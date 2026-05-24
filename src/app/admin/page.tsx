@@ -1,11 +1,8 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/auth";
+import { requireRole } from "@/lib/authz";
 import { AppShell } from "../_components/app-shell";
 
 export default async function AdminHome() {
-  const session = await auth();
-  if (!session?.user) redirect("/");
-  if (session.user.role !== "admin") redirect("/coach");
+  const session = await requireRole("admin");
 
   return (
     <AppShell role="admin">

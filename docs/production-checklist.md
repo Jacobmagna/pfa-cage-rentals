@@ -150,7 +150,7 @@ Rationale: build the **reusable primitives** that all subsequent server actions 
 - Est: 1 h.
 - **Done:** auditLog table + auditAction enum in [src/db/schema.ts](../src/db/schema.ts) with `(entity_type, entity_id)` and `(ts)` indexes for the common lookup patterns. Migration [drizzle/0001_safe_the_twelve.sql](../drizzle/0001_safe_the_twelve.sql) applied + verified idempotent. Helper at [src/lib/audit.ts](../src/lib/audit.ts) accepts `db` or a transaction handle (typed as `NeonHttpDatabase<typeof schema>`); diff shape: `{after}` for create, `{before}` for delete, changed-keys-only `{before, after}` for update (via exported `shallowDiff`). Acceptance test runs in C8.
 
-### B4. Auth ownership guards — `[ ]`
+### B4. Auth ownership guards — `[x]`
 - Create `src/lib/authz.ts`:
   - `requireSession()` → throws redirect to `/` if no session.
   - `requireRole(role)` → throws redirect if user.role !== role.
@@ -158,6 +158,7 @@ Rationale: build the **reusable primitives** that all subsequent server actions 
 - Pattern: every server action's first line calls one of these.
 - Acceptance: `requireRole("admin")` called from coach session → throws + redirects (test with curl).
 - Est: 45 min.
+- **Done:** [src/lib/authz.ts](../src/lib/authz.ts) exports all three helpers with `AuthedSession` type. Retrofitted [src/app/admin/page.tsx](../src/app/admin/page.tsx), [src/app/coach/page.tsx](../src/app/coach/page.tsx), and [src/app/coach/actions.ts](../src/app/coach/actions.ts) to use them — proves the helpers work in real route + server-action contexts. Live curl test will follow once Vercel picks up the deploy.
 
 ### B5. Magic-link rate limiting — `[ ]`
 - Sign up Upstash (https://upstash.com) free tier → create Redis DB → copy REST URL + token.

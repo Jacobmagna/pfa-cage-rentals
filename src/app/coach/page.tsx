@@ -1,10 +1,8 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/auth";
+import { requireSession } from "@/lib/authz";
 import { AppShell } from "../_components/app-shell";
 
 export default async function CoachHome() {
-  const session = await auth();
-  if (!session?.user) redirect("/");
+  const session = await requireSession();
 
   return (
     <AppShell role="coach">

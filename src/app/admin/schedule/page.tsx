@@ -9,6 +9,7 @@ import {
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
+import { formatPfaDateLong } from "@/lib/timezone";
 import { AppShell } from "@/app/_components/app-shell";
 import { AutoRefresh } from "./_components/auto-refresh";
 import { ScheduleGrid } from "./_components/schedule-grid";
@@ -106,12 +107,7 @@ export default async function AdminSchedulePage({
     reason: b.reason,
   }));
 
-  const dateLabel = selectedDate.toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
+  const dateLabel = formatPfaDateLong(selectedDate);
   const sessionCount = sessions.length;
 
   return (

@@ -14,6 +14,7 @@ import {
   type RateOverride,
   type ResourceType,
 } from "@/lib/billing";
+import { formatPfaMonthYear } from "@/lib/timezone";
 import { AppShell } from "@/app/_components/app-shell";
 import { CoachesTable, type CoachRow } from "./_components/coaches-table";
 
@@ -103,10 +104,7 @@ export default async function AdminCoachesPage() {
     };
   });
 
-  const monthLabel = now.toLocaleDateString("en-US", {
-    month: "long",
-    year: "numeric",
-  });
+  const monthLabel = formatPfaMonthYear(now);
 
   return (
     <AppShell role="admin">

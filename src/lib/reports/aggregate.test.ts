@@ -15,8 +15,12 @@ import type { RateOverride } from "@/lib/billing";
 function session(
   overrides: Partial<AggregateSessionInput> = {},
 ): AggregateSessionInput {
-  const startAt = new Date("2026-05-01T09:00:00");
-  const endAt = new Date("2026-05-01T10:00:00"); // 1 hour = 2 slots
+  // Construct dates as explicit UTC so display assertions are
+  // independent of the test runner's local TZ. 2026-05-01 is in EDT
+  // (UTC-4), so 13:00 UTC → "09:00" PFA time, the value the original
+  // test was asserting on.
+  const startAt = new Date("2026-05-01T13:00:00Z");
+  const endAt = new Date("2026-05-01T14:00:00Z"); // 1 hour = 2 slots
   return {
     sessionId: "s-1",
     coachId: "coach-a",

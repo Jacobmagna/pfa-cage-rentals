@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
+import { formatPfaDateMedium } from "@/lib/timezone";
 import { AppShell } from "@/app/_components/app-shell";
 
 // Coach detail page — H2 ships the route + identity card so the
@@ -53,12 +54,7 @@ export default async function AdminCoachDetailPage({
         </h1>
         <p className="text-sm text-fg-muted">{coach.email}</p>
         <p className="text-xs text-fg-subtle font-mono tabular-nums">
-          Joined{" "}
-          {coach.createdAt.toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          })}
+          Joined {formatPfaDateMedium(coach.createdAt)}
         </p>
       </div>
 

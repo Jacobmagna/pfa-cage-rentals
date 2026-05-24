@@ -18,6 +18,11 @@ import {
   type RateOverride,
   type ResourceType,
 } from "@/lib/billing";
+import {
+  formatPfaDate,
+  formatPfaTime,
+  formatPfaWeekday,
+} from "@/lib/timezone";
 
 export type AggregateSessionInput = {
   sessionId: string;
@@ -97,10 +102,10 @@ export function aggregateReport(
     );
     return {
       sessionId: s.sessionId,
-      date: formatDateISO(s.startAt),
-      dayOfWeek: s.startAt.toLocaleDateString("en-US", { weekday: "short" }),
-      startTime: formatTimeHHMM(s.startAt),
-      endTime: formatTimeHHMM(s.endAt),
+      date: formatPfaDate(s.startAt),
+      dayOfWeek: formatPfaWeekday(s.startAt),
+      startTime: formatPfaTime(s.startAt),
+      endTime: formatPfaTime(s.endAt),
       durationMinutes: Math.round(
         (s.endAt.getTime() - s.startAt.getTime()) / 60_000,
       ),
@@ -164,15 +169,4 @@ export function aggregateReport(
   const grandTotalCents = detail.reduce((sum, r) => sum + r.totalCents, 0);
 
   return { detail, summary, grandTotalCents };
-}
-
-function formatDateISO(d: Date): string {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function formatTimeHHMM(d: Date): string {
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }

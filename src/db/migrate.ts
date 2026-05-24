@@ -1,38 +1,40 @@
+// Apply pending Drizzle migrations against Neon.
+//
+// Uses Drizzle's official `migrate()` from drizzle-orm/neon-http/migrator,
+// which tracks applied migrations in a `__drizzle_migrations` table and
+// only runs pending ones. Idempotent — safe to call on every deploy.
+//
+// Local: load `.env.local` so DATABASE_URL is available without manual exports.
+// Vercel: env vars are already in process.env via the build environment —
+// the dotenv call is a harmless no-op when the file doesn't exist.
+//
+// Runs via:
+//   - `npm run db:migrate`  — local invocation
+//   - `npm run vercel-build` — first step of Vercel deploys (package.json),
+//     so every deploy applies pending migrations before next build. Failures
+//     here block the deploy entirely, which is the correct behavior: a
+//     broken migration must not be paired with code that assumes the new
+//     schema.
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { neon } from "@neondatabase/serverless";
-
-const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) throw new Error("DATABASE_URL not set");
+import { drizzle } from "drizzle-orm/neon-http";
+import { migrate } from "drizzle-orm/neon-http/migrator";
 
 async function main() {
-  const sql = neon(DATABASE_URL!);
-  const dir = "drizzle";
-  const files = readdirSync(dir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort();
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error("DATABASE_URL not set");
 
-  for (const file of files) {
-    const path = join(dir, file);
-    const raw = readFileSync(path, "utf8");
-    const statements = raw
-      .split(/-->\s*statement-breakpoint/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+  const sql = neon(url);
+  const db = drizzle(sql);
 
-    console.log(`Applying ${file} (${statements.length} statements)`);
-    for (const stmt of statements) {
-      await sql.query(stmt);
-    }
-  }
-
-  console.log("Migrations applied.");
+  console.log("Applying pending migrations...");
+  await migrate(db, { migrationsFolder: "drizzle" });
+  console.log("Migrations up to date.");
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error("Migration failed:", err);
   process.exit(1);
 });

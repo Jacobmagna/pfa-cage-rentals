@@ -7,8 +7,17 @@
  * Docs: https://docs.sentry.io/platforms/javascript/guides/nextjs/manual-setup/
  */
 import * as Sentry from "@sentry/nextjs";
+import { validateRequiredEnv } from "@/lib/env";
 
 export async function register() {
+  // Boot-time env guard — logs loudly but never throws. An instrumentation-
+  // time throw surfaces as MIDDLEWARE_INVOCATION_FAILED on every route
+  // including /api/health, leaving uptime monitors blind. /api/health
+  // degrades to 503 with a structured body listing missing vars, so
+  // misconfiguration is visible without bricking boot. Pattern lifted
+  // from doc-insured-backend after their 2026-05-02 incident.
+  validateRequiredEnv();
+
   // Release tag = git SHA of the deployed commit. Vercel injects
   // VERCEL_GIT_COMMIT_SHA on every build; locally falls back to "development"
   // so dev errors don't claim to be from a production release. Sentry uses

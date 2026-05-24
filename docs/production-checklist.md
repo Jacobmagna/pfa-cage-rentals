@@ -17,9 +17,11 @@ Cross-refs:
 
 ---
 
-# STAGE A — Guard rails (do BEFORE Phase 2)
+# STAGE A — Guard rails (do BEFORE Phase 2) ✓ COMPLETE 2026-05-23
 
 Rationale: install error visibility, CI, and migration safety **before** any new product code lands. Every later phase benefits from these, and adding them after means retrofitting noise into a larger codebase.
+
+**Status:** All P0 items done. A4b deferred (P1 — ship only if real CSP breakage observed; current enforce-mode works for the live surface).
 
 ### A1. CI workflow on every PR — `[x]`
 - Add `.github/workflows/ci.yml`: matrix on Node 24, steps = `npm ci`, `npm run lint`, `npx tsc --noEmit`, `npm run build`.
@@ -64,20 +66,20 @@ Rationale: install error visibility, CI, and migration safety **before** any new
 - Acceptance: push a no-op migration change → Vercel build log shows migrator output before Next.js compile.
 - Est: 30 min (took ~1h due to idempotency fix for the pre-existing migration).
 
-### A6. Vercel + Neon spend alerts — `[ ]`
+### A6. Vercel + Neon spend alerts — `[x]`
 - Vercel → Settings → Billing → set notification at 75% of free tier usage (bandwidth, function-hours).
 - Neon → Settings → Usage Alerts → set at 75% of free tier (storage, compute hours).
 - Acceptance: alerts appear in email inbox as test entries.
 - Est: 10 min.
 
-### A7. Uptime monitoring — `[ ]`
+### A7. Uptime monitoring — `[x]`
 - Sign up Better Stack (https://betterstack.com) free tier.
 - Add monitor: GET `https://www.pfacagerentals.com/api/health`, 3-min interval, expect 200 + JSON `{ status: "ok" }`. (`/api/health` lands in A8; if A8 is deferred, fall back to `/api/auth/csrf`.)
 - Alert destination: email + push (install Better Stack mobile app).
 - Acceptance: pause Vercel deploy briefly, get alert within 6 min.
 - Est: 15 min.
 
-### A8. validateRequiredEnv + /api/health endpoint (lifted from doc-insured) — `[ ]`
+### A8. validateRequiredEnv + /api/health endpoint (lifted from doc-insured) — `[x]`
 - Create `src/lib/env.ts` exporting:
   - `REQUIRED_SCHEMA` (Zod) listing every env var that must be set for production to function (DATABASE_URL, AUTH_SECRET, AUTH_URL, AUTH_GOOGLE_ID/SECRET, AUTH_RESEND_KEY, NEXT_PUBLIC_SENTRY_DSN — extend per slice).
   - `getMissingRequiredEnv()` returning the list of vars that are missing or malformed.
@@ -89,7 +91,7 @@ Rationale: install error visibility, CI, and migration safety **before** any new
 - Est: 1.5 h.
 - Priority: P0 — gives uptime monitor a real signal vs blind.
 
-### A9. Explicit serverActions allowedOrigins — `[ ]`
+### A9. Explicit serverActions allowedOrigins — `[x]`
 - In `next.config.ts`:
   ```ts
   experimental: {

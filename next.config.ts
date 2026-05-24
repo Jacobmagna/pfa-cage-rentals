@@ -15,6 +15,26 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA: process.env.VERCEL_GIT_COMMIT_SHA,
   },
 
+  // Without this, Next allows server actions only from the request's own
+  // host. Documenting the intended production hosts explicitly makes the
+  // security boundary visible in source and protects against a future
+  // proxy/CDN config silently expanding the surface.
+  //
+  // Includes the current Vercel deploy URL at build time so preview
+  // deploys can still exercise server actions (each preview gets a unique
+  // pfa-cage-rentals-<hash>-jacobmagnas-projects.vercel.app — we read
+  // VERCEL_URL to include the per-build one).
+  experimental: {
+    serverActions: {
+      allowedOrigins: [
+        "www.pfacagerentals.com",
+        "pfacagerentals.com",
+        "pfa-cage-rentals.vercel.app",
+        ...(process.env.VERCEL_URL ? [process.env.VERCEL_URL] : []),
+      ],
+    },
+  },
+
   async headers() {
     // Security headers applied to every response.
     // CSP iterated as integrations are added — keep tight by default.
@@ -67,8 +87,6 @@ export default withSentryConfig(nextConfig, {
 
   // Suppress upload errors when env vars are missing (CI/local dev).
   silent: !process.env.CI,
-  // Don't upload source maps in dev — only on Vercel builds.
-  disableLogger: true,
   // Tunnel client errors through a Next.js route to bypass ad-blockers.
   tunnelRoute: "/monitoring",
 

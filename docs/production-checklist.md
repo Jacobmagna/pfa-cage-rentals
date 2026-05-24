@@ -130,7 +130,7 @@ Rationale: build the **reusable primitives** that all subsequent server actions 
 - Est: 1.5 h.
 - **Done:** [src/lib/billing.ts](../src/lib/billing.ts) exports `slotsBetween`, `rateForSlot`, `chargeForSession`, plus `DEFAULT_RATES_PER_SLOT_CENTS` (for C2 seed) and types `ResourceType`, `RateOverride`, `SessionInput`, `ChargeBreakdown`. Cents-only, pure, throws on zero/negative-duration sessions. Tests land in B6.
 
-### B3. Audit log schema + helper — `[ ]`
+### B3. Audit log schema + helper — `[x]`
 - Drizzle schema in `src/db/schema.ts` (add to existing file):
   ```ts
   export const auditAction = pgEnum("audit_action", ["create", "update", "delete"]);
@@ -148,6 +148,7 @@ Rationale: build the **reusable primitives** that all subsequent server actions 
 - Helper `src/lib/audit.ts`: `logAudit(tx, { actorUserId, entityType, entityId, action, before?, after? })` — computes diff via shallow object compare, inserts row inside the same transaction.
 - Acceptance: helper called from a test mutation creates an audit row with non-null diff.
 - Est: 1 h.
+- **Done:** auditLog table + auditAction enum in [src/db/schema.ts](../src/db/schema.ts) with `(entity_type, entity_id)` and `(ts)` indexes for the common lookup patterns. Migration [drizzle/0001_safe_the_twelve.sql](../drizzle/0001_safe_the_twelve.sql) applied + verified idempotent. Helper at [src/lib/audit.ts](../src/lib/audit.ts) accepts `db` or a transaction handle (typed as `NeonHttpDatabase<typeof schema>`); diff shape: `{after}` for create, `{before}` for delete, changed-keys-only `{before, after}` for update (via exported `shallowDiff`). Acceptance test runs in C8.
 
 ### B4. Auth ownership guards — `[ ]`
 - Create `src/lib/authz.ts`:

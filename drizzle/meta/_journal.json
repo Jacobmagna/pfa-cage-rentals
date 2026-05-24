@@ -8,6 +8,13 @@
       "when": 1779588322765,
       "tag": "0000_talented_human_robot",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779644521170,
+      "tag": "0001_safe_the_twelve",
+      "breakpoints": true
     }
   ]
 }

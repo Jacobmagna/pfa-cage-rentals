@@ -464,14 +464,18 @@ is a second Resend account for PFA, free tier covers the volume.
   Dad's inbox (not spam) on first send.
 - Est: 1 h (Jacob's manual steps).
 
-### J2. SPF + DMARC records — `[ ]`
+### J2. SPF + DMARC records — `[x]`
 - GoDaddy DNS (SPF: Resend's domain-verification flow in J1 already
   adds `include:_spf.resend.com` via SPF TXT — confirm it's present
   before adding the DMARC record below):
-  - DMARC TXT `_dmarc`: `v=DMARC1; p=quarantine; rua=mailto:postmaster@pfacagerentals.com; pct=100; sp=quarantine`
+  - DMARC TXT `_dmarc`: `v=DMARC1; p=quarantine; pct=100; sp=quarantine`
+- Dropped `rua=mailto:postmaster@pfacagerentals.com` from the original
+  value — there's no postmaster mailbox set up, and standing one up
+  for DMARC aggregate reports is extra scope. Without rua DMARC still
+  enforces; we just don't receive the daily XML report.
 - Test with https://mxtoolbox.com — all green.
 - Acceptance: mxtoolbox SPF + DMARC checks pass.
-- Est: 30 min.
+- Est: 10 min.
 
 ### J3. Mail-tester.com score — `[ ]`
 - Send test magic-link to the address mail-tester.com gives you.

@@ -7,6 +7,14 @@ const nextConfig: NextConfig = {
     root: path.resolve(import.meta.dirname),
   },
 
+  // Forward Vercel's server-side git SHA into the client bundle so
+  // instrumentation-client.ts can tag Sentry releases. Without this,
+  // client errors land under release "development" even in prod.
+  // Inlined at build time — no runtime cost.
+  env: {
+    NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA: process.env.VERCEL_GIT_COMMIT_SHA,
+  },
+
   async headers() {
     // Security headers applied to every response.
     // CSP iterated as integrations are added — keep tight by default.

@@ -9,16 +9,22 @@
 import * as Sentry from "@sentry/nextjs";
 
 export async function register() {
+  // Release tag = git SHA of the deployed commit. Vercel injects
+  // VERCEL_GIT_COMMIT_SHA on every build; locally falls back to "development"
+  // so dev errors don't claim to be from a production release. Sentry uses
+  // this to group errors by deploy and power "regression introduced in
+  // release X" alerts.
+  const release = process.env.VERCEL_GIT_COMMIT_SHA ?? "development";
+
   if (process.env.NEXT_RUNTIME === "nodejs") {
     Sentry.init({
       dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+      release,
       environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV,
       tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 0,
       // Send default PII (request data) only — no body capture (could include
       // billing data, coach emails). Tune later if we need more context.
       sendDefaultPii: false,
-      // Don't ship Sentry's noisy default integrations into the bundle.
-      // Add specific ones via integrations: [] if we need them.
       enabled: !!process.env.NEXT_PUBLIC_SENTRY_DSN,
     });
   }
@@ -26,6 +32,7 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === "edge") {
     Sentry.init({
       dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+      release,
       environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV,
       tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 0,
       sendDefaultPii: false,

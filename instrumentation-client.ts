@@ -7,6 +7,10 @@ import * as Sentry from "@sentry/nextjs";
 
 Sentry.init({
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  // Release tag matches instrumentation.ts (server). Sentry groups
+  // client + server errors by release for regression detection.
+  release:
+    process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? "development",
   environment: process.env.NEXT_PUBLIC_VERCEL_ENV ?? "development",
   tracesSampleRate: 0.1,
   // Replays are a paid feature — disable.

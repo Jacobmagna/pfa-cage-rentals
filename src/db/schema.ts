@@ -195,6 +195,13 @@ export const sessionsBilling = pgTable(
     endAt: timestamp("end_at", { mode: "date" }).notNull(),
     useType: sessionUseType("use_type"),
     note: text("note"),
+    // Provenance tag for batch operations. NULL for manually-entered
+    // sessions (admin or coach UI); "historical_import" for rows
+    // backfilled by I3's Excel import. Lets I4 dedupe on re-import
+    // without burning insert-then-23P01 round trips, and lets us
+    // selectively delete a botched historical batch without
+    // touching live data.
+    source: text("source"),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),

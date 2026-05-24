@@ -259,8 +259,9 @@ function CommitSummary({ result }: { result: NonNullable<Extract<ImportFormState
     <div className="space-y-4 rounded-lg border border-line bg-surface p-4">
       <div>
         <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">Import complete</p>
-        <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4">
+        <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-5">
           <Stat label="Sessions created" value={result.created} accent="gold" />
+          <Stat label="Already imported" value={result.skippedDuplicates} />
           <Stat label="Skipped (overlap)" value={result.skippedOverlaps} />
           <Stat label="Skipped (by plan)" value={result.skippedByPlan.reduce((s, r) => s + r.count, 0)} />
           <Stat label="Errored" value={result.errored.length} />

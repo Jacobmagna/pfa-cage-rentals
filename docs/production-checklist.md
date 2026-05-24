@@ -440,7 +440,7 @@ Now we build product. All work below uses primitives from Stages A & B.
 - Acceptance: import dry-run shows accurate count, commit creates expected sessions.
 - Est: 5 h.
 
-### I4. Idempotency check — `[ ]`
+### I4. Idempotency check — `[x]`
 - Importing same file twice should NOT duplicate. Use composite uniqueness `(coachId, resourceId, startAt, endAt, source='historical')` — drop on second insert.
 - Acceptance: importing twice = same row count after both.
 - Est: 1 h.

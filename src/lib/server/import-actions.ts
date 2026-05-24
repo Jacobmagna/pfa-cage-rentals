@@ -4,7 +4,7 @@
 // safeLogAudit swallows audit failures without blocking the mutation.
 
 import * as Sentry from "@sentry/nextjs";
-import { eq } from "drizzle-orm";
+import { and, eq, gte, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { resources, sessionsBilling, users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
@@ -29,10 +29,13 @@ export type PreviewResult = {
 export type CommitResult = {
   created: number;
   skippedOverlaps: number;
+  skippedDuplicates: number;
   skippedByPlan: { rawName: string; reason: string; count: number }[];
   errored: { sessionDescription: string; message: string }[];
   newCoachesCreated: number;
 };
+
+const IMPORT_SOURCE = "historical_import";
 
 // Parses the uploaded workbook and returns groups + counts. Pure-ish:
 // reads existing user names from DB but doesn't mutate anything.
@@ -103,8 +106,15 @@ export async function executeCommitPlan(
     .from(resources);
   const resourceIdByName = new Map(allResources.map((r) => [r.name, r.id]));
 
+  // I4 dedupe: pre-fetch every existing historical-import row whose
+  // start_at sits inside the date range of this workbook, build a
+  // key set, and skip planned rows that already exist. Cheaper than
+  // letting the EXCLUDE constraint catch each one as 23P01.
+  const existingImportedKeys = await fetchImportedKeySet(normalized);
+
   let created = 0;
   let skippedOverlaps = 0;
+  let skippedDuplicates = 0;
   const errored: CommitResult["errored"] = [];
 
   for (const planned of plan.sessionsToInsert) {
@@ -132,6 +142,12 @@ export async function executeCommitPlan(
     const startAt = pfaWallClockToUtc(planned.source.date, planned.source.startTime);
     const endAt = pfaWallClockToUtc(planned.source.date, planned.source.endTime);
 
+    const dedupeKey = buildDedupeKey(resourceId, coachId, startAt, endAt);
+    if (existingImportedKeys.has(dedupeKey)) {
+      skippedDuplicates += 1;
+      continue;
+    }
+
     try {
       const [row] = await db
         .insert(sessionsBilling)
@@ -142,9 +158,13 @@ export async function executeCommitPlan(
           endAt,
           useType: planned.source.useTypeHint,
           note: planned.note,
+          source: IMPORT_SOURCE,
           createdBy: actor.id,
         })
         .returning({ id: sessionsBilling.id });
+      // Remember this insert so a workbook with overlapping ranges within
+      // a single import doesn't fight itself on the second occurrence.
+      existingImportedKeys.add(dedupeKey);
       created += 1;
       await safeLogAudit({
         actorUserId: actor.id,
@@ -158,7 +178,7 @@ export async function executeCommitPlan(
           endAt: endAt.toISOString(),
           useType: planned.source.useTypeHint,
           note: planned.note,
-          source: "historical_import",
+          source: IMPORT_SOURCE,
           sourceTab: planned.source.sourceTab,
           rawName: planned.source.rawName,
         },
@@ -182,10 +202,48 @@ export async function executeCommitPlan(
   return {
     created,
     skippedOverlaps,
+    skippedDuplicates,
     skippedByPlan: plan.skipped,
     errored,
     newCoachesCreated: newCoachIdByKey.size,
   };
+}
+
+function buildDedupeKey(resourceId: string, coachId: string, startAt: Date, endAt: Date): string {
+  return `${resourceId}|${coachId}|${startAt.toISOString()}|${endAt.toISOString()}`;
+}
+
+// Pre-fetches every historical-import session whose start_at sits in the
+// date range of the supplied (already TZ-aware-parsed) normalized rows.
+// Returns the dedupe-key set used by executeCommitPlan.
+async function fetchImportedKeySet(normalized: NormalizedSession[]): Promise<Set<string>> {
+  if (normalized.length === 0) return new Set();
+  let minStart: Date | null = null;
+  let maxEnd: Date | null = null;
+  for (const n of normalized) {
+    const start = pfaWallClockToUtc(n.date, n.startTime);
+    const end = pfaWallClockToUtc(n.date, n.endTime);
+    if (minStart === null || start < minStart) minStart = start;
+    if (maxEnd === null || end > maxEnd) maxEnd = end;
+  }
+  if (!minStart || !maxEnd) return new Set();
+
+  const rows = await db
+    .select({
+      resourceId: sessionsBilling.resourceId,
+      coachId: sessionsBilling.coachId,
+      startAt: sessionsBilling.startAt,
+      endAt: sessionsBilling.endAt,
+    })
+    .from(sessionsBilling)
+    .where(
+      and(
+        eq(sessionsBilling.source, IMPORT_SOURCE),
+        gte(sessionsBilling.startAt, minStart),
+        lt(sessionsBilling.startAt, maxEnd),
+      ),
+    );
+  return new Set(rows.map((r) => buildDedupeKey(r.resourceId, r.coachId, r.startAt, r.endAt)));
 }
 
 async function fetchExistingUserLites(): Promise<ExistingUserLite[]> {

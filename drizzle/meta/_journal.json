@@ -57,6 +57,13 @@
       "when": 1779648217302,
       "tag": "0007_amusing_demogoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779664307605,
+      "tag": "0008_common_lilith",
+      "breakpoints": true
     }
   ]
 }

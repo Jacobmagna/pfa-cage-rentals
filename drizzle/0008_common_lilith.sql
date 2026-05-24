@@ -1,0 +1,1 @@
+ALTER TABLE "sessions_billing" ADD COLUMN "source" text;

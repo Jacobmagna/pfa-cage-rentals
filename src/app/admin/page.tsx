@@ -45,11 +45,20 @@ export default async function AdminHome() {
             Per-coach billing breakdown by resource type. Excel export lands in E2.
           </p>
         </Link>
-        <PlaceholderCard
-          eyebrow="Phase 5"
-          title="Schedule grid"
-          description="The Excel-style grid view, real-time and editable."
-        />
+        <Link
+          href="/admin/schedule"
+          className="rounded-lg border border-line bg-surface p-5 transition-colors hover:border-line-strong"
+        >
+          <p className="text-[10px] uppercase tracking-[0.18em] text-gold">
+            Live
+          </p>
+          <h3 className="mt-1 text-base font-semibold text-fg">
+            Schedule grid
+          </h3>
+          <p className="mt-1.5 text-sm text-fg-muted">
+            Excel-style day view of every cage / bullpen / weight room booking.
+          </p>
+        </Link>
         <PlaceholderCard
           eyebrow="Phase 7"
           title="Coaches & rates"

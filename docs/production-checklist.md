@@ -345,12 +345,13 @@ Now we build product. All work below uses primitives from Stages A & B.
 
 # STAGE F — Phase 5: Schedule grid (read-only)
 
-### F1. Schedule grid component — `[ ]`
+### F1. Schedule grid component — `[x]`
 - `src/app/admin/schedule/page.tsx`: vertical = resources (rows per design spec table), horizontal = time slots (8am-10pm, 30-min cols), one column per day in the current week.
 - Each cell renders coach name if a session exists.
 - Pagination/nav: prev/next week.
 - Acceptance: schedule for current week renders sessions correctly with overlap visualization.
 - Est: 6 h.
+- **Done:** Single-day view at /admin/schedule with a 7-day strip nav above the grid (one column per day in the current week). [page.tsx](../src/app/admin/schedule/page.tsx) is server-rendered, parses `?date=YYYY-MM-DD` from URL, defaults to today, fetches sessions + blocks for that date in parallel. [_components/week-nav.tsx](../src/app/admin/schedule/_components/week-nav.tsx) renders Mon–Sun day chips with prev/next chevrons; today gets a small gold dot. [_components/schedule-grid.tsx](../src/app/admin/schedule/_components/schedule-grid.tsx) uses CSS Grid with `grid-template-columns: 120px repeat(28, …)`; sessions/blocks render as positioned blocks via `gridColumn: ${start} / span ${slots}` so multi-slot bookings appear as one contiguous bar. Resource label column is sticky on horizontal scroll. Per-resource-type accent via left border (cage=gold, bullpen=success/green, weight room=warning/amber); blocks use a danger/dashed treatment. Legend below the grid. Out-of-range sessions (outside 8 AM – 10 PM) surface in a warning banner above the grid with the count. Browser-verified at 1400×900 and 768×1024: 6 seeded sessions + 1 HVAC block render correctly across cages/bullpens/weight room with multi-slot spans intact; day-nav click → URL updates → grid re-renders against the new day (Wed May 20 = empty correctly). /admin dashboard's Schedule grid card promoted from Phase 5 placeholder to Live link.
 
 ### F2. Real-time refresh strategy — `[ ]`
 - Start with SWR polling at 30s interval (`useSWR` with `refreshInterval`).

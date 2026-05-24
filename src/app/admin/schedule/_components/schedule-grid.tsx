@@ -16,7 +16,8 @@
 // Block body = neutral (bg-surface-2); status tokens are used as
 // type MARKERS, not decoration — respects the spec's gold-only rule.
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { BlockEditDialog } from "./block-edit-dialog";
 import {
   DndContext,
   PointerSensor,
@@ -34,7 +35,6 @@ import type {
   CoachOption,
   ResourceOption as SessionResourceOption,
 } from "@/app/admin/sessions/_components/sessions-client";
-import { deleteBlockAction } from "../form-actions";
 import {
   ScheduleCreateDialog,
   type CreatePrefill,
@@ -72,8 +72,25 @@ export type ScheduleBlock = {
 
 type DialogState =
   | { kind: "closed" }
-  | { kind: "create"; prefill: CreatePrefill }
-  | { kind: "edit-session"; session: ScheduleSession };
+  | {
+      kind: "create";
+      prefill: CreatePrefill;
+      /** "block" when reached via paint-mode; defaults to "session". */
+      defaultTab?: "session" | "block";
+    }
+  | { kind: "edit-session"; session: ScheduleSession }
+  | { kind: "edit-block"; block: ScheduleBlock };
+
+type PaintState =
+  | { kind: "idle" }
+  | {
+      kind: "active";
+      resourceId: string;
+      // Inclusive endpoints. start can be > end while painting leftward;
+      // commit normalizes to min..max.
+      startSlot: number;
+      endSlot: number;
+    };
 
 type CellDropData = {
   type: "cell";
@@ -102,12 +119,31 @@ export function ScheduleGrid({
   selectedDate: Date;
 }) {
   const [dialog, setDialog] = useState<DialogState>({ kind: "closed" });
-  const [pendingDeleteBlockId, setPendingDeleteBlockId] = useState<string | null>(
-    null,
-  );
   const [dragError, setDragError] = useState<string | null>(null);
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
+  const [paint, setPaint] = useState<PaintState>({ kind: "idle" });
   const [, startTransition] = useTransition();
+
+  // Holds the pointerdown anchor between pointerdown and the first
+  // pointermove that crosses the 5px activation threshold. Lives in a
+  // ref because we don't want re-renders for every pointermove.
+  const paintStartRef = useRef<{
+    resourceId: string;
+    slotIdx: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  // Set when paint activated for the current pointer cycle, so the
+  // cell's onClick (which fires AFTER pointerup) skips its single-cell
+  // create. Cleared on the next click event.
+  const suppressNextClickRef = useRef(false);
+
+  // The grid DOM node — used by the paint pointermove handler to
+  // convert clientX into a slot index via getBoundingClientRect.
+  // elementFromPoint would be wrong here: sessions/blocks sit on top
+  // of cells (higher z-index), so painting across them would lose
+  // track of the underlying cell. Geometry math doesn't care.
+  const gridRef = useRef<HTMLDivElement | null>(null);
 
   // distance: 5 lets short clicks through as clicks; only after the
   // pointer moves 5px does @dnd-kit activate a drag. Touch has a
@@ -120,6 +156,179 @@ export function ScheduleGrid({
   );
 
   const close = () => setDialog({ kind: "closed" });
+
+  // Latest-ref pattern: window-level pointer handlers are bound once
+  // but need the freshest props/state. The refs sync in a dedicated
+  // post-commit effect (no deps) — assigning to ref.current during
+  // render is flagged by react-hooks/refs in React 19 because it
+  // makes the render impure. The handler closure may briefly see the
+  // previous values between commit and effect, but pointer events
+  // can't fire during that interval (the browser hands them out
+  // synchronously between paints), so this is safe in practice.
+  const paintRef = useRef(paint);
+  const sessionsRef = useRef(sessions);
+  const blocksRef = useRef(blocks);
+  const selectedDateRef = useRef(selectedDate);
+  useEffect(() => {
+    paintRef.current = paint;
+    sessionsRef.current = sessions;
+    blocksRef.current = blocks;
+    selectedDateRef.current = selectedDate;
+  });
+
+  const isCellOccupied = (resourceId: string, slotIdx: number) => {
+    for (const s of sessionsRef.current) {
+      if (s.resourceId !== resourceId) continue;
+      const p = placeOnGrid(s.startAt, s.endAt);
+      if (p && slotIdx >= p.col - 2 && slotIdx < p.col - 2 + p.span) return true;
+    }
+    for (const b of blocksRef.current) {
+      if (b.resourceId !== resourceId) continue;
+      const p = placeOnGrid(b.startAt, b.endAt);
+      if (p && slotIdx >= p.col - 2 && slotIdx < p.col - 2 + p.span) return true;
+    }
+    return false;
+  };
+
+  // Convert pointer.clientX to a slot index by measuring the grid's
+  // cell-area bounding rect. The grid template is "120px repeat(SLOTS,
+  // minmax(36px, 1fr))" — first column is the resource label, then
+  // SLOTS equal cells filling the rest of the row.
+  const slotIndexFromClientX = (clientX: number): number | null => {
+    const grid = gridRef.current;
+    if (!grid) return null;
+    const rect = grid.getBoundingClientRect();
+    const cellsLeft = rect.left + 120;
+    const cellsWidth = rect.right - cellsLeft;
+    if (clientX < cellsLeft) return 0;
+    if (clientX >= rect.right) return SLOTS - 1;
+    const idx = Math.floor(((clientX - cellsLeft) / cellsWidth) * SLOTS);
+    return Math.max(0, Math.min(SLOTS - 1, idx));
+  };
+
+  const handleCellPointerDown = (
+    resourceId: string,
+    slotIdx: number,
+    e: React.PointerEvent<HTMLButtonElement>,
+  ) => {
+    if (e.button !== 0) return; // left click only
+    // Clear any stale suppress flag from a previous gesture. If the
+    // last paint committed but its trailing click never landed
+    // (dialog took focus, pointer was elsewhere, etc.), the flag
+    // could otherwise eat this gesture's click.
+    suppressNextClickRef.current = false;
+    paintStartRef.current = {
+      resourceId,
+      slotIdx,
+      x: e.clientX,
+      y: e.clientY,
+    };
+  };
+
+  const handleCellClick = (
+    resourceId: string,
+    slotIdx: number,
+    onCreate: () => void,
+  ) => {
+    // Paint just committed in pointerup → swallow the trailing click
+    // so we don't ALSO open the single-cell create dialog.
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      return;
+    }
+    void resourceId;
+    void slotIdx;
+    onCreate();
+  };
+
+  // Window-level pointer handlers for paint mode. Bound once on mount;
+  // all dynamic data comes through refs (latest-ref pattern) so we
+  // don't re-bind on every state change.
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const start = paintStartRef.current;
+      if (!start) return;
+
+      const current = paintRef.current;
+      // Cross the 5px activation threshold → enter paint mode.
+      if (current.kind === "idle") {
+        const dx = Math.abs(e.clientX - start.x);
+        const dy = Math.abs(e.clientY - start.y);
+        if (dx <= 5 && dy <= 5) return;
+        suppressNextClickRef.current = true;
+        setPaint({
+          kind: "active",
+          resourceId: start.resourceId,
+          startSlot: start.slotIdx,
+          endSlot: start.slotIdx,
+        });
+        return;
+      }
+
+      // Already painting — update endSlot to where the pointer is now,
+      // clamped at the first occupied cell between startSlot and the
+      // pointer's slot.
+      const targetSlot = slotIndexFromClientX(e.clientX);
+      if (targetSlot === null) return;
+      const dir = targetSlot >= current.startSlot ? 1 : -1;
+      let clampedEnd = current.startSlot;
+      for (
+        let i = current.startSlot + dir;
+        dir > 0 ? i <= targetSlot : i >= targetSlot;
+        i += dir
+      ) {
+        if (isCellOccupied(current.resourceId, i)) break;
+        clampedEnd = i;
+      }
+      if (clampedEnd !== current.endSlot) {
+        setPaint({ ...current, endSlot: clampedEnd });
+      }
+    };
+
+    const onUp = () => {
+      const start = paintStartRef.current;
+      paintStartRef.current = null;
+      const current = paintRef.current;
+      if (!start) return;
+
+      if (current.kind === "active") {
+        const min = Math.min(current.startSlot, current.endSlot);
+        const max = Math.max(current.startSlot, current.endSlot);
+        const startAt = new Date(selectedDateRef.current);
+        startAt.setHours(
+          FIRST_HOUR + Math.floor(min / 2),
+          (min % 2) * 30,
+          0,
+          0,
+        );
+        const endAt = new Date(selectedDateRef.current);
+        // max is inclusive; the block runs through the END of slot `max`.
+        const endSlotBoundary = max + 1;
+        endAt.setHours(
+          FIRST_HOUR + Math.floor(endSlotBoundary / 2),
+          (endSlotBoundary % 2) * 30,
+          0,
+          0,
+        );
+        setDialog({
+          kind: "create",
+          prefill: { resourceId: current.resourceId, startAt, endAt },
+          defaultTab: "block",
+        });
+        setPaint({ kind: "idle" });
+      }
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+    return () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    };
+    // Bound once; everything dynamic flows through refs above.
+  }, []);
 
   const openCreateAt = (resource: ScheduleResource, slotIdx: number) => {
     const startAt = new Date(selectedDate);
@@ -141,22 +350,8 @@ export function ScheduleGrid({
     setDialog({ kind: "edit-session", session });
   };
 
-  const handleDeleteBlock = (block: ScheduleBlock) => {
-    if (
-      !confirm(
-        `Delete block "${block.reason}" on this resource?\nThis can't be undone.`,
-      )
-    ) {
-      return;
-    }
-    setPendingDeleteBlockId(block.id);
-    startTransition(async () => {
-      try {
-        await deleteBlockAction(block.id);
-      } finally {
-        setPendingDeleteBlockId(null);
-      }
-    });
+  const openEditBlock = (block: ScheduleBlock) => {
+    setDialog({ kind: "edit-block", block });
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -302,7 +497,11 @@ export function ScheduleGrid({
         ) : null}
 
         <div className="overflow-x-auto rounded-lg border border-line">
-          <div className="relative grid bg-surface min-w-fit" style={gridStyle}>
+          <div
+            ref={gridRef}
+            className="relative grid bg-surface min-w-fit"
+            style={gridStyle}
+          >
             {/* Header corner cell. */}
             <div
               className="sticky left-0 z-20 border-b border-r border-line bg-surface"
@@ -342,7 +541,7 @@ export function ScheduleGrid({
               </div>
             ))}
 
-            {/* Cells — droppable + clickable when empty. */}
+            {/* Cells — droppable + clickable when empty + paint-aware. */}
             {resources.map((r, i) =>
               Array.from({ length: SLOTS }).map((_, slotIdx) => (
                 <DroppableCell
@@ -353,9 +552,33 @@ export function ScheduleGrid({
                   isOccupied={occupiedSlots.has(`${r.id}-${slotIdx}`)}
                   isDraggingSession={draggingSessionId !== null}
                   onCreate={() => openCreateAt(r, slotIdx)}
+                  onPointerDown={handleCellPointerDown}
+                  onClickWrapped={handleCellClick}
                 />
               )),
             )}
+
+            {/* Paint highlight — a gold dashed overlay across the painted range. */}
+            {paint.kind === "active"
+              ? (() => {
+                  const row = resourceRow.get(paint.resourceId);
+                  if (!row) return null;
+                  const min = Math.min(paint.startSlot, paint.endSlot);
+                  const max = Math.max(paint.startSlot, paint.endSlot);
+                  return (
+                    <div
+                      aria-hidden
+                      style={{
+                        gridRow: row,
+                        gridColumn: `${min + 2} / span ${max - min + 1}`,
+                        pointerEvents: "none",
+                        zIndex: 5,
+                      }}
+                      className="m-0.5 rounded border-2 border-dashed border-gold/80 bg-gold/15"
+                    />
+                  );
+                })()
+              : null}
 
             {/* Blocks. */}
             {visibleBlocks.map((b) => {
@@ -363,25 +586,22 @@ export function ScheduleGrid({
               if (!row) return null;
               const placement = placeOnGrid(b.startAt, b.endAt);
               if (!placement) return null;
-              const isPending = pendingDeleteBlockId === b.id;
               return (
                 <button
                   key={`block-${b.id}`}
                   type="button"
-                  onClick={() => handleDeleteBlock(b)}
-                  disabled={isPending}
+                  onClick={() => openEditBlock(b)}
                   className={[
                     "m-0.5 rounded border border-dashed border-danger/60 bg-danger/10 px-2 py-1 text-[11px] text-danger",
                     "flex items-center min-w-0 text-left",
                     "hover:bg-danger/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors",
-                    isPending ? "opacity-50" : "",
                   ].join(" ")}
                   style={{
                     gridRow: row,
                     gridColumn: `${placement.col} / span ${placement.span}`,
                     zIndex: 1,
                   }}
-                  title={`Blocked: ${b.reason} (click to delete)`}
+                  title={`Blocked: ${b.reason} (click to edit)`}
                 >
                   <span className="truncate font-medium">{b.reason}</span>
                 </button>
@@ -418,8 +638,9 @@ export function ScheduleGrid({
             label="Blocked"
           />
           <span className="text-fg-subtle">
-            · Click empty cell to create. Click session to edit, block to
-            delete. Drag a session to move it.
+            · Click an empty cell to create. Drag across empty cells to
+            block a range. Click a session or block to edit. Drag a session
+            to move it.
           </span>
         </div>
 
@@ -429,6 +650,9 @@ export function ScheduleGrid({
           coaches={coaches}
           resources={sessionResourceOptions}
           prefill={dialog.kind === "create" ? dialog.prefill : null}
+          defaultTab={
+            dialog.kind === "create" ? dialog.defaultTab ?? "session" : "session"
+          }
         />
 
         <SessionFormDialog
@@ -438,6 +662,23 @@ export function ScheduleGrid({
           coachOptions={coaches}
           resourceOptions={sessionResourceOptions}
           initial={editInitial}
+        />
+
+        <BlockEditDialog
+          open={dialog.kind === "edit-block"}
+          onClose={close}
+          resources={sessionResourceOptions}
+          initial={
+            dialog.kind === "edit-block"
+              ? {
+                  id: dialog.block.id,
+                  resourceId: dialog.block.resourceId,
+                  startAt: dialog.block.startAt,
+                  endAt: dialog.block.endAt,
+                  reason: dialog.block.reason,
+                }
+              : undefined
+          }
         />
       </div>
     </DndContext>
@@ -451,6 +692,8 @@ function DroppableCell({
   isOccupied,
   isDraggingSession,
   onCreate,
+  onPointerDown,
+  onClickWrapped,
 }: {
   resource: ScheduleResource;
   slotIdx: number;
@@ -458,6 +701,16 @@ function DroppableCell({
   isOccupied: boolean;
   isDraggingSession: boolean;
   onCreate: () => void;
+  onPointerDown: (
+    resourceId: string,
+    slotIdx: number,
+    e: React.PointerEvent<HTMLButtonElement>,
+  ) => void;
+  onClickWrapped: (
+    resourceId: string,
+    slotIdx: number,
+    onCreate: () => void,
+  ) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `drop-${resource.id}-${slotIdx}`,
@@ -477,7 +730,14 @@ function DroppableCell({
     <button
       ref={setNodeRef}
       type="button"
-      onClick={isOccupied ? undefined : onCreate}
+      onClick={
+        isOccupied
+          ? undefined
+          : () => onClickWrapped(resource.id, slotIdx, onCreate)
+      }
+      onPointerDown={
+        isOccupied ? undefined : (e) => onPointerDown(resource.id, slotIdx, e)
+      }
       disabled={isOccupied}
       tabIndex={isOccupied ? -1 : 0}
       aria-label={

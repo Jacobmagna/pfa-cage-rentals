@@ -389,10 +389,11 @@ Now we build product. All work below uses primitives from Stages A & B.
 
 # STAGE H — Phase 7: Block-off + coach management + rate overrides
 
-### H1. Block-off paint mode — `[ ]`
+### H1. Block-off paint mode — `[x]`
 - Toggle on schedule grid: "block off mode" → click-drag selects empty cells → confirm → creates `blocked_times` rows.
 - Acceptance: blocking range prevents session creation in that range.
 - Est: 3 h.
+- **Done:** Scope expanded to also ship block edit (the deferred-from-G piece). Pipeline: [updateBlockSchema](../src/lib/schemas/block.ts), [updateBlockInternal](../src/lib/server/block-actions.ts) (mirrors session pattern incl. self-exclusion in overlap checks + cross-table session conflict + audit), public [updateBlock](../src/app/admin/schedule/actions.ts) (with revalidatePath), [updateBlockFormAction](../src/app/admin/schedule/form-actions.ts), and new [BlockEditDialog](../src/app/admin/schedule/_components/block-edit-dialog.tsx) (mirror of SessionFormDialog edit mode with a Delete-block button inside per the chosen click-UX). Paint UX: window-level pointer handlers in [schedule-grid.tsx](../src/app/admin/schedule/_components/schedule-grid.tsx), <5px movement = single-cell click (existing onClick path), >5px enters paint mode using geometry math against the grid's bounding rect (more robust than elementFromPoint, which misses cells behind sessions/blocks). Latest-ref pattern keeps the once-bound window listeners free of stale closures. Paint clamps at the first occupied cell in either direction. Commit opens [ScheduleCreateDialog](../src/app/admin/schedule/_components/schedule-create-dialog.tsx) with new `defaultTab="block"` prop + the painted range prefilled. **Caught + fixed during browser verify:** `suppressNextClickRef` could stay true if the trailing click never landed (dialog stole focus); fix clears it at every pointerdown so a stale flag never blocks a new gesture. Browser-verified at 1280×900: edit dialog opens with prefill, save propagates to DB + audit + grid re-render with new placement; paint commits 8 AM Cage 1 dragging through the 10–11 AM session → clamps at 9:30 → dialog opens 8:00–10:00 on Block tab; single-cell click → Session tab; original session-edit + block-create paths still work.
 
 ### H2. Coach list page — `[ ]`
 - `src/app/admin/coaches/page.tsx`: lists all users with role=coach, columns: name, email, joined date, # sessions this month, $ owed this month.

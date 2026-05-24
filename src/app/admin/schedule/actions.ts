@@ -19,11 +19,19 @@ import { requireRole } from "@/lib/authz";
 import {
   createBlockInternal,
   deleteBlockInternal,
+  updateBlockInternal,
 } from "@/lib/server/block-actions";
 
 export async function createBlock(input: unknown) {
   const session = await requireRole("admin");
   const result = await createBlockInternal(session.user, input);
+  revalidatePath("/admin/schedule");
+  return result;
+}
+
+export async function updateBlock(id: string, input: unknown) {
+  const session = await requireRole("admin");
+  const result = await updateBlockInternal(session.user, id, input);
   revalidatePath("/admin/schedule");
   return result;
 }

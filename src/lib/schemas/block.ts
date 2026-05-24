@@ -18,4 +18,10 @@ export const createBlockSchema = z.object({
     .max(120, "Reason is at most 120 characters"),
 });
 
+// Same partial pattern as updateSessionSchema — every field optional,
+// the update action treats `undefined` as "don't touch this column"
+// and writes whatever's present in the parsed payload.
+export const updateBlockSchema = createBlockSchema.partial();
+
 export type CreateBlockInput = z.infer<typeof createBlockSchema>;
+export type UpdateBlockInput = z.infer<typeof updateBlockSchema>;

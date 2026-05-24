@@ -42,15 +42,37 @@ export function ScheduleCreateDialog({
   coaches,
   resources,
   prefill,
+  defaultTab = "session",
 }: {
   open: boolean;
   onClose: () => void;
   coaches: CoachOption[];
   resources: ResourceOption[];
   prefill: CreatePrefill | null;
+  /**
+   * Which tab to land on when the dialog opens. The paint flow uses
+   * "block" so an admin who just painted a range doesn't have to
+   * manually switch tabs before typing the reason.
+   */
+  defaultTab?: "session" | "block";
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const [tab, setTab] = useState<"session" | "block">("session");
+  const [tab, setTab] = useState<"session" | "block">(defaultTab);
+
+  // React 19 pattern for "reset internal state when a prop transitions":
+  // store the previous `open` in state, compare during render, and
+  // call setState conditionally. The effect-based version of this is
+  // flagged by react-hooks/set-state-in-effect because it triggers a
+  // second commit; this pattern collapses to a single render.
+  //
+  // We reset tab only on the open=false → open=true transition so
+  // switching defaultTab mid-open doesn't yank the user off the tab
+  // they're typing in.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (open && !prevOpen) setTab(defaultTab);
+  }
 
   const [sessionState, sessionAction, sessionPending] = useActionState(
     createSessionFormAction,

@@ -18,7 +18,7 @@
 // Same atomicity trade-off as the session path: audit failures are
 // Sentry-captured via safeLogAudit but don't roll back the mutation.
 
-import { and, eq, gt, lt } from "drizzle-orm";
+import { and, eq, gt, lt, ne } from "drizzle-orm";
 import * as Sentry from "@sentry/nextjs";
 import { db } from "@/db";
 import {
@@ -35,7 +35,7 @@ import {
   BlockOverlapError,
   ResourceNotFoundError,
 } from "@/lib/errors";
-import { createBlockSchema } from "@/lib/schemas/block";
+import { createBlockSchema, updateBlockSchema } from "@/lib/schemas/block";
 
 function isExclusionViolation(err: unknown): boolean {
   if (err && typeof err === "object" && "code" in err && err.code === "23P01") {
@@ -77,20 +77,20 @@ async function findOverlappingBlock(
   resourceId: string,
   startAt: Date,
   endAt: Date,
+  excludeBlockId?: string,
 ) {
-  // Self-exclusion for updateBlock will land in H1; for now we only
-  // call this from createBlock, where there's no existing row to
-  // exclude.
+  const conditions = [
+    eq(blockedTimes.resourceId, resourceId),
+    lt(blockedTimes.startAt, endAt),
+    gt(blockedTimes.endAt, startAt),
+  ];
+  if (excludeBlockId) {
+    conditions.push(ne(blockedTimes.id, excludeBlockId));
+  }
   const [row] = await db
     .select()
     .from(blockedTimes)
-    .where(
-      and(
-        eq(blockedTimes.resourceId, resourceId),
-        lt(blockedTimes.startAt, endAt),
-        gt(blockedTimes.endAt, startAt),
-      ),
-    )
+    .where(and(...conditions))
     .limit(1);
   return row;
 }
@@ -180,6 +180,87 @@ export async function createBlockInternal(
     after: inserted as unknown as Record<string, unknown>,
   });
   return inserted;
+}
+
+export async function updateBlockInternal(
+  actor: AuthedSession["user"],
+  id: string,
+  input: unknown,
+) {
+  const parsed = updateBlockSchema.parse(input);
+
+  const [existing] = await db
+    .select()
+    .from(blockedTimes)
+    .where(eq(blockedTimes.id, id))
+    .limit(1);
+  if (!existing) throw new BlockNotFoundError(id);
+
+  // Merge desired final state for downstream cross-table checks.
+  const finalResourceId = parsed.resourceId ?? existing.resourceId;
+  const finalStartAt = parsed.startAt ?? existing.startAt;
+  const finalEndAt = parsed.endAt ?? existing.endAt;
+
+  const resource = await getResourceOrThrow(finalResourceId);
+
+  // App-layer: a block can't span an existing session.
+  const conflictingSession = await findOverlappingSession(
+    finalResourceId,
+    finalStartAt,
+    finalEndAt,
+  );
+  if (conflictingSession) {
+    throw new BlockConflictsWithSessionError(
+      resource.name,
+      conflictingSession.coachName ?? conflictingSession.coachEmail,
+      conflictingSession.startAt,
+      conflictingSession.endAt,
+    );
+  }
+
+  let updated;
+  try {
+    [updated] = await db
+      .update(blockedTimes)
+      .set({
+        ...(parsed.resourceId !== undefined && {
+          resourceId: parsed.resourceId,
+        }),
+        ...(parsed.startAt !== undefined && { startAt: parsed.startAt }),
+        ...(parsed.endAt !== undefined && { endAt: parsed.endAt }),
+        ...(parsed.reason !== undefined && { reason: parsed.reason }),
+      })
+      .where(eq(blockedTimes.id, id))
+      .returning();
+  } catch (err) {
+    if (isExclusionViolation(err)) {
+      const conflict = await findOverlappingBlock(
+        finalResourceId,
+        finalStartAt,
+        finalEndAt,
+        id,
+      );
+      if (conflict) {
+        throw new BlockOverlapError(
+          resource.name,
+          conflict.reason,
+          conflict.startAt,
+          conflict.endAt,
+        );
+      }
+    }
+    throw err;
+  }
+
+  await safeLogAudit(db, {
+    actorUserId: actor.id,
+    entityType: "block",
+    entityId: id,
+    action: "update",
+    before: existing as unknown as Record<string, unknown>,
+    after: updated as unknown as Record<string, unknown>,
+  });
+  return updated;
 }
 
 export async function deleteBlockInternal(

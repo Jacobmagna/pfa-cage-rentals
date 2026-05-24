@@ -6,7 +6,8 @@
 // banner copy, anything else re-thrown to the Next error boundary.
 
 import { ZodError } from "zod";
-import { createBlock, deleteBlock } from "./actions";
+import { createBlock, deleteBlock, updateBlock } from "./actions";
+import { BlockNotFoundError } from "@/lib/errors";
 
 // Revalidation invariant: ./actions.ts owns revalidatePath for the
 // schedule surface. These wrappers focus on FormData translation +
@@ -62,7 +63,8 @@ function translate(err: unknown, values: BlockFormValues): BlockActionResult {
   if (
     err instanceof BlockOverlapError ||
     err instanceof BlockConflictsWithSessionError ||
-    err instanceof ResourceNotFoundError
+    err instanceof ResourceNotFoundError ||
+    err instanceof BlockNotFoundError
   ) {
     return {
       ok: false,
@@ -93,6 +95,27 @@ export async function createBlockFormAction(
   const values = snapshot(formData);
   try {
     await createBlock(buildInput(formData));
+    return { ok: true };
+  } catch (err) {
+    return translate(err, values);
+  }
+}
+
+export async function updateBlockFormAction(
+  _prev: BlockActionResult,
+  formData: FormData,
+): Promise<BlockActionResult> {
+  const values = snapshot(formData);
+  const id = formData.get("id")?.toString();
+  if (!id) {
+    return {
+      ok: false,
+      error: { code: "VALIDATION", message: "Missing block id" },
+      values,
+    };
+  }
+  try {
+    await updateBlock(id, buildInput(formData));
     return { ok: true };
   } catch (err) {
     return translate(err, values);

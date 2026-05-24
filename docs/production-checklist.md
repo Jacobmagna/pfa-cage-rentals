@@ -21,19 +21,19 @@ Cross-refs:
 
 Rationale: install error visibility, CI, and migration safety **before** any new product code lands. Every later phase benefits from these, and adding them after means retrofitting noise into a larger codebase.
 
-### A1. CI workflow on every PR — `[ ]`
+### A1. CI workflow on every PR — `[x]`
 - Add `.github/workflows/ci.yml`: matrix on Node 24, steps = `npm ci`, `npm run lint`, `npx tsc --noEmit`, `npm run build`.
 - Trigger on PRs to `main` and pushes to any branch.
 - Acceptance: opening a PR with a TS error blocks merge with a red check.
 - Est: 30 min.
 
-### A2. Branch protection on `main` — `[ ]`
+### A2. Branch protection on `main` — `[x]`
 - GitHub repo → Settings → Branches → Protection rule for `main`: require status check `ci` (from A1) to pass, require linear history.
 - Skip "require approving review" since you're solo — adds friction without value.
 - Acceptance: `git push origin main` directly is blocked (forces PR flow).
 - Est: 5 min.
 
-### A3. Sentry error tracking — `[ ]`
+### A3. Sentry error tracking — `[x]`
 - `npm i @sentry/nextjs` → `npx @sentry/wizard@latest -i nextjs` → walk wizard.
 - Create Sentry project under your account, free tier.
 - Add `SENTRY_AUTH_TOKEN`, `NEXT_PUBLIC_SENTRY_DSN` to Vercel env vars (Production + Preview).
@@ -41,18 +41,28 @@ Rationale: install error visibility, CI, and migration safety **before** any new
 - Acceptance: throw a test error from a server action → email arrives within 1 min, error visible in Sentry dashboard.
 - Est: 45 min.
 
-### A4. Security headers in `next.config.ts` — `[ ]`
+### A4. Security headers in `next.config.ts` — `[x]`
 - Add `headers()` returning: `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://vercel.live; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.resend.com https://*.sentry.io; frame-ancestors 'none'`.
 - Test with https://securityheaders.com — target A+ grade.
 - Acceptance: securityheaders.com scan of `www.pfacagerentals.com` returns A or A+.
 - Est: 45 min (iterating CSP).
+- **Done in A3 PR** (bundled because both touch next.config.ts). All 6 headers live and verified via curl.
 
-### A5. DB migrations run automatically on deploy — `[ ]`
+### A4b. CSP violation reporting (lifted from doc-insured pattern) — `[ ]`
+- Add `/api/csp-report` POST route that ingests CSP violation reports, logs to Sentry as `csp.violation` events.
+- Add `report-uri /api/csp-report` directive to existing CSP.
+- **When to do this:** only after seeing suspected breakage. The current CSP enforce-mode works for the live surface (sign-in, Google OAuth, Resend, Sentry beacons) — adding the endpoint preemptively is fine but not urgent. Bumps a flag when Stage J introduces new integrations (PWA manifest, etc.) that might trip CSP.
+- Acceptance: a synthetic violation (e.g. inline-style probe page) lands as a Sentry event tagged `csp.violation`.
+- Est: 45 min.
+- Priority: P1 (Stage J pre-launch, or earlier if a real violation is observed).
+
+### A5. DB migrations run automatically on deploy — `[x]`
 - Add `vercel-build` script in `package.json`: `"vercel-build": "npm run db:migrate && next build"`.
-- Verify Vercel build log shows migration applied before Next.js build.
-- Worst case rollback: Vercel build fails → no new deploy → old version still serves users.
-- Acceptance: push a no-op migration change → Vercel build log shows `Applying 0001_xxx.sql` line before Next.js compile.
-- Est: 30 min.
+- Swap custom migrator to Drizzle's official `migrate()` from `drizzle-orm/neon-http/migrator` — tracks applied migrations in `__drizzle_migrations` table, idempotent across deploys (the previous custom migrator re-ran every statement, would have failed on second Vercel deploy with `type "X" already exists`).
+- Verify Vercel build log shows migration applied (or "up to date") before Next.js build.
+- Worst case rollback: Vercel build fails → no new deploy → old version still serves users. Migration that succeeded leaves DB ahead of code; acceptable risk for additive migrations (the two-step migration discipline from CI section keeps destructive changes safe).
+- Acceptance: push a no-op migration change → Vercel build log shows migrator output before Next.js compile.
+- Est: 30 min (took ~1h due to idempotency fix for the pre-existing migration).
 
 ### A6. Vercel + Neon spend alerts — `[ ]`
 - Vercel → Settings → Billing → set notification at 75% of free tier usage (bandwidth, function-hours).
@@ -62,10 +72,36 @@ Rationale: install error visibility, CI, and migration safety **before** any new
 
 ### A7. Uptime monitoring — `[ ]`
 - Sign up Better Stack (https://betterstack.com) free tier.
-- Add monitor: GET `https://www.pfacagerentals.com/api/auth/csrf`, 3-min interval, expect 200 + JSON containing `csrfToken`.
+- Add monitor: GET `https://www.pfacagerentals.com/api/health`, 3-min interval, expect 200 + JSON `{ status: "ok" }`. (`/api/health` lands in A8; if A8 is deferred, fall back to `/api/auth/csrf`.)
 - Alert destination: email + push (install Better Stack mobile app).
 - Acceptance: pause Vercel deploy briefly, get alert within 6 min.
 - Est: 15 min.
+
+### A8. validateRequiredEnv + /api/health endpoint (lifted from doc-insured) — `[ ]`
+- Create `src/lib/env.ts` exporting:
+  - `REQUIRED_SCHEMA` (Zod) listing every env var that must be set for production to function (DATABASE_URL, AUTH_SECRET, AUTH_URL, AUTH_GOOGLE_ID/SECRET, AUTH_RESEND_KEY, NEXT_PUBLIC_SENTRY_DSN — extend per slice).
+  - `getMissingRequiredEnv()` returning the list of vars that are missing or malformed.
+  - `validateRequiredEnv()` that logs loudly but **never throws** (an instrumentation-time throw bricks every route including /api/health — see doc-insured incident comment).
+- Call `validateRequiredEnv()` from `instrumentation.ts`'s `register()`.
+- Add `src/app/api/health/route.ts`: GET returns 200 `{ status: "ok", commit: VERCEL_GIT_COMMIT_SHA }` when env is valid, else 503 `{ status: "degraded", missing: [...] }`.
+- A7's uptime monitor switches to /api/health (richer signal than /api/auth/csrf).
+- Acceptance: temporarily unset a required env var in Vercel preview → /api/health returns 503 with the missing var named; Better Stack alerts.
+- Est: 1.5 h.
+- Priority: P0 — gives uptime monitor a real signal vs blind.
+
+### A9. Explicit serverActions allowedOrigins — `[ ]`
+- In `next.config.ts`:
+  ```ts
+  experimental: {
+    serverActions: {
+      allowedOrigins: ["www.pfacagerentals.com", "pfacagerentals.com"],
+    },
+  },
+  ```
+- Why: default is request's own host. Setting explicitly documents the security boundary and prevents a future proxy/CDN/preview-domain config from silently widening it.
+- Acceptance: Vercel preview deploys still work (they use *.vercel.app — confirm they're whitelisted or use a localhost override during preview tests).
+- Est: 20 min.
+- Priority: P1.
 
 ---
 

@@ -38,9 +38,19 @@ const nextConfig: NextConfig = {
   async headers() {
     // Security headers applied to every response.
     // CSP iterated as integrations are added — keep tight by default.
+    //
+    // 'unsafe-eval' is allowed ONLY in development — React dev-mode
+    // uses eval() to reconstruct call stacks for the error overlay
+    // (and Next.js Turbopack HMR needs it). Production never needs
+    // it (React's prod build never calls eval), and we don't want
+    // to weaken the prod policy.
+    const isDev = process.env.NODE_ENV !== "production";
+    const scriptSrc = isDev
+      ? "'self' 'unsafe-inline' 'unsafe-eval' https://vercel.live"
+      : "'self' 'unsafe-inline' https://vercel.live";
     const csp = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' https://vercel.live",
+      `script-src ${scriptSrc}`,
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: https:",
       "font-src 'self' data:",

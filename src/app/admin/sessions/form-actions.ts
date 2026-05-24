@@ -1,0 +1,160 @@
+"use server";
+
+// Form-action wrappers for the C6 server actions. The raw actions
+// throw typed errors (SessionOverlapError, BlockedTimeError, etc.);
+// useActionState wants a stable return shape so the dialog can
+// render error banners without try/catch in the client component.
+//
+// These translate the typed errors into a discriminated-union
+// result shape. Unknown errors still throw — Next.js error
+// boundaries + Sentry catch them, which is the right default for
+// "this is a bug, not a user-correctable conflict".
+
+import { revalidatePath } from "next/cache";
+import { ZodError } from "zod";
+import {
+  createSession,
+  deleteSession,
+  updateSession,
+} from "./actions";
+import {
+  BlockedTimeError,
+  ResourceNotFoundError,
+  SessionNotFoundError,
+  SessionOverlapError,
+  UseTypeValidationError,
+} from "@/lib/errors";
+
+export type SubmittedFormValues = {
+  coachId: string;
+  resourceId: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  useType: string;
+  note: string;
+};
+
+export type ActionResult =
+  | { ok: true }
+  | {
+      ok: false;
+      error: { code: string; message: string };
+      values: SubmittedFormValues;
+    };
+
+// Snapshot the form's raw values so we can re-render the form
+// pre-filled when the action errors. Without this, the user has to
+// re-pick coach/resource/date/etc. after every overlap conflict.
+function snapshotFormValues(formData: FormData): SubmittedFormValues {
+  return {
+    coachId: formData.get("coachId")?.toString() ?? "",
+    resourceId: formData.get("resourceId")?.toString() ?? "",
+    date: formData.get("date")?.toString() ?? "",
+    startTime: formData.get("startTime")?.toString() ?? "",
+    endTime: formData.get("endTime")?.toString() ?? "",
+    useType: formData.get("useType")?.toString() ?? "",
+    note: formData.get("note")?.toString() ?? "",
+  };
+}
+
+// Maps FormData → the shape createSessionSchema expects. Combines
+// the date input and two time inputs into Date objects.
+function buildSessionInput(formData: FormData) {
+  const dateStr = formData.get("date")?.toString().trim();
+  const startStr = formData.get("startTime")?.toString().trim();
+  const endStr = formData.get("endTime")?.toString().trim();
+  if (!dateStr || !startStr || !endStr) {
+    throw new Error("Missing date, start, or end time");
+  }
+  const startAt = new Date(`${dateStr}T${startStr}:00`);
+  const endAt = new Date(`${dateStr}T${endStr}:00`);
+  const useTypeRaw = formData.get("useType")?.toString().trim();
+  return {
+    coachId: formData.get("coachId")?.toString() ?? "",
+    resourceId: formData.get("resourceId")?.toString() ?? "",
+    startAt,
+    endAt,
+    useType: useTypeRaw === "hitting" || useTypeRaw === "pitching"
+      ? useTypeRaw
+      : undefined,
+    note: formData.get("note")?.toString().trim() || undefined,
+  };
+}
+
+function translateError(
+  err: unknown,
+  values: SubmittedFormValues,
+): ActionResult {
+  if (
+    err instanceof SessionOverlapError ||
+    err instanceof BlockedTimeError ||
+    err instanceof UseTypeValidationError ||
+    err instanceof SessionNotFoundError ||
+    err instanceof ResourceNotFoundError
+  ) {
+    return {
+      ok: false,
+      error: { code: err.code, message: err.message },
+      values,
+    };
+  }
+  if (err instanceof ZodError) {
+    const first = err.issues[0];
+    return {
+      ok: false,
+      error: {
+        code: "VALIDATION",
+        message: first
+          ? `${first.path.join(".")}: ${first.message}`
+          : "Invalid input",
+      },
+      values,
+    };
+  }
+  // Unknown — let Next.js error boundary + Sentry handle it.
+  throw err;
+}
+
+export async function createSessionFormAction(
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const values = snapshotFormValues(formData);
+  try {
+    await createSession(buildSessionInput(formData));
+    revalidatePath("/admin/sessions");
+    return { ok: true };
+  } catch (err) {
+    return translateError(err, values);
+  }
+}
+
+export async function updateSessionFormAction(
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const values = snapshotFormValues(formData);
+  const id = formData.get("id")?.toString();
+  if (!id) {
+    return {
+      ok: false,
+      error: { code: "VALIDATION", message: "Missing session id" },
+      values,
+    };
+  }
+  try {
+    await updateSession(id, buildSessionInput(formData));
+    revalidatePath("/admin/sessions");
+    return { ok: true };
+  } catch (err) {
+    return translateError(err, values);
+  }
+}
+
+// Delete doesn't use useActionState — confirm() dialog + simple
+// button. revalidate happens inside.
+export async function deleteSessionAction(id: string): Promise<void> {
+  await deleteSession(id);
+  revalidatePath("/admin/sessions");
+}

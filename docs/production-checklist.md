@@ -261,12 +261,13 @@ Now we build product. All work below uses primitives from Stages A & B.
 - Est: 2 h.
 - **Done:** Split into [src/app/admin/sessions/actions.ts](../src/app/admin/sessions/actions.ts) (public "use server" requireRole-gated wrappers) and [src/lib/server/session-actions.ts](../src/lib/server/session-actions.ts) (Internal logic, takes actor as param, reusable from D1 coach actions later). New: [src/lib/schemas/session.ts](../src/lib/schemas/session.ts), [src/lib/errors.ts](../src/lib/errors.ts) (SessionOverlapError, BlockedTimeError, UseTypeValidationError, etc.). **Note:** neon-http doesn't support transactions, so mutation + audit happen sequentially. Mutation-first ordering prevents phantom audit rows; audit failures are Sentry-captured via `safeLogAudit` and detectable via `LEFT JOIN audit_log` query. If true atomicity is needed later (compliance), switch to neon-serverless WebSocket driver. Smoke-tested all 7 paths: happy create + audit ✓, cage missing useType ✓, bullpen with useType ✓, overlap with coach-name error ✓, blocked-time rejection with reason ✓, update diff captured ✓, delete + audit ✓.
 
-### C7. Admin session entry UI — `[ ]`
+### C7. Admin session entry UI — `[x]`
 - Page `src/app/admin/sessions/page.tsx`: list recent 50 sessions in a table (date, coach, resource, duration, $).
 - "New session" form (coach dropdown, resource dropdown, date + start + end pickers, note, save).
 - Use design-spec tokens — gold primary, table per spec, all-caps eyebrow labels.
 - Acceptance: admin creates, edits, deletes a session through the UI; audit log reflects all three.
 - Est: 4 h.
+- **Done:** [src/app/admin/sessions/page.tsx](../src/app/admin/sessions/page.tsx) (server, requireRole + parallel fetch of latest 50 + coaches + active resources). Client components in `_components/`: `sessions-client.tsx` (table with eyebrow count + gold "New session" CTA + always-visible pencil/trash icons; native `confirm()` for delete) and `session-form-dialog.tsx` (native `<dialog>` modal, useActionState wires C6 actions, error banner). Form values persist across error re-renders via `state.values` echo + form `key` remount. Date + two time inputs combine to `Date` in `form-actions.ts`. Browser-verified end-to-end: create succeeds + audit row lands, overlap fires `SessionOverlapError` with conflicting coach name in red banner with all form fields preserved. Admin home card now links to the page. Lucide icons added. CSP gained `'unsafe-eval'` in dev only (React dev-mode requirement; prod policy unchanged).
 
 ### C8. Integration tests — `[ ]`
 - Vitest setup pointing at a Neon dev branch (cheap copy-on-write).

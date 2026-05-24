@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireRole } from "@/lib/authz";
 import { AppShell } from "../_components/app-shell";
 
@@ -20,11 +21,18 @@ export default async function AdminHome() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <PlaceholderCard
-          eyebrow="Phase 2"
-          title="Sessions"
-          description="Manual session entry for admins. Drops next."
-        />
+        <Link
+          href="/admin/sessions"
+          className="rounded-lg border border-line bg-surface p-5 transition-colors hover:border-line-strong"
+        >
+          <p className="text-[10px] uppercase tracking-[0.18em] text-gold">
+            Live
+          </p>
+          <h3 className="mt-1 text-base font-semibold text-fg">Sessions</h3>
+          <p className="mt-1.5 text-sm text-fg-muted">
+            Log, edit, and review every cage / bullpen / weight room booking.
+          </p>
+        </Link>
         <PlaceholderCard
           eyebrow="Phase 4"
           title="Reports"

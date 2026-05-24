@@ -9,7 +9,10 @@ Working notes for the web app replacing PFA Baseball's shared-Excel system for c
 
 **Product URL:** `pfacagerentals.com` — Dad will buy through Vercel during setup (~$12/year, one-click DNS). PFA Baseball has a separate Wix-hosted brand site Jacob doesn't have access to; this app is a standalone property at its own domain. Name framing matters: it's "cage rentals," not "scheduling" — consistent with the underlying Excel filename "Coaches Cage _ Bullpen Rentals.xlsx." The product is a **rental-billing tool first, scheduling second.**
 
-**Auth (Google sign-in, Workspace assumed):** Dad signs into Google Sheets with `mdm@pfasports.com`, which strongly indicates `pfasports.com` is on Google Workspace — non-Workspace email can't authenticate as a Google account at all. Plan stays Google OAuth. We'll do a 60-second sanity test in Phase 1 with Dad's real account before going further. If it fails for any reason, fallback is email magic-link via Auth.js (~20-min swap).
+**Auth (Google + email magic-link, decided 2026-05-23):** Original Workspace assumption was **wrong** — `mdm@pfasports.com` is not a Google account; sign-in fails with "couldn't find your Google Account." Pivoted to dual-provider:
+- **Google OAuth** for coaches with Gmail (most of them).
+- **Email magic-link via Resend** for Dad, Mom, and any non-Gmail coaches.
+Sign-in page shows both options. Resend free tier (3k emails/mo) covers this app forever. Sender is `onboarding@resend.dev` until `pfacagerentals.com` is bought and verified with Resend (~5 min once DNS lands).
 
 ## The problem (in Dad's words, paraphrased)
 

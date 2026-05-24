@@ -22,11 +22,26 @@
 // handles the wire format. Date values inside `before`/`after` will
 // serialize as ISO strings on the way in.
 
+import type { NeonHttpQueryResultHKT } from "drizzle-orm/neon-http";
 import type { NeonHttpDatabase } from "drizzle-orm/neon-http";
+import type { PgTransaction } from "drizzle-orm/pg-core";
+import type { ExtractTablesWithRelations } from "drizzle-orm/relations";
 import { auditLog } from "@/db/schema";
 import * as schema from "@/db/schema";
 
-type Database = NeonHttpDatabase<typeof schema>;
+// Accept either the root db handle or the tx parameter from
+// db.transaction(async (tx) => ...). Drizzle types them differently
+// (`NeonHttpDatabase` vs `PgTransaction<NeonHttpQueryResultHKT, ...>`)
+// even though they share the insert/select/update/delete surface we
+// care about. Union keeps the call sites clean — callers don't need
+// to cast.
+type Database =
+  | NeonHttpDatabase<typeof schema>
+  | PgTransaction<
+      NeonHttpQueryResultHKT,
+      typeof schema,
+      ExtractTablesWithRelations<typeof schema>
+    >;
 
 export type LogAuditInput = {
   actorUserId: string;

@@ -252,13 +252,14 @@ Now we build product. All work below uses primitives from Stages A & B.
 - Est: 1 h.
 - **Done:** Migration [drizzle/0007_amusing_demogoblin.sql](../drizzle/0007_amusing_demogoblin.sql) applied. `blocked_times` table mirrors sessions_billing's CHECK + EXCLUDE pattern (block-vs-block overlap rejected at DB layer). Index on (resource_id, start_at) for cross-table overlap queries from C6. Smoke-tested: valid insert ✓, overlap rejected ✓, end<start rejected ✓, back-to-back allowed ✓. Block-vs-session cross-table check lives in C6 server actions (createSession queries blocked_times; createBlock queries sessions_billing) — Postgres EXCLUDE can't span tables. Admin block-off-paint UI lands in H1.
 
-### C6. Server actions for admin session entry — `[ ]`
+### C6. Server actions for admin session entry — `[x]`
 - `src/app/admin/sessions/actions.ts`:
   - `createSession(input)` — Zod-parse → `requireRole("admin")` → transaction: insert + audit log.
   - `updateSession(id, input)` — same pattern with diff capture.
   - `deleteSession(id)` — same.
 - Acceptance: each action creates corresponding audit_log row.
 - Est: 2 h.
+- **Done:** Split into [src/app/admin/sessions/actions.ts](../src/app/admin/sessions/actions.ts) (public "use server" requireRole-gated wrappers) and [src/lib/server/session-actions.ts](../src/lib/server/session-actions.ts) (Internal logic, takes actor as param, reusable from D1 coach actions later). New: [src/lib/schemas/session.ts](../src/lib/schemas/session.ts), [src/lib/errors.ts](../src/lib/errors.ts) (SessionOverlapError, BlockedTimeError, UseTypeValidationError, etc.). **Note:** neon-http doesn't support transactions, so mutation + audit happen sequentially. Mutation-first ordering prevents phantom audit rows; audit failures are Sentry-captured via `safeLogAudit` and detectable via `LEFT JOIN audit_log` query. If true atomicity is needed later (compliance), switch to neon-serverless WebSocket driver. Smoke-tested all 7 paths: happy create + audit ✓, cage missing useType ✓, bullpen with useType ✓, overlap with coach-name error ✓, blocked-time rejection with reason ✓, update diff captured ✓, delete + audit ✓.
 
 ### C7. Admin session entry UI — `[ ]`
 - Page `src/app/admin/sessions/page.tsx`: list recent 50 sessions in a table (date, coach, resource, duration, $).

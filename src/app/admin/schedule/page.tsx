@@ -10,6 +10,7 @@ import {
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import { AppShell } from "@/app/_components/app-shell";
+import { AutoRefresh } from "./_components/auto-refresh";
 import { ScheduleGrid } from "./_components/schedule-grid";
 import { WeekNav } from "./_components/week-nav";
 
@@ -136,6 +137,8 @@ export default async function AdminSchedulePage({
         sessions={sessions}
         blocks={blocks}
       />
+
+      <AutoRefresh />
     </AppShell>
   );
 }

@@ -33,11 +33,18 @@ export default async function AdminHome() {
             Log, edit, and review every cage / bullpen / weight room booking.
           </p>
         </Link>
-        <PlaceholderCard
-          eyebrow="Phase 4"
-          title="Reports"
-          description="Monthly Excel export by coach and date range."
-        />
+        <Link
+          href="/admin/reports"
+          className="rounded-lg border border-line bg-surface p-5 transition-colors hover:border-line-strong"
+        >
+          <p className="text-[10px] uppercase tracking-[0.18em] text-gold">
+            Live
+          </p>
+          <h3 className="mt-1 text-base font-semibold text-fg">Reports</h3>
+          <p className="mt-1.5 text-sm text-fg-muted">
+            Per-coach billing breakdown by resource type. Excel export lands in E2.
+          </p>
+        </Link>
         <PlaceholderCard
           eyebrow="Phase 5"
           title="Schedule grid"

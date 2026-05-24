@@ -318,11 +318,12 @@ Now we build product. All work below uses primitives from Stages A & B.
 
 # STAGE E — Phase 4: Reports
 
-### E1. Report filters page — `[ ]`
+### E1. Report filters page — `[x]`
 - `src/app/admin/reports/page.tsx`: filters for coach (multi-select), date range, resource type.
 - Server action `generateReport(filters)` returns aggregated rows.
 - Acceptance: filtering by single coach + May date range shows that coach's May sessions only.
 - Est: 3 h.
+- **Done:** New pure module [src/lib/reports/aggregate.ts](../src/lib/reports/aggregate.ts) is the single source of truth for both the live preview and E2's Excel export — takes joined session inputs + rate overrides, returns `{ detail, summary, grandTotalCents }` with per-row `rateSource: "default" | "override"` and summary `appliedOverride` rollup. [src/lib/reports/aggregate.test.ts](../src/lib/reports/aggregate.test.ts) has 7 starter Vitest cases (slot math, override application, multi-resource roll-up, alpha-sorted summary, empty input); E3 will add edge cases + Excel-buffer round-trip. [src/app/admin/reports/page.tsx](../src/app/admin/reports/page.tsx) reads filters from URL searchParams (`?from=&to=&coachIds=&resourceTypes=`) so links are shareable + browser-back works; defaults to current month + all coaches + all types. Filter form is server-rendered `<form method="GET">` — no client JS, "leave all unchecked = no filter" semantic with helper copy. Browser-verified at 1280×900 with 3 seeded coaches, 6 sessions, 1 override: math correct (override $18 × 4 cage slots = $72 + $66 bullpen = $138 for Lusk; $20 Tyler weight room; $66 Chen cage; **grand $224**). Filter to bullpen+weight only → 2 coaches, Chen drops, $86. Empty range → friendly "No sessions match" card. /admin dashboard's Reports card promoted from Phase 4 placeholder to Live link. Download button stubbed pending E2.
 
 ### E2. ExcelJS export — `[ ]`
 - `npm i exceljs`.

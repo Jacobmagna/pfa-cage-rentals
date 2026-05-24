@@ -83,32 +83,20 @@ export default async function AdminHome() {
             Every create / update / delete to sessions, blocks, and rates.
           </p>
         </Link>
-        <PlaceholderCard
-          eyebrow="Phase 8"
-          title="Historical import"
-          description="One-time backfill from source_data.xlsx."
-        />
+        <Link
+          href="/admin/import"
+          className="rounded-lg border border-line bg-surface p-5 transition-colors hover:border-line-strong"
+        >
+          <p className="text-[10px] uppercase tracking-[0.18em] text-gold">
+            Live
+          </p>
+          <h3 className="mt-1 text-base font-semibold text-fg">Historical import</h3>
+          <p className="mt-1.5 text-sm text-fg-muted">
+            Upload source_data.xlsx → preview + review → commit past sessions.
+          </p>
+        </Link>
       </div>
     </AppShell>
   );
 }
 
-function PlaceholderCard({
-  eyebrow,
-  title,
-  description,
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="rounded-lg border border-line bg-surface p-5 transition-colors hover:border-line-strong">
-      <p className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
-        {eyebrow}
-      </p>
-      <h3 className="mt-1 text-base font-semibold text-fg">{title}</h3>
-      <p className="mt-1.5 text-sm text-fg-muted">{description}</p>
-    </div>
-  );
-}

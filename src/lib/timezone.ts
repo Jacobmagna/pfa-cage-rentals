@@ -91,6 +91,39 @@ export function formatPfaMonthYear(d: Date): string {
  *
  * Month is 1-indexed (matches Date.UTC's convention NOT Date()'s).
  */
+/**
+ * Converts a PFA wall-clock date+time to its UTC instant. Inverse of
+ * formatPfaDate + formatPfaTime: format(pfaWallClockToUtc(d, t))
+ * round-trips.
+ *
+ * Used by the historical Excel import (I3): the parser emits
+ * "YYYY-MM-DD" + "HH:mm" in PFA local; the sessions table stores
+ * UTC Date instants. Wall-clock 14:30 on 2026-05-01 (EDT, UTC-4)
+ * becomes 18:30 UTC.
+ *
+ * Strategy: build the wall-clock-as-if-UTC instant, ask Intl for
+ * the PFA offset at that moment, subtract it back. Survives DST
+ * for any wall-time in the operating window (8:00–22:00); the
+ * unrepresentable 02:00–03:00 spring-forward gap can't appear in
+ * imported data.
+ */
+export function pfaWallClockToUtc(date: string, time: string): Date {
+  const naive = new Date(`${date}T${time}:00Z`);
+  if (Number.isNaN(naive.getTime())) {
+    throw new Error(`pfaWallClockToUtc: invalid date/time "${date}T${time}"`);
+  }
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: PFA_TIMEZONE,
+    timeZoneName: "shortOffset",
+  }).formatToParts(naive);
+  const offsetPart = parts.find((p) => p.type === "timeZoneName")?.value ?? "GMT+0";
+  const match = offsetPart.match(/GMT([+-])(\d+)(?::(\d+))?/);
+  if (!match) throw new Error(`pfaWallClockToUtc: could not parse offset "${offsetPart}"`);
+  const sign = match[1] === "+" ? 1 : -1;
+  const offsetMin = sign * (Number(match[2]) * 60 + Number(match[3] ?? 0));
+  return new Date(naive.getTime() - offsetMin * 60_000);
+}
+
 export function pfaParts(d: Date): {
   year: number;
   month: number; // 1-12

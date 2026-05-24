@@ -433,7 +433,7 @@ Now we build product. All work below uses primitives from Stages A & B.
 - Acceptance: `D. Lusk`, `Lusk`, `David Lusk` all map to same canonical entry.
 - Est: 3 h.
 
-### I3. Admin import UI with dry-run — `[ ]`
+### I3. Admin import UI with dry-run — `[~]`
 - `src/app/admin/import/page.tsx`: file upload → server parses → shows preview table with "would create N sessions, M unmatched names" → confirm to commit.
 - Unmatched names → "review + assign canonical name" UI before commit.
 - Bulk insert in single transaction, audit-log each row with `action='create'` and `diff` containing `{ source: 'historical_import' }`.

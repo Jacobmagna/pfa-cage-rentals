@@ -17,9 +17,11 @@ Cross-refs:
 
 ---
 
-# STAGE A — Guard rails (do BEFORE Phase 2)
+# STAGE A — Guard rails (do BEFORE Phase 2) ✓ COMPLETE 2026-05-23
 
 Rationale: install error visibility, CI, and migration safety **before** any new product code lands. Every later phase benefits from these, and adding them after means retrofitting noise into a larger codebase.
+
+**Status:** All P0 items done. A4b deferred (P1 — ship only if real CSP breakage observed; current enforce-mode works for the live surface).
 
 ### A1. CI workflow on every PR — `[x]`
 - Add `.github/workflows/ci.yml`: matrix on Node 24, steps = `npm ci`, `npm run lint`, `npx tsc --noEmit`, `npm run build`.

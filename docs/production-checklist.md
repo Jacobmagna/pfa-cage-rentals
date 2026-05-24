@@ -169,7 +169,7 @@ Rationale: build the **reusable primitives** that all subsequent server actions 
 - Est: 1 h.
 - **Done:** Dedicated Upstash account (jacob+pfa@themagnas.com, separate from doc-insured) → DB `pfa-cage-rentals` in us-east-1. [src/lib/ratelimit.ts](../src/lib/ratelimit.ts) lazy-inits Upstash (so CI builds work without secrets) and exposes `checkMagicLinkRateLimit(email, ip)` with sliding-window limits (5/h email, 10/h IP). Magic-link inline action moved to [src/app/actions.ts](../src/app/actions.ts) (`requestMagicLink`), now extracts client IP via `x-forwarded-for` header, runs the check, and redirects to `/?error=email-limit|ip-limit|missing-email` on failure. [src/app/page.tsx](../src/app/page.tsx) renders the error banner from searchParams. `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` added to `REQUIRED_SCHEMA` in [src/lib/env.ts](../src/lib/env.ts) so `/api/health` flags missing config. Smoke-tested locally against real Upstash: 5 allowed, 6th blocked with `email-limit` as expected.
 
-### B6. Unit tests for billing helpers — `[ ]`
+### B6. Unit tests for billing helpers — `[x]`
 - `npm i -D vitest @vitest/coverage-v8`.
 - Add `vitest.config.ts`, add `"test": "vitest"` script.
 - Test `src/lib/billing.ts`: edge cases for slot counting (back-to-back lessons spanning multiple slots, half-slot rounding, start-equals-end, overnight sessions if relevant).
@@ -178,11 +178,13 @@ Rationale: build the **reusable primitives** that all subsequent server actions 
 - Target: 100% line coverage on `src/lib/billing.ts`.
 - Acceptance: `npm test` runs, all green, coverage report shows 100% on billing.ts.
 - Est: 2 h.
+- **Done:** [vitest.config.ts](../vitest.config.ts) with v8 coverage + 100% thresholds on all four metrics. [src/lib/billing.test.ts](../src/lib/billing.test.ts) has 21 tests covering slot rounding (exact, off-boundary start/end, both ends, overnight, zero-duration throw, negative throw), rate selection (default for each resource type, coach match, wrong coach, wrong resource type, multiple-match precedence), chargeForSession (default, override, weight_room, rounding propagation), and a regression test on `DEFAULT_RATES_PER_SLOT_CENTS`. Coverage report: 100% statements, branches, functions, lines.
 
-### B7. CI runs tests — `[ ]`
+### B7. CI runs tests — `[x]`
 - Update `.github/workflows/ci.yml` to add `npm test` as a final step after build.
 - Acceptance: PR with broken billing test gets blocked by CI.
 - Est: 5 min.
+- **Done:** CI now runs `npm run test:coverage` after Build. The 100% threshold from vitest.config.ts means a regression in either tests or billing.ts blocks merge.
 
 ---
 

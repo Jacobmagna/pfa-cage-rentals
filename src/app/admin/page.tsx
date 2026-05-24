@@ -59,15 +59,22 @@ export default async function AdminHome() {
             Excel-style day view of every cage / bullpen / weight room booking.
           </p>
         </Link>
-        <PlaceholderCard
-          eyebrow="Phase 7"
-          title="Coaches & rates"
-          description="Manage per-coach rate overrides."
-        />
+        <Link
+          href="/admin/coaches"
+          className="rounded-lg border border-line bg-surface p-5 transition-colors hover:border-line-strong"
+        >
+          <p className="text-[10px] uppercase tracking-[0.18em] text-gold">
+            Live
+          </p>
+          <h3 className="mt-1 text-base font-semibold text-fg">Coaches</h3>
+          <p className="mt-1.5 text-sm text-fg-muted">
+            Roster with month-to-date activity. Rate overrides land in H3.
+          </p>
+        </Link>
         <PlaceholderCard
           eyebrow="Phase 7"
           title="Block-off times"
-          description="Mark cages unavailable for closure / maintenance."
+          description="Paint-mode lives on the schedule grid. Standalone admin coming."
         />
         <PlaceholderCard
           eyebrow="Phase 8"

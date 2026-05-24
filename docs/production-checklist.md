@@ -395,11 +395,12 @@ Now we build product. All work below uses primitives from Stages A & B.
 - Est: 3 h.
 - **Done:** Scope expanded to also ship block edit (the deferred-from-G piece). Pipeline: [updateBlockSchema](../src/lib/schemas/block.ts), [updateBlockInternal](../src/lib/server/block-actions.ts) (mirrors session pattern incl. self-exclusion in overlap checks + cross-table session conflict + audit), public [updateBlock](../src/app/admin/schedule/actions.ts) (with revalidatePath), [updateBlockFormAction](../src/app/admin/schedule/form-actions.ts), and new [BlockEditDialog](../src/app/admin/schedule/_components/block-edit-dialog.tsx) (mirror of SessionFormDialog edit mode with a Delete-block button inside per the chosen click-UX). Paint UX: window-level pointer handlers in [schedule-grid.tsx](../src/app/admin/schedule/_components/schedule-grid.tsx), <5px movement = single-cell click (existing onClick path), >5px enters paint mode using geometry math against the grid's bounding rect (more robust than elementFromPoint, which misses cells behind sessions/blocks). Latest-ref pattern keeps the once-bound window listeners free of stale closures. Paint clamps at the first occupied cell in either direction. Commit opens [ScheduleCreateDialog](../src/app/admin/schedule/_components/schedule-create-dialog.tsx) with new `defaultTab="block"` prop + the painted range prefilled. **Caught + fixed during browser verify:** `suppressNextClickRef` could stay true if the trailing click never landed (dialog stole focus); fix clears it at every pointerdown so a stale flag never blocks a new gesture. Browser-verified at 1280×900: edit dialog opens with prefill, save propagates to DB + audit + grid re-render with new placement; paint commits 8 AM Cage 1 dragging through the 10–11 AM session → clamps at 9:30 → dialog opens 8:00–10:00 on Block tab; single-cell click → Session tab; original session-edit + block-create paths still work.
 
-### H2. Coach list page — `[ ]`
+### H2. Coach list page — `[x]`
 - `src/app/admin/coaches/page.tsx`: lists all users with role=coach, columns: name, email, joined date, # sessions this month, $ owed this month.
 - Click row → coach detail page.
 - Acceptance: list renders, sortable.
 - Est: 3 h.
+- **Done:** [/admin/coaches](../src/app/admin/coaches/page.tsx) — server component fetches coaches + current-month sessions + rate overrides in parallel, pre-aggregates per-coach `chargeForSession` totals so the client island ships one row per coach instead of the full session list. Client-side sort lives in [coaches-table.tsx](../src/app/admin/coaches/_components/coaches-table.tsx); URL-state was overkill for a <100-row internal roster where coupling to refresh isn't valuable. Per-column DEFAULT_DIR map so numeric columns default to descending ("biggest owed first" is the natural framing); name/email default ascending. Coach names fall back to email when null (consistent with the reports + sessions pattern). Detail-page stub at [/admin/coaches/[id]](../src/app/admin/coaches/[id]/page.tsx) so row links don't 404 — H3 fills it with rate override UI. Admin landing's Phase 7 placeholder card promoted to a live Coaches link. Browser-verified with three seeded coaches (one with override): Alice with cage override $30/slot showed $120.00 for 2 × 1hr cage sessions (matching 4 slots × $30); Bob $66.00 for one 90-min bullpen session (3 slots × $22 default); coach with no activity rendered em-dashes. All three sort modes verified (name, joined desc/asc, owed desc).
 
 ### H3. Per-coach rate override UI — `[ ]`
 - Coach detail page → "Rate overrides" section.
@@ -485,6 +486,20 @@ Now we build product. All work below uses primitives from Stages A & B.
 - **Acceptance:** the report preview + Excel `Detail` sheet show the same "Start"/"End" times that an admin entered, when viewed on a Vercel preview deploy.
 - Est: 30 min for (a), 2 h for (b).
 - Priority: P0 before launch (J-stage hardening).
+
+### J4d. Sign-in page: PFA logo + "cage rentals" wordmark — `[ ]`
+- **Scope:** the only visual change Jacob wants to the sign-in page (everything else stays). Replace the current text-only "PFA Cage Rentals" heading at the top of [src/app/page.tsx](../src/app/page.tsx) with: (1) the PFA logo lifted from pfasports.com (above the Google sign-in button), (2) the words "cage rentals" rendered as text below the logo.
+- **Asset prep:** download the logo from pfasports.com → drop into `public/pfa-logo.svg` (prefer SVG; fall back to PNG @2x if only raster is available). Verify it works on the dark background (gold-on-dark already matches the design spec); recolor if needed.
+- **Acceptance:** sign-in page shows the logo + "cage rentals" wordmark; renders correctly on mobile (375×812) and desktop (1280×900); no CSP / loading regressions.
+- Est: 30 min.
+- Priority: P1 — visual identity for launch.
+
+### J4e. UI polish pass (parked task) — `[ ]`
+- **Scope:** the "Premium UI polish pass" task Jacob has parked as a separate session chip. Kill the AI-stale aesthetic across the entire app — typography rhythm, spacing, micro-interactions, hover states, empty-state copy, card density. NOT a redesign — the design spec (dark + warm gold, Vercel/Linear vibe) stays. This is the level-up from "functional + tokens applied" to "feels intentional".
+- **Suggested sequencing:** sign-in (after J4d) → /admin landing → /admin/sessions table → /admin/reports tables → /admin/schedule grid (denser type, tighter borders, better hover affordances) → /coach pages.
+- **Don't bundle with feature work** — let it run as its own spinoff session (Jacob clicks the chip when he's ready) so the diff is reviewable in isolation.
+- Est: 6–10 h depending on depth.
+- Priority: P1 — pre-launch finish.
 
 ### J4c. Drag-self-overlap snap-back UX — `[ ]`
 - **Problem (caught in E+F+G deep sweep, 2026-05-24):** in the schedule grid, cells underneath a dragged session are marked `disabled` droppables (so the visible drop target wins). But that means moving a 10:00–11:00 session by a half-slot to 10:30 doesn't work — the 10:30 cell is "occupied" by the session itself and rejects the drop. Admin has to drag fully out of the session's footprint and back.

@@ -17,6 +17,7 @@ export const resourceType = pgEnum("resource_type", [
   "bullpen",
   "weight_room",
 ]);
+export const sessionUseType = pgEnum("use_type", ["hitting", "pitching"]);
 
 export const users = pgTable("users", {
   id: text("id")
@@ -109,6 +110,74 @@ export const resources = pgTable("resources", {
   active: boolean("active").notNull().default(true),
 });
 
+// Billing sessions — the row that every report, schedule grid, and
+// coach history reads from. Named `sessions_billing` because Auth.js
+// already owns `sessions` for login sessions and the FK chaos isn't
+// worth the brevity.
+//
+// Constraints enforced at the DB layer (NOT by Drizzle — added by
+// hand in the migration):
+//   - CHECK (start_at < end_at): rejects backwards/zero-duration
+//     ranges. App-level Zod also catches this but the DB is the
+//     final word in case of direct SQL writes.
+//   - EXCLUDE USING gist (resource_id WITH =,
+//       tsrange(start_at, end_at) WITH &&):
+//     prevents any two rows on the same resource from overlapping.
+//     Race-safe at the DB level — two simultaneous inserts can't
+//     both win. Requires `CREATE EXTENSION btree_gist`.
+//
+// useType is nullable in the schema, but C6 server actions enforce
+// "required for cage, must be NULL for bullpen/weight_room" via
+// Zod since CHECK constraints can't subquery the resources table.
+// Direct SQL writes can bypass this, but those are admin-only and
+// audited.
+//
+// Block-vs-session overlap (C5): blocked_times will have its own
+// EXCLUDE constraint for block-vs-block, and C6 server actions will
+// also check the opposite table before insert. Cross-table EXCLUDE
+// isn't supported in Postgres without a trigger function; the app-
+// layer check is the v1 trade-off — race window is essentially
+// zero given the user count.
+//
+// Indexes (added in the migration):
+//   - (coach_id, start_at): D2 coach history "my sessions in May"
+//   - (resource_id, start_at): F1 schedule grid lookups
+//   - (start_at): E1 admin reports by date range
+export const sessionsBilling = pgTable(
+  "sessions_billing",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id),
+    resourceId: text("resource_id")
+      .notNull()
+      .references(() => resources.id),
+    startAt: timestamp("start_at", { mode: "date" }).notNull(),
+    endAt: timestamp("end_at", { mode: "date" }).notNull(),
+    useType: sessionUseType("use_type"),
+    note: text("note"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    index("sessions_billing_coach_start_idx").on(table.coachId, table.startAt),
+    index("sessions_billing_resource_start_idx").on(
+      table.resourceId,
+      table.startAt,
+    ),
+    index("sessions_billing_start_idx").on(table.startAt),
+  ],
+);
+
 export const auditAction = pgEnum("audit_action", ["create", "update", "delete"]);
 
 // Append-only audit trail for every billing-relevant mutation. `diff`
@@ -152,3 +221,6 @@ export type NewResource = typeof resources.$inferInsert;
 export type ResourceType = (typeof resourceType.enumValues)[number];
 export type RateDefault = typeof rateDefaults.$inferSelect;
 export type NewRateDefault = typeof rateDefaults.$inferInsert;
+export type SessionBilling = typeof sessionsBilling.$inferSelect;
+export type NewSessionBilling = typeof sessionsBilling.$inferInsert;
+export type SessionUseType = (typeof sessionUseType.enumValues)[number];

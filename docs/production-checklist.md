@@ -219,7 +219,7 @@ Now we build product. All work below uses primitives from Stages A & B.
 - Est: 20 min.
 - **Done:** Migration [drizzle/0003_rich_wilson_fisk.sql](../drizzle/0003_rich_wilson_fisk.sql) applied. `rateDefaults` table in [src/db/schema.ts](../src/db/schema.ts) uses `type` enum as PK (one default per resource type, forever). [src/db/seed-rate-defaults.ts](../src/db/seed-rate-defaults.ts) pulls cent values from `DEFAULT_RATES_PER_SLOT_CENTS` in billing.ts — single source of truth — and inserts via onConflictDoNothing so production rate edits (from H3 admin UI) are never overwritten by re-seeding. Coach visibility: coaches see their own per-session billed amount in D2 (rate × slots = total); they never see the defaults table directly. Admin UI for editing rates lands in H3. **No `getDefaultRate(type)` helper yet** — added when the read path is needed in C6, which can either fetch from DB or fall back to the in-code constant.
 
-### C3. Sessions table with constraints — `[ ]`
+### C3. Sessions table with constraints — `[x]`
 - Drizzle schema:
   ```ts
   export const sessions_billing = pgTable("sessions_billing", {  // rename to avoid auth `sessions` collision
@@ -237,6 +237,7 @@ Now we build product. All work below uses primitives from Stages A & B.
 - Add raw-SQL migration extension for: `CHECK (start_at < end_at)`, and `EXCLUDE USING gist (resource_id WITH =, tsrange(start_at, end_at) WITH &&)` (requires `CREATE EXTENSION btree_gist` — add to migration).
 - Acceptance: trying to insert two overlapping sessions on the same resource fails at the DB layer.
 - Est: 2 h (constraint setup is finicky).
+- **Done:** Migrations [0004](../drizzle/0004_unknown_dragon_man.sql) (table + raw-SQL CHECK + EXCLUDE + btree_gist extension) and [0005](../drizzle/0005_pretty_bucky.sql) (Drizzle-snapshot resync for the indexes, IF NOT EXISTS for idempotency). Table includes useType enum (hitting | pitching, nullable — required-for-cage rule enforced at app layer in C6), and indexes on (coach_id, start_at), (resource_id, start_at), (start_at) for D2/F1/E1 read paths. Sessions table renamed `sessions_billing` because Auth.js owns `sessions`. Smoke-tested against Neon: valid insert ✓, overlap rejected ✓, end<start rejected ✓, end==start rejected ✓, back-to-back allowed ✓. Block-vs-session cross-table overlap enforcement deferred to C6 app-layer check (Postgres EXCLUDE can't span tables).
 
 ### C4. Coach rate overrides table — `[ ]`
 - `coachRateOverrides(coachId, resourceType, ratePer30MinCents)` — PK on `(coachId, resourceType)`.

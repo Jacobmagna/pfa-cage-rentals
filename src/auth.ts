@@ -17,7 +17,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     Google,
     Resend({
-      from: "PFA Cage Rentals <onboarding@resend.dev>",
+      // Temporary sender on docinsured.com (Jacob's other verified Resend domain).
+      // Swap to noreply@pfacagerentals.com once that domain is verified in Resend
+      // (blocked on Resend free-tier 1-domain limit; revisit before launch).
+      from: "PFA Cage Rentals <pfa@docinsured.com>",
     }),
   ],
   session: { strategy: "database" },

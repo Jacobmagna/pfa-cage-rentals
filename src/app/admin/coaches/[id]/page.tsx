@@ -3,13 +3,24 @@ import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
-import { users } from "@/db/schema";
+import { coachRateOverrides, users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
+import {
+  DEFAULT_RATES_PER_SLOT_CENTS,
+  type ResourceType,
+} from "@/lib/billing";
 import { formatPfaDateMedium } from "@/lib/timezone";
 import { AppShell } from "@/app/_components/app-shell";
+import {
+  RateOverridesCard,
+  type RateOverrideRow,
+} from "./_components/rate-overrides-card";
 
-// Coach detail page — H2 ships the route + identity card so the
-// /admin/coaches row links work; rate-override UI lands in H3.
+// Coach detail page. Renders the coach identity header + the H3
+// rate-override editor (one row per resource type, inline save +
+// remove).
+
+const ALL_RESOURCE_TYPES: ResourceType[] = ["cage", "bullpen", "weight_room"];
 
 type Params = Promise<{ id: string }>;
 
@@ -21,19 +32,43 @@ export default async function AdminCoachDetailPage({
   await requireRole("admin");
   const { id } = await params;
 
-  const [coach] = await db
-    .select({
-      id: users.id,
-      name: users.name,
-      email: users.email,
-      role: users.role,
-      createdAt: users.createdAt,
-    })
-    .from(users)
-    .where(eq(users.id, id))
-    .limit(1);
+  const [coachResult, overrideRows] = await Promise.all([
+    db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        role: users.role,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .where(eq(users.id, id))
+      .limit(1),
+    db
+      .select()
+      .from(coachRateOverrides)
+      .where(eq(coachRateOverrides.coachId, id)),
+  ]);
 
+  const coach = coachResult[0];
   if (!coach || coach.role !== "coach") notFound();
+
+  // Always render one row per resource type; merge in the override
+  // when present. The client component decides save-vs-create based
+  // on whether `override` is null.
+  const overrideByType = new Map(
+    overrideRows.map((o) => [o.resourceType, o]),
+  );
+  const rateRows: RateOverrideRow[] = ALL_RESOURCE_TYPES.map((rt) => {
+    const o = overrideByType.get(rt);
+    return {
+      resourceType: rt,
+      defaultCents: DEFAULT_RATES_PER_SLOT_CENTS[rt],
+      override: o
+        ? { ratePer30MinCents: o.ratePer30MinCents, updatedAt: o.updatedAt }
+        : null,
+    };
+  });
 
   return (
     <AppShell role="admin">
@@ -58,18 +93,7 @@ export default async function AdminCoachDetailPage({
         </p>
       </div>
 
-      <div className="rounded-lg border border-line bg-surface p-5">
-        <p className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
-          Phase 7 · H3
-        </p>
-        <h3 className="mt-1 text-base font-semibold text-fg">
-          Rate overrides
-        </h3>
-        <p className="mt-1.5 text-sm text-fg-muted">
-          Per-resource-type rate overrides for this coach land in H3. Until
-          then, this coach is billed at the default rates.
-        </p>
-      </div>
+      <RateOverridesCard coachId={coach.id} rows={rateRows} />
     </AppShell>
   );
 }

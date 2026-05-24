@@ -88,6 +88,17 @@ export class BlockOverlapError extends Error {
 
 // Trying to create a block over an existing session. App-layer
 // check because Postgres EXCLUDE can't span tables.
+export class RateOverrideNotFoundError extends Error {
+  readonly code = "RATE_OVERRIDE_NOT_FOUND" as const;
+  constructor(
+    public readonly coachId: string,
+    public readonly resourceType: string,
+  ) {
+    super(`No override exists for that coach + resource type yet.`);
+    this.name = "RateOverrideNotFoundError";
+  }
+}
+
 export class BlockConflictsWithSessionError extends Error {
   readonly code = "BLOCK_CONFLICTS_WITH_SESSION" as const;
   constructor(

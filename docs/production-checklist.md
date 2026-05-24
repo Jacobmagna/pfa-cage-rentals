@@ -334,11 +334,12 @@ Now we build product. All work below uses primitives from Stages A & B.
 - Est: 4 h.
 - **Done:** exceljs 4.4 installed. [src/lib/reports/excel.ts](../src/lib/reports/excel.ts) builds the 2-sheet workbook: Summary (one row per coach, currency-formatted `$` columns, grand-total footer row, frozen header) + Detail (one row per session). Cents → dollars at the sheet boundary using ExcelJS `numFmt: '"$"#,##0.00'`. [src/app/admin/reports/download/route.ts](../src/app/admin/reports/download/route.ts) is the GET handler — `requireRole("admin")` → parse filters from URL.searchParams → fetch + aggregate via shared helpers → build workbook → return with `Content-Disposition: attachment` and `Cache-Control: no-store`. Filter parsing + data fetching extracted into [src/lib/reports/filters.ts](../src/lib/reports/filters.ts) (parsers + `filtersToQueryString`) and [src/lib/reports/fetch.ts](../src/lib/reports/fetch.ts) (`fetchReportData`), shared between page.tsx and the download route — what's previewed matches what downloads, exactly. Download button activates when results exist; disables (with tooltip) when zero matches. **Verified via curl:** HTTP 200, `Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, filename `pfa-billing-2026-05-01_to_2026-05-28.xlsx`, 8325 bytes. Parsed the workbook back with ExcelJS in a tsx round-trip: Summary headers + 2 coach rows + grand-total footer + Detail with date/day/start/end/duration/resource/use/coach/slots/rate/$/source/note all populated, math correct (Lusk $36 override + Chen $10 default = grand $46).
 
-### E3. Unit tests for report generation — `[ ]`
+### E3. Unit tests for report generation — `[x]`
 - Test summary aggregation: 1 coach with 3 sessions across 2 resources → correct per-resource totals + grand total.
 - Test rate override application: coach with override + session on that resource type → override rate used.
 - Acceptance: report tests in CI green.
 - Est: 1.5 h.
+- **Done:** 7 aggregate tests shipped with E1 (slot math, override application + non-match against wrong coach / wrong resource type, multi-resource roll-up, alpha-sorted summary, empty input). E3 adds 9 round-trip tests in [src/lib/reports/excel.test.ts](../src/lib/reports/excel.test.ts) — write workbook → load buffer back via ExcelJS → assert sheet names, headers, currency numFmt on `$` columns, cents-to-dollars conversion, override flag, footer with grand total, frozen-pane view, and empty-report rendering with header-only sheets. Catches column-reorder regressions and any drift in the cents boundary. Total tests in suite: 37 (21 billing + 7 aggregate + 9 excel). CI runs them all via `npm run test:coverage`.
 
 ---
 

@@ -14,10 +14,12 @@ import { AutoRefresh } from "./_components/auto-refresh";
 import { ScheduleGrid } from "./_components/schedule-grid";
 import { WeekNav } from "./_components/week-nav";
 
-// Read-only Excel-style schedule grid for admins. Single-day view
-// with a week strip for quick navigation. F2 layers SWR polling on
-// top for soft real-time. Editing happens in Stage G (click-to-edit,
-// drag-to-move).
+// Schedule grid page with click-to-create and click-to-edit (G1+G2).
+// Admin clicks an empty cell → unified create dialog (Session OR
+// Block toggle). Clicking a session opens the edit dialog. Clicking
+// a block triggers confirm() + deleteBlockAction.
+//
+// Read-only auto-refresh (F2) keeps the grid in sync across tabs.
 //
 // URL state: ?date=YYYY-MM-DD (defaults to today).
 
@@ -37,7 +39,7 @@ export default async function AdminSchedulePage({
   const dayEnd = new Date(dayStart);
   dayEnd.setDate(dayEnd.getDate() + 1);
 
-  const [activeResources, sessionRows, blockRows] = await Promise.all([
+  const [activeResources, sessionRows, blockRows, coachRows] = await Promise.all([
     db
       .select({
         id: resources.id,
@@ -51,6 +53,7 @@ export default async function AdminSchedulePage({
     db
       .select({
         id: sessionsBilling.id,
+        coachId: sessionsBilling.coachId,
         coachName: users.name,
         coachEmail: users.email,
         resourceId: sessionsBilling.resourceId,
@@ -77,10 +80,16 @@ export default async function AdminSchedulePage({
           lt(blockedTimes.startAt, dayEnd),
         ),
       ),
+    db
+      .select({ id: users.id, name: users.name, email: users.email })
+      .from(users)
+      .where(eq(users.role, "coach"))
+      .orderBy(asc(users.name), asc(users.email)),
   ]);
 
   const sessions = sessionRows.map((r) => ({
     id: r.id,
+    coachId: r.coachId,
     coachName: r.coachName ?? r.coachEmail,
     resourceId: r.resourceId,
     startAt: r.startAt,
@@ -136,6 +145,8 @@ export default async function AdminSchedulePage({
         resources={activeResources}
         sessions={sessions}
         blocks={blocks}
+        coaches={coachRows}
+        selectedDate={selectedDate}
       />
 
       <AutoRefresh />

@@ -131,9 +131,16 @@ export function SessionFormDialog({
     >
       <form
         action={formAction}
-        // Bump key on each error so uncontrolled inputs remount with
-        // the latest defaultValue (preserving the user's input).
-        key={state.ok ? `${mode}-fresh` : `${mode}-err-${state.error.code}-${state.error.message}`}
+        // Key bumps on error (so uncontrolled inputs remount with the
+        // user's submitted values via defaultValue) AND on identity
+        // changes (so opening edit on a different row remounts with
+        // the new initial values, instead of keeping the first row's
+        // values locked in defaultValue).
+        key={
+          state.ok
+            ? `${mode}-${initial?.id ?? "new"}`
+            : `${mode}-err-${state.error.code}-${state.error.message}`
+        }
         className="space-y-5 p-6"
       >
         {mode === "edit" && initial ? (

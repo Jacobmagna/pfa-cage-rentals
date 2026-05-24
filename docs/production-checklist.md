@@ -364,16 +364,18 @@ Now we build product. All work below uses primitives from Stages A & B.
 
 # STAGE G — Phase 6: Schedule grid editing
 
-### G1. Click-to-add cell — `[ ]`
+### G1. Click-to-add cell — `[x]`
 - Empty cell click → modal/sheet with quick-create form (resource + start auto-filled from cell coords, coach dropdown, end time, note).
 - Acceptance: click cage 2 at 3pm Tuesday → form opens with those values prefilled.
 - Est: 2 h.
+- **Done with scope expansion:** Empty-cell click opens a unified create dialog with a **Session / Block tab toggle** (in addition to the spec's session-only requirement). The Block tab covers non-coach uses like "Summer Camp Group 5" / "Team Hitting Lab" / "HVAC repair" — Dad needs to schedule those from the grid too, so pulled the basics of H1's block-create surface forward. Sessions submit via the existing `createSessionFormAction`; blocks via the new `createBlockFormAction`. Prefill plumbed via grid cell coords → `CreatePrefill` → form `defaultValue` + form `key` (resource + date + start) so each new cell click remounts inputs with the new defaults instead of locking to the first click's values. Browser-verified at 1400×900: click Cage 2 at 2 PM → dialog opens with Cage 2 selected + 14:00 start; submitted Block "Team Hitting Lab" → appears on grid; switched to Session tab + submitted David Lusk + hitting → appears on grid.
 
-### G2. Click-to-edit existing session — `[ ]`
+### G2. Click-to-edit existing session — `[x]`
 - Filled cell click → edit form with current values.
 - Calls `updateSession` (existing from Phase 2).
 - Acceptance: edit successfully updates and audit log captures diff.
 - Est: 1.5 h.
+- **Done:** Schedule grid is now a client component ([_components/schedule-grid.tsx](../src/app/admin/schedule/_components/schedule-grid.tsx)) — sessions render as `<button>` elements that open the existing C7 `SessionFormDialog` in edit mode with the row's values pre-filled. Blocks render as buttons too: click → native `confirm()` → `deleteBlockAction`. **Patched a pre-existing C7 bug along the way:** [session-form-dialog.tsx](../src/app/admin/sessions/_components/session-form-dialog.tsx) computed defaults via `useMemo(initial)` but keyed the `<form>` on `${mode}-fresh` constant — so opening edit on a different row kept the first row's `defaultValue`s locked in. Key now includes `initial.id`, matching the D2 coach EditSessionDialog pattern. Without this fix the grid's edit click would have shown stale values across multiple edits. Browser-verified: click an existing session block → dialog opens with correct coach + resource + use type + start pre-selected.
 
 ### G3. Drag-to-move — `[ ]`
 - Library: `@dnd-kit/core` (best React DnD for grids).

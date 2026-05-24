@@ -132,6 +132,7 @@ export async function createSessionFormAction(
   try {
     await createSession(buildSessionInput(formData));
     revalidatePath("/admin/sessions");
+    revalidatePath("/admin/schedule");
     return { ok: true };
   } catch (err) {
     return translateError(err, values);
@@ -154,6 +155,7 @@ export async function updateSessionFormAction(
   try {
     await updateSession(id, buildSessionInput(formData));
     revalidatePath("/admin/sessions");
+    revalidatePath("/admin/schedule");
     return { ok: true };
   } catch (err) {
     return translateError(err, values);
@@ -165,4 +167,5 @@ export async function updateSessionFormAction(
 export async function deleteSessionAction(id: string): Promise<void> {
   await deleteSession(id);
   revalidatePath("/admin/sessions");
+  revalidatePath("/admin/schedule");
 }

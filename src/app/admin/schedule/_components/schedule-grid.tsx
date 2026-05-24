@@ -1,22 +1,39 @@
-// Excel-style schedule grid for a single day.
-// Rows = resources (sorted by sortOrder), Columns = 30-min slots from
-// 8 AM to 10 PM. Sessions and blocked times render as positioned
-// blocks via CSS Grid `grid-column: start / span N`, so a multi-slot
-// session reads as one contiguous bar — not three split cells.
+"use client";
+
+// Excel-style schedule grid for a single day, with click-to-create
+// and click-to-edit. Empty cell → unified create dialog (Session
+// or Block toggle). Session block → edit dialog. Blocked time →
+// confirm() + delete.
+//
+// Rows = resources (sorted by sortOrder), Columns = 30-min slots
+// from 8 AM to 10 PM. Sessions and blocks render as positioned
+// blocks via CSS Grid `grid-column: start / span N` so a multi-slot
+// booking reads as one contiguous bar.
 //
 // Per-resource-type visual differentiation:
 //   - Cage:        gold left-border (brand accent)
-//   - Bullpen:     emerald left-border (--color-success token)
-//   - Weight room: amber left-border (--color-warning token)
-//   - Blocked:     red dashed border + tinted background (--color-danger)
-// Block body stays neutral (bg-surface-2) — this respects the spec's
-// "gold is the only brand color, status tokens are status" rule by
-// using the status tokens as type markers, not decoration.
+//   - Bullpen:     success left-border
+//   - Weight room: warning left-border
+//   - Blocked:     dashed danger border + tinted background
+// Block bodies are neutral (bg-surface-2) — the spec's "gold is the
+// only brand color" rule preserved by using status tokens as type
+// markers, not decoration.
 //
-// Sessions outside 8 AM – 10 PM aren't rendered on the grid. A small
-// banner above the grid surfaces the count when any exist.
+// Sessions outside 8 AM – 10 PM aren't rendered. A banner above the
+// grid surfaces the count when any exist.
 
+import { useState, useTransition } from "react";
 import type { ResourceType } from "@/lib/billing";
+import { SessionFormDialog } from "@/app/admin/sessions/_components/session-form-dialog";
+import type {
+  CoachOption,
+  ResourceOption as SessionResourceOption,
+} from "@/app/admin/sessions/_components/sessions-client";
+import { deleteBlockAction } from "../form-actions";
+import {
+  ScheduleCreateDialog,
+  type CreatePrefill,
+} from "./schedule-create-dialog";
 
 const FIRST_HOUR = 8;
 const LAST_HOUR = 22;
@@ -31,6 +48,7 @@ export type ScheduleResource = {
 
 export type ScheduleSession = {
   id: string;
+  coachId: string;
   coachName: string;
   resourceId: string;
   startAt: Date;
@@ -47,15 +65,73 @@ export type ScheduleBlock = {
   reason: string;
 };
 
+type DialogState =
+  | { kind: "closed" }
+  | { kind: "create"; prefill: CreatePrefill }
+  | { kind: "edit-session"; session: ScheduleSession };
+
 export function ScheduleGrid({
   resources,
   sessions,
   blocks,
+  coaches,
+  selectedDate,
 }: {
   resources: ScheduleResource[];
   sessions: ScheduleSession[];
   blocks: ScheduleBlock[];
+  coaches: CoachOption[];
+  selectedDate: Date;
 }) {
+  const [dialog, setDialog] = useState<DialogState>({ kind: "closed" });
+  const [pendingDeleteBlockId, setPendingDeleteBlockId] = useState<string | null>(
+    null,
+  );
+  const [, startTransition] = useTransition();
+
+  const close = () => setDialog({ kind: "closed" });
+
+  const openCreateAt = (resource: ScheduleResource, slotIdx: number) => {
+    const startAt = new Date(selectedDate);
+    startAt.setHours(
+      FIRST_HOUR + Math.floor(slotIdx / 2),
+      (slotIdx % 2) * 30,
+      0,
+      0,
+    );
+    // Default 1-hour duration, clipped to last visible slot if
+    // necessary (clicking 9:30 PM on a 1-hour default would otherwise
+    // extend past 10:30 PM which is outside the visible range).
+    const endAt = new Date(startAt);
+    endAt.setHours(startAt.getHours() + 1);
+    setDialog({
+      kind: "create",
+      prefill: { resourceId: resource.id, startAt, endAt },
+    });
+  };
+
+  const openEditSession = (session: ScheduleSession) => {
+    setDialog({ kind: "edit-session", session });
+  };
+
+  const handleDeleteBlock = (block: ScheduleBlock) => {
+    if (
+      !confirm(
+        `Delete block "${block.reason}" on this resource?\nThis can't be undone.`,
+      )
+    ) {
+      return;
+    }
+    setPendingDeleteBlockId(block.id);
+    startTransition(async () => {
+      try {
+        await deleteBlockAction(block.id);
+      } finally {
+        setPendingDeleteBlockId(null);
+      }
+    });
+  };
+
   // Index resources to a row number. Row 1 is the time-header row;
   // resources start at row 2.
   const resourceRow = new Map<string, number>();
@@ -67,13 +143,55 @@ export function ScheduleGrid({
   const hiddenCount = sessions.length - visibleSessions.length;
   const visibleBlocks = blocks.filter((b) => inRange(b.startAt));
 
-  // Grid template: 1 sticky label column + 28 slot columns, each at
-  // minmax(34px, 1fr) so the layout responds to viewport width but
-  // never collapses below tap-target width.
+  // Map of "this resource has a session or block at this slot" so
+  // empty-cell buttons can short-circuit out of the way of overlay
+  // blocks (otherwise clicks on an empty area beside a session would
+  // accidentally hit the underlying empty cell). The session block's
+  // z-index already sits above, so we don't strictly need this — but
+  // disabling the empty button under blocks makes keyboard tab order
+  // skip them.
+  const occupiedSlots = new Set<string>();
+  for (const s of visibleSessions) {
+    const placement = placeOnGrid(s.startAt, s.endAt);
+    if (!placement) continue;
+    for (let i = 0; i < placement.span; i++) {
+      occupiedSlots.add(`${s.resourceId}-${placement.col - 2 + i}`);
+    }
+  }
+  for (const b of visibleBlocks) {
+    const placement = placeOnGrid(b.startAt, b.endAt);
+    if (!placement) continue;
+    for (let i = 0; i < placement.span; i++) {
+      occupiedSlots.add(`${b.resourceId}-${placement.col - 2 + i}`);
+    }
+  }
+
   const gridStyle: React.CSSProperties = {
     gridTemplateColumns: `120px repeat(${SLOTS}, minmax(36px, 1fr))`,
     gridTemplateRows: `40px repeat(${resources.length}, 56px)`,
   };
+
+  // Map session → SessionFormDialog initial shape.
+  const editInitial =
+    dialog.kind === "edit-session"
+      ? {
+          id: dialog.session.id,
+          coachId: dialog.session.coachId,
+          resourceId: dialog.session.resourceId,
+          startAt: dialog.session.startAt,
+          endAt: dialog.session.endAt,
+          useType: dialog.session.useType,
+          note: dialog.session.note,
+        }
+      : undefined;
+
+  // SessionFormDialog expects ResourceOption with sortOrder.
+  const sessionResourceOptions: SessionResourceOption[] = resources.map((r) => ({
+    id: r.id,
+    name: r.name,
+    type: r.type,
+    sortOrder: r.sortOrder,
+  }));
 
   return (
     <div className="space-y-3">
@@ -88,21 +206,16 @@ export function ScheduleGrid({
       ) : null}
 
       <div className="overflow-x-auto rounded-lg border border-line">
-        <div
-          className="relative grid bg-surface min-w-fit"
-          style={gridStyle}
-        >
+        <div className="relative grid bg-surface min-w-fit" style={gridStyle}>
           {/* Header corner cell. */}
           <div
             className="sticky left-0 z-20 border-b border-r border-line bg-surface"
             style={{ gridRow: 1, gridColumn: 1 }}
           />
 
-          {/* Time-slot headers. Show hour labels at even slot indices
-              (full hours); half-hour columns just get a faint tick via
-              the border. */}
+          {/* Time-slot headers. */}
           {Array.from({ length: SLOTS }).map((_, slotIdx) => {
-            const col = slotIdx + 2; // +1 for label col, +1 for 1-based
+            const col = slotIdx + 2;
             const isHour = slotIdx % 2 === 0;
             const hour24 = FIRST_HOUR + Math.floor(slotIdx / 2);
             return (
@@ -133,44 +246,71 @@ export function ScheduleGrid({
             </div>
           ))}
 
-          {/* Background grid cells — one per (resource × slot) to
-              draw vertical / horizontal lines. Layered under sessions
-              + blocks. */}
+          {/* Empty-cell buttons. Each (resource × slot) becomes a
+              clickable target. The few cells under a session/block
+              get a disabled/hidden treatment so the overlay's
+              click handler wins. */}
           {resources.map((r, i) =>
-            Array.from({ length: SLOTS }).map((_, slotIdx) => (
-              <div
-                key={`cell-${r.id}-${slotIdx}`}
-                className={[
-                  "border-b border-line",
-                  slotIdx % 2 === 0
-                    ? "border-l border-line-strong"
-                    : "border-l border-line/40",
-                ].join(" ")}
-                style={{ gridRow: i + 2, gridColumn: slotIdx + 2 }}
-              />
-            )),
+            Array.from({ length: SLOTS }).map((_, slotIdx) => {
+              const key = `${r.id}-${slotIdx}`;
+              const isOccupied = occupiedSlots.has(key);
+              return (
+                <button
+                  key={`cell-${key}`}
+                  type="button"
+                  onClick={isOccupied ? undefined : () => openCreateAt(r, slotIdx)}
+                  disabled={isOccupied}
+                  tabIndex={isOccupied ? -1 : 0}
+                  aria-label={
+                    isOccupied
+                      ? undefined
+                      : `Create on ${r.name} at ${formatHour(FIRST_HOUR + Math.floor(slotIdx / 2))}${
+                          slotIdx % 2 === 1 ? ":30" : ""
+                        }`
+                  }
+                  className={[
+                    "border-b border-line text-left",
+                    slotIdx % 2 === 0
+                      ? "border-l border-line-strong"
+                      : "border-l border-line/40",
+                    isOccupied
+                      ? "cursor-default"
+                      : "hover:bg-gold/5 focus-visible:outline-none focus-visible:bg-gold/10 transition-colors",
+                  ].join(" ")}
+                  style={{ gridRow: i + 2, gridColumn: slotIdx + 2 }}
+                />
+              );
+            }),
           )}
 
-          {/* Blocked-time blocks render under sessions but over the
-              background cells — DOM order matters when grid items
-              share cells, so emit blocks first. */}
+          {/* Blocked-time blocks. */}
           {visibleBlocks.map((b) => {
             const row = resourceRow.get(b.resourceId);
             if (!row) return null;
             const placement = placeOnGrid(b.startAt, b.endAt);
             if (!placement) return null;
+            const isPending = pendingDeleteBlockId === b.id;
             return (
-              <div
+              <button
                 key={`block-${b.id}`}
-                className="m-0.5 rounded border border-dashed border-danger/60 bg-danger/10 px-2 py-1 text-[11px] text-danger flex items-center min-w-0"
+                type="button"
+                onClick={() => handleDeleteBlock(b)}
+                disabled={isPending}
+                className={[
+                  "m-0.5 rounded border border-dashed border-danger/60 bg-danger/10 px-2 py-1 text-[11px] text-danger",
+                  "flex items-center min-w-0 text-left",
+                  "hover:bg-danger/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors",
+                  isPending ? "opacity-50" : "",
+                ].join(" ")}
                 style={{
                   gridRow: row,
                   gridColumn: `${placement.col} / span ${placement.span}`,
+                  zIndex: 1,
                 }}
-                title={`Blocked: ${b.reason}`}
+                title={`Blocked: ${b.reason} (click to delete)`}
               >
                 <span className="truncate font-medium">{b.reason}</span>
-              </div>
+              </button>
             );
           })}
 
@@ -190,12 +330,15 @@ export function ScheduleGrid({
               .filter(Boolean)
               .join(" · ");
             return (
-              <div
+              <button
                 key={`s-${s.id}`}
-                className={`m-0.5 rounded border border-line bg-surface-2 ${accent} px-2 py-1 text-[11px] text-fg flex items-center gap-1.5 min-w-0`}
+                type="button"
+                onClick={() => openEditSession(s)}
+                className={`m-0.5 rounded border border-line bg-surface-2 ${accent} px-2 py-1 text-[11px] text-fg flex items-center gap-1.5 min-w-0 text-left hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors`}
                 style={{
                   gridRow: row,
                   gridColumn: `${placement.col} / span ${placement.span}`,
+                  zIndex: 1,
                 }}
                 title={tooltip}
               >
@@ -205,7 +348,7 @@ export function ScheduleGrid({
                     {s.useType[0]}
                   </span>
                 ) : null}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -219,7 +362,27 @@ export function ScheduleGrid({
           className="border border-dashed border-danger/60 bg-danger/10"
           label="Blocked"
         />
+        <span className="text-fg-subtle">
+          · Click an empty cell to create. Click a session to edit, a block to delete.
+        </span>
       </div>
+
+      <ScheduleCreateDialog
+        open={dialog.kind === "create"}
+        onClose={close}
+        coaches={coaches}
+        resources={sessionResourceOptions}
+        prefill={dialog.kind === "create" ? dialog.prefill : null}
+      />
+
+      <SessionFormDialog
+        open={dialog.kind === "edit-session"}
+        mode="edit"
+        onClose={close}
+        coachOptions={coaches}
+        resourceOptions={sessionResourceOptions}
+        initial={editInitial}
+      />
     </div>
   );
 }
@@ -228,18 +391,15 @@ function placeOnGrid(
   startAt: Date,
   endAt: Date,
 ): { col: number; span: number } | null {
-  // Clip to visible range so a session that runs past 10 PM still
-  // renders up to the edge (rather than disappearing).
   const startSlots =
     (startAt.getHours() - FIRST_HOUR) * 2 + Math.floor(startAt.getMinutes() / 30);
   const endSlots =
-    (endAt.getHours() - FIRST_HOUR) * 2 +
-    Math.ceil(endAt.getMinutes() / 30);
+    (endAt.getHours() - FIRST_HOUR) * 2 + Math.ceil(endAt.getMinutes() / 30);
   const clippedStart = Math.max(startSlots, 0);
   const clippedEnd = Math.min(endSlots, SLOTS);
   if (clippedEnd <= clippedStart) return null;
   return {
-    col: clippedStart + 2, // +1 for label col, +1 for 1-based grid
+    col: clippedStart + 2,
     span: clippedEnd - clippedStart,
   };
 }

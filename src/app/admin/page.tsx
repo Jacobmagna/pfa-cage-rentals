@@ -68,14 +68,21 @@ export default async function AdminHome() {
           </p>
           <h3 className="mt-1 text-base font-semibold text-fg">Coaches</h3>
           <p className="mt-1.5 text-sm text-fg-muted">
-            Roster with month-to-date activity. Rate overrides land in H3.
+            Roster with month-to-date activity + per-coach rate overrides.
           </p>
         </Link>
-        <PlaceholderCard
-          eyebrow="Phase 7"
-          title="Block-off times"
-          description="Paint-mode lives on the schedule grid. Standalone admin coming."
-        />
+        <Link
+          href="/admin/audit"
+          className="rounded-lg border border-line bg-surface p-5 transition-colors hover:border-line-strong"
+        >
+          <p className="text-[10px] uppercase tracking-[0.18em] text-gold">
+            Live
+          </p>
+          <h3 className="mt-1 text-base font-semibold text-fg">Audit log</h3>
+          <p className="mt-1.5 text-sm text-fg-muted">
+            Every create / update / delete to sessions, blocks, and rates.
+          </p>
+        </Link>
         <PlaceholderCard
           eyebrow="Phase 8"
           title="Historical import"

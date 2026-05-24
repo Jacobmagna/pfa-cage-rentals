@@ -477,6 +477,21 @@ Now we build product. All work below uses primitives from Stages A & B.
 - Acceptance: "Add to Home Screen" on iPhone Safari produces a real app icon launching standalone.
 - Est: 2 h.
 
+### J4b. Server-side timezone for date/time formatting — `[ ]`
+- **Problem (caught in E+F+G deep sweep, 2026-05-24):** server-rendered surfaces format dates via `d.getHours()`/`getFullYear()`/etc., which use the runtime's local TZ. Vercel default is UTC, so a 9 AM EST session stored as `2026-05-24T13:00:00Z` will render in Reports + Excel as "13:00" — wrong by 4–5 hours. Worked in local dev because Jacob's Mac runs ET.
+- **Scope:** `src/lib/reports/aggregate.ts` (formatDateISO + formatTimeHHMM), `src/lib/reports/excel.ts` (inherits via aggregate), the schedule grid layout math in `inRange`/`placeOnGrid` (currently client-side, so safe today, but a fragile invariant). Billing math is unaffected — `slotsBetween` uses millisecond diffs.
+- **Options:** (a) set `TZ=America/New_York` in Vercel env (one-line fix, also gates future regressions); (b) refactor date formatters to take an explicit TZ string and pass it from a single config constant. (a) is cheaper, (b) survives a deployment to a different region later.
+- **Acceptance:** the report preview + Excel `Detail` sheet show the same "Start"/"End" times that an admin entered, when viewed on a Vercel preview deploy.
+- Est: 30 min for (a), 2 h for (b).
+- Priority: P0 before launch (J-stage hardening).
+
+### J4c. Drag-self-overlap snap-back UX — `[ ]`
+- **Problem (caught in E+F+G deep sweep, 2026-05-24):** in the schedule grid, cells underneath a dragged session are marked `disabled` droppables (so the visible drop target wins). But that means moving a 10:00–11:00 session by a half-slot to 10:30 doesn't work — the 10:30 cell is "occupied" by the session itself and rejects the drop. Admin has to drag fully out of the session's footprint and back.
+- **Fix sketch:** exclude the actively-dragged session's own footprint when computing `occupiedSlots`. The `draggingSessionId` is already tracked in state.
+- **Acceptance:** drag a 60-min session up or down by 30 minutes within the same resource row.
+- Est: 30 min.
+- Priority: P2 — minor UX, not blocking.
+
 ### J5. Loading skeletons on async pages — `[ ]`
 - Add `loading.tsx` files in:
   - `src/app/admin/sessions/`

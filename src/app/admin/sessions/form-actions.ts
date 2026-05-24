@@ -10,13 +10,16 @@
 // boundaries + Sentry catch them, which is the right default for
 // "this is a bug, not a user-correctable conflict".
 
-import { revalidatePath } from "next/cache";
 import { ZodError } from "zod";
 import {
   createSession,
   deleteSession,
   updateSession,
 } from "./actions";
+
+// Revalidation invariant: the public actions in ./actions.ts now own
+// revalidatePath for the session surfaces. These wrappers focus on
+// FormData translation + typed-error → banner-copy mapping only.
 import {
   BlockedTimeError,
   ResourceNotFoundError,
@@ -131,8 +134,6 @@ export async function createSessionFormAction(
   const values = snapshotFormValues(formData);
   try {
     await createSession(buildSessionInput(formData));
-    revalidatePath("/admin/sessions");
-    revalidatePath("/admin/schedule");
     return { ok: true };
   } catch (err) {
     return translateError(err, values);
@@ -154,8 +155,6 @@ export async function updateSessionFormAction(
   }
   try {
     await updateSession(id, buildSessionInput(formData));
-    revalidatePath("/admin/sessions");
-    revalidatePath("/admin/schedule");
     return { ok: true };
   } catch (err) {
     return translateError(err, values);
@@ -163,9 +162,7 @@ export async function updateSessionFormAction(
 }
 
 // Delete doesn't use useActionState — confirm() dialog + simple
-// button. revalidate happens inside.
+// button. Revalidation happens inside the public deleteSession action.
 export async function deleteSessionAction(id: string): Promise<void> {
   await deleteSession(id);
-  revalidatePath("/admin/sessions");
-  revalidatePath("/admin/schedule");
 }

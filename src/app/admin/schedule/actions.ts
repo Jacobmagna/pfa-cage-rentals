@@ -9,7 +9,12 @@
 // Block edit lives in Stage H1 (with the full block-management UI).
 // G1 ships create + delete only — the minimum to support "admin
 // clicks empty cell on the grid and blocks it for Summer Camp."
+//
+// Revalidation invariant: every mutating public action revalidates
+// /admin/schedule. Form-action wrappers do not double-revalidate.
+// Any future direct caller (paint UI, etc.) gets the right behavior.
 
+import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/authz";
 import {
   createBlockInternal,
@@ -18,10 +23,14 @@ import {
 
 export async function createBlock(input: unknown) {
   const session = await requireRole("admin");
-  return createBlockInternal(session.user, input);
+  const result = await createBlockInternal(session.user, input);
+  revalidatePath("/admin/schedule");
+  return result;
 }
 
 export async function deleteBlock(id: string) {
   const session = await requireRole("admin");
-  return deleteBlockInternal(session.user, id);
+  const result = await deleteBlockInternal(session.user, id);
+  revalidatePath("/admin/schedule");
+  return result;
 }

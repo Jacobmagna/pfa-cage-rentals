@@ -5,9 +5,12 @@
 // pattern as admin/sessions/form-actions.ts — typed errors → red
 // banner copy, anything else re-thrown to the Next error boundary.
 
-import { revalidatePath } from "next/cache";
 import { ZodError } from "zod";
 import { createBlock, deleteBlock } from "./actions";
+
+// Revalidation invariant: ./actions.ts owns revalidatePath for the
+// schedule surface. These wrappers focus on FormData translation +
+// typed-error → banner-copy mapping only.
 import {
   BlockConflictsWithSessionError,
   BlockOverlapError,
@@ -90,7 +93,6 @@ export async function createBlockFormAction(
   const values = snapshot(formData);
   try {
     await createBlock(buildInput(formData));
-    revalidatePath("/admin/schedule");
     return { ok: true };
   } catch (err) {
     return translate(err, values);
@@ -99,5 +101,4 @@ export async function createBlockFormAction(
 
 export async function deleteBlockAction(id: string): Promise<void> {
   await deleteBlock(id);
-  revalidatePath("/admin/schedule");
 }

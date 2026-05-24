@@ -5,7 +5,15 @@
 // Every async export in a "use server" file is exposed as a public
 // RPC endpoint, so this file deliberately ONLY exposes the
 // requireRole-gated paths.
+//
+// Revalidation invariant: every public action that mutates revalidates
+// the two surfaces that render sessions (/admin/schedule + /admin/sessions).
+// Form-action wrappers no longer double-revalidate. Direct callers
+// (e.g. the grid's drag-to-move) get the right behavior for free —
+// without this, a successful drag would only show up after the next
+// 30s AutoRefresh tick.
 
+import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/authz";
 import {
   createSessionInternal,
@@ -13,17 +21,28 @@ import {
   updateSessionInternal,
 } from "@/lib/server/session-actions";
 
+function revalidateSessionSurfaces() {
+  revalidatePath("/admin/schedule");
+  revalidatePath("/admin/sessions");
+}
+
 export async function createSession(input: unknown) {
   const session = await requireRole("admin");
-  return createSessionInternal(session.user, input);
+  const result = await createSessionInternal(session.user, input);
+  revalidateSessionSurfaces();
+  return result;
 }
 
 export async function updateSession(id: string, input: unknown) {
   const session = await requireRole("admin");
-  return updateSessionInternal(session.user, id, input);
+  const result = await updateSessionInternal(session.user, id, input);
+  revalidateSessionSurfaces();
+  return result;
 }
 
 export async function deleteSession(id: string) {
   const session = await requireRole("admin");
-  return deleteSessionInternal(session.user, id);
+  const result = await deleteSessionInternal(session.user, id);
+  revalidateSessionSurfaces();
+  return result;
 }

@@ -70,6 +70,24 @@ export const verificationTokens = pgTable(
   (vt) => [primaryKey({ columns: [vt.identifier, vt.token] })],
 );
 
+// Default per-30-min rate (in cents) for each resource type.
+// Primary key is `type` itself — exactly one default row per
+// resource type forever, no "Cage default v2" concept. Per-coach
+// overrides live in a separate `coach_rate_overrides` table (C4)
+// and take precedence over these defaults.
+//
+// Cents-only (integer column) to dodge JS float math bugs in
+// billing aggregations. UI converts at the boundary.
+//
+// `updatedAt` powers an "as of" line in the admin rate editor (H3)
+// without separate audit-log spelunking — though every change still
+// gets a row in audit_log via the helper.
+export const rateDefaults = pgTable("rate_defaults", {
+  type: resourceType("type").primaryKey(),
+  ratePer30MinCents: integer("rate_per_30_min_cents").notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+});
+
 // Physical inventory: cages, bullpens, weight room slots. Rows of
 // the schedule grid. `name` is unique so seeds and admin edits can't
 // double-create "Cage 1". `sortOrder` controls dropdown + grid row
@@ -132,3 +150,5 @@ export type AuditAction = (typeof auditAction.enumValues)[number];
 export type Resource = typeof resources.$inferSelect;
 export type NewResource = typeof resources.$inferInsert;
 export type ResourceType = (typeof resourceType.enumValues)[number];
+export type RateDefault = typeof rateDefaults.$inferSelect;
+export type NewRateDefault = typeof rateDefaults.$inferInsert;

@@ -212,11 +212,12 @@ Now we build product. All work below uses primitives from Stages A & B.
 - Est: 45 min.
 - **Done:** Migration [drizzle/0002_lonely_valeria_richards.sql](../drizzle/0002_lonely_valeria_richards.sql) applied. [src/db/seed-resources.ts](../src/db/seed-resources.ts) holds the 10 canonical rows (Cage 1–5, Bullpen 1–2, Weight Room 1–3); orchestrator at [src/db/seed.ts](../src/db/seed.ts) imports dynamically after dotenv so module-load env checks don't fire prematurely. Idempotent via `onConflictDoNothing` on `name`. Hitting/pitching distinction deferred to session-level useType (lands in C3) per Dad's clarification 2026-05-24.
 
-### C2. Default rates table + seed — `[ ]`
+### C2. Default rates table + seed — `[x]`
 - Drizzle schema `rateDefaults` table with `type` (PK) and `ratePer30MinCents` (integer, stored in cents to avoid float).
 - Seed: cage 2200, bullpen 2200, weight_room 500.
 - Acceptance: rows exist in DB; helper `getDefaultRate(type)` returns correct cents.
 - Est: 20 min.
+- **Done:** Migration [drizzle/0003_rich_wilson_fisk.sql](../drizzle/0003_rich_wilson_fisk.sql) applied. `rateDefaults` table in [src/db/schema.ts](../src/db/schema.ts) uses `type` enum as PK (one default per resource type, forever). [src/db/seed-rate-defaults.ts](../src/db/seed-rate-defaults.ts) pulls cent values from `DEFAULT_RATES_PER_SLOT_CENTS` in billing.ts — single source of truth — and inserts via onConflictDoNothing so production rate edits (from H3 admin UI) are never overwritten by re-seeding. Coach visibility: coaches see their own per-session billed amount in D2 (rate × slots = total); they never see the defaults table directly. Admin UI for editing rates lands in H3. **No `getDefaultRate(type)` helper yet** — added when the read path is needed in C6, which can either fetch from DB or fall back to the in-code constant.
 
 ### C3. Sessions table with constraints — `[ ]`
 - Drizzle schema:

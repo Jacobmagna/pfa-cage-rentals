@@ -15,7 +15,9 @@ config({ path: ".env.local" });
 
 async function main() {
   const { seedResources } = await import("./seed-resources");
+  const { seedRateDefaults } = await import("./seed-rate-defaults");
   await seedResources();
+  await seedRateDefaults();
   console.log("[seed] complete");
 }
 

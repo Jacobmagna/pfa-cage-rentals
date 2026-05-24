@@ -245,11 +245,12 @@ Now we build product. All work below uses primitives from Stages A & B.
 - Est: 30 min.
 - **Done:** Migration [drizzle/0006_previous_sentry.sql](../drizzle/0006_previous_sentry.sql) applied. `coach_rate_overrides` table with composite PK on `(coach_id, resource_type)` — one override per coach per resource type, enforced at DB layer. `ON DELETE CASCADE` so deleting a user (rare) cleans up their overrides too. Read path uses existing `rateForSlot()` in billing.ts — caller pre-fetches relevant overrides; no DB read inside the pure billing function. Admin override UI lands in H3.
 
-### C5. Blocked times table — `[ ]`
+### C5. Blocked times table — `[x]`
 - `blockedTimes(id, resourceId, startAt, endAt, reason, createdBy, createdAt)`.
 - Same `EXCLUDE` GIST constraint as sessions — a session can't be created over a block.
 - Acceptance: blocking a cage 9-11am then trying to log a session at 10am for that cage fails.
 - Est: 1 h.
+- **Done:** Migration [drizzle/0007_amusing_demogoblin.sql](../drizzle/0007_amusing_demogoblin.sql) applied. `blocked_times` table mirrors sessions_billing's CHECK + EXCLUDE pattern (block-vs-block overlap rejected at DB layer). Index on (resource_id, start_at) for cross-table overlap queries from C6. Smoke-tested: valid insert ✓, overlap rejected ✓, end<start rejected ✓, back-to-back allowed ✓. Block-vs-session cross-table check lives in C6 server actions (createSession queries blocked_times; createBlock queries sessions_billing) — Postgres EXCLUDE can't span tables. Admin block-off-paint UI lands in H1.
 
 ### C6. Server actions for admin session entry — `[ ]`
 - `src/app/admin/sessions/actions.ts`:

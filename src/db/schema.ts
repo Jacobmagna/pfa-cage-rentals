@@ -214,6 +214,47 @@ export const sessionsBilling = pgTable(
   ],
 );
 
+// Admin-created resource blocks for non-billing reasons: summer
+// camps, private team rentals, HVAC repair, holidays. Coaches can't
+// book a resource while it's blocked.
+//
+// Same DB-level constraints as sessions_billing:
+//   - CHECK (start_at < end_at)
+//   - EXCLUDE USING gist (resource_id, tsrange): block-vs-block
+//     overlap rejected at the DB layer
+//
+// Block-vs-session overlap is enforced in C6 server actions
+// (app-layer cross-table check) since Postgres EXCLUDE can't span
+// tables. Race window is negligible for ~12-user load.
+//
+// `reason` is required text — surfaces in conflict error messages
+// ("Cage 1 is blocked at this time for: Summer Camp 2026") so the
+// person trying to book knows the situation.
+//
+// Index on (resource_id, start_at) for the cross-table overlap
+// check from createSession in C6.
+export const blockedTimes = pgTable(
+  "blocked_times",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    resourceId: text("resource_id")
+      .notNull()
+      .references(() => resources.id),
+    startAt: timestamp("start_at", { mode: "date" }).notNull(),
+    endAt: timestamp("end_at", { mode: "date" }).notNull(),
+    reason: text("reason").notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("blocked_times_resource_start_idx").on(table.resourceId, table.startAt),
+  ],
+);
+
 export const auditAction = pgEnum("audit_action", ["create", "update", "delete"]);
 
 // Append-only audit trail for every billing-relevant mutation. `diff`
@@ -262,3 +303,5 @@ export type NewSessionBilling = typeof sessionsBilling.$inferInsert;
 export type SessionUseType = (typeof sessionUseType.enumValues)[number];
 export type CoachRateOverride = typeof coachRateOverrides.$inferSelect;
 export type NewCoachRateOverride = typeof coachRateOverrides.$inferInsert;
+export type BlockedTime = typeof blockedTimes.$inferSelect;
+export type NewBlockedTime = typeof blockedTimes.$inferInsert;

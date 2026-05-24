@@ -269,7 +269,7 @@ Now we build product. All work below uses primitives from Stages A & B.
 - Est: 4 h.
 - **Done:** [src/app/admin/sessions/page.tsx](../src/app/admin/sessions/page.tsx) (server, requireRole + parallel fetch of latest 50 + coaches + active resources). Client components in `_components/`: `sessions-client.tsx` (table with eyebrow count + gold "New session" CTA + always-visible pencil/trash icons; native `confirm()` for delete) and `session-form-dialog.tsx` (native `<dialog>` modal, useActionState wires C6 actions, error banner). Form values persist across error re-renders via `state.values` echo + form `key` remount. Date + two time inputs combine to `Date` in `form-actions.ts`. Browser-verified end-to-end: create succeeds + audit row lands, overlap fires `SessionOverlapError` with conflicting coach name in red banner with all form fields preserved. Admin home card now links to the page. Lucide icons added. CSP gained `'unsafe-eval'` in dev only (React dev-mode requirement; prod policy unchanged).
 
-### C8. Integration tests — `[ ]`
+### C8. Integration tests — `[~]`
 - Vitest setup pointing at a Neon dev branch (cheap copy-on-write).
 - Tests:
   - `createSession` rejects when caller is coach (not admin).
@@ -279,18 +279,25 @@ Now we build product. All work below uses primitives from Stages A & B.
   - `deleteSession` removes session + writes audit row.
 - Acceptance: 5+ integration tests passing in CI.
 - Est: 3 h.
+- **Code shipped 2026-05-24 (commit 6b23a2a)** — Vitest suite + CI job + `INTEGRATION_DATABASE_URL` wiring all live. Six tests written across two files in [tests/integration/](../tests/integration/). Flipping to `[x]` requires:
+  - (Jacob, at Dad's computer) provision Neon `integration-tests` branch
+  - Add `INTEGRATION_DATABASE_URL` to `.env.local` + GitHub Actions secrets
+  - One-time `DATABASE_URL=$INTEGRATION_DATABASE_URL npm run db:migrate && ... npm run db:seed`
+  - `npm run test:integration` shows 6/6 green
+  - Then mark `[x]` + this note collapses.
 
 ---
 
 # STAGE D — Phase 3: Coach session logging
 
-### D1. Coach session log form (mobile-first) — `[ ]`
+### D1. Coach session log form (mobile-first) — `[x]`
 - `src/app/coach/sessions/new/page.tsx`: form with date, start, end, resource select, optional note.
 - Touch-friendly inputs (h-12 min on mobile per design spec).
 - Submit calls `createSession` with `coachId = session.user.id` (server action enforces).
 - Optimistic loading state with disabled submit (prevents double-creates on slow networks).
 - Acceptance: works on iPhone Safari, creates session correctly.
 - Est: 3 h.
+- **Done:** [src/app/coach/sessions/actions.ts](../src/app/coach/sessions/actions.ts) holds the public `logOwnSession` wrapper; it calls `requireSession()` then force-overrides `coachId = session.user.id` before delegating to `createSessionInternal`. Client-supplied `coachId` values are discarded server-side — a coach cannot bill under another's name. [src/app/coach/sessions/new/page.tsx](../src/app/coach/sessions/new/page.tsx) is a server component that fetches active resources sorted by sortOrder; the client form lives in `_components/log-session-form.tsx`. [form-actions.ts](../src/app/coach/sessions/new/form-actions.ts) wraps the action for `useActionState` and returns a `{ ok, loggedAt }` sentinel so the form can remount with fresh defaults on success (log-multiple flow). Inputs are h-12, single column on mobile, start/end side-by-side, optgroup-grouped resource dropdown. Default times = now rounded down to last 30-min slot + 1h. Browser-verified end-to-end on mobile viewport (375x812): happy path (cage with hitting + note) → success banner + form cleared with refreshed defaults; overlap submit → red banner "Cage 5 is already booked by jacob@themagnas.com" with form values preserved. /coach dashboard CTA card now links here (also tightened the welcome heading for long-email overflow on mobile).
 
 ### D2. Coach "My sessions" history — `[ ]`
 - `src/app/coach/sessions/page.tsx`: paginated list of own sessions (newest first).

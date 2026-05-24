@@ -419,14 +419,14 @@ Now we build product. All work below uses primitives from Stages A & B.
 
 # STAGE I — Phase 8: Historical Excel import
 
-### I1. Excel parser for source_data.xlsx — `[ ]`
+### I1. Excel parser for source_data.xlsx — `[x]`
 - `src/lib/import/parse.ts`: reads workbook → emits raw rows `(date, resource, raw_name, start_time, end_time)`.
 - Handle quirks per BRAINSTORM.md:202-206 (skip ` Template 250706` tab, trust cell dates over tab titles, collapse consecutive same-name cells into one session).
 - Pure function, unit-tested.
 - Acceptance: parsing `source_data.xlsx` produces expected row count and shape.
 - Est: 4 h.
 
-### I2. Name normalization + alias map — `[ ]`
+### I2. Name normalization + alias map — `[x]`
 - `src/lib/import/normalize.ts`: fuzzy match raw names → canonical coach.
 - Build initial alias map from known variations (BRAINSTORM.md:48-58).
 - Strip parentheticals to a separate `note` field.

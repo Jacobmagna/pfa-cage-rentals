@@ -60,3 +60,45 @@ export class ResourceNotFoundError extends Error {
     this.name = "ResourceNotFoundError";
   }
 }
+
+export class BlockNotFoundError extends Error {
+  readonly code = "BLOCK_NOT_FOUND" as const;
+  constructor(public readonly blockId: string) {
+    super(`Blocked time ${blockId} not found`);
+    this.name = "BlockNotFoundError";
+  }
+}
+
+// Block-vs-block overlap on the same resource — caught by the
+// `blocked_times` EXCLUDE constraint (SQLSTATE 23P01) and translated
+// to a friendly message. Different from BlockedTimeError (which is
+// "a session overlaps with an existing block").
+export class BlockOverlapError extends Error {
+  readonly code = "BLOCK_OVERLAP" as const;
+  constructor(
+    public readonly resourceName: string,
+    public readonly conflictingReason: string,
+    public readonly conflictingStart: Date,
+    public readonly conflictingEnd: Date,
+  ) {
+    super(`${resourceName} is already blocked: ${conflictingReason}`);
+    this.name = "BlockOverlapError";
+  }
+}
+
+// Trying to create a block over an existing session. App-layer
+// check because Postgres EXCLUDE can't span tables.
+export class BlockConflictsWithSessionError extends Error {
+  readonly code = "BLOCK_CONFLICTS_WITH_SESSION" as const;
+  constructor(
+    public readonly resourceName: string,
+    public readonly coachName: string,
+    public readonly conflictingStart: Date,
+    public readonly conflictingEnd: Date,
+  ) {
+    super(
+      `${resourceName} already has a session by ${coachName} during that range`,
+    );
+    this.name = "BlockConflictsWithSessionError";
+  }
+}

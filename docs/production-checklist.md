@@ -119,7 +119,7 @@ Rationale: build the **reusable primitives** that all subsequent server actions 
 - Est: 30 min.
 - **Done:** `src/lib/schemas/user.ts` (createUserSchema, updateUserSchema, userRoleSchema, inferred types) imported by `src/app/coach/actions.ts` (`updateOwnProfile`). Convention established for subsequent entity schemas.
 
-### B2. Pure billing helpers — `[ ]`
+### B2. Pure billing helpers — `[x]`
 - Create `src/lib/billing.ts`. Pure functions only. No DB calls, no React.
 - Functions to implement:
   - `slotsBetween(startAt: Date, endAt: Date): number` — count 30-min slots, validate start < end, round to slot boundaries.
@@ -128,6 +128,7 @@ Rationale: build the **reusable primitives** that all subsequent server actions 
 - Will be tested in stage B5 — write the test alongside.
 - Acceptance: module exports above functions with TS types matching schema in B1.
 - Est: 1.5 h.
+- **Done:** [src/lib/billing.ts](../src/lib/billing.ts) exports `slotsBetween`, `rateForSlot`, `chargeForSession`, plus `DEFAULT_RATES_PER_SLOT_CENTS` (for C2 seed) and types `ResourceType`, `RateOverride`, `SessionInput`, `ChargeBreakdown`. Cents-only, pure, throws on zero/negative-duration sessions. Tests land in B6.
 
 ### B3. Audit log schema + helper — `[ ]`
 - Drizzle schema in `src/db/schema.ts` (add to existing file):

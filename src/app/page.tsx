@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth, signIn } from "@/auth";
+import { GoogleSignInButton } from "./_components/google-signin-button";
 
 export default async function Home() {
   const session = await auth();
@@ -19,19 +20,7 @@ export default async function Home() {
           </p>
         </div>
 
-        <form
-          action={async () => {
-            "use server";
-            await signIn("google", { redirectTo: "/" });
-          }}
-        >
-          <button
-            type="submit"
-            className="w-full rounded-md border border-foreground/15 bg-foreground/[0.03] px-4 py-2.5 text-sm font-medium hover:bg-foreground/[0.06] transition"
-          >
-            Continue with Google
-          </button>
-        </form>
+        <GoogleSignInButton />
 
         <div className="flex items-center gap-3 text-xs text-foreground/40">
           <div className="h-px flex-1 bg-foreground/10" />

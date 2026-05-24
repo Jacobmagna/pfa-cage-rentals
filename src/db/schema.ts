@@ -4,6 +4,7 @@ import {
   timestamp,
   primaryKey,
   integer,
+  boolean,
   jsonb,
   pgEnum,
   index,
@@ -11,6 +12,11 @@ import {
 import type { AdapterAccountType } from "next-auth/adapters";
 
 export const roleEnum = pgEnum("role", ["coach", "admin"]);
+export const resourceType = pgEnum("resource_type", [
+  "cage",
+  "bullpen",
+  "weight_room",
+]);
 
 export const users = pgTable("users", {
   id: text("id")
@@ -64,6 +70,27 @@ export const verificationTokens = pgTable(
   (vt) => [primaryKey({ columns: [vt.identifier, vt.token] })],
 );
 
+// Physical inventory: cages, bullpens, weight room slots. Rows of
+// the schedule grid. `name` is unique so seeds and admin edits can't
+// double-create "Cage 1". `sortOrder` controls dropdown + grid row
+// order without depending on insert order or name parsing. `active`
+// lets us soft-disable a closed-down resource without losing its
+// session history (the FK from sessions_billing in C3 prevents
+// hard deletes anyway).
+//
+// No hitting/pitching subtype here — any cage can host either, and
+// the actual use type for a given booking lives on the session row
+// (C3). Resources stay pure "what's available."
+export const resources = pgTable("resources", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull().unique(),
+  type: resourceType("type").notNull(),
+  sortOrder: integer("sort_order").notNull(),
+  active: boolean("active").notNull().default(true),
+});
+
 export const auditAction = pgEnum("audit_action", ["create", "update", "delete"]);
 
 // Append-only audit trail for every billing-relevant mutation. `diff`
@@ -102,3 +129,6 @@ export type Role = (typeof roleEnum.enumValues)[number];
 export type AuditLog = typeof auditLog.$inferSelect;
 export type NewAuditLog = typeof auditLog.$inferInsert;
 export type AuditAction = (typeof auditAction.enumValues)[number];
+export type Resource = typeof resources.$inferSelect;
+export type NewResource = typeof resources.$inferInsert;
+export type ResourceType = (typeof resourceType.enumValues)[number];

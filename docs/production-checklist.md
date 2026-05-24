@@ -194,7 +194,7 @@ Rationale: build the **reusable primitives** that all subsequent server actions 
 
 Now we build product. All work below uses primitives from Stages A & B.
 
-### C1. Resources table + seed — `[ ]`
+### C1. Resources table + seed — `[x]`
 - Drizzle schema:
   ```ts
   export const resourceType = pgEnum("resource_type", ["cage", "bullpen", "weight_room"]);
@@ -210,6 +210,7 @@ Now we build product. All work below uses primitives from Stages A & B.
 - Add `"db:seed": "tsx src/db/seed-resources.ts"` script.
 - Acceptance: `npm run db:seed` populates 10 rows; rerunning is idempotent (upsert by name).
 - Est: 45 min.
+- **Done:** Migration [drizzle/0002_lonely_valeria_richards.sql](../drizzle/0002_lonely_valeria_richards.sql) applied. [src/db/seed-resources.ts](../src/db/seed-resources.ts) holds the 10 canonical rows (Cage 1–5, Bullpen 1–2, Weight Room 1–3); orchestrator at [src/db/seed.ts](../src/db/seed.ts) imports dynamically after dotenv so module-load env checks don't fire prematurely. Idempotent via `onConflictDoNothing` on `name`. Hitting/pitching distinction deferred to session-level useType (lands in C3) per Dad's clarification 2026-05-24.
 
 ### C2. Default rates table + seed — `[ ]`
 - Drizzle schema `rateDefaults` table with `type` (PK) and `ratePer30MinCents` (integer, stored in cents to avoid float).

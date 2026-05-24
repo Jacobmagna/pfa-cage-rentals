@@ -239,10 +239,11 @@ Now we build product. All work below uses primitives from Stages A & B.
 - Est: 2 h (constraint setup is finicky).
 - **Done:** Migrations [0004](../drizzle/0004_unknown_dragon_man.sql) (table + raw-SQL CHECK + EXCLUDE + btree_gist extension) and [0005](../drizzle/0005_pretty_bucky.sql) (Drizzle-snapshot resync for the indexes, IF NOT EXISTS for idempotency). Table includes useType enum (hitting | pitching, nullable — required-for-cage rule enforced at app layer in C6), and indexes on (coach_id, start_at), (resource_id, start_at), (start_at) for D2/F1/E1 read paths. Sessions table renamed `sessions_billing` because Auth.js owns `sessions`. Smoke-tested against Neon: valid insert ✓, overlap rejected ✓, end<start rejected ✓, end==start rejected ✓, back-to-back allowed ✓. Block-vs-session cross-table overlap enforcement deferred to C6 app-layer check (Postgres EXCLUDE can't span tables).
 
-### C4. Coach rate overrides table — `[ ]`
+### C4. Coach rate overrides table — `[x]`
 - `coachRateOverrides(coachId, resourceType, ratePer30MinCents)` — PK on `(coachId, resourceType)`.
 - Acceptance: row insertable, retrievable, billing helper picks override over default when present.
 - Est: 30 min.
+- **Done:** Migration [drizzle/0006_previous_sentry.sql](../drizzle/0006_previous_sentry.sql) applied. `coach_rate_overrides` table with composite PK on `(coach_id, resource_type)` — one override per coach per resource type, enforced at DB layer. `ON DELETE CASCADE` so deleting a user (rare) cleans up their overrides too. Read path uses existing `rateForSlot()` in billing.ts — caller pre-fetches relevant overrides; no DB read inside the pure billing function. Admin override UI lands in H3.
 
 ### C5. Blocked times table — `[ ]`
 - `blockedTimes(id, resourceId, startAt, endAt, reason, createdBy, createdAt)`.

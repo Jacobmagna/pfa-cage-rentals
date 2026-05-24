@@ -43,6 +43,13 @@
       "when": 1779647834519,
       "tag": "0005_pretty_bucky",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779648092132,
+      "tag": "0006_previous_sentry",
+      "breakpoints": true
     }
   ]
 }

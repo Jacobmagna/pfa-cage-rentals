@@ -110,6 +110,42 @@ export const resources = pgTable("resources", {
   active: boolean("active").notNull().default(true),
 });
 
+// Per-coach pricing exceptions. Composite PK on (coachId, resourceType)
+// enforces "one override per (coach, resource type) forever" at the DB
+// layer — no need for filtering or `ORDER BY updatedAt LIMIT 1` in
+// reads. A coach can have different overrides for different resource
+// types (e.g. cage default rate, bullpen discount).
+//
+// Read path: src/lib/billing.ts:rateForSlot already does the right
+// thing — caller pre-fetches all relevant overrides into an array,
+// rateForSlot picks the match or falls back to default. The DB read
+// happens in the server action that calls it.
+//
+// No FK from sessions_billing to this table — sessions snapshot the
+// rate that was charged at the time. Changing a coach's override
+// today never retroactively re-bills their past sessions.
+//
+// updatedAt powers an "as of" line in the admin override editor (H3)
+// without separate audit-log spelunking — every change still gets a
+// row in audit_log via the helper.
+export const coachRateOverrides = pgTable(
+  "coach_rate_overrides",
+  {
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    resourceType: resourceType("resource_type").notNull(),
+    ratePer30MinCents: integer("rate_per_30_min_cents").notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    primaryKey({ columns: [table.coachId, table.resourceType] }),
+  ],
+);
+
 // Billing sessions — the row that every report, schedule grid, and
 // coach history reads from. Named `sessions_billing` because Auth.js
 // already owns `sessions` for login sessions and the FK chaos isn't
@@ -224,3 +260,5 @@ export type NewRateDefault = typeof rateDefaults.$inferInsert;
 export type SessionBilling = typeof sessionsBilling.$inferSelect;
 export type NewSessionBilling = typeof sessionsBilling.$inferInsert;
 export type SessionUseType = (typeof sessionUseType.enumValues)[number];
+export type CoachRateOverride = typeof coachRateOverrides.$inferSelect;
+export type NewCoachRateOverride = typeof coachRateOverrides.$inferInsert;

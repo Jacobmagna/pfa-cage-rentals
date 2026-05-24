@@ -8,7 +8,7 @@ import {
   EditSessionDialog,
   type SessionInitial,
 } from "./edit-session-dialog";
-import type { ResourceOption } from "../../sessions/new/_components/log-session-form";
+import type { ResourceOption } from "./types";
 
 // Renders the history list, owns the edit-dialog open/close + the
 // row delete pending state. Pagination links are server-side

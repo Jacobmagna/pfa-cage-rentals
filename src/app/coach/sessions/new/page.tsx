@@ -5,7 +5,8 @@ import { db } from "@/db";
 import { resources } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
 import { AppShell } from "@/app/_components/app-shell";
-import { LogSessionForm, type ResourceOption } from "./_components/log-session-form";
+import { LogSessionForm } from "./_components/log-session-form";
+import type { ResourceOption } from "../_components/types";
 
 // Coach session log page. Server component — auths the user,
 // fetches active resources, hands off to the client form. Public

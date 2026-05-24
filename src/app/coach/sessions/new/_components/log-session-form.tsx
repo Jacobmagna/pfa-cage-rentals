@@ -6,15 +6,7 @@ import {
   logOwnSessionFormAction,
   type CoachActionResult,
 } from "../form-actions";
-
-// Resource shape passed from the server page. Pre-grouped by type so
-// we can render <optgroup> sections without re-filtering on every
-// render.
-export type ResourceOption = {
-  id: string;
-  name: string;
-  type: "cage" | "bullpen" | "weight_room";
-};
+import type { ResourceOption } from "../../_components/types";
 
 const INITIAL_STATE: CoachActionResult = { ok: true, loggedAt: 0 };
 

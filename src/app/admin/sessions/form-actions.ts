@@ -75,10 +75,18 @@ function buildSessionInput(formData: FormData) {
     resourceId: formData.get("resourceId")?.toString() ?? "",
     startAt,
     endAt,
-    useType: useTypeRaw === "hitting" || useTypeRaw === "pitching"
-      ? useTypeRaw
-      : undefined,
-    note: formData.get("note")?.toString().trim() || undefined,
+    // Send `null` (not undefined) for empty values so the UPDATE path
+    // actually clears the column. updateSessionInternal treats
+    // undefined as "don't touch this column" and null as "set to NULL"
+    // — using undefined here previously caused silent no-ops when an
+    // admin tried to remove a note or switch a cage's useType to
+    // "— None". Create path is unaffected (the internal coerces
+    // undefined/null to null at insert).
+    useType:
+      useTypeRaw === "hitting" || useTypeRaw === "pitching"
+        ? useTypeRaw
+        : null,
+    note: formData.get("note")?.toString().trim() || null,
   };
 }
 

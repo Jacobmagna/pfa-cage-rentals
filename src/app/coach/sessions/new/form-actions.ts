@@ -60,11 +60,15 @@ function buildInput(formData: FormData) {
     resourceId: formData.get("resourceId")?.toString() ?? "",
     startAt,
     endAt,
+    // null for empty values to match the coach update form-actions
+    // pattern (and the admin form-actions, which has the same fix).
+    // For create-only this is equivalent to undefined, but normalizing
+    // both surfaces keeps the schema-level invariant straightforward.
     useType:
       useTypeRaw === "hitting" || useTypeRaw === "pitching"
         ? useTypeRaw
-        : undefined,
-    note: formData.get("note")?.toString().trim() || undefined,
+        : null,
+    note: formData.get("note")?.toString().trim() || null,
   };
 }
 

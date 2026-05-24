@@ -18,7 +18,12 @@ export const createSessionSchema = z.object({
   startAt: z.coerce.date(),
   endAt: z.coerce.date(),
   useType: z.enum(["hitting", "pitching"]).nullish(),
-  note: z.string().max(500).optional(),
+  // nullish so the UPDATE form can send null to actually clear the
+  // note — `optional()` alone would reject null at Zod parse, and a
+  // missing-vs-undefined-vs-null distinction matters: updateSessionInternal
+  // skips the column when the parsed value is `undefined` and writes
+  // when it's `null`. See form-actions.ts buildSessionInput.
+  note: z.string().max(500).nullish(),
 });
 
 export const updateSessionSchema = createSessionSchema.partial();

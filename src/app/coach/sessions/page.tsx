@@ -15,7 +15,7 @@ import {
 } from "@/lib/billing";
 import { AppShell } from "@/app/_components/app-shell";
 import { SessionsHistoryClient, type HistoryRow } from "./_components/sessions-history-client";
-import type { ResourceOption } from "./new/_components/log-session-form";
+import type { ResourceOption } from "./_components/types";
 
 const PAGE_SIZE = 20;
 

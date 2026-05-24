@@ -6,7 +6,7 @@ import {
   updateOwnSessionFormAction,
   type EditActionResult,
 } from "../form-actions";
-import type { ResourceOption } from "../../sessions/new/_components/log-session-form";
+import type { ResourceOption } from "./types";
 
 // Edit dialog for a coach's existing session. Mirrors the admin
 // session-form-dialog (native <dialog>, useActionState, error

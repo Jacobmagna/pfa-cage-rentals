@@ -449,19 +449,25 @@ Now we build product. All work below uses primitives from Stages A & B.
 
 # STAGE J — Pre-launch hardening
 
-### J1. Swap email to AWS SES — `[ ]`
-- Sign up AWS, create SES identity for `pfacagerentals.com`.
-- Verify domain via DNS records (DKIM, MAIL FROM domain) added to GoDaddy.
-- Move out of SES sandbox (request production access — ~24 hour AWS turnaround).
-- Swap `src/auth.ts`: use Nodemailer provider pointed at SES SMTP, sender = `noreply@pfacagerentals.com`.
-- Add `AWS_SES_*` env vars to Vercel.
-- Remove Resend dependency.
-- Acceptance: magic-link sent to a fresh inbox lands in inbox (not spam) on first send.
-- Est: 4 h.
+### J1. Move email to PFA-dedicated Resend account — `[~]`
+Originally scoped as an AWS SES swap; rewritten 2026-05-24. Reason
+to switch was never deliverability — it was that the existing
+Resend free-tier slot is held by doc-insured, so PFA had to send
+from `noreply@docinsured.com` (looks like phishing). Cheapest fix
+is a second Resend account for PFA, free tier covers the volume.
+- Code: `src/auth.ts` already points at `noreply@pfacagerentals.com`
+  (commit d72c900-adjacent). No further code change.
+- Manual: follow `docs/resend-setup.md` to create the PFA Resend
+  account, verify `pfacagerentals.com` via GoDaddy DNS, generate a
+  new API key, swap `AUTH_RESEND_KEY` in `.env.local` + Vercel.
+- Acceptance: magic-link from `noreply@pfacagerentals.com` lands in
+  Dad's inbox (not spam) on first send.
+- Est: 1 h (Jacob's manual steps).
 
 ### J2. SPF + DMARC records — `[ ]`
-- GoDaddy DNS:
-  - SPF TXT `@`: `v=spf1 include:amazonses.com -all`
+- GoDaddy DNS (SPF: Resend's domain-verification flow in J1 already
+  adds `include:_spf.resend.com` via SPF TXT — confirm it's present
+  before adding the DMARC record below):
   - DMARC TXT `_dmarc`: `v=DMARC1; p=quarantine; rua=mailto:postmaster@pfacagerentals.com; pct=100; sp=quarantine`
 - Test with https://mxtoolbox.com — all green.
 - Acceptance: mxtoolbox SPF + DMARC checks pass.

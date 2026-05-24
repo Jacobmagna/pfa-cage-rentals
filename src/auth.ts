@@ -23,10 +23,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // addresses, and there's no high-value takeover target here.
     Google({ allowDangerousEmailAccountLinking: true }),
     Resend({
-      // Temporary sender on docinsured.com (Jacob's other verified Resend domain).
-      // Swap to noreply@pfacagerentals.com once that domain is verified in Resend
-      // (blocked on Resend free-tier 1-domain limit; revisit before launch).
-      from: "PFA Cage Rentals <pfa@docinsured.com>",
+      // Sender lives on the PFA-dedicated Resend account
+      // (jacob+pfa@themagnas.com — separate from doc-insured). See
+      // docs/resend-setup.md for the account-creation + domain-verification
+      // runbook. AUTH_RESEND_KEY must be the API key from THAT account.
+      from: "PFA Cage Rentals <noreply@pfacagerentals.com>",
       // (no allowDangerousEmailAccountLinking — Email providers always
       // require the link-click to prove email ownership, so Auth.js handles
       // the linking flow safely without an opt-in.)

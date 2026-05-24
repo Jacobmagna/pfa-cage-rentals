@@ -2,54 +2,67 @@
 
 Why: `pfasports.com` is not on Google Workspace, so Dad and Mom can't sign in with Google. Resend sends them a one-time sign-in link instead. Also covers any future coach without a Gmail.
 
+**Account separation:** PFA has its own Resend account (`jacob+pfa@themagnas.com`), separate from the doc-insured Resend account. Same pattern as the dedicated PFA Upstash account. Reason: Resend's free tier allows one verified domain per account; doc-insured already uses that slot.
+
 You'll end with one value in `.env.local`:
 
 ```
 AUTH_RESEND_KEY="re_<...>"
 ```
 
-## Step 1 — get the API key
+## Step 1 — create the PFA Resend account
 
-1. https://resend.com → sign in.
-2. Left nav → **API Keys** → **Create API Key**.
-3. Name: `pfa-cage-rentals-local` · Permission: **Sending access** · Domain: **All domains** · **Add**.
-4. Copy the `re_...` value (only shown once).
-5. Paste into `.env.local` as `AUTH_RESEND_KEY`.
+1. Open https://resend.com in an incognito window (so you don't accidentally land on the doc-insured account).
+2. Sign up with `jacob+pfa@themagnas.com` (Gmail's `+tag` lets it route to your regular inbox while staying a distinct address for Resend).
+3. Verify the signup link in email.
 
-## Step 2 — verify Dad's and Mom's emails for sandbox testing
+## Step 2 — verify pfacagerentals.com
 
-Because we haven't bought `pfacagerentals.com` yet, we send from Resend's shared `onboarding@resend.dev` sender. **In sandbox mode, that sender can only deliver to emails you've verified in your Resend account.**
+1. Resend dashboard → **Domains** → **Add Domain** → `pfacagerentals.com`.
+2. Resend shows ~4 DNS records to add (SPF TXT, DKIM CNAMEs, MAIL FROM TXT). Copy each.
+3. Open GoDaddy (https://dcc.godaddy.com/manage/pfacagerentals.com/dns) and add each record exactly as Resend shows it. Host fields are usually `@`, `resend._domainkey`, etc — paste verbatim from Resend, don't append the domain.
+4. Back in Resend → **Verify**. DNS propagation is typically 5–15 min on GoDaddy; refresh until all rows go green.
 
-For each recipient you want to test with (Dad, Mom, any coach):
+## Step 3 — generate API key
 
-1. Resend dashboard → **Domains** is not the path — instead go to **Settings → Team** or top-right account menu → look for **Verified Emails** / **Add test recipient**.
-   - If the UI has changed, the equivalent: Resend → **API logs / Emails** → try sending; if blocked, it'll prompt you to verify the recipient.
-2. Add `mdm@pfasports.com` and `esther@pfasports.com`. Each address gets a one-click verification email — forward to Dad/Mom to click.
+1. Resend dashboard → **API Keys** → **Create API Key**.
+2. Name: `pfa-cage-rentals` · Permission: **Sending access** · Domain: **pfacagerentals.com**.
+3. Copy the `re_...` value (only shown once).
+4. Paste into `.env.local` as `AUTH_RESEND_KEY`.
 
-(Your own email — whichever you use for the Resend account — is auto-verified, so you can test with it immediately without this step.)
+## Step 4 — paste into Vercel
 
-## Step 3 — buy the domain (Phase 9, not now)
+1. Vercel → Project → Settings → Environment Variables.
+2. Find existing `AUTH_RESEND_KEY` (it currently holds the doc-insured key). **Update value** to the new key from Step 3. Apply to Production, Preview, and Development.
+3. Trigger a redeploy (push a no-op commit or use Vercel UI → Redeploy).
 
-Once `pfacagerentals.com` is bought via Vercel:
+## Step 5 — sanity test
 
-1. Resend → **Domains** → **Add Domain** → `pfacagerentals.com` → follow the DNS prompts (Vercel DNS makes this 2 clicks).
-2. Once verified, in `src/auth.ts` change `from: "PFA Cage Rentals <onboarding@resend.dev>"` → `from: "PFA Cage Rentals <noreply@pfacagerentals.com>"`.
-3. The sandbox recipient verification (Step 2) becomes unnecessary — you can send to any address.
-
-## Step 4 — sanity test
-
-After Step 1 (and Step 2 if testing with Dad/Mom):
+After Step 3 (locally) and Step 4 (in prod):
 
 ```
 npm run dev
 ```
 
 1. http://localhost:3000
-2. Enter `mdm@pfasports.com` in the email field → **Email me a sign-in link**.
-3. Page redirects to "Check your email" (Auth.js default verify-request page).
-4. Email arrives in Dad's inbox (subject: "Sign in to localhost:3000") → click link → land on `/admin`.
+2. Enter `mdm@pfasports.com` → **Email me a sign-in link**.
+3. Page redirects to "Check your email".
+4. Email arrives in Dad's inbox from `noreply@pfacagerentals.com` (subject: "Sign in to localhost:3000") → click link → land on `/admin`.
+
+Repeat against `https://pfacagerentals.com` after the Vercel redeploy to verify the prod env var.
 
 If the email doesn't arrive:
 - Spam folder first.
-- Resend dashboard → **Emails** tab shows every send + delivery status. If it says `bounced` or `not allowed`, recipient isn't verified (Step 2).
-- If it says `delivered` but no email visible, check Dad's spam / quarantine.
+- Resend dashboard → **Emails** tab shows every send + delivery status. If it says `bounced`, check the recipient address. If `not allowed`, the domain isn't fully verified yet (Step 2).
+- If `delivered` but no email visible, check the recipient's quarantine.
+
+## Step 6 — rotate doc-insured key (cleanup)
+
+Once the new key is verified working in prod, the old doc-insured key is no longer used by this project. Optional but tidy:
+- doc-insured Resend → revoke the old `pfa-cage-rentals-local` API key (if it was issued from that account).
+- Update `pfa@docinsured.com` mailbox (if you set one up) to bounce — no project should be sending from it anymore.
+
+## Related deliverability work
+
+- **J2** (SPF + DMARC on `pfacagerentals.com`): the SPF Resend asks you to add in Step 2 covers `include:_spf.resend.com`. DMARC is separate and lives in J2 of the production checklist.
+- **J3** (mail-tester.com score): after Steps 1–5, send a magic link to a mail-tester address to verify deliverability. Target ≥ 9/10.

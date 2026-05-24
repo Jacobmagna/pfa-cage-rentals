@@ -38,6 +38,13 @@ const REQUIRED_SCHEMA = z.object({
   // Observability — degrades silently if missing (Sentry no-ops), but
   // production-grade requires it.
   NEXT_PUBLIC_SENTRY_DSN: z.string().url(),
+
+  // Upstash Redis — magic-link rate limiting (src/lib/ratelimit.ts).
+  // Missing values cause the first rate-limit check to throw at
+  // request time; flagging here surfaces it via /api/health before
+  // users hit it.
+  UPSTASH_REDIS_REST_URL: z.string().url(),
+  UPSTASH_REDIS_REST_TOKEN: z.string().min(1),
 });
 
 // AUTH_URL is required in production (Auth.js builds OAuth callback URLs

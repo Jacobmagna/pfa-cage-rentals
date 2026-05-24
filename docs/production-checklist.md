@@ -160,13 +160,14 @@ Rationale: build the **reusable primitives** that all subsequent server actions 
 - Est: 45 min.
 - **Done:** [src/lib/authz.ts](../src/lib/authz.ts) exports all three helpers with `AuthedSession` type. Retrofitted [src/app/admin/page.tsx](../src/app/admin/page.tsx), [src/app/coach/page.tsx](../src/app/coach/page.tsx), and [src/app/coach/actions.ts](../src/app/coach/actions.ts) to use them — proves the helpers work in real route + server-action contexts. Live curl test will follow once Vercel picks up the deploy.
 
-### B5. Magic-link rate limiting — `[ ]`
+### B5. Magic-link rate limiting — `[x]`
 - Sign up Upstash (https://upstash.com) free tier → create Redis DB → copy REST URL + token.
 - `npm i @upstash/ratelimit @upstash/redis`.
 - Wrap the magic-link server action: 5 requests per email per hour, 10 per IP per hour.
 - Add `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` to Vercel env (Production + Preview).
 - Acceptance: hammering "Email me a sign-in link" 6 times from same browser returns rate-limit error on 6th.
 - Est: 1 h.
+- **Done:** Dedicated Upstash account (jacob+pfa@themagnas.com, separate from doc-insured) → DB `pfa-cage-rentals` in us-east-1. [src/lib/ratelimit.ts](../src/lib/ratelimit.ts) lazy-inits Upstash (so CI builds work without secrets) and exposes `checkMagicLinkRateLimit(email, ip)` with sliding-window limits (5/h email, 10/h IP). Magic-link inline action moved to [src/app/actions.ts](../src/app/actions.ts) (`requestMagicLink`), now extracts client IP via `x-forwarded-for` header, runs the check, and redirects to `/?error=email-limit|ip-limit|missing-email` on failure. [src/app/page.tsx](../src/app/page.tsx) renders the error banner from searchParams. `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN` added to `REQUIRED_SCHEMA` in [src/lib/env.ts](../src/lib/env.ts) so `/api/health` flags missing config. Smoke-tested locally against real Upstash: 5 allowed, 6th blocked with `email-limit` as expected.
 
 ### B6. Unit tests for billing helpers — `[ ]`
 - `npm i -D vitest @vitest/coverage-v8`.

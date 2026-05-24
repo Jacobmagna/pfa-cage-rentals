@@ -1,13 +1,31 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { auth, signIn } from "@/auth";
+import { auth } from "@/auth";
 import { GoogleSignInButton } from "./_components/google-signin-button";
+import { requestMagicLink } from "./actions";
 
-export default async function Home() {
+type SearchParams = Promise<{ error?: string }>;
+
+const ERROR_COPY: Record<string, string> = {
+  "missing-email": "Please enter your email address.",
+  "email-limit":
+    "Too many sign-in attempts for this email. Try again in an hour.",
+  "ip-limit":
+    "Too many sign-in attempts from your network. Try again in an hour.",
+};
+
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
   const session = await auth();
   if (session?.user) {
     redirect(session.user.role === "admin" ? "/admin" : "/coach");
   }
+
+  const { error } = await searchParams;
+  const errorMessage = error ? ERROR_COPY[error] : undefined;
 
   return (
     <main className="flex flex-1 items-center justify-center px-6 py-12">
@@ -31,15 +49,7 @@ export default async function Home() {
               <div className="h-px flex-1 bg-line" />
             </div>
 
-            <form
-              action={async (formData: FormData) => {
-                "use server";
-                const email = formData.get("email")?.toString().trim();
-                if (!email) return;
-                await signIn("resend", { email, redirectTo: "/" });
-              }}
-              className="space-y-3"
-            >
+            <form action={requestMagicLink} className="space-y-3">
               <label className="block">
                 <span className="block text-xs uppercase tracking-wider text-fg-muted mb-1.5">
                   Email
@@ -53,6 +63,14 @@ export default async function Home() {
                   className="w-full rounded-md bg-page border border-line text-fg placeholder:text-fg-subtle px-3 py-2 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
                 />
               </label>
+              {errorMessage ? (
+                <p
+                  role="alert"
+                  className="text-xs text-red-400 leading-relaxed"
+                >
+                  {errorMessage}
+                </p>
+              ) : null}
               <button
                 type="submit"
                 className="w-full rounded-md border border-line bg-surface-2 text-fg h-10 px-4 text-sm font-medium hover:bg-surface transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"

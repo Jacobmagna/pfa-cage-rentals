@@ -102,3 +102,61 @@ jobs:
           DATABASE_URL="$INTEGRATION_DATABASE_URL" npm run db:migrate
           DATABASE_URL="$INTEGRATION_DATABASE_URL" npm run db:seed
           npm run test:integration
+
+  e2e:
+    name: E2E tests
+    runs-on: ubuntu-latest
+    needs: integration
+    timeout-minutes: 15
+
+    # Same gating pattern as the integration job. Sequenced AFTER
+    # integration so the two suites don't race the shared Neon
+    # branch's mutable tables (both TRUNCATE in setup hooks).
+    env:
+      INTEGRATION_DATABASE_URL: ${{ secrets.INTEGRATION_DATABASE_URL }}
+      AUTH_SECRET: ci-only-secret-not-used-in-production
+      AUTH_URL: http://localhost:3001
+      AUTH_GOOGLE_ID: ci-placeholder.apps.googleusercontent.com
+      AUTH_GOOGLE_SECRET: ci-placeholder-secret
+      AUTH_RESEND_KEY: re_ci_placeholder
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Run E2E tests
+        run: |
+          if [ -z "$INTEGRATION_DATABASE_URL" ]; then
+            echo "INTEGRATION_DATABASE_URL not set; skipping E2E tests"
+            exit 0
+          fi
+          npx playwright install --with-deps chromium
+          # db:migrate + db:seed are idempotent; integration job already
+          # ran them, but rerunning is cheap and protects against this
+          # job running first if needs: ordering changes later.
+          DATABASE_URL="$INTEGRATION_DATABASE_URL" npm run db:migrate
+          DATABASE_URL="$INTEGRATION_DATABASE_URL" npm run db:seed
+          npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure() && env.INTEGRATION_DATABASE_URL != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

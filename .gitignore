@@ -50,3 +50,9 @@ source_data.xlsx
 
 # misc
 .Rhistory
+
+# husky internals (regenerated on `npm install` via prepare script)
+.husky/_/
+
+# excel lock files
+~$*.xlsx

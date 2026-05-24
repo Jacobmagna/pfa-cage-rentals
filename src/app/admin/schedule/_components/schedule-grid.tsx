@@ -1,29 +1,34 @@
 "use client";
 
-// Excel-style schedule grid for a single day, with click-to-create
-// and click-to-edit. Empty cell → unified create dialog (Session
-// or Block toggle). Session block → edit dialog. Blocked time →
-// confirm() + delete.
+// Excel-style schedule grid for a single day, with:
+//   - Click empty cell → unified create dialog (Session/Block tabs)
+//   - Click session → edit dialog
+//   - Click block → confirm + delete
+//   - Drag session block → updateSession with new (resource, startAt)
+//     preserving duration. Touch-friendly via @dnd-kit's TouchSensor.
 //
-// Rows = resources (sorted by sortOrder), Columns = 30-min slots
-// from 8 AM to 10 PM. Sessions and blocks render as positioned
-// blocks via CSS Grid `grid-column: start / span N` so a multi-slot
-// booking reads as one contiguous bar.
+// Rows = resources, Columns = 30-min slots 8 AM – 10 PM. Sessions
+// and blocks render via CSS Grid `grid-column: start / span N` so a
+// multi-slot booking reads as one contiguous bar.
 //
 // Per-resource-type visual differentiation:
-//   - Cage:        gold left-border (brand accent)
-//   - Bullpen:     success left-border
-//   - Weight room: warning left-border
-//   - Blocked:     dashed danger border + tinted background
-// Block bodies are neutral (bg-surface-2) — the spec's "gold is the
-// only brand color" rule preserved by using status tokens as type
-// markers, not decoration.
-//
-// Sessions outside 8 AM – 10 PM aren't rendered. A banner above the
-// grid surfaces the count when any exist.
+//   Cage = gold left-border, Bullpen = success, Weight = warning.
+// Block body = neutral (bg-surface-2); status tokens are used as
+// type MARKERS, not decoration — respects the spec's gold-only rule.
 
 import { useState, useTransition } from "react";
+import {
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
 import type { ResourceType } from "@/lib/billing";
+import { updateSession } from "@/app/admin/sessions/actions";
 import { SessionFormDialog } from "@/app/admin/sessions/_components/session-form-dialog";
 import type {
   CoachOption,
@@ -70,6 +75,19 @@ type DialogState =
   | { kind: "create"; prefill: CreatePrefill }
   | { kind: "edit-session"; session: ScheduleSession };
 
+type CellDropData = {
+  type: "cell";
+  resourceId: string;
+  slotIdx: number;
+};
+
+type SessionDragData = {
+  type: "session";
+  sessionId: string;
+  startAt: string; // ISO; @dnd-kit serializes data, easier to pass strings
+  endAt: string;
+};
+
 export function ScheduleGrid({
   resources,
   sessions,
@@ -87,7 +105,19 @@ export function ScheduleGrid({
   const [pendingDeleteBlockId, setPendingDeleteBlockId] = useState<string | null>(
     null,
   );
+  const [dragError, setDragError] = useState<string | null>(null);
+  const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
+
+  // distance: 5 lets short clicks through as clicks; only after the
+  // pointer moves 5px does @dnd-kit activate a drag. Touch has a
+  // small delay so scrolling on a touchscreen still works.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 200, tolerance: 5 },
+    }),
+  );
 
   const close = () => setDialog({ kind: "closed" });
 
@@ -99,9 +129,6 @@ export function ScheduleGrid({
       0,
       0,
     );
-    // Default 1-hour duration, clipped to last visible slot if
-    // necessary (clicking 9:30 PM on a 1-hour default would otherwise
-    // extend past 10:30 PM which is outside the visible range).
     const endAt = new Date(startAt);
     endAt.setHours(startAt.getHours() + 1);
     setDialog({
@@ -132,8 +159,62 @@ export function ScheduleGrid({
     });
   };
 
-  // Index resources to a row number. Row 1 is the time-header row;
-  // resources start at row 2.
+  const handleDragEnd = (event: DragEndEvent) => {
+    setDraggingSessionId(null);
+    const { active, over } = event;
+    if (!over) return;
+
+    const sessionData = active.data.current as SessionDragData | undefined;
+    const dropData = over.data.current as CellDropData | undefined;
+    if (sessionData?.type !== "session" || dropData?.type !== "cell") return;
+
+    const oldStart = new Date(sessionData.startAt);
+    const oldEnd = new Date(sessionData.endAt);
+    const durationMs = oldEnd.getTime() - oldStart.getTime();
+
+    const newStart = new Date(selectedDate);
+    newStart.setHours(
+      FIRST_HOUR + Math.floor(dropData.slotIdx / 2),
+      (dropData.slotIdx % 2) * 30,
+      0,
+      0,
+    );
+    const newEnd = new Date(newStart.getTime() + durationMs);
+
+    // No-op if dropped on the same cell.
+    const oldResourceId = sessions.find((s) => s.id === sessionData.sessionId)
+      ?.resourceId;
+    if (
+      newStart.getTime() === oldStart.getTime() &&
+      dropData.resourceId === oldResourceId
+    ) {
+      return;
+    }
+
+    startTransition(async () => {
+      try {
+        await updateSession(sessionData.sessionId, {
+          resourceId: dropData.resourceId,
+          startAt: newStart,
+          endAt: newEnd,
+        });
+        setDragError(null);
+      } catch (err) {
+        // SessionOverlapError / BlockedTimeError / others — surface
+        // the friendly message; the visual snaps back automatically
+        // because revalidatePath doesn't re-render on error and the
+        // dnd-kit transform clears on dragEnd.
+        const message =
+          err instanceof Error && err.message
+            ? err.message
+            : "Couldn't move that session. Try a different slot.";
+        setDragError(message);
+        // Auto-dismiss after 6 seconds.
+        setTimeout(() => setDragError(null), 6_000);
+      }
+    });
+  };
+
   const resourceRow = new Map<string, number>();
   resources.forEach((r, i) => resourceRow.set(r.id, i + 2));
 
@@ -143,13 +224,8 @@ export function ScheduleGrid({
   const hiddenCount = sessions.length - visibleSessions.length;
   const visibleBlocks = blocks.filter((b) => inRange(b.startAt));
 
-  // Map of "this resource has a session or block at this slot" so
-  // empty-cell buttons can short-circuit out of the way of overlay
-  // blocks (otherwise clicks on an empty area beside a session would
-  // accidentally hit the underlying empty cell). The session block's
-  // z-index already sits above, so we don't strictly need this — but
-  // disabling the empty button under blocks makes keyboard tab order
-  // skip them.
+  // Sessions/blocks claim multi-slot rectangles; the cells under them
+  // get pointer-events disabled so the overlay's drop target wins.
   const occupiedSlots = new Set<string>();
   for (const s of visibleSessions) {
     const placement = placeOnGrid(s.startAt, s.endAt);
@@ -171,7 +247,6 @@ export function ScheduleGrid({
     gridTemplateRows: `40px repeat(${resources.length}, 56px)`,
   };
 
-  // Map session → SessionFormDialog initial shape.
   const editInitial =
     dialog.kind === "edit-session"
       ? {
@@ -185,7 +260,6 @@ export function ScheduleGrid({
         }
       : undefined;
 
-  // SessionFormDialog expects ResourceOption with sortOrder.
   const sessionResourceOptions: SessionResourceOption[] = resources.map((r) => ({
     id: r.id,
     name: r.name,
@@ -194,196 +268,307 @@ export function ScheduleGrid({
   }));
 
   return (
-    <div className="space-y-3">
-      {hiddenCount > 0 ? (
-        <div
-          role="status"
-          className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
-        >
-          {hiddenCount} {hiddenCount === 1 ? "session is" : "sessions are"}{" "}
-          outside the 8 AM – 10 PM range and not shown here.
-        </div>
-      ) : null}
-
-      <div className="overflow-x-auto rounded-lg border border-line">
-        <div className="relative grid bg-surface min-w-fit" style={gridStyle}>
-          {/* Header corner cell. */}
+    <DndContext
+      sensors={sensors}
+      onDragStart={(e) => setDraggingSessionId(String(e.active.id))}
+      onDragCancel={() => setDraggingSessionId(null)}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="space-y-3">
+        {hiddenCount > 0 ? (
           <div
-            className="sticky left-0 z-20 border-b border-r border-line bg-surface"
-            style={{ gridRow: 1, gridColumn: 1 }}
-          />
+            role="status"
+            className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
+          >
+            {hiddenCount} {hiddenCount === 1 ? "session is" : "sessions are"}{" "}
+            outside the 8 AM – 10 PM range and not shown here.
+          </div>
+        ) : null}
 
-          {/* Time-slot headers. */}
-          {Array.from({ length: SLOTS }).map((_, slotIdx) => {
-            const col = slotIdx + 2;
-            const isHour = slotIdx % 2 === 0;
-            const hour24 = FIRST_HOUR + Math.floor(slotIdx / 2);
-            return (
-              <div
-                key={`h-${slotIdx}`}
-                className={[
-                  "border-b border-line text-[10px] uppercase tracking-wider text-fg-muted",
-                  "flex items-end pb-1.5 pl-1",
-                  slotIdx % 2 === 0
-                    ? "border-l border-line-strong"
-                    : "border-l border-line/40",
-                ].join(" ")}
-                style={{ gridRow: 1, gridColumn: col }}
-              >
-                {isHour ? formatHour(hour24) : ""}
-              </div>
-            );
-          })}
-
-          {/* Resource label cells (sticky-left). */}
-          {resources.map((r, i) => (
-            <div
-              key={`label-${r.id}`}
-              className="sticky left-0 z-10 border-r border-line bg-surface px-3 py-2 text-sm font-medium text-fg flex items-center"
-              style={{ gridRow: i + 2, gridColumn: 1 }}
+        {dragError ? (
+          <div
+            role="alert"
+            className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger flex items-start justify-between gap-2"
+          >
+            <span>{dragError}</span>
+            <button
+              type="button"
+              onClick={() => setDragError(null)}
+              className="text-danger/70 hover:text-danger text-[10px] uppercase tracking-wider"
             >
-              <span className="truncate">{r.name}</span>
-            </div>
-          ))}
+              Dismiss
+            </button>
+          </div>
+        ) : null}
 
-          {/* Empty-cell buttons. Each (resource × slot) becomes a
-              clickable target. The few cells under a session/block
-              get a disabled/hidden treatment so the overlay's
-              click handler wins. */}
-          {resources.map((r, i) =>
-            Array.from({ length: SLOTS }).map((_, slotIdx) => {
-              const key = `${r.id}-${slotIdx}`;
-              const isOccupied = occupiedSlots.has(key);
+        <div className="overflow-x-auto rounded-lg border border-line">
+          <div className="relative grid bg-surface min-w-fit" style={gridStyle}>
+            {/* Header corner cell. */}
+            <div
+              className="sticky left-0 z-20 border-b border-r border-line bg-surface"
+              style={{ gridRow: 1, gridColumn: 1 }}
+            />
+
+            {/* Time-slot headers. */}
+            {Array.from({ length: SLOTS }).map((_, slotIdx) => {
+              const col = slotIdx + 2;
+              const isHour = slotIdx % 2 === 0;
+              const hour24 = FIRST_HOUR + Math.floor(slotIdx / 2);
               return (
-                <button
-                  key={`cell-${key}`}
-                  type="button"
-                  onClick={isOccupied ? undefined : () => openCreateAt(r, slotIdx)}
-                  disabled={isOccupied}
-                  tabIndex={isOccupied ? -1 : 0}
-                  aria-label={
-                    isOccupied
-                      ? undefined
-                      : `Create on ${r.name} at ${formatHour(FIRST_HOUR + Math.floor(slotIdx / 2))}${
-                          slotIdx % 2 === 1 ? ":30" : ""
-                        }`
-                  }
+                <div
+                  key={`h-${slotIdx}`}
                   className={[
-                    "border-b border-line text-left",
+                    "border-b border-line text-[10px] uppercase tracking-wider text-fg-muted",
+                    "flex items-end pb-1.5 pl-1",
                     slotIdx % 2 === 0
                       ? "border-l border-line-strong"
                       : "border-l border-line/40",
-                    isOccupied
-                      ? "cursor-default"
-                      : "hover:bg-gold/5 focus-visible:outline-none focus-visible:bg-gold/10 transition-colors",
                   ].join(" ")}
-                  style={{ gridRow: i + 2, gridColumn: slotIdx + 2 }}
+                  style={{ gridRow: 1, gridColumn: col }}
+                >
+                  {isHour ? formatHour(hour24) : ""}
+                </div>
+              );
+            })}
+
+            {/* Resource label cells. */}
+            {resources.map((r, i) => (
+              <div
+                key={`label-${r.id}`}
+                className="sticky left-0 z-10 border-r border-line bg-surface px-3 py-2 text-sm font-medium text-fg flex items-center"
+                style={{ gridRow: i + 2, gridColumn: 1 }}
+              >
+                <span className="truncate">{r.name}</span>
+              </div>
+            ))}
+
+            {/* Cells — droppable + clickable when empty. */}
+            {resources.map((r, i) =>
+              Array.from({ length: SLOTS }).map((_, slotIdx) => (
+                <DroppableCell
+                  key={`cell-${r.id}-${slotIdx}`}
+                  resource={r}
+                  slotIdx={slotIdx}
+                  row={i + 2}
+                  isOccupied={occupiedSlots.has(`${r.id}-${slotIdx}`)}
+                  isDraggingSession={draggingSessionId !== null}
+                  onCreate={() => openCreateAt(r, slotIdx)}
+                />
+              )),
+            )}
+
+            {/* Blocks. */}
+            {visibleBlocks.map((b) => {
+              const row = resourceRow.get(b.resourceId);
+              if (!row) return null;
+              const placement = placeOnGrid(b.startAt, b.endAt);
+              if (!placement) return null;
+              const isPending = pendingDeleteBlockId === b.id;
+              return (
+                <button
+                  key={`block-${b.id}`}
+                  type="button"
+                  onClick={() => handleDeleteBlock(b)}
+                  disabled={isPending}
+                  className={[
+                    "m-0.5 rounded border border-dashed border-danger/60 bg-danger/10 px-2 py-1 text-[11px] text-danger",
+                    "flex items-center min-w-0 text-left",
+                    "hover:bg-danger/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors",
+                    isPending ? "opacity-50" : "",
+                  ].join(" ")}
+                  style={{
+                    gridRow: row,
+                    gridColumn: `${placement.col} / span ${placement.span}`,
+                    zIndex: 1,
+                  }}
+                  title={`Blocked: ${b.reason} (click to delete)`}
+                >
+                  <span className="truncate font-medium">{b.reason}</span>
+                </button>
+              );
+            })}
+
+            {/* Sessions — draggable + clickable for edit. */}
+            {visibleSessions.map((s) => {
+              const row = resourceRow.get(s.resourceId);
+              if (!row) return null;
+              const placement = placeOnGrid(s.startAt, s.endAt);
+              if (!placement) return null;
+              const resource = resources.find((r) => r.id === s.resourceId);
+              return (
+                <DraggableSession
+                  key={`s-${s.id}`}
+                  session={s}
+                  resource={resource ?? null}
+                  row={row}
+                  placement={placement}
+                  onEdit={() => openEditSession(s)}
                 />
               );
-            }),
-          )}
-
-          {/* Blocked-time blocks. */}
-          {visibleBlocks.map((b) => {
-            const row = resourceRow.get(b.resourceId);
-            if (!row) return null;
-            const placement = placeOnGrid(b.startAt, b.endAt);
-            if (!placement) return null;
-            const isPending = pendingDeleteBlockId === b.id;
-            return (
-              <button
-                key={`block-${b.id}`}
-                type="button"
-                onClick={() => handleDeleteBlock(b)}
-                disabled={isPending}
-                className={[
-                  "m-0.5 rounded border border-dashed border-danger/60 bg-danger/10 px-2 py-1 text-[11px] text-danger",
-                  "flex items-center min-w-0 text-left",
-                  "hover:bg-danger/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors",
-                  isPending ? "opacity-50" : "",
-                ].join(" ")}
-                style={{
-                  gridRow: row,
-                  gridColumn: `${placement.col} / span ${placement.span}`,
-                  zIndex: 1,
-                }}
-                title={`Blocked: ${b.reason} (click to delete)`}
-              >
-                <span className="truncate font-medium">{b.reason}</span>
-              </button>
-            );
-          })}
-
-          {/* Session blocks. */}
-          {visibleSessions.map((s) => {
-            const row = resourceRow.get(s.resourceId);
-            if (!row) return null;
-            const placement = placeOnGrid(s.startAt, s.endAt);
-            if (!placement) return null;
-            const resource = resources.find((r) => r.id === s.resourceId);
-            const accent = resource ? typeBorder(resource.type) : "";
-            const tooltip = [
-              s.coachName,
-              s.useType ? cap(s.useType) : null,
-              s.note,
-            ]
-              .filter(Boolean)
-              .join(" · ");
-            return (
-              <button
-                key={`s-${s.id}`}
-                type="button"
-                onClick={() => openEditSession(s)}
-                className={`m-0.5 rounded border border-line bg-surface-2 ${accent} px-2 py-1 text-[11px] text-fg flex items-center gap-1.5 min-w-0 text-left hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors`}
-                style={{
-                  gridRow: row,
-                  gridColumn: `${placement.col} / span ${placement.span}`,
-                  zIndex: 1,
-                }}
-                title={tooltip}
-              >
-                <span className="truncate font-medium">{s.coachName}</span>
-                {s.useType ? (
-                  <span className="text-[9px] uppercase tracking-wider text-fg-subtle shrink-0">
-                    {s.useType[0]}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
+            })}
+          </div>
         </div>
-      </div>
 
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] text-fg-muted">
-        <LegendDot className="border-l-4 border-l-gold" label="Cage" />
-        <LegendDot className="border-l-4 border-l-success" label="Bullpen" />
-        <LegendDot className="border-l-4 border-l-warning" label="Weight Room" />
-        <LegendDot
-          className="border border-dashed border-danger/60 bg-danger/10"
-          label="Blocked"
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] text-fg-muted">
+          <LegendDot className="border-l-4 border-l-gold" label="Cage" />
+          <LegendDot className="border-l-4 border-l-success" label="Bullpen" />
+          <LegendDot className="border-l-4 border-l-warning" label="Weight Room" />
+          <LegendDot
+            className="border border-dashed border-danger/60 bg-danger/10"
+            label="Blocked"
+          />
+          <span className="text-fg-subtle">
+            · Click empty cell to create. Click session to edit, block to
+            delete. Drag a session to move it.
+          </span>
+        </div>
+
+        <ScheduleCreateDialog
+          open={dialog.kind === "create"}
+          onClose={close}
+          coaches={coaches}
+          resources={sessionResourceOptions}
+          prefill={dialog.kind === "create" ? dialog.prefill : null}
         />
-        <span className="text-fg-subtle">
-          · Click an empty cell to create. Click a session to edit, a block to delete.
-        </span>
+
+        <SessionFormDialog
+          open={dialog.kind === "edit-session"}
+          mode="edit"
+          onClose={close}
+          coachOptions={coaches}
+          resourceOptions={sessionResourceOptions}
+          initial={editInitial}
+        />
       </div>
+    </DndContext>
+  );
+}
 
-      <ScheduleCreateDialog
-        open={dialog.kind === "create"}
-        onClose={close}
-        coaches={coaches}
-        resources={sessionResourceOptions}
-        prefill={dialog.kind === "create" ? dialog.prefill : null}
-      />
+function DroppableCell({
+  resource,
+  slotIdx,
+  row,
+  isOccupied,
+  isDraggingSession,
+  onCreate,
+}: {
+  resource: ScheduleResource;
+  slotIdx: number;
+  row: number;
+  isOccupied: boolean;
+  isDraggingSession: boolean;
+  onCreate: () => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `drop-${resource.id}-${slotIdx}`,
+    data: { type: "cell", resourceId: resource.id, slotIdx } as CellDropData,
+    disabled: isOccupied,
+  });
 
-      <SessionFormDialog
-        open={dialog.kind === "edit-session"}
-        mode="edit"
-        onClose={close}
-        coachOptions={coaches}
-        resourceOptions={sessionResourceOptions}
-        initial={editInitial}
-      />
-    </div>
+  // While a drag is in progress, ALL cells should look like neutral
+  // drop targets — the click-to-create hover affordance would be
+  // confusing mid-drag.
+  const baseBorders =
+    slotIdx % 2 === 0
+      ? "border-l border-line-strong"
+      : "border-l border-line/40";
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={isOccupied ? undefined : onCreate}
+      disabled={isOccupied}
+      tabIndex={isOccupied ? -1 : 0}
+      aria-label={
+        isOccupied
+          ? undefined
+          : `Create on ${resource.name} at ${formatHour(FIRST_HOUR + Math.floor(slotIdx / 2))}${
+              slotIdx % 2 === 1 ? ":30" : ""
+            }`
+      }
+      className={[
+        "border-b border-line text-left",
+        baseBorders,
+        isOccupied
+          ? "cursor-default"
+          : isDraggingSession
+            ? isOver
+              ? "bg-gold/20"
+              : "bg-page/40"
+            : "hover:bg-gold/5 focus-visible:outline-none focus-visible:bg-gold/10 transition-colors",
+      ].join(" ")}
+      style={{ gridRow: row, gridColumn: slotIdx + 2 }}
+    />
+  );
+}
+
+function DraggableSession({
+  session,
+  resource,
+  row,
+  placement,
+  onEdit,
+}: {
+  session: ScheduleSession;
+  resource: ScheduleResource | null;
+  row: number;
+  placement: { col: number; span: number };
+  onEdit: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({
+      id: session.id,
+      data: {
+        type: "session",
+        sessionId: session.id,
+        startAt: session.startAt.toISOString(),
+        endAt: session.endAt.toISOString(),
+      } as SessionDragData,
+    });
+
+  const accent = resource ? typeBorder(resource.type) : "";
+  const tooltip = [
+    session.coachName,
+    session.useType ? cap(session.useType) : null,
+    session.note,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const dragTransform = transform
+    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
+    : null;
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={onEdit}
+      {...listeners}
+      {...attributes}
+      className={[
+        "m-0.5 rounded border border-line bg-surface-2 px-2 py-1 text-[11px] text-fg",
+        "flex items-center gap-1.5 min-w-0 text-left",
+        "hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors",
+        accent,
+        isDragging ? "opacity-40 cursor-grabbing" : "cursor-grab",
+      ].join(" ")}
+      style={{
+        gridRow: row,
+        gridColumn: `${placement.col} / span ${placement.span}`,
+        zIndex: isDragging ? 30 : 2,
+        ...dragTransform,
+      }}
+      title={tooltip}
+    >
+      <span className="truncate font-medium">{session.coachName}</span>
+      {session.useType ? (
+        <span className="text-[9px] uppercase tracking-wider text-fg-subtle shrink-0">
+          {session.useType[0]}
+        </span>
+      ) : null}
+    </button>
   );
 }
 
@@ -398,10 +583,7 @@ function placeOnGrid(
   const clippedStart = Math.max(startSlots, 0);
   const clippedEnd = Math.min(endSlots, SLOTS);
   if (clippedEnd <= clippedStart) return null;
-  return {
-    col: clippedStart + 2,
-    span: clippedEnd - clippedStart,
-  };
+  return { col: clippedStart + 2, span: clippedEnd - clippedStart };
 }
 
 function typeBorder(type: ResourceType): string {

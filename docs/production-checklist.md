@@ -377,12 +377,13 @@ Now we build product. All work below uses primitives from Stages A & B.
 - Est: 1.5 h.
 - **Done:** Schedule grid is now a client component ([_components/schedule-grid.tsx](../src/app/admin/schedule/_components/schedule-grid.tsx)) — sessions render as `<button>` elements that open the existing C7 `SessionFormDialog` in edit mode with the row's values pre-filled. Blocks render as buttons too: click → native `confirm()` → `deleteBlockAction`. **Patched a pre-existing C7 bug along the way:** [session-form-dialog.tsx](../src/app/admin/sessions/_components/session-form-dialog.tsx) computed defaults via `useMemo(initial)` but keyed the `<form>` on `${mode}-fresh` constant — so opening edit on a different row kept the first row's `defaultValue`s locked in. Key now includes `initial.id`, matching the D2 coach EditSessionDialog pattern. Without this fix the grid's edit click would have shown stale values across multiple edits. Browser-verified: click an existing session block → dialog opens with correct coach + resource + use type + start pre-selected.
 
-### G3. Drag-to-move — `[ ]`
+### G3. Drag-to-move — `[x]`
 - Library: `@dnd-kit/core` (best React DnD for grids).
 - Drag a session cell to a new time/resource → calls `updateSession` with new coords.
 - Validate against overlap (DB constraint will reject, surface as UI error).
 - Acceptance: drag works on desktop, touch-drag on tablet.
 - Est: 5 h.
+- **Done:** `@dnd-kit/core` 6.x installed. Sessions wrapped in `useDraggable` via a new `<DraggableSession>` component; every grid cell wrapped in `useDroppable` via `<DroppableCell>`. `DndContext` at the grid root with both `PointerSensor` (`distance: 5` activation, so clicks pass through cleanly) and `TouchSensor` (`delay: 200, tolerance: 5` for iPad). `onDragEnd` computes new `(resourceId, startAt)` from the drop target, preserves duration via `(endAt - startAt)` ms, calls the existing `updateSession` server action, and snaps back automatically on `SessionOverlapError` / `BlockedTimeError` — error message surfaces in a dismissable danger banner above the grid (auto-clears in 6s). While a drag is active, all cells render as neutral drop targets and the hovered target highlights gold (`bg-gold/20`). Browser-verified at 1400×900: dragged David Lusk session from Cage 1 @ 10 AM → Cage 3 @ 3 PM; server action fired with the correct payload, grid revalidated to show the session at the new (row 4, col 16/span 2) position, duration intact.
 
 ---
 

@@ -111,12 +111,13 @@ Rationale: install error visibility, CI, and migration safety **before** any new
 
 Rationale: build the **reusable primitives** that all subsequent server actions will use. Doing this first means Phase 2 writes against solid abstractions instead of inlining validation/auth/audit logic that you'd refactor later.
 
-### B1. Install Zod + validation conventions — `[ ]`
-- `npm i zod`.
+### B1. Install Zod + validation conventions — `[x]`
+- `npm i zod`. (already installed at 4.4.3 from prior work)
 - Create `src/lib/schemas/` directory. One file per entity (`session.ts`, `coach.ts`, `rate-override.ts`).
 - Pattern: each file exports `createXSchema`, `updateXSchema`, inferred TS types via `z.infer`.
 - Acceptance: a placeholder `src/lib/schemas/user.ts` exists and is imported in one server action successfully.
 - Est: 30 min.
+- **Done:** `src/lib/schemas/user.ts` (createUserSchema, updateUserSchema, userRoleSchema, inferred types) imported by `src/app/coach/actions.ts` (`updateOwnProfile`). Convention established for subsequent entity schemas.
 
 ### B2. Pure billing helpers — `[ ]`
 - Create `src/lib/billing.ts`. Pure functions only. No DB calls, no React.

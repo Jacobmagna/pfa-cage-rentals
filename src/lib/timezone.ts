@@ -85,13 +85,6 @@ export function formatPfaMonthYear(d: Date): string {
 }
 
 /**
- * Returns the wall-clock parts (year, month, day, hour, minute) at
- * `d` in PFA TZ. Useful for "what is the current PFA day" without
- * relying on the runtime's local TZ.
- *
- * Month is 1-indexed (matches Date.UTC's convention NOT Date()'s).
- */
-/**
  * Converts a PFA wall-clock date+time to its UTC instant. Inverse of
  * formatPfaDate + formatPfaTime: format(pfaWallClockToUtc(d, t))
  * round-trips.
@@ -124,6 +117,13 @@ export function pfaWallClockToUtc(date: string, time: string): Date {
   return new Date(naive.getTime() - offsetMin * 60_000);
 }
 
+/**
+ * Returns the wall-clock parts (year, month, day, hour, minute) at
+ * `d` in PFA TZ. Useful for "what is the current PFA day" without
+ * relying on the runtime's local TZ.
+ *
+ * Month is 1-indexed (matches Date.UTC's convention NOT Date()'s).
+ */
 export function pfaParts(d: Date): {
   year: number;
   month: number; // 1-12

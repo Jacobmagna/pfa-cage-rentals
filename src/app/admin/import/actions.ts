@@ -41,12 +41,21 @@ export async function previewOrCommitImport(
   const intent = formData.get("intent")?.toString();
 
   if (intent === "commit") {
-    const decisions = parseDecisions(formData.get("decisions")?.toString());
+    let decisions;
+    try {
+      decisions = parseDecisions(formData.get("decisions")?.toString());
+    } catch (err) {
+      return {
+        stage: "error",
+        message: `Could not parse your decisions — please re-preview the file. (${err instanceof Error ? err.message : "JSON parse error"})`,
+      };
+    }
     try {
       const result = await executeCommitPlan(session.user, buf, decisions);
       revalidatePath("/admin/schedule");
       revalidatePath("/admin/sessions");
       revalidatePath("/admin/coaches");
+      revalidatePath("/admin/audit");
       return { stage: "committed", result };
     } catch (err) {
       return {
@@ -70,25 +79,23 @@ export async function previewOrCommitImport(
 
 function parseDecisions(raw: string | undefined): Decision[] {
   if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    const out: Decision[] = [];
-    for (const item of parsed) {
-      if (!item || typeof item !== "object") continue;
-      const { rawName, action, mappedUserId } = item as Record<string, unknown>;
-      if (typeof rawName !== "string") continue;
-      if (!isDecisionAction(action)) continue;
-      const d: Decision = { rawName, action };
-      if (action === "map" && typeof mappedUserId === "string") {
-        d.mappedUserId = mappedUserId;
-      }
-      out.push(d);
-    }
-    return out;
-  } catch {
-    return [];
+  const parsed = JSON.parse(raw);
+  if (!Array.isArray(parsed)) {
+    throw new Error("decisions must be a JSON array");
   }
+  const out: Decision[] = [];
+  for (const item of parsed) {
+    if (!item || typeof item !== "object") continue;
+    const { rawName, action, mappedUserId } = item as Record<string, unknown>;
+    if (typeof rawName !== "string") continue;
+    if (!isDecisionAction(action)) continue;
+    const d: Decision = { rawName, action };
+    if (action === "map" && typeof mappedUserId === "string") {
+      d.mappedUserId = mappedUserId;
+    }
+    out.push(d);
+  }
+  return out;
 }
 
 function isDecisionAction(v: unknown): v is DecisionAction {

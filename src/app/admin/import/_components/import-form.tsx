@@ -18,20 +18,34 @@ const INITIAL: ImportFormState = { stage: "idle" };
 
 export function ImportForm({ coaches }: { coaches: CoachOption[] }) {
   const [state, formAction, isPending] = useActionState(previewOrCommitImport, INITIAL);
-  const [decisions, setDecisions] = useState<Record<string, Decision>>({});
+  // Admin overrides only — unset rows fall back to suggestedAction at render + submit time.
+  const [overrides, setOverrides] = useState<Record<string, Decision>>({});
 
-  function updateDecision(rawName: string, patch: Partial<Decision>) {
-    setDecisions((prev) => ({
+  function updateOverride(rawName: string, patch: Partial<Decision>, suggestedAction: DecisionAction) {
+    setOverrides((prev) => ({
       ...prev,
       [rawName]: {
-        ...{ rawName, action: "auto" as DecisionAction },
+        ...{ rawName, action: suggestedAction },
         ...prev[rawName],
         ...patch,
       },
     }));
   }
 
-  const decisionsJSON = JSON.stringify(Object.values(decisions));
+  const groups = state.stage === "preview" ? state.preview.groups : [];
+  // Build the complete decision array from suggestedAction defaults + admin overrides.
+  // Always send one decision per group so the server doesn't need an implicit fallback.
+  const decisionsJSON = JSON.stringify(
+    groups.map((g) => {
+      const override = overrides[g.rawName];
+      if (override) return override;
+      const d: Decision = { rawName: g.rawName, action: g.suggestedAction };
+      if (g.suggestedAction === "map" && g.existingUserMatch) {
+        d.mappedUserId = g.existingUserMatch.id;
+      }
+      return d;
+    }),
+  );
 
   return (
     <form action={formAction} className="space-y-6">
@@ -51,8 +65,8 @@ export function ImportForm({ coaches }: { coaches: CoachOption[] }) {
           groups={state.preview.groups}
           totalParsed={state.preview.totalParsed}
           coaches={coaches}
-          decisions={decisions}
-          updateDecision={updateDecision}
+          overrides={overrides}
+          updateOverride={updateOverride}
           isPending={isPending}
         />
       )}
@@ -96,37 +110,30 @@ function PreviewSection({
   groups,
   totalParsed,
   coaches,
-  decisions,
-  updateDecision,
+  overrides,
+  updateOverride,
   isPending,
 }: {
   fileName: string;
   groups: GroupSummary[];
   totalParsed: number;
   coaches: CoachOption[];
-  decisions: Record<string, Decision>;
-  updateDecision: (rawName: string, patch: Partial<Decision>) => void;
+  overrides: Record<string, Decision>;
+  updateOverride: (rawName: string, patch: Partial<Decision>, suggestedAction: DecisionAction) => void;
   isPending: boolean;
 }) {
   const effective = (g: GroupSummary): DecisionAction =>
-    decisions[g.rawName]?.action ?? g.suggestedAction;
+    overrides[g.rawName]?.action ?? g.suggestedAction;
 
-  const counts = {
-    autoMap: 0,
-    create: 0,
-    skip: 0,
-    map: 0,
-    sessionsImporting: 0,
-    sessionsSkipping: 0,
-  };
+  const counts = { skip: 0, sessionsImporting: 0, sessionsSkipping: 0 };
   for (const g of groups) {
     const a = effective(g);
-    if (a === "auto") counts.autoMap += 1;
-    if (a === "create") counts.create += 1;
-    if (a === "skip") counts.skip += 1;
-    if (a === "map") counts.map += 1;
-    if (a === "skip") counts.sessionsSkipping += g.count;
-    else counts.sessionsImporting += g.count;
+    if (a === "skip") {
+      counts.skip += 1;
+      counts.sessionsSkipping += g.count;
+    } else {
+      counts.sessionsImporting += g.count;
+    }
   }
 
   return (
@@ -180,11 +187,14 @@ function PreviewSection({
                     <select
                       value={action}
                       onChange={(e) =>
-                        updateDecision(g.rawName, { action: e.target.value as DecisionAction })
+                        updateOverride(
+                          g.rawName,
+                          { action: e.target.value as DecisionAction },
+                          g.suggestedAction,
+                        )
                       }
                       className="rounded border border-line bg-surface-2 px-2 py-1 text-xs text-fg"
                     >
-                      <option value="auto">Auto (use canonical)</option>
                       <option value="create">Create new coach</option>
                       <option value="map">Map to existing</option>
                       <option value="skip">Skip</option>
@@ -194,12 +204,16 @@ function PreviewSection({
                     {action === "map" ? (
                       <select
                         value={
-                          decisions[g.rawName]?.mappedUserId ??
+                          overrides[g.rawName]?.mappedUserId ??
                           g.existingUserMatch?.id ??
                           ""
                         }
                         onChange={(e) =>
-                          updateDecision(g.rawName, { mappedUserId: e.target.value })
+                          updateOverride(
+                            g.rawName,
+                            { mappedUserId: e.target.value },
+                            g.suggestedAction,
+                          )
                         }
                         className="rounded border border-line bg-surface-2 px-2 py-1 text-xs text-fg"
                       >

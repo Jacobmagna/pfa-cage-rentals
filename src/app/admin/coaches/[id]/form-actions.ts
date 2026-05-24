@@ -10,7 +10,6 @@
 
 import { ZodError } from "zod";
 import { upsertRateOverride } from "./actions";
-import { RateOverrideNotFoundError } from "@/lib/errors";
 
 export type RateOverrideFormValues = {
   coachId: string;
@@ -64,13 +63,9 @@ function translate(
   err: unknown,
   values: RateOverrideFormValues,
 ): RateOverrideActionResult {
-  if (err instanceof RateOverrideNotFoundError) {
-    return {
-      ok: false,
-      error: { code: err.code, message: err.message },
-      values,
-    };
-  }
+  // No typed errors are reachable from the upsert path (overlap /
+  // not-found don't apply to upsert). Just Zod + generic Error
+  // (the dollar-parser throws plain Error with friendly copy).
   if (err instanceof ZodError) {
     const first = err.issues[0];
     return {

@@ -108,10 +108,7 @@ function Row({
     setRemoveError(null);
     startRemove(async () => {
       try {
-        await deleteRateOverride({
-          coachId,
-          resourceType: row.resourceType,
-        });
+        await deleteRateOverride(coachId, row.resourceType);
       } catch (err) {
         setRemoveError(
           err instanceof Error

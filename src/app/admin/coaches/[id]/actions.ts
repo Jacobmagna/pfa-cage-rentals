@@ -14,6 +14,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/authz";
+import type { ResourceType } from "@/lib/billing";
 import {
   deleteRateOverrideInternal,
   upsertRateOverrideInternal,
@@ -33,18 +34,13 @@ export async function upsertRateOverride(input: unknown) {
   return result;
 }
 
-export async function deleteRateOverride(input: unknown) {
+// Explicit args (matches deleteSession(id) / deleteBlock(id) convention).
+// The internal still Zod-parses for defense-in-depth.
+export async function deleteRateOverride(
+  coachId: string,
+  resourceType: ResourceType,
+) {
   const session = await requireRole("admin");
-  await deleteRateOverrideInternal(session.user, input);
-  // input is unknown post-parse; the internal already validated. For
-  // revalidation we pull coachId out at the boundary — duplicate
-  // parse is cheap and keeps this function's authz layer honest.
-  if (
-    typeof input === "object" &&
-    input !== null &&
-    "coachId" in input &&
-    typeof (input as { coachId: unknown }).coachId === "string"
-  ) {
-    revalidateOverrideSurfaces((input as { coachId: string }).coachId);
-  }
+  await deleteRateOverrideInternal(session.user, { coachId, resourceType });
+  revalidateOverrideSurfaces(coachId);
 }

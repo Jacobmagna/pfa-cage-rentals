@@ -225,19 +225,13 @@ export function ScheduleGrid({
     };
   };
 
-  const handleCellClick = (
-    resourceId: string,
-    slotIdx: number,
-    onCreate: () => void,
-  ) => {
+  const handleCellClick = (onCreate: () => void) => {
     // Paint just committed in pointerup → swallow the trailing click
     // so we don't ALSO open the single-cell create dialog.
     if (suppressNextClickRef.current) {
       suppressNextClickRef.current = false;
       return;
     }
-    void resourceId;
-    void slotIdx;
     onCreate();
   };
 
@@ -706,11 +700,7 @@ function DroppableCell({
     slotIdx: number,
     e: React.PointerEvent<HTMLButtonElement>,
   ) => void;
-  onClickWrapped: (
-    resourceId: string,
-    slotIdx: number,
-    onCreate: () => void,
-  ) => void;
+  onClickWrapped: (onCreate: () => void) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `drop-${resource.id}-${slotIdx}`,
@@ -730,11 +720,7 @@ function DroppableCell({
     <button
       ref={setNodeRef}
       type="button"
-      onClick={
-        isOccupied
-          ? undefined
-          : () => onClickWrapped(resource.id, slotIdx, onCreate)
-      }
+      onClick={isOccupied ? undefined : () => onClickWrapped(onCreate)}
       onPointerDown={
         isOccupied ? undefined : (e) => onPointerDown(resource.id, slotIdx, e)
       }

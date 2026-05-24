@@ -57,3 +57,48 @@ jobs:
 
       - name: Test
         run: npm run test:coverage
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    needs: verify
+    timeout-minutes: 10
+
+    # Integration tests need a real Neon dev branch. Set
+    # INTEGRATION_DATABASE_URL in repo secrets to enable. When the
+    # secret is empty (forks, fresh clones, unconfigured repos) the
+    # job exits 0 with a skip message — keeps the gate non-blocking.
+    env:
+      INTEGRATION_DATABASE_URL: ${{ secrets.INTEGRATION_DATABASE_URL }}
+      AUTH_SECRET: ci-only-secret-not-used-in-production
+      AUTH_URL: http://localhost:3000
+      AUTH_GOOGLE_ID: ci-placeholder.apps.googleusercontent.com
+      AUTH_GOOGLE_SECRET: ci-placeholder-secret
+      AUTH_RESEND_KEY: re_ci_placeholder
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run integration tests
+        run: |
+          if [ -z "$INTEGRATION_DATABASE_URL" ]; then
+            echo "INTEGRATION_DATABASE_URL not set; skipping integration tests"
+            exit 0
+          fi
+          # db:migrate + db:seed both read DATABASE_URL from .env.local
+          # or process.env. Point them at the integration branch so the
+          # schema and seed rows are guaranteed to be in sync before
+          # tests run. Both are idempotent.
+          DATABASE_URL="$INTEGRATION_DATABASE_URL" npm run db:migrate
+          DATABASE_URL="$INTEGRATION_DATABASE_URL" npm run db:seed
+          npm run test:integration

@@ -15,12 +15,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     verificationTokensTable: verificationTokens,
   }),
   providers: [
-    Google,
+    // allowDangerousEmailAccountLinking: a user who already exists via the
+    // other provider (e.g. magic-link first, then Google) gets the new
+    // account auto-linked to their existing user row by matching email,
+    // instead of being rejected with OAuthAccountNotLinked. Safe for our
+    // trust model: admin emails are hardcoded, coaches use real verified
+    // addresses, and there's no high-value takeover target here.
+    Google({ allowDangerousEmailAccountLinking: true }),
     Resend({
       // Temporary sender on docinsured.com (Jacob's other verified Resend domain).
       // Swap to noreply@pfacagerentals.com once that domain is verified in Resend
       // (blocked on Resend free-tier 1-domain limit; revisit before launch).
       from: "PFA Cage Rentals <pfa@docinsured.com>",
+      allowDangerousEmailAccountLinking: true,
     }),
   ],
   session: { strategy: "database" },

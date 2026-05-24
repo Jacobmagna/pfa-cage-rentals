@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: ['**']
 
 # Cancel in-progress runs when a new commit lands on the same branch / PR.
 # Saves CI minutes and gives faster feedback on the latest push.

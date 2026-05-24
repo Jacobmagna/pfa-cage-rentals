@@ -477,7 +477,7 @@ is a second Resend account for PFA, free tier covers the volume.
 - Acceptance: mxtoolbox SPF + DMARC checks pass.
 - Est: 10 min.
 
-### J3. Mail-tester.com score — `[ ]`
+### J3. Mail-tester.com score — `[x]`
 - Send test magic-link to the address mail-tester.com gives you.
 - Target: ≥ 9/10.
 - Fix any flagged issues (likely link-text, list-unsubscribe header, etc.).

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { auth, signOut } from "@/auth";
+import { auth } from "@/auth";
+import { AppShell } from "../_components/app-shell";
 
 export default async function AdminHome() {
   const session = await auth();
@@ -7,32 +8,72 @@ export default async function AdminHome() {
   if (session.user.role !== "admin") redirect("/coach");
 
   return (
-    <main className="flex flex-1 flex-col items-center justify-center gap-6 px-6">
-      <div className="w-full max-w-md space-y-2 text-center">
-        <p className="text-xs uppercase tracking-wider text-foreground/50">
-          Admin
+    <AppShell role="admin">
+      <div className="space-y-2 mb-10">
+        <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
+          Dashboard
         </p>
-        <h1 className="text-2xl font-semibold">
-          Welcome, {session.user.name ?? session.user.email}
+        <h1 className="text-3xl font-bold tracking-tight">
+          Welcome back, {session.user.name?.split(" ")[0] ?? "Admin"}
         </h1>
-        <p className="text-sm text-foreground/60">
-          Phase 1 foundation. Schedule grid, reports, and coach management land
-          in later phases.
+        <p className="text-sm text-fg-muted">
+          Phase 1 foundation is live. Schedule grid, reports, coach
+          management, and rate overrides land in later phases.
         </p>
       </div>
-      <form
-        action={async () => {
-          "use server";
-          await signOut({ redirectTo: "/" });
-        }}
-      >
-        <button
-          type="submit"
-          className="rounded-md border border-foreground/15 px-3 py-1.5 text-xs hover:bg-foreground/[0.04]"
-        >
-          Sign out
-        </button>
-      </form>
-    </main>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <PlaceholderCard
+          eyebrow="Phase 2"
+          title="Sessions"
+          description="Manual session entry for admins. Drops next."
+        />
+        <PlaceholderCard
+          eyebrow="Phase 4"
+          title="Reports"
+          description="Monthly Excel export by coach and date range."
+        />
+        <PlaceholderCard
+          eyebrow="Phase 5"
+          title="Schedule grid"
+          description="The Excel-style grid view, real-time and editable."
+        />
+        <PlaceholderCard
+          eyebrow="Phase 7"
+          title="Coaches & rates"
+          description="Manage per-coach rate overrides."
+        />
+        <PlaceholderCard
+          eyebrow="Phase 7"
+          title="Block-off times"
+          description="Mark cages unavailable for closure / maintenance."
+        />
+        <PlaceholderCard
+          eyebrow="Phase 8"
+          title="Historical import"
+          description="One-time backfill from source_data.xlsx."
+        />
+      </div>
+    </AppShell>
+  );
+}
+
+function PlaceholderCard({
+  eyebrow,
+  title,
+  description,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="rounded-lg border border-line bg-surface p-5 transition-colors hover:border-line-strong">
+      <p className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
+        {eyebrow}
+      </p>
+      <h3 className="mt-1 text-base font-semibold text-fg">{title}</h3>
+      <p className="mt-1.5 text-sm text-fg-muted">{description}</p>
+    </div>
   );
 }

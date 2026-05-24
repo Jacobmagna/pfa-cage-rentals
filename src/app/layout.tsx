@@ -14,7 +14,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "PFA Cage Rentals",
-  description: "Cage, bullpen, and weight-room rental tracking for PFA Baseball.",
+  description:
+    "Cage, bullpen, and weight-room rental tracking for PFA Baseball.",
 };
 
 export default function RootLayout({
@@ -25,9 +26,11 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col bg-page text-fg antialiased">
+        {children}
+      </body>
     </html>
   );
 }

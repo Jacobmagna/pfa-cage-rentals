@@ -107,9 +107,11 @@ Rationale: install error visibility, CI, and migration safety **before** any new
 
 ---
 
-# STAGE B — Data foundation (still BEFORE Phase 2 product work)
+# STAGE B — Data foundation (still BEFORE Phase 2 product work) ✓ COMPLETE 2026-05-24
 
 Rationale: build the **reusable primitives** that all subsequent server actions will use. Doing this first means Phase 2 writes against solid abstractions instead of inlining validation/auth/audit logic that you'd refactor later.
+
+**Status:** All 7 items shipped. Stage C (product work) builds directly on these primitives: Zod schemas + billing math + audit logging + auth guards + rate limiting + tests + CI test gate.
 
 ### B1. Install Zod + validation conventions — `[x]`
 - `npm i zod`. (already installed at 4.4.3 from prior work)

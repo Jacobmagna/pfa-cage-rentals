@@ -484,7 +484,7 @@ is a second Resend account for PFA, free tier covers the volume.
 - Acceptance: mail-tester score ≥ 9/10.
 - Est: 1 h.
 
-### J4. PWA manifest for coach app — `[ ]`
+### J4. PWA manifest for coach app — `[x]`
 - Add `src/app/manifest.ts` returning a Web App Manifest (name, short_name, icons, theme color = `#0a0a0a`, background = `#0a0a0a`).
 - Add iOS-specific tags in layout (apple-touch-icon, status-bar-style).
 - Add 192px + 512px PNG icons.

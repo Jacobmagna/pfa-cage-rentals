@@ -510,7 +510,7 @@ is a second Resend account for PFA, free tier covers the volume.
 - Est: 2–3 h. Cross-cutting refactor — touches form-actions, all session/block dialogs, schedule grid, schedule page, coaches page.
 - Priority: P0 before launch.
 
-### J4d. Sign-in page: PFA logo + "cage rentals" wordmark — `[ ]`
+### J4d. Sign-in page: PFA logo + "cage rentals" wordmark — `[x]`
 - **Scope:** the only visual change Jacob wants to the sign-in page (everything else stays). Replace the current text-only "PFA Cage Rentals" heading at the top of [src/app/page.tsx](../src/app/page.tsx) with: (1) the PFA logo lifted from pfasports.com (above the Google sign-in button), (2) the words "cage rentals" rendered as text below the logo.
 - **Asset prep:** download the logo from pfasports.com → drop into `public/pfa-logo.svg` (prefer SVG; fall back to PNG @2x if only raster is available). Verify it works on the dark background (gold-on-dark already matches the design spec); recolor if needed.
 - **Acceptance:** sign-in page shows the logo + "cage rentals" wordmark; renders correctly on mobile (375×812) and desktop (1280×900); no CSP / loading regressions.

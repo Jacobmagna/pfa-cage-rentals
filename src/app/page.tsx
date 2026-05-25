@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
@@ -31,13 +32,18 @@ export default async function Home({
     <main className="flex flex-1 items-center justify-center px-6 py-12">
       <div className="w-full max-w-sm">
         <div className="rounded-lg border border-line bg-surface px-8 py-10 shadow-[0_1px_0_0_rgba(255,255,255,0.04)_inset]">
-          <div className="space-y-2 text-center mb-8">
-            <h1 className="text-2xl font-bold tracking-tight text-gold">
-              PFA Cage Rentals
+          <div className="text-center mb-8">
+            <Image
+              src="/pfa-logo.png"
+              alt="PFA Sports"
+              width={813}
+              height={813}
+              priority
+              className="mx-auto h-20 w-auto"
+            />
+            <h1 className="mt-3 text-sm uppercase tracking-[0.28em] text-gold font-semibold">
+              Cage Rentals
             </h1>
-            <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
-              Cage · Bullpen · Weight Room
-            </p>
           </div>
 
           <div className="space-y-4">

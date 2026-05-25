@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, GitMerge } from "lucide-react";
 import { PFA_TIMEZONE } from "@/lib/timezone";
+import { MergeCoachDialog } from "./merge-coach-dialog";
 
 // Client-side sortable table. The page pre-aggregates one row per
 // coach, so sorting here is purely O(n log n) on a small array — no
@@ -18,6 +19,13 @@ export type CoachRow = {
   joinedAt: Date;
   sessionsThisMonth: number;
   owedThisMonthCents: number;
+  isSynthetic: boolean;
+};
+
+export type MergeTarget = {
+  id: string;
+  name: string | null;
+  email: string;
 };
 
 type SortKey =
@@ -38,11 +46,18 @@ const DEFAULT_DIR: Record<SortKey, SortDir> = {
   owedThisMonthCents: "desc",
 };
 
-export function CoachesTable({ rows }: { rows: CoachRow[] }) {
+export function CoachesTable({
+  rows,
+  mergeTargets,
+}: {
+  rows: CoachRow[];
+  mergeTargets: MergeTarget[];
+}) {
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({
     key: "name",
     dir: "asc",
   });
+  const [mergeSource, setMergeSource] = useState<CoachRow | null>(null);
 
   const sorted = useMemo(() => {
     const copy = [...rows];
@@ -113,6 +128,12 @@ export function CoachesTable({ rows }: { rows: CoachRow[] }) {
               sort={sort}
               onClick={onHeaderClick}
             />
+            <th
+              scope="col"
+              className="px-4 py-3 font-medium text-right sr-only"
+            >
+              Actions
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -122,12 +143,22 @@ export function CoachesTable({ rows }: { rows: CoachRow[] }) {
               className="border-b border-line/50 last:border-b-0 hover:bg-surface/60 transition-colors"
             >
               <td className="px-4 py-3">
-                <Link
-                  href={`/admin/coaches/${row.id}`}
-                  className="text-fg hover:text-gold transition-colors font-medium"
-                >
-                  {row.name ?? row.email}
-                </Link>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Link
+                    href={`/admin/coaches/${row.id}`}
+                    className="text-fg hover:text-gold transition-colors font-medium"
+                  >
+                    {row.name ?? row.email}
+                  </Link>
+                  {row.isSynthetic ? (
+                    <span
+                      className="inline-flex items-center rounded-full bg-surface-2 px-1.5 py-px text-[10px] font-medium uppercase tracking-wider text-fg-muted ring-1 ring-inset ring-line"
+                      title="Created by the historical import — has no auth tie to a real user"
+                    >
+                      Imported
+                    </span>
+                  ) : null}
+                </div>
               </td>
               <td className="px-4 py-3 text-fg-muted text-xs">{row.email}</td>
               <td className="px-4 py-3 text-fg-muted font-mono tabular-nums text-xs whitespace-nowrap">
@@ -147,10 +178,30 @@ export function CoachesTable({ rows }: { rows: CoachRow[] }) {
                   formatCents(row.owedThisMonthCents)
                 )}
               </td>
+              <td className="px-4 py-3 text-right whitespace-nowrap">
+                {row.isSynthetic ? (
+                  <button
+                    type="button"
+                    onClick={() => setMergeSource(row)}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 h-7 text-[11px] font-medium text-fg-muted hover:text-fg hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+                    title="Re-point this synthetic coach's sessions to a real coach"
+                  >
+                    <GitMerge className="h-3 w-3" />
+                    Merge
+                  </button>
+                ) : null}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
+
+      <MergeCoachDialog
+        open={mergeSource !== null}
+        onClose={() => setMergeSource(null)}
+        source={mergeSource}
+        targets={mergeTargets}
+      />
     </div>
   );
 }

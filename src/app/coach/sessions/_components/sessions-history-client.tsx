@@ -27,9 +27,6 @@ export type HistoryRow = {
   useType: "hitting" | "pitching" | null;
   note: string | null;
   isTeamRental: boolean;
-  slots: number;
-  ratePerSlotCents: number;
-  totalCents: number;
 };
 
 export function SessionsHistoryClient({
@@ -134,11 +131,8 @@ export function SessionsHistoryClient({
                 </div>
 
                 <div className="text-right whitespace-nowrap">
-                  <p className="text-base font-semibold tabular-nums text-fg">
-                    {formatCents(row.totalCents)}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-fg-subtle tabular-nums">
-                    {row.slots} × {formatCents(row.ratePerSlotCents)}
+                  <p className="text-sm font-mono tabular-nums text-fg-muted">
+                    {formatDuration(row.startAt, row.endAt)}
                   </p>
                 </div>
               </div>
@@ -266,6 +260,11 @@ function formatTimeRange(start: Date, end: Date): string {
   return `${startTime} – ${endTime}`;
 }
 
-function formatCents(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
+function formatDuration(start: Date, end: Date): string {
+  const minutes = Math.round((end.getTime() - start.getTime()) / 60_000);
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours === 0) return `${mins} min`;
+  if (mins === 0) return `${hours} hr`;
+  return `${hours} hr ${mins} min`;
 }

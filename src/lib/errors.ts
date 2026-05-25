@@ -129,6 +129,26 @@ export class CoachAlreadyDeletedError extends Error {
   }
 }
 
+// Merge rejected because the source isn't a synthetic import user.
+// Only @imported.local pseudo-coaches can be merged — merging two
+// real coaches would conflate human-vs-human identity changes that
+// belong in a separate flow.
+export class MergeSourceNotSyntheticError extends Error {
+  readonly code = "MERGE_SOURCE_NOT_SYNTHETIC" as const;
+  constructor(public readonly sourceId: string) {
+    super(`Source coach is not a synthetic import user`);
+    this.name = "MergeSourceNotSyntheticError";
+  }
+}
+
+export class MergeTargetSameAsSourceError extends Error {
+  readonly code = "MERGE_TARGET_SAME_AS_SOURCE" as const;
+  constructor(public readonly id: string) {
+    super(`Merge source and target must differ`);
+    this.name = "MergeTargetSameAsSourceError";
+  }
+}
+
 export class BlockConflictsWithSessionError extends Error {
   readonly code = "BLOCK_CONFLICTS_WITH_SESSION" as const;
   constructor(

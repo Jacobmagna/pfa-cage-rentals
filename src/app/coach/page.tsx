@@ -5,20 +5,11 @@ import {
   CalendarDays,
   CalendarPlus,
   ClipboardList,
-  Coins,
+  Clock,
 } from "lucide-react";
 import { db } from "@/db";
-import {
-  coachRateOverrides,
-  resources,
-  sessionsBilling,
-} from "@/db/schema";
+import { sessionsBilling } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
-import {
-  chargeForSession,
-  type RateOverride,
-  type ResourceType,
-} from "@/lib/billing";
 import {
   formatPfaDateLong,
   formatPfaMonthYear,
@@ -27,13 +18,15 @@ import {
 } from "@/lib/timezone";
 import { EditableName } from "../_components/editable-name";
 
-// /coach landing. J4e: real-data dashboard mirror of /admin. Two
-// numbers — sessions logged this month, total owed — plus the two
-// actions a coach actually does (log a new session, review history).
+// /coach landing. Two stat tiles + the two actions a coach actually
+// does (log a new session, review history). Dollar amounts are
+// admin-only — coach rates are variable per-coach and per-resource,
+// and Dad invoices manually outside the app. V2 will add an invoice
+// surface; until then nothing on the coach side touches money.
 //
 // Coach can only see their OWN data here. The WHERE clause on
 // coachId enforces it server-side; URL-guessing another coach's
-// totals is moot.
+// numbers is moot.
 
 export default async function CoachHome() {
   const session = await requireSession();
@@ -45,53 +38,31 @@ export default async function CoachHome() {
   const monthStart = pfaMonthStart(now);
   const monthEndExclusive = pfaMonthEnd(now);
 
-  const [monthSessionRows, overrideRows, [{ count: totalEver }]] =
-    await Promise.all([
-      db
-        .select({
-          coachId: sessionsBilling.coachId,
-          resourceType: resources.type,
-          startAt: sessionsBilling.startAt,
-          endAt: sessionsBilling.endAt,
-        })
-        .from(sessionsBilling)
-        .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
-        .where(
-          and(
-            eq(sessionsBilling.coachId, coachId),
-            gte(sessionsBilling.startAt, monthStart),
-            lt(sessionsBilling.startAt, monthEndExclusive),
-          ),
+  const [monthSessionRows, [{ count: totalEver }]] = await Promise.all([
+    db
+      .select({
+        startAt: sessionsBilling.startAt,
+        endAt: sessionsBilling.endAt,
+      })
+      .from(sessionsBilling)
+      .where(
+        and(
+          eq(sessionsBilling.coachId, coachId),
+          gte(sessionsBilling.startAt, monthStart),
+          lt(sessionsBilling.startAt, monthEndExclusive),
         ),
-      db
-        .select()
-        .from(coachRateOverrides)
-        .where(eq(coachRateOverrides.coachId, coachId)),
-      db
-        .select({ count: drizzleSql<number>`count(*)::int` })
-        .from(sessionsBilling)
-        .where(eq(sessionsBilling.coachId, coachId)),
-    ]);
+      ),
+    db
+      .select({ count: drizzleSql<number>`count(*)::int` })
+      .from(sessionsBilling)
+      .where(eq(sessionsBilling.coachId, coachId)),
+  ]);
 
-  const overrides: RateOverride[] = overrideRows.map((o) => ({
-    coachId: o.coachId,
-    resourceType: o.resourceType,
-    ratePer30MinCents: o.ratePer30MinCents,
-  }));
-  let monthCents = 0;
-  for (const s of monthSessionRows) {
-    const charge = chargeForSession(
-      {
-        coachId: s.coachId,
-        resourceType: s.resourceType as ResourceType,
-        startAt: s.startAt,
-        endAt: s.endAt,
-      },
-      overrides,
-    );
-    monthCents += charge.totalCents;
-  }
   const monthCount = monthSessionRows.length;
+  const monthMinutes = monthSessionRows.reduce(
+    (sum, s) => sum + (s.endAt.getTime() - s.startAt.getTime()) / 60_000,
+    0,
+  );
 
   return (
     <div className="max-w-2xl">
@@ -119,10 +90,14 @@ export default async function CoachHome() {
           }
         />
         <Stat
-          icon={<Coins className="h-4 w-4" />}
-          label="Total this month"
-          value={formatDollars(monthCents)}
-          sub="Based on your current rates"
+          icon={<Clock className="h-4 w-4" />}
+          label={`Hours in ${formatPfaMonthYear(now)}`}
+          value={formatHours(monthMinutes)}
+          sub={
+            monthMinutes === 0
+              ? "—"
+              : "Sum of your logged session durations"
+          }
           accent
         />
       </section>
@@ -138,7 +113,7 @@ export default async function CoachHome() {
           href="/coach/sessions"
           icon={<ClipboardList className="h-4 w-4" />}
           title="My sessions"
-          body="Review history, fix a slot, see your totals."
+          body="Review history, fix a slot."
         />
       </div>
     </div>
@@ -205,6 +180,8 @@ function NavCard({
   );
 }
 
-function formatDollars(cents: number): string {
-  return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+function formatHours(minutes: number): string {
+  // 1.5h instead of "1 hr 30 min" — fits the big-numeric stat-tile aesthetic.
+  const h = minutes / 60;
+  return h % 1 === 0 ? `${h}` : h.toFixed(1);
 }

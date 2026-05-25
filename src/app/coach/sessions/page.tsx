@@ -2,17 +2,8 @@ import Link from "next/link";
 import { desc, eq, sql } from "drizzle-orm";
 import { ArrowLeft, CalendarPlus } from "lucide-react";
 import { db } from "@/db";
-import {
-  coachRateOverrides,
-  resources,
-  sessionsBilling,
-} from "@/db/schema";
+import { resources, sessionsBilling } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
-import {
-  chargeForSession,
-  type RateOverride,
-  type ResourceType,
-} from "@/lib/billing";
 import { SessionsHistoryClient, type HistoryRow } from "./_components/sessions-history-client";
 import type { ResourceOption } from "./_components/types";
 
@@ -24,9 +15,10 @@ const PAGE_SIZE = 20;
 // Pagination is offset-based via ?page=N — cursor would be overkill
 // for v1 scale (~100 rows per coach per month).
 //
-// Rate / total is computed at render time using billing.ts. We fetch
-// the coach's overrides once (typically 0–3 rows) and let
-// chargeForSession decide override-vs-default per session.
+// Money is admin-only: this surface used to render charge totals via
+// billing.ts, but coach-facing dollar amounts are deferred to a V2
+// invoice section (rates are variable per coach and Dad invoices
+// manually). Coaches see what they booked, not what they earned.
 
 type SearchParams = Promise<{ page?: string }>;
 
@@ -60,8 +52,7 @@ export default async function CoachSessionsPage({
     );
   }
 
-  // Fetch session rows + coach's overrides in parallel.
-  const [rawRows, overrides, activeResources] = await Promise.all([
+  const [rawRows, activeResources] = await Promise.all([
     db
       .select({
         id: sessionsBilling.id,
@@ -81,10 +72,6 @@ export default async function CoachSessionsPage({
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db
-      .select()
-      .from(coachRateOverrides)
-      .where(eq(coachRateOverrides.coachId, session.user.id)),
-    db
       .select({
         id: resources.id,
         name: resources.name,
@@ -95,38 +82,17 @@ export default async function CoachSessionsPage({
       .orderBy(resources.sortOrder),
   ]);
 
-  // Adapt DB overrides to the billing.ts shape.
-  const billingOverrides: RateOverride[] = overrides.map((o) => ({
-    coachId: o.coachId,
-    resourceType: o.resourceType,
-    ratePer30MinCents: o.ratePer30MinCents,
+  const rows: HistoryRow[] = rawRows.map((r) => ({
+    id: r.id,
+    resourceId: r.resourceId,
+    resourceName: r.resourceName,
+    resourceType: r.resourceType,
+    startAt: r.startAt,
+    endAt: r.endAt,
+    useType: r.useType,
+    note: r.note,
+    isTeamRental: r.isTeamRental,
   }));
-
-  const rows: HistoryRow[] = rawRows.map((r) => {
-    const charge = chargeForSession(
-      {
-        coachId: session.user.id,
-        resourceType: r.resourceType as ResourceType,
-        startAt: r.startAt,
-        endAt: r.endAt,
-      },
-      billingOverrides,
-    );
-    return {
-      id: r.id,
-      resourceId: r.resourceId,
-      resourceName: r.resourceName,
-      resourceType: r.resourceType,
-      startAt: r.startAt,
-      endAt: r.endAt,
-      useType: r.useType,
-      note: r.note,
-      isTeamRental: r.isTeamRental,
-      slots: charge.slots,
-      ratePerSlotCents: charge.ratePer30MinCents,
-      totalCents: charge.totalCents,
-    };
-  });
 
   const resourceOptions: ResourceOption[] = activeResources;
 
@@ -178,8 +144,7 @@ function EmptyState() {
       </div>
       <h2 className="text-base font-semibold text-fg">No sessions yet</h2>
       <p className="mt-1.5 text-sm text-fg-muted max-w-xs mx-auto">
-        Log your first session and it&apos;ll show up here with the rate and
-        total.
+        Log your first session and it&apos;ll show up here.
       </p>
       <Link
         href="/coach/sessions/new"

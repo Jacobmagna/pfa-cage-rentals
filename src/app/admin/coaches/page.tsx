@@ -15,6 +15,7 @@ import {
   type ResourceType,
 } from "@/lib/billing";
 import { formatPfaMonthYear } from "@/lib/timezone";
+import { isSyntheticUserEmail } from "@/lib/server/user-actions";
 import { CoachesTable, type CoachRow } from "./_components/coaches-table";
 
 // /admin/coaches — list of every user with role=coach plus their
@@ -100,8 +101,16 @@ export default async function AdminCoachesPage() {
       joinedAt: c.createdAt,
       sessionsThisMonth: t?.count ?? 0,
       owedThisMonthCents: t?.cents ?? 0,
+      isSynthetic: isSyntheticUserEmail(c.email),
     };
   });
+
+  // Merge targets = real coaches only (never a synthetic into another
+  // synthetic). Pre-filtered server-side so the dialog dropdown is
+  // identical for every row.
+  const mergeTargets = rows
+    .filter((r) => !r.isSynthetic)
+    .map((r) => ({ id: r.id, name: r.name, email: r.email }));
 
   const monthLabel = formatPfaMonthYear(now);
 
@@ -128,7 +137,7 @@ export default async function AdminCoachesPage() {
         </p>
       </div>
 
-      <CoachesTable rows={rows} />
+      <CoachesTable rows={rows} mergeTargets={mergeTargets} />
     </>
   );
 }

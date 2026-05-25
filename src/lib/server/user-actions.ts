@@ -33,6 +33,8 @@ import { db } from "@/db";
 import {
   accounts,
   sessions as authSessions,
+  coachRateOverrides,
+  sessionsBilling,
   users,
   verificationTokens,
 } from "@/db/schema";
@@ -42,6 +44,8 @@ import {
   CannotDeleteAdminError,
   CoachAlreadyDeletedError,
   CoachNotFoundError,
+  MergeSourceNotSyntheticError,
+  MergeTargetSameAsSourceError,
 } from "@/lib/errors";
 import { deleteCoachSchema } from "@/lib/schemas/user";
 
@@ -129,4 +133,87 @@ export async function deleteCoachInternal(
   });
 
   return updated;
+}
+
+// Predicate: a "synthetic" coach is one created by the historical
+// import flow (pseudo-account, no auth tie). Email pattern is the
+// canonical signal — see syntheticEmailFor() in src/lib/import/commit.ts.
+export function isSyntheticUserEmail(email: string): boolean {
+  return email.endsWith("@imported.local");
+}
+
+/**
+ * Merge a synthetic import coach into a real coach. Re-points every
+ * sessions_billing row from source → target, drops any (empty in
+ * practice) rate overrides on the source, then hard-deletes the
+ * source user. Audit log captures both the source-delete and the
+ * row-count moved.
+ *
+ * Constraints:
+ *   - source must be a synthetic user (email @imported.local). Two
+ *     real coaches don't merge via this path — that's a different
+ *     identity-resolution problem.
+ *   - source ≠ target.
+ *
+ * No transaction (neon-http) — the order is:
+ *   1. UPDATE sessions_billing.coach_id source → target
+ *   2. DELETE coach_rate_overrides where coach_id = source (safety)
+ *   3. DELETE users WHERE id = source
+ *   4. Audit
+ * If a step 2/3 hiccup leaves a synthetic with 0 sessions around,
+ * the admin can just re-run merge → step 1 is a no-op, steps 2/3
+ * complete the cleanup.
+ */
+export async function mergeSyntheticCoachInternal(
+  actor: AuthedSession["user"],
+  sourceId: string,
+  targetId: string,
+): Promise<{ movedSessions: number }> {
+  if (sourceId === targetId) {
+    throw new MergeTargetSameAsSourceError(sourceId);
+  }
+
+  const [source] = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, sourceId))
+    .limit(1);
+  if (!source) throw new CoachNotFoundError(sourceId);
+  if (!isSyntheticUserEmail(source.email)) {
+    throw new MergeSourceNotSyntheticError(sourceId);
+  }
+
+  const [target] = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, targetId))
+    .limit(1);
+  if (!target) throw new CoachNotFoundError(targetId);
+
+  const moved = await db
+    .update(sessionsBilling)
+    .set({ coachId: targetId })
+    .where(eq(sessionsBilling.coachId, sourceId))
+    .returning({ id: sessionsBilling.id });
+
+  await db
+    .delete(coachRateOverrides)
+    .where(eq(coachRateOverrides.coachId, sourceId));
+
+  await db.delete(users).where(eq(users.id, sourceId));
+
+  await safeLogAudit(db, {
+    actorUserId: actor.id,
+    entityType: "user",
+    entityId: sourceId,
+    action: "delete",
+    before: source as unknown as Record<string, unknown>,
+    after: {
+      mergedInto: targetId,
+      targetName: target.name ?? target.email,
+      sessionsMoved: moved.length,
+    },
+  });
+
+  return { movedSessions: moved.length };
 }

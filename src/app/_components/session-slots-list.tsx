@@ -1,0 +1,182 @@
+"use client";
+
+// Per-slot notecard list for the multi-slot session flow. Renders N
+// cards, one per generated time range, each with its own optional
+// note and team-rental checkbox. Coach (or admin) picks a date +
+// start + end + slot length on the parent form; this component
+// reads that range and emits N cards.
+//
+// State strategy: per-slot notes + team-rental flags live in the
+// parent's state. This component is a controlled view — it rebuilds
+// the slot array from (rangeStart, rangeEnd, slotLengthMinutes) and
+// emits via onChange. When the range or length changes, notes typed
+// so far are lost; the realistic flow is "pick range first, type
+// notes last," so this matches usage. If we ever need
+// preserve-on-resize behavior, store the cache in the parent (not
+// here) to satisfy React Compiler's no-refs-during-render rule.
+//
+// Submission: this component doesn't submit itself. The parent
+// receives the slot array via `onChange` and includes it in its own
+// form-action call to logOwnSessionsBatch / createSessionsBatch.
+//
+// Note: kept under SAFE_SLOT_LIMIT (server enforces 50) to stop the
+// UI from rendering hundreds of cards if a user pastes garbage into
+// the date inputs.
+
+import { useEffect, useMemo, useRef } from "react";
+import { PFA_TIMEZONE } from "@/lib/timezone";
+
+const SAFE_SLOT_LIMIT = 50;
+
+export type SlotInput = {
+  startAt: Date;
+  endAt: Date;
+  note: string;
+  isTeamRental: boolean;
+};
+
+type Props = {
+  /** Computed UTC instant for the FIRST slot start. */
+  rangeStart: Date | null;
+  /** Computed UTC instant for the LAST slot end (exclusive). */
+  rangeEnd: Date | null;
+  /** 30 or 60. */
+  slotLengthMinutes: 30 | 60;
+  /** Current per-slot inputs. Parent owns the array. */
+  slots: SlotInput[];
+  /** Emit a new slots array when the user edits a note or toggle. */
+  onChange: (slots: SlotInput[]) => void;
+};
+
+export function SessionSlotsList({
+  rangeStart,
+  rangeEnd,
+  slotLengthMinutes,
+  slots,
+  onChange,
+}: Props) {
+  // Recompute the canonical slot list from the range + length. Each
+  // slot keeps its existing note/teamRental ONLY if its (startAt,
+  // endAt) signature is unchanged — handled by reading from the
+  // parent's `slots` prop (not a ref) so React Compiler is happy.
+  const computed = useMemo<SlotInput[]>(() => {
+    if (!rangeStart || !rangeEnd) return [];
+    const lengthMs = slotLengthMinutes * 60_000;
+    const totalMs = rangeEnd.getTime() - rangeStart.getTime();
+    if (totalMs <= 0) return [];
+    if (totalMs % lengthMs !== 0) return [];
+    const count = totalMs / lengthMs;
+    if (count <= 0 || count > SAFE_SLOT_LIMIT) return [];
+
+    // Build a lookup from the parent's current slots (props) so a
+    // range tweak that produces overlapping slot signatures keeps
+    // typed notes. Reading props during render is fine; reading a
+    // ref isn't.
+    const priorByKey = new Map<string, { note: string; isTeamRental: boolean }>();
+    for (const s of slots) {
+      priorByKey.set(slotKey(s.startAt, s.endAt), {
+        note: s.note,
+        isTeamRental: s.isTeamRental,
+      });
+    }
+
+    const out: SlotInput[] = [];
+    for (let i = 0; i < count; i++) {
+      const startAt = new Date(rangeStart.getTime() + i * lengthMs);
+      const endAt = new Date(startAt.getTime() + lengthMs);
+      const prior = priorByKey.get(slotKey(startAt, endAt));
+      out.push({
+        startAt,
+        endAt,
+        note: prior?.note ?? "",
+        isTeamRental: prior?.isTeamRental ?? false,
+      });
+    }
+    return out;
+  }, [rangeStart, rangeEnd, slotLengthMinutes, slots]);
+
+  // Propagate the rebuilt array upward. Effect (not direct setState)
+  // because computed is derived from props; calling onChange during
+  // render would loop.
+  const lastEmittedRef = useRef<string>("");
+  useEffect(() => {
+    const sig = computed
+      .map((s) => `${s.startAt.toISOString()}|${s.note}|${s.isTeamRental ? 1 : 0}`)
+      .join("·");
+    const current = slots
+      .map((s) => `${s.startAt.toISOString()}|${s.note}|${s.isTeamRental ? 1 : 0}`)
+      .join("·");
+    if (sig !== current && sig !== lastEmittedRef.current) {
+      lastEmittedRef.current = sig;
+      onChange(computed);
+    }
+  }, [computed, slots, onChange]);
+
+  if (slots.length === 0) return null;
+
+  const updateNote = (i: number, note: string) => {
+    const next = slots.map((s, idx) => (idx === i ? { ...s, note } : s));
+    onChange(next);
+  };
+  const updateTeam = (i: number, isTeamRental: boolean) => {
+    const next = slots.map((s, idx) =>
+      idx === i ? { ...s, isTeamRental } : s,
+    );
+    onChange(next);
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs uppercase tracking-wider text-fg-muted">
+        {slots.length} {slots.length === 1 ? "session" : "sessions"} — optional
+        per-session details
+      </p>
+      <ul className="space-y-2">
+        {slots.map((slot, i) => (
+          <li
+            key={slot.startAt.toISOString()}
+            className="rounded-md border border-line bg-page p-3"
+          >
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <p className="text-sm font-mono tabular-nums text-fg">
+                {formatRangeShort(slot.startAt, slot.endAt)}
+              </p>
+              <label className="inline-flex items-center gap-2 cursor-pointer text-xs text-fg-muted select-none">
+                <input
+                  type="checkbox"
+                  checked={slot.isTeamRental}
+                  onChange={(e) => updateTeam(i, e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-line bg-page text-gold focus-visible:ring-2 focus-visible:ring-gold/40 accent-gold"
+                />
+                <span>Team rental</span>
+              </label>
+            </div>
+            <input
+              type="text"
+              value={slot.note}
+              onChange={(e) => updateNote(i, e.target.value)}
+              maxLength={500}
+              placeholder="Optional note (student, drill, etc.)"
+              className="mt-2 w-full rounded bg-surface border border-line text-fg placeholder:text-fg-subtle px-2.5 h-8 text-xs focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+            />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function slotKey(start: Date, end: Date): string {
+  return `${start.toISOString()}|${end.toISOString()}`;
+}
+
+// Compact label like "10:00 AM – 10:30 AM" (date is implied by the
+// outer form's date input — no point repeating it 8 times).
+function formatRangeShort(start: Date, end: Date): string {
+  const opts: Intl.DateTimeFormatOptions = {
+    timeZone: PFA_TIMEZONE,
+    hour: "numeric",
+    minute: "2-digit",
+  };
+  return `${start.toLocaleTimeString("en-US", opts)} – ${end.toLocaleTimeString("en-US", opts)}`;
+}

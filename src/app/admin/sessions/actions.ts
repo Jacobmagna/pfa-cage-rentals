@@ -17,6 +17,7 @@ import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/authz";
 import {
   createSessionInternal,
+  createSessionsBatchInternal,
   deleteSessionInternal,
   updateSessionInternal,
 } from "@/lib/server/session-actions";
@@ -29,6 +30,13 @@ function revalidateSessionSurfaces() {
 export async function createSession(input: unknown) {
   const session = await requireRole("admin");
   const result = await createSessionInternal(session.user, input);
+  revalidateSessionSurfaces();
+  return result;
+}
+
+export async function createSessionsBatch(input: unknown) {
+  const session = await requireRole("admin");
+  const result = await createSessionsBatchInternal(session.user, input);
   revalidateSessionSurfaces();
   return result;
 }

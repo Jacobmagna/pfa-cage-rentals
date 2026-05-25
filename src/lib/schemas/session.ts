@@ -33,3 +33,28 @@ export const updateSessionSchema = createSessionSchema.partial();
 
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 export type UpdateSessionInput = z.infer<typeof updateSessionSchema>;
+
+// Batch-create: one coach + one resource + one useType, with N
+// per-slot rows (each with its own start/end/note/teamRental).
+// Used by the multi-slot UI on /coach/sessions/new and the admin
+// session dialogs. Hard cap at 50 slots — a half-day of back-to-
+// back 30-min lessons is ~20, so 50 covers any reasonable case
+// while preventing pathological inputs from blowing up the server.
+export const createSessionBatchSchema = z.object({
+  coachId: z.string().min(1, "coachId is required"),
+  resourceId: z.string().min(1, "resourceId is required"),
+  useType: z.enum(["hitting", "pitching"]).nullish(),
+  slots: z
+    .array(
+      z.object({
+        startAt: z.coerce.date(),
+        endAt: z.coerce.date(),
+        note: z.string().max(500).nullish(),
+        isTeamRental: z.boolean().optional(),
+      }),
+    )
+    .min(1, "at least one slot is required")
+    .max(50, "too many slots — max 50 per submission"),
+});
+
+export type CreateSessionBatchInput = z.infer<typeof createSessionBatchSchema>;

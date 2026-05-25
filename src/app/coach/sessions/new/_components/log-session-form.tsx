@@ -1,29 +1,44 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import {
+  useActionState,
+  useMemo,
+  useState,
+  useTransition,
+  type FormEvent,
+} from "react";
 import { CheckCircle2 } from "lucide-react";
 import {
   logOwnSessionFormAction,
   type CoachActionResult,
 } from "../form-actions";
+import { logOwnSessionsBatch } from "../../actions";
 import type { ResourceOption } from "../../_components/types";
 import { TimeSelect } from "@/app/_components/time-select";
 import { TeamRentalCheckbox } from "@/app/_components/team-rental-checkbox";
-import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
+import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
+import {
+  SessionSlotsList,
+  type SlotInput,
+} from "@/app/_components/session-slots-list";
+import { formatPfaDate, formatPfaTime, parsePfaInput } from "@/lib/timezone";
 import { AvailabilityPanel } from "./availability-panel";
 
 const INITIAL_STATE: CoachActionResult = { ok: true, loggedAt: 0 };
 
-// Mobile-first single-column form. Inputs are h-12 (48px) for
-// comfortable tapping; submit is full-width on mobile, auto on
-// desktop. After a successful submit:
-//   - the success banner shows above the form
-//   - the form remounts (keyed on loggedAt) so all fields reset to
-//     fresh defaults
-//   - the user can immediately log another session
-// On error, the form remounts keyed to the error so uncontrolled
-// inputs pick up state.values as defaultValue — preserving what the
-// user typed.
+// Mobile-first single-column form. Two submission paths:
+//   - Single slot (end - start === slotLength): form-action layer
+//     handles the submit via useActionState. Existing tested path.
+//   - Multi slot (end - start > slotLength): onSubmit intercepts,
+//     calls logOwnSessionsBatch directly with the live slot array.
+//     The slot list is controlled and N notecards render in place
+//     of the single Note + TeamRental fields.
+//
+// Why two paths instead of one batch-only path: keeping the
+// useActionState flow for the common N=1 case means we don't have
+// to re-derive its "echo errored values back into the form on
+// failure" behavior. Multi-slot errors do lose typed-per-slot
+// notes on failure — accepted v1 trade-off; coach retypes.
 export function LogSessionForm({
   resources,
 }: {
@@ -34,19 +49,20 @@ export function LogSessionForm({
     INITIAL_STATE,
   );
 
+  // Multi-slot path has its own pending + result state — useActionState
+  // only knows about the single-slot path.
+  const [batchPending, startBatchTransition] = useTransition();
+  const [batchResult, setBatchResult] = useState<
+    | { status: "idle" }
+    | { status: "success"; count: number; at: number }
+    | { status: "error"; message: string }
+  >({ status: "idle" });
+
   const cages = resources.filter((r) => r.type === "cage");
   const bullpens = resources.filter((r) => r.type === "bullpen");
   const weightRooms = resources.filter((r) => r.type === "weight_room");
 
-  // Default field values. On error: echo back what the user typed.
-  // On fresh / post-success: compute "now rounded down to last 30-min
-  // slot" so the coach can submit with minimal touch input. If the
-  // current PFA time is outside the facility's 8a–10p window (e.g. a
-  // coach logging last night's session at 11pm), fall back to a sane
-  // morning slot rather than showing a "(non-standard)" pseudo-option
-  // in the TimeSelect dropdown. Memoized on state so a successful
-  // submit (which bumps loggedAt and remounts the form via key) gets
-  // a freshly computed "now".
+  // Default field values (same as before).
   const defaults = useMemo(() => {
     if (!state.ok) {
       return state.values;
@@ -55,8 +71,6 @@ export function LogSessionForm({
     const startWall = toTimeInput(start);
     const inWindow = startWall >= "08:00" && startWall <= "21:30";
     const startTime = inWindow ? startWall : "09:00";
-    // Bump end one hour past start. End may legitimately equal "22:00"
-    // (closing time), but cap there.
     const endTime = (() => {
       const [h, m] = startTime.split(":").map(Number);
       let endH = h + 1;
@@ -78,32 +92,22 @@ export function LogSessionForm({
     };
   }, [state]);
 
-  // Banner state. Success banner shown only when ok && we've actually
-  // submitted (loggedAt > 0 distinguishes initial state from
-  // post-submit success). Error banner shown when !ok.
-  const showSuccess = state.ok && state.loggedAt > 0;
-  const showError = !state.ok;
+  // Banner state. The batch banner takes precedence when it's freshly
+  // set — both surfaces never have a meaningful state at once because
+  // each submission path resets the other's transient state.
+  const showSingleSuccess = state.ok && state.loggedAt > 0;
+  const showSingleError = !state.ok;
+  const showBatchSuccess = batchResult.status === "success";
+  const showBatchError = batchResult.status === "error";
 
-  // Form key drives the remount strategy:
-  //   - success → key on loggedAt → fresh defaults
-  //   - error   → key on error message → preserves echoed values
-  //   - initial → stable key
   const formKey = state.ok
     ? state.loggedAt > 0
       ? `ok-${state.loggedAt}`
       : "fresh"
     : `err-${state.error.code}-${state.error.message}`;
 
-  // Live "echo" of the four fields the AvailabilityPanel below cares
-  // about. Form inputs are controlled (value + onChange) so the panel
-  // can react in real time and the resource tab strip can two-way bind
-  // back to the form select.
-  //
-  // When the form remounts (defaults change post-success or on error
-  // → useMemo recomputes), we need to reset the echo to match the
-  // new defaults. React 19 flags setState in useEffect for prop
-  // transitions; the canonical replacement is the "store prev in
-  // state, conditionally setState during render" pattern.
+  // Live state for the four "echoed" fields that the AvailabilityPanel
+  // + slot computation both depend on.
   const [live, setLive] = useState({
     date: defaults.date,
     resourceId: defaults.resourceId,
@@ -121,9 +125,130 @@ export function LogSessionForm({
     });
   }
 
+  // Slot length + computed slot count. Slot count = (end - start) /
+  // length, validated for clean divisibility. If invalid (e.g. 4h15m
+  // / 30min), count = 0 and we show an inline error.
+  const [slotLengthMinutes, setSlotLengthMinutes] = useState<30 | 60>(30);
+  const [slots, setSlots] = useState<SlotInput[]>([]);
+  const [useTypeValue, setUseTypeValue] = useState(defaults.useType);
+
+  // Reset useType when defaults change (post-success or post-error reset).
+  const [prevUseTypeDefault, setPrevUseTypeDefault] = useState(
+    defaults.useType,
+  );
+  if (defaults.useType !== prevUseTypeDefault) {
+    setPrevUseTypeDefault(defaults.useType);
+    setUseTypeValue(defaults.useType);
+  }
+
+  const { rangeStart, rangeEnd, slotCount, divisibilityError } = useMemo(() => {
+    if (!live.date || !live.startTime || !live.endTime) {
+      return {
+        rangeStart: null,
+        rangeEnd: null,
+        slotCount: 0,
+        divisibilityError: false,
+      };
+    }
+    let start: Date;
+    let end: Date;
+    try {
+      start = parsePfaInput(live.date, live.startTime);
+      end = parsePfaInput(live.date, live.endTime);
+    } catch {
+      return {
+        rangeStart: null,
+        rangeEnd: null,
+        slotCount: 0,
+        divisibilityError: false,
+      };
+    }
+    const totalMs = end.getTime() - start.getTime();
+    const lengthMs = slotLengthMinutes * 60_000;
+    if (totalMs <= 0) {
+      return {
+        rangeStart: start,
+        rangeEnd: end,
+        slotCount: 0,
+        divisibilityError: false,
+      };
+    }
+    if (totalMs % lengthMs !== 0) {
+      return {
+        rangeStart: start,
+        rangeEnd: end,
+        slotCount: 0,
+        divisibilityError: true,
+      };
+    }
+    return {
+      rangeStart: start,
+      rangeEnd: end,
+      slotCount: totalMs / lengthMs,
+      divisibilityError: false,
+    };
+  }, [live.date, live.startTime, live.endTime, slotLengthMinutes]);
+
+  const isMultiSlot = slotCount > 1;
+
+  const submitLabel = (() => {
+    if (pending || batchPending) return "Logging…";
+    if (slotCount === 0) return "Log session";
+    if (slotCount === 1) return "Log session";
+    return `Log ${slotCount} sessions`;
+  })();
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    if (!isMultiSlot) {
+      // N=1 → let the form-action take over. Don't preventDefault.
+      return;
+    }
+    // N>1 → take over the submit.
+    e.preventDefault();
+    if (slotCount === 0 || divisibilityError) return;
+    if (slots.length === 0) return;
+
+    setBatchResult({ status: "idle" });
+    startBatchTransition(async () => {
+      try {
+        await logOwnSessionsBatch({
+          resourceId: live.resourceId,
+          useType:
+            useTypeValue === "hitting" || useTypeValue === "pitching"
+              ? useTypeValue
+              : null,
+          slots: slots.map((s) => ({
+            startAt: s.startAt,
+            endAt: s.endAt,
+            note: s.note.trim() || null,
+            isTeamRental: s.isTeamRental,
+          })),
+        });
+        setBatchResult({
+          status: "success",
+          count: slots.length,
+          at: Date.now(),
+        });
+        // Reset slot state for the next batch.
+        setSlots([]);
+        // Reset the form via the existing remount path: dispatch a no-op
+        // to bump useActionState. Simpler: nudge live state and let the
+        // useMemo "defaults" path naturally reset on the next render.
+        // But we DON'T have a way to trigger useActionState's reset
+        // from here. Acceptable: success banner stays + slots clear;
+        // coach picks a new range to log another batch.
+      } catch (err) {
+        setBatchResult({
+          status: "error",
+          message: err instanceof Error ? err.message : "Batch create failed",
+        });
+      }
+    });
+  };
+
   return (
     <div className="space-y-4">
-      {showSuccess ? (
+      {showSingleSuccess && !showBatchSuccess ? (
         <div
           role="status"
           className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-300 flex items-center gap-2"
@@ -133,7 +258,21 @@ export function LogSessionForm({
         </div>
       ) : null}
 
-      {showError ? (
+      {showBatchSuccess ? (
+        <div
+          role="status"
+          className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-300 flex items-center gap-2"
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>
+            {batchResult.status === "success"
+              ? `${batchResult.count} sessions logged.`
+              : null}
+          </span>
+        </div>
+      ) : null}
+
+      {showSingleError ? (
         <div
           role="alert"
           className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2.5 text-sm text-danger"
@@ -142,7 +281,21 @@ export function LogSessionForm({
         </div>
       ) : null}
 
-      <form action={formAction} key={formKey} className="space-y-5">
+      {showBatchError ? (
+        <div
+          role="alert"
+          className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2.5 text-sm text-danger"
+        >
+          {batchResult.status === "error" ? batchResult.message : null}
+        </div>
+      ) : null}
+
+      <form
+        action={formAction}
+        onSubmit={handleSubmit}
+        key={formKey}
+        className="space-y-5"
+      >
         <Field label="Resource">
           <select
             name="resourceId"
@@ -223,12 +376,41 @@ export function LogSessionForm({
         </div>
 
         <Field
+          label="Slot length"
+          hint="30 min = back-to-back half-hour lessons. 1 hr = full hours."
+        >
+          <SlotLengthToggle
+            value={slotLengthMinutes}
+            onChange={(v) => setSlotLengthMinutes(v)}
+          />
+        </Field>
+
+        {divisibilityError ? (
+          <div
+            role="alert"
+            className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+          >
+            Range isn&apos;t a clean multiple of {slotLengthMinutes} min — pick
+            different start/end times.
+          </div>
+        ) : null}
+
+        {slotCount > 0 && !divisibilityError ? (
+          <p className="text-xs text-fg-subtle">
+            Will create <span className="text-fg">{slotCount}</span>{" "}
+            {slotCount === 1 ? "session" : "sessions"} of{" "}
+            {slotLengthMinutes} min each.
+          </p>
+        ) : null}
+
+        <Field
           label="Use type"
           hint="Required for cages (hitting or pitching). Leave blank for bullpens and weight rooms."
         >
           <select
             name="useType"
-            defaultValue={defaults.useType}
+            value={useTypeValue}
+            onChange={(e) => setUseTypeValue(e.target.value)}
             className={selectStyles}
           >
             <option value="">— None (bullpen / weight room)</option>
@@ -237,25 +419,41 @@ export function LogSessionForm({
           </select>
         </Field>
 
-        <Field label="Note" optional>
-          <input
-            type="text"
-            name="note"
-            defaultValue={defaults.note}
-            maxLength={500}
-            placeholder="Optional context (e.g. JP De La Cruz)"
-            className={inputStyles}
-          />
-        </Field>
+        {!isMultiSlot ? (
+          <>
+            <Field label="Note" optional>
+              <input
+                type="text"
+                name="note"
+                defaultValue={defaults.note}
+                maxLength={500}
+                placeholder="Optional context (e.g. JP De La Cruz)"
+                className={inputStyles}
+              />
+            </Field>
 
-        <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
+            <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
+          </>
+        ) : (
+          <SessionSlotsList
+            rangeStart={rangeStart}
+            rangeEnd={rangeEnd}
+            slotLengthMinutes={slotLengthMinutes}
+            slots={slots}
+            onChange={setSlots}
+          />
+        )}
 
         <button
           type="submit"
-          disabled={pending}
+          disabled={
+            pending ||
+            batchPending ||
+            (isMultiSlot && (slotCount === 0 || divisibilityError))
+          }
           className="w-full sm:w-auto rounded-md bg-gold text-gold-ink hover:bg-gold-hover h-12 px-6 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
-          {pending ? "Logging…" : "Log session"}
+          {submitLabel}
         </button>
       </form>
 

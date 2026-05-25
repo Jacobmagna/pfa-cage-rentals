@@ -47,6 +47,7 @@ import {
   UseTypeValidationError,
 } from "@/lib/errors";
 import {
+  createSessionBatchSchema,
   createSessionSchema,
   updateSessionSchema,
 } from "@/lib/schemas/session";
@@ -326,4 +327,137 @@ export async function deleteSessionInternal(
     action: "delete",
     before: existing as unknown as Record<string, unknown>,
   });
+}
+
+/**
+ * Batch-create: insert N sessions sharing the same coach + resource
+ * + useType, each with its own time range / note / team-rental flag.
+ * Used by the multi-slot UI ("create 8 back-to-back 30-min lessons
+ * in Cage 3 from 10 AM to 2 PM").
+ *
+ * Pipeline:
+ *   1. Zod-parse
+ *   2. Resource lookup + useType rule (shared — checked once)
+ *   3. For each slot: cross-check blocked_times AND the rest of
+ *      sessions_billing AND every PRIOR slot in this same batch
+ *      (so a self-overlap inside the batch is caught here, not
+ *      at the DB insert).
+ *   4. Bulk insert. Audit log a single "batch_create" entry with
+ *      the array of created IDs.
+ *
+ * Atomicity caveat: neon-http has no transactions. We pre-validate
+ * every slot before inserting any, which shuts the door on the
+ * common cases (self-overlap, existing conflict). The remaining
+ * race window — another mutation lands between pre-check and the
+ * bulk insert — is caught by the DB's EXCLUDE constraint and
+ * surfaces as a SessionOverlapError. The bulk insert is a single
+ * statement, so it's either fully applied or fully rejected by
+ * Postgres — no partial-insert surprises.
+ */
+export async function createSessionsBatchInternal(
+  actor: AuthedSession["user"],
+  input: unknown,
+) {
+  const parsed = createSessionBatchSchema.parse(input);
+  const resource = await getResourceOrThrow(parsed.resourceId);
+  validateUseType(resource.name, resource.type, parsed.useType);
+
+  // Pre-validate each slot:
+  //   (a) against any existing block on the same resource
+  //   (b) against any existing session on the same resource
+  //   (c) against every PRIOR slot in this batch (intra-batch overlap)
+  for (let i = 0; i < parsed.slots.length; i++) {
+    const slot = parsed.slots[i];
+
+    const block = await findOverlappingBlock(
+      parsed.resourceId,
+      slot.startAt,
+      slot.endAt,
+    );
+    if (block) throw new BlockedTimeError(resource.name, block.reason);
+
+    const conflict = await findOverlappingSession(
+      parsed.resourceId,
+      slot.startAt,
+      slot.endAt,
+    );
+    if (conflict) {
+      throw new SessionOverlapError(
+        resource.name,
+        conflict.coachName ?? conflict.coachEmail,
+        conflict.startAt,
+        conflict.endAt,
+      );
+    }
+
+    // Intra-batch self-overlap: scan earlier slots in the same array.
+    // O(N^2) but N ≤ 50, so worst case 1,225 comparisons — fine.
+    for (let j = 0; j < i; j++) {
+      const prior = parsed.slots[j];
+      if (prior.startAt < slot.endAt && prior.endAt > slot.startAt) {
+        throw new SessionOverlapError(
+          resource.name,
+          actor.name ?? actor.email ?? "this booking",
+          prior.startAt,
+          prior.endAt,
+        );
+      }
+    }
+  }
+
+  // Bulk insert in a single statement. drizzle accepts an array on
+  // .values() and emits one multi-row INSERT, which Postgres treats
+  // atomically — either all rows commit or the statement fails.
+  let inserted;
+  try {
+    inserted = await db
+      .insert(sessionsBilling)
+      .values(
+        parsed.slots.map((s) => ({
+          coachId: parsed.coachId,
+          resourceId: parsed.resourceId,
+          startAt: s.startAt,
+          endAt: s.endAt,
+          useType: parsed.useType ?? null,
+          note: s.note ?? null,
+          isTeamRental: s.isTeamRental ?? false,
+          createdBy: actor.id,
+        })),
+      )
+      .returning();
+  } catch (err) {
+    if (isExclusionViolation(err)) {
+      // Race with a concurrent booking — one of our slots collided.
+      // We don't know which one without rescanning, so surface a
+      // generic overlap message scoped to the resource. The coach
+      // can re-check the schedule grid.
+      throw new SessionOverlapError(
+        resource.name,
+        "another booking",
+        parsed.slots[0].startAt,
+        parsed.slots[parsed.slots.length - 1].endAt,
+      );
+    }
+    throw err;
+  }
+
+  await safeLogAudit(db, {
+    actorUserId: actor.id,
+    entityType: "session",
+    // Audit log entity-per-row convention: log a single batch entry
+    // keyed to the first inserted id with the full set in metadata.
+    // Per-row entries would clutter the audit page; this surface is
+    // a batch action.
+    entityId: inserted[0].id,
+    action: "create",
+    after: {
+      batch: true,
+      count: inserted.length,
+      sessionIds: inserted.map((r) => r.id),
+      coachId: parsed.coachId,
+      resourceId: parsed.resourceId,
+    },
+  });
+
+  return inserted;
 }

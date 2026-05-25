@@ -1,16 +1,34 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef } from "react";
+import {
+  useActionState,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type FormEvent,
+} from "react";
 import { X } from "lucide-react";
 import {
   createSessionFormAction,
   updateSessionFormAction,
   type ActionResult,
 } from "../form-actions";
+import { createSessionsBatch } from "../actions";
 import type { CoachOption, ResourceOption } from "./sessions-client";
 import { TimeSelect } from "@/app/_components/time-select";
 import { TeamRentalCheckbox } from "@/app/_components/team-rental-checkbox";
-import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
+import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
+import {
+  SessionSlotsList,
+  type SlotInput,
+} from "@/app/_components/session-slots-list";
+import {
+  formatPfaDate,
+  formatPfaTime,
+  parsePfaInput,
+} from "@/lib/timezone";
 
 export type SessionFormInitialValues = {
   id: string;
@@ -23,18 +41,17 @@ export type SessionFormInitialValues = {
   isTeamRental: boolean;
 };
 
-// Modal form for creating or editing a session. Uses the native
-// <dialog> element — modern browsers handle the backdrop, focus
-// trap, and Escape-to-close for free. Styled with our design
-// tokens via the open: attribute.
+// Modal form for creating or editing a session.
 //
-// useActionState lets the server action return a typed result that
-// becomes part of the form's state without a try/catch. On
-// successful submit, parent closes via the onClose prop.
+// In edit mode: same flow as before — form-action submits the
+// underlying update. Multi-slot is NOT supported (you're editing
+// one row).
 //
-// Date/time strategy: the underlying schema wants Date objects.
-// HTML gives us split date + time inputs (more reliable on mobile
-// than datetime-local). form-actions.ts combines them.
+// In create mode: when the time range covers > 1 slot of the chosen
+// length, the single Note + TeamRental fields swap for a list of N
+// notecards, and submit dispatches to createSessionsBatch (bypassing
+// the form-action layer). Sub-1-slot creates use the original
+// createSessionFormAction path.
 
 const INITIAL_STATE: ActionResult = { ok: true };
 
@@ -58,7 +75,10 @@ export function SessionFormDialog({
     mode === "edit" ? updateSessionFormAction : createSessionFormAction;
   const [state, formAction, pending] = useActionState(action, INITIAL_STATE);
 
-  // Sync dialog open state with React state.
+  // Batch-create path state (create mode + N>1 only).
+  const [batchPending, startBatchTransition] = useTransition();
+  const [batchError, setBatchError] = useState<string | null>(null);
+
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -69,7 +89,8 @@ export function SessionFormDialog({
     }
   }, [open]);
 
-  // Auto-close after a successful submit.
+  // Auto-close after a successful submit (single-slot path). For
+  // batch path, we close in the transition's success branch directly.
   const wasPending = useRef(false);
   useEffect(() => {
     if (wasPending.current && !pending && state.ok && open) {
@@ -78,7 +99,6 @@ export function SessionFormDialog({
     wasPending.current = pending;
   }, [pending, state, open, onClose]);
 
-  // Listen for the dialog's native close event (Escape key, backdrop click).
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -89,11 +109,6 @@ export function SessionFormDialog({
     return () => dialog.removeEventListener("close", handler);
   }, [open, onClose]);
 
-  // Defaults priority: errored-submission values (so users don't
-  // re-pick after an overlap) → initial values (edit mode) → empty
-  // skeleton (new mode). Forms are uncontrolled and `defaultValue`
-  // only applies on mount, so the form is keyed below to force a
-  // remount whenever this set changes (on error, mode switch, etc.).
   const defaults = useMemo(() => {
     if (!state.ok && state.values) {
       return state.values;
@@ -123,12 +138,124 @@ export function SessionFormDialog({
     };
   }, [initial, state]);
 
-  // For the useType visibility: which resource is selected? Re-derived
-  // from the form's current state via a ref + uncontrolled inputs would
-  // be more code; we just always render the useType row and let the
-  // server-side validator catch mismatches with a friendly error.
-  // Trade-off: one more click for the admin if they pick the wrong
-  // option. Worth it for code simplicity.
+  // Controlled state for the fields multi-slot math depends on.
+  // Other fields stay uncontrolled (defaultValue). We re-seed on
+  // defaults change.
+  const [live, setLive] = useState({
+    coachId: defaults.coachId,
+    resourceId: defaults.resourceId,
+    date: defaults.date,
+    startTime: defaults.startTime,
+    endTime: defaults.endTime,
+    useType: defaults.useType,
+  });
+  const [prevDefaults, setPrevDefaults] = useState(defaults);
+  if (defaults !== prevDefaults) {
+    setPrevDefaults(defaults);
+    setLive({
+      coachId: defaults.coachId,
+      resourceId: defaults.resourceId,
+      date: defaults.date,
+      startTime: defaults.startTime,
+      endTime: defaults.endTime,
+      useType: defaults.useType,
+    });
+    setBatchError(null);
+  }
+
+  // Multi-slot state (create mode only).
+  const [slotLengthMinutes, setSlotLengthMinutes] = useState<30 | 60>(30);
+  const [slots, setSlots] = useState<SlotInput[]>([]);
+
+  const { rangeStart, rangeEnd, slotCount, divisibilityError } = useMemo(() => {
+    if (!live.date || !live.startTime || !live.endTime) {
+      return {
+        rangeStart: null,
+        rangeEnd: null,
+        slotCount: 0,
+        divisibilityError: false,
+      };
+    }
+    let start: Date;
+    let end: Date;
+    try {
+      start = parsePfaInput(live.date, live.startTime);
+      end = parsePfaInput(live.date, live.endTime);
+    } catch {
+      return {
+        rangeStart: null,
+        rangeEnd: null,
+        slotCount: 0,
+        divisibilityError: false,
+      };
+    }
+    const totalMs = end.getTime() - start.getTime();
+    const lengthMs = slotLengthMinutes * 60_000;
+    if (totalMs <= 0) {
+      return {
+        rangeStart: start,
+        rangeEnd: end,
+        slotCount: 0,
+        divisibilityError: false,
+      };
+    }
+    if (totalMs % lengthMs !== 0) {
+      return {
+        rangeStart: start,
+        rangeEnd: end,
+        slotCount: 0,
+        divisibilityError: true,
+      };
+    }
+    return {
+      rangeStart: start,
+      rangeEnd: end,
+      slotCount: totalMs / lengthMs,
+      divisibilityError: false,
+    };
+  }, [live.date, live.startTime, live.endTime, slotLengthMinutes]);
+
+  const isCreate = mode === "create";
+  const isMultiSlot = isCreate && slotCount > 1;
+
+  const submitLabel = (() => {
+    if (pending || batchPending) return "Saving…";
+    if (mode === "edit") return "Save changes";
+    if (slotCount > 1) return `Create ${slotCount} sessions`;
+    return "Create session";
+  })();
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    if (!isMultiSlot) return; // let form-action handle it
+    e.preventDefault();
+    if (slotCount === 0 || divisibilityError || slots.length === 0) return;
+
+    setBatchError(null);
+    startBatchTransition(async () => {
+      try {
+        await createSessionsBatch({
+          coachId: live.coachId,
+          resourceId: live.resourceId,
+          useType:
+            live.useType === "hitting" || live.useType === "pitching"
+              ? live.useType
+              : null,
+          slots: slots.map((s) => ({
+            startAt: s.startAt,
+            endAt: s.endAt,
+            note: s.note.trim() || null,
+            isTeamRental: s.isTeamRental,
+          })),
+        });
+        setSlots([]);
+        onClose();
+      } catch (err) {
+        setBatchError(
+          err instanceof Error ? err.message : "Batch create failed",
+        );
+      }
+    });
+  };
 
   return (
     <dialog
@@ -137,11 +264,7 @@ export function SessionFormDialog({
     >
       <form
         action={formAction}
-        // Key bumps on error (so uncontrolled inputs remount with the
-        // user's submitted values via defaultValue) AND on identity
-        // changes (so opening edit on a different row remounts with
-        // the new initial values, instead of keeping the first row's
-        // values locked in defaultValue).
+        onSubmit={handleSubmit}
         key={
           state.ok
             ? `${mode}-${initial?.id ?? "new"}`
@@ -181,12 +304,24 @@ export function SessionFormDialog({
           </div>
         ) : null}
 
+        {batchError ? (
+          <div
+            role="alert"
+            className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+          >
+            {batchError}
+          </div>
+        ) : null}
+
         <div className="space-y-3">
           <Field label="Coach">
             <select
               name="coachId"
               required
-              defaultValue={defaults.coachId}
+              value={live.coachId}
+              onChange={(e) =>
+                setLive((p) => ({ ...p, coachId: e.target.value }))
+              }
               className={selectStyles}
             >
               <option value="" disabled>
@@ -204,7 +339,10 @@ export function SessionFormDialog({
             <select
               name="resourceId"
               required
-              defaultValue={defaults.resourceId}
+              value={live.resourceId}
+              onChange={(e) =>
+                setLive((p) => ({ ...p, resourceId: e.target.value }))
+              }
               className={selectStyles}
             >
               <option value="" disabled>
@@ -224,7 +362,10 @@ export function SessionFormDialog({
                 type="date"
                 name="date"
                 required
-                defaultValue={defaults.date}
+                value={live.date}
+                onChange={(e) =>
+                  setLive((p) => ({ ...p, date: e.target.value }))
+                }
                 className={inputStyles}
               />
             </Field>
@@ -233,7 +374,8 @@ export function SessionFormDialog({
                 name="startTime"
                 variant="start"
                 required
-                defaultValue={defaults.startTime}
+                value={live.startTime}
+                onChange={(v) => setLive((p) => ({ ...p, startTime: v }))}
                 className={selectStyles}
               />
             </Field>
@@ -242,11 +384,42 @@ export function SessionFormDialog({
                 name="endTime"
                 variant="end"
                 required
-                defaultValue={defaults.endTime}
+                value={live.endTime}
+                onChange={(v) => setLive((p) => ({ ...p, endTime: v }))}
                 className={selectStyles}
               />
             </Field>
           </div>
+
+          {isCreate ? (
+            <Field
+              label="Slot length"
+              hint="30 min = back-to-back half-hour lessons. 1 hr = full hours."
+            >
+              <SlotLengthToggle
+                value={slotLengthMinutes}
+                onChange={(v) => setSlotLengthMinutes(v)}
+              />
+            </Field>
+          ) : null}
+
+          {isCreate && divisibilityError ? (
+            <div
+              role="alert"
+              className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+            >
+              Range isn&apos;t a clean multiple of {slotLengthMinutes} min — pick
+              different start/end times.
+            </div>
+          ) : null}
+
+          {isCreate && slotCount > 0 && !divisibilityError ? (
+            <p className="text-xs text-fg-subtle">
+              Will create <span className="text-fg">{slotCount}</span>{" "}
+              {slotCount === 1 ? "session" : "sessions"} of{" "}
+              {slotLengthMinutes} min each.
+            </p>
+          ) : null}
 
           <Field
             label="Use type"
@@ -254,7 +427,10 @@ export function SessionFormDialog({
           >
             <select
               name="useType"
-              defaultValue={defaults.useType}
+              value={live.useType}
+              onChange={(e) =>
+                setLive((p) => ({ ...p, useType: e.target.value }))
+              }
               className={selectStyles}
             >
               <option value="">— None (bullpen / weight room)</option>
@@ -263,18 +439,30 @@ export function SessionFormDialog({
             </select>
           </Field>
 
-          <Field label="Note" optional>
-            <input
-              type="text"
-              name="note"
-              defaultValue={defaults.note}
-              maxLength={500}
-              placeholder="Optional context (e.g. JP De La Cruz, online)"
-              className={inputStyles}
-            />
-          </Field>
+          {!isMultiSlot ? (
+            <>
+              <Field label="Note" optional>
+                <input
+                  type="text"
+                  name="note"
+                  defaultValue={defaults.note}
+                  maxLength={500}
+                  placeholder="Optional context (e.g. JP De La Cruz, online)"
+                  className={inputStyles}
+                />
+              </Field>
 
-          <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
+              <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
+            </>
+          ) : (
+            <SessionSlotsList
+              rangeStart={rangeStart}
+              rangeEnd={rangeEnd}
+              slotLengthMinutes={slotLengthMinutes}
+              slots={slots}
+              onChange={setSlots}
+            />
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-2 pt-2">
@@ -287,14 +475,14 @@ export function SessionFormDialog({
           </button>
           <button
             type="submit"
-            disabled={pending}
+            disabled={
+              pending ||
+              batchPending ||
+              (isMultiSlot && (slotCount === 0 || divisibilityError))
+            }
             className="rounded-md bg-gold text-gold-ink hover:bg-gold-hover h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
           >
-            {pending
-              ? "Saving…"
-              : mode === "edit"
-                ? "Save changes"
-                : "Create session"}
+            {submitLabel}
           </button>
         </div>
       </form>

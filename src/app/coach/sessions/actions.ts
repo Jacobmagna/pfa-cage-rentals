@@ -21,6 +21,7 @@ import { requireSession, requireSessionOwnership } from "@/lib/authz";
 import { SessionNotFoundError } from "@/lib/errors";
 import {
   createSessionInternal,
+  createSessionsBatchInternal,
   deleteSessionInternal,
   updateSessionInternal,
 } from "@/lib/server/session-actions";
@@ -34,6 +35,17 @@ export async function logOwnSession(input: unknown) {
   // Force coachId server-side — client-supplied coachId is discarded.
   const safeInput = { ...base, coachId: session.user.id };
   return createSessionInternal(session.user, safeInput);
+}
+
+export async function logOwnSessionsBatch(input: unknown) {
+  const session = await requireSession();
+  const base =
+    typeof input === "object" && input !== null
+      ? (input as Record<string, unknown>)
+      : {};
+  // Same coachId-forcing as logOwnSession — client can't impersonate.
+  const safeInput = { ...base, coachId: session.user.id };
+  return createSessionsBatchInternal(session.user, safeInput);
 }
 
 export async function updateOwnSession(id: string, input: unknown) {

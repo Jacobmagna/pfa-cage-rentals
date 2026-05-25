@@ -1,11 +1,20 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useActionState,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type FormEvent,
+} from "react";
 import { X } from "lucide-react";
 import {
   createSessionFormAction,
   type ActionResult as SessionActionResult,
 } from "@/app/admin/sessions/form-actions";
+import { createSessionsBatch } from "@/app/admin/sessions/actions";
 import type {
   CoachOption,
   ResourceOption,
@@ -16,7 +25,12 @@ import {
 } from "../form-actions";
 import { TimeSelect } from "@/app/_components/time-select";
 import { TeamRentalCheckbox } from "@/app/_components/team-rental-checkbox";
-import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
+import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
+import {
+  SessionSlotsList,
+  type SlotInput,
+} from "@/app/_components/session-slots-list";
+import { formatPfaDate, formatPfaTime, parsePfaInput } from "@/lib/timezone";
 
 // Unified "create on the grid" dialog. Two tabs:
 //   - Session: full session form (coach dropdown + use type + note)
@@ -285,15 +299,130 @@ function SessionTab({
   resources: ResourceOption[];
   onCancel: () => void;
 }) {
-  // Include defaults in the key so changing prefill (a new cell click)
-  // remounts the inputs with the new defaultValue. Without this the
-  // form keeps the first prefill's values across cell clicks.
+  // Controlled live state for fields that multi-slot math reads from.
+  // Re-seeded whenever defaults change (new prefill or post-error).
+  const [live, setLive] = useState({
+    coachId: defaults.coachId,
+    resourceId: defaults.resourceId,
+    date: defaults.date,
+    startTime: defaults.startTime,
+    endTime: defaults.endTime,
+    useType: defaults.useType,
+  });
+  const [prevDefaults, setPrevDefaults] = useState(defaults);
+  if (defaults !== prevDefaults) {
+    setPrevDefaults(defaults);
+    setLive({
+      coachId: defaults.coachId,
+      resourceId: defaults.resourceId,
+      date: defaults.date,
+      startTime: defaults.startTime,
+      endTime: defaults.endTime,
+      useType: defaults.useType,
+    });
+  }
+
+  const [slotLengthMinutes, setSlotLengthMinutes] = useState<30 | 60>(30);
+  const [slots, setSlots] = useState<SlotInput[]>([]);
+  const [batchPending, startBatchTransition] = useTransition();
+  const [batchError, setBatchError] = useState<string | null>(null);
+
+  const { rangeStart, rangeEnd, slotCount, divisibilityError } = useMemo(() => {
+    if (!live.date || !live.startTime || !live.endTime) {
+      return {
+        rangeStart: null,
+        rangeEnd: null,
+        slotCount: 0,
+        divisibilityError: false,
+      };
+    }
+    let start: Date;
+    let end: Date;
+    try {
+      start = parsePfaInput(live.date, live.startTime);
+      end = parsePfaInput(live.date, live.endTime);
+    } catch {
+      return {
+        rangeStart: null,
+        rangeEnd: null,
+        slotCount: 0,
+        divisibilityError: false,
+      };
+    }
+    const totalMs = end.getTime() - start.getTime();
+    const lengthMs = slotLengthMinutes * 60_000;
+    if (totalMs <= 0)
+      return {
+        rangeStart: start,
+        rangeEnd: end,
+        slotCount: 0,
+        divisibilityError: false,
+      };
+    if (totalMs % lengthMs !== 0)
+      return {
+        rangeStart: start,
+        rangeEnd: end,
+        slotCount: 0,
+        divisibilityError: true,
+      };
+    return {
+      rangeStart: start,
+      rangeEnd: end,
+      slotCount: totalMs / lengthMs,
+      divisibilityError: false,
+    };
+  }, [live.date, live.startTime, live.endTime, slotLengthMinutes]);
+
+  const isMultiSlot = slotCount > 1;
+
+  const submitLabel = (() => {
+    if (pending || batchPending) return "Saving…";
+    if (slotCount > 1) return `Create ${slotCount} sessions`;
+    return "Create session";
+  })();
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    if (!isMultiSlot) return;
+    e.preventDefault();
+    if (slotCount === 0 || divisibilityError || slots.length === 0) return;
+    setBatchError(null);
+    startBatchTransition(async () => {
+      try {
+        await createSessionsBatch({
+          coachId: live.coachId,
+          resourceId: live.resourceId,
+          useType:
+            live.useType === "hitting" || live.useType === "pitching"
+              ? live.useType
+              : null,
+          slots: slots.map((s) => ({
+            startAt: s.startAt,
+            endAt: s.endAt,
+            note: s.note.trim() || null,
+            isTeamRental: s.isTeamRental,
+          })),
+        });
+        setSlots([]);
+        onCancel();
+      } catch (err) {
+        setBatchError(
+          err instanceof Error ? err.message : "Batch create failed",
+        );
+      }
+    });
+  };
+
   const formKey = state.ok
     ? `session-${defaults.resourceId}-${defaults.date}-${defaults.startTime}`
     : `session-err-${state.error.code}-${state.error.message}`;
 
   return (
-    <form action={action} key={formKey} className="space-y-3">
+    <form
+      action={action}
+      onSubmit={handleSubmit}
+      key={formKey}
+      className="space-y-3"
+    >
       {!state.ok ? (
         <div
           role="alert"
@@ -302,12 +431,21 @@ function SessionTab({
           {state.error.message}
         </div>
       ) : null}
+      {batchError ? (
+        <div
+          role="alert"
+          className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+        >
+          {batchError}
+        </div>
+      ) : null}
 
       <Field label="Coach">
         <select
           name="coachId"
           required
-          defaultValue={defaults.coachId}
+          value={live.coachId}
+          onChange={(e) => setLive((p) => ({ ...p, coachId: e.target.value }))}
           className={selectStyles}
         >
           <option value="" disabled>
@@ -325,7 +463,10 @@ function SessionTab({
         <select
           name="resourceId"
           required
-          defaultValue={defaults.resourceId}
+          value={live.resourceId}
+          onChange={(e) =>
+            setLive((p) => ({ ...p, resourceId: e.target.value }))
+          }
           className={selectStyles}
         >
           <option value="" disabled>
@@ -339,7 +480,66 @@ function SessionTab({
         </select>
       </Field>
 
-      <DateAndTimeRow defaults={defaults} />
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Date">
+          <input
+            type="date"
+            name="date"
+            required
+            value={live.date}
+            onChange={(e) => setLive((p) => ({ ...p, date: e.target.value }))}
+            className={inputStyles}
+          />
+        </Field>
+        <Field label="Start">
+          <TimeSelect
+            name="startTime"
+            variant="start"
+            required
+            value={live.startTime}
+            onChange={(v) => setLive((p) => ({ ...p, startTime: v }))}
+            className={selectStyles}
+          />
+        </Field>
+        <Field label="End">
+          <TimeSelect
+            name="endTime"
+            variant="end"
+            required
+            value={live.endTime}
+            onChange={(v) => setLive((p) => ({ ...p, endTime: v }))}
+            className={selectStyles}
+          />
+        </Field>
+      </div>
+
+      <Field
+        label="Slot length"
+        hint="30 min = back-to-back half-hour lessons. 1 hr = full hours."
+      >
+        <SlotLengthToggle
+          value={slotLengthMinutes}
+          onChange={(v) => setSlotLengthMinutes(v)}
+        />
+      </Field>
+
+      {divisibilityError ? (
+        <div
+          role="alert"
+          className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+        >
+          Range isn&apos;t a clean multiple of {slotLengthMinutes} min — pick
+          different start/end times.
+        </div>
+      ) : null}
+
+      {slotCount > 0 && !divisibilityError ? (
+        <p className="text-xs text-fg-subtle">
+          Will create <span className="text-fg">{slotCount}</span>{" "}
+          {slotCount === 1 ? "session" : "sessions"} of {slotLengthMinutes} min
+          each.
+        </p>
+      ) : null}
 
       <Field
         label="Use type"
@@ -347,7 +547,8 @@ function SessionTab({
       >
         <select
           name="useType"
-          defaultValue={defaults.useType}
+          value={live.useType}
+          onChange={(e) => setLive((p) => ({ ...p, useType: e.target.value }))}
           className={selectStyles}
         >
           <option value="">— None (bullpen / weight room)</option>
@@ -356,20 +557,36 @@ function SessionTab({
         </select>
       </Field>
 
-      <Field label="Note" optional>
-        <input
-          type="text"
-          name="note"
-          defaultValue={defaults.note}
-          maxLength={500}
-          placeholder="Optional context (e.g. JP De La Cruz, online)"
-          className={inputStyles}
+      {!isMultiSlot ? (
+        <>
+          <Field label="Note" optional>
+            <input
+              type="text"
+              name="note"
+              defaultValue={defaults.note}
+              maxLength={500}
+              placeholder="Optional context (e.g. JP De La Cruz, online)"
+              className={inputStyles}
+            />
+          </Field>
+          <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
+        </>
+      ) : (
+        <SessionSlotsList
+          rangeStart={rangeStart}
+          rangeEnd={rangeEnd}
+          slotLengthMinutes={slotLengthMinutes}
+          slots={slots}
+          onChange={setSlots}
         />
-      </Field>
+      )}
 
-      <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
-
-      <FormButtons pending={pending} submitLabel="Create session" onCancel={onCancel} />
+      <FormButtons
+        pending={pending || batchPending}
+        submitLabel={submitLabel}
+        onCancel={onCancel}
+        disabled={isMultiSlot && (slotCount === 0 || divisibilityError)}
+      />
     </form>
   );
 }
@@ -492,10 +709,12 @@ function FormButtons({
   pending,
   submitLabel,
   onCancel,
+  disabled = false,
 }: {
   pending: boolean;
   submitLabel: string;
   onCancel: () => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="flex items-center justify-end gap-2 pt-2">
@@ -508,7 +727,7 @@ function FormButtons({
       </button>
       <button
         type="submit"
-        disabled={pending}
+        disabled={pending || disabled}
         className="rounded-md bg-gold text-gold-ink hover:bg-gold-hover h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
       >
         {pending ? "Saving…" : submitLabel}

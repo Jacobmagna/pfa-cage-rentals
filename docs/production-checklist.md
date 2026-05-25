@@ -599,17 +599,12 @@ is a second Resend account for PFA, free tier covers the volume.
 - Acceptance: doc exists, accurate.
 - Est: 1.5 h.
 
-### K4. Neon backup strategy — `[~]`
-Decision (2026-05-25): stay on Neon free tier (24h PITR) + add a nightly `pg_dump` to Cloudflare R2 covering the previous 30 days.
-- **Implementation (✓):** `.github/workflows/backup.yml` runs at 06:00 UTC daily. Installs `postgresql-client-17` (matches Neon's server version), runs `pg_dump --no-owner --no-acl --quote-all-identifiers`, gzips the output, uploads to R2 via `rclone` (S3-compatible API), then lists the bucket to confirm. Total runtime < 1 minute.
-- **Why GH Actions instead of Vercel cron:** Vercel functions don't ship with `pg_dump` and a JS-based row-by-row dump produces JSONL that's harder to restore than a real SQL dump. GH Actions runners are full Ubuntu so `apt install postgresql-client-17` is a one-liner. Backup also keeps working if the app itself is down.
-- **Pending Jacob-manual:**
-  - Create R2 bucket `pfa-cage-rentals-backups` with a 30-day Object Lifecycle Rule.
-  - Generate an R2 API token scoped to that bucket only.
-  - Add GitHub secrets: `DATABASE_URL_PROD`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`.
-  - Manually trigger the workflow once (Actions → Nightly backup → Run workflow) and verify the dump appears in R2.
+### K4. Neon backup strategy — `[x]`
+Decision (2026-05-25): stay on Neon free tier (24h PITR) + nightly `pg_dump` to Cloudflare R2 covering the previous 30 days.
+- **Implementation:** `.github/workflows/backup.yml` runs at 06:00 UTC daily (manually dispatchable too). Installs `postgresql-client-17` via PGDG apt repo + modern signed-by GPG keyring (apt-key is deprecated and silently fails on Ubuntu 22.04+), runs `/usr/lib/postgresql/17/bin/pg_dump --no-owner --no-acl --quote-all-identifiers` by absolute path (preinstalled v16 on PATH would otherwise abort with a version mismatch against Neon's v17 server), gzips the output, uploads via rclone with `no_check_bucket = true` (our R2 token is scoped to the single bucket and can't satisfy rclone's default HeadBucket probe). Total runtime ~30s.
+- **R2 provisioning done:** bucket `pfa-cage-rentals-backups` (WNAM region) with a `expire-after-30-days` lifecycle rule scoped to the `nightly/` prefix. R2 API token scoped Object Read & Write to that bucket only. GitHub secrets `DATABASE_URL_PROD`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` configured.
+- **Verified:** first manual dispatch (2026-05-25) produced `pfa-cage-rentals-2026-05-25T02-39-...sql.gz` in `nightly/` (~7KB given the current small dataset).
 - **Restore procedure:** documented in `docs/runbook.md` ("Restore from nightly backup").
-- Acceptance: flip to `[x]` after the first successful nightly dump shows up in R2.
 
 ### K5. Status page — `[ ]` (parked post-launch)
 Not a launch blocker. Pick this up after Stage K-launch (K8–K10) is comfortable.

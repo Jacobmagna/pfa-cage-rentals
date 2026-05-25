@@ -26,6 +26,7 @@ export type EditFormValues = {
   note: string;
   isTeamRental: boolean;
   pfaReferred: boolean;
+  isOnline: boolean;
 };
 
 export type EditActionResult =
@@ -46,6 +47,7 @@ function snapshot(formData: FormData): EditFormValues {
     note: formData.get("note")?.toString() ?? "",
     isTeamRental: formData.get("isTeamRental") === "on",
     pfaReferred: formData.get("pfaReferred") === "on",
+    isOnline: formData.get("isOnline") === "on",
   };
 }
 
@@ -70,6 +72,7 @@ function buildInput(formData: FormData) {
     note: formData.get("note")?.toString().trim() || null,
     isTeamRental: formData.get("isTeamRental") === "on",
     pfaReferred: formData.get("pfaReferred") === "on",
+    isOnline: formData.get("isOnline") === "on",
   };
 }
 

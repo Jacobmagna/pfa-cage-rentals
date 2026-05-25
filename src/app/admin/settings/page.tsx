@@ -1,8 +1,12 @@
 import Link from "next/link";
+import { asc } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
+import { db } from "@/db";
+import { rateDefaults } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import { getOrgSettings } from "@/lib/server/handles-actions";
 import { OrgSettingsCard } from "./_components/org-settings-card";
+import { RateDefaultsCard } from "./_components/rate-defaults-card";
 
 // /admin/settings — org-wide configuration.
 //
@@ -17,7 +21,10 @@ import { OrgSettingsCard } from "./_components/org-settings-card";
 
 export default async function AdminSettingsPage() {
   await requireRole("admin");
-  const settings = await getOrgSettings();
+  const [settings, rateRows] = await Promise.all([
+    getOrgSettings(),
+    db.select().from(rateDefaults).orderBy(asc(rateDefaults.type)),
+  ]);
 
   return (
     <>
@@ -35,15 +42,18 @@ export default async function AdminSettingsPage() {
         </p>
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
         <p className="text-sm text-fg-muted">
-          Org-wide configuration. Today: the Zelle contact coaches use
-          to pay PFA.
+          Org-wide configuration: PFA payment handle + default rental rates.
         </p>
       </div>
 
-      <OrgSettingsCard
-        initialPfaDisplayName={settings.pfaDisplayName}
-        initialPfaZelleContact={settings.pfaZelleContact}
-      />
+      <div className="space-y-6">
+        <OrgSettingsCard
+          initialPfaDisplayName={settings.pfaDisplayName}
+          initialPfaZelleContact={settings.pfaZelleContact}
+        />
+
+        <RateDefaultsCard rows={rateRows} />
+      </div>
     </>
   );
 }

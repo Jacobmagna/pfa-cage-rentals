@@ -1,23 +1,17 @@
 // Pure aggregation for billing reports. No DB, no React, no I/O.
-// Both the live admin preview (Stage E1) and the ExcelJS export
-// (Stage E2) call this — single source of truth for what a "report
-// row" looks like, plus drives unit tests in E3.
+// Both the live admin preview and the ExcelJS export call this —
+// single source of truth for what a "report row" looks like.
+//
+// Snapshot rule (post variable-rates change): every session input
+// already carries its own `ratePer30MinCents`, stamped at session
+// creation by the server actions. This aggregator NEVER recomputes
+// from current overrides — it multiplies snapshot rate × slot count
+// so reports always reflect the historical rate at the time of the
+// booking, even if Dad has since renegotiated the coach's rate.
 //
 // Cents discipline: every monetary number stays in integer cents.
-// Dollar formatting happens at the boundary (the page renders
-// "$X.XX", the Excel workbook applies a currency format).
-//
-// Rate selection: each detail row records whether the rate came
-// from the default constants (billing.ts) or a coach override
-// (`rateSource`). The Summary row's `appliedOverride` flag rolls
-// that up so Dad can spot "this coach is on an override rate"
-// without scanning the detail.
 
-import {
-  chargeForSession,
-  type RateOverride,
-  type ResourceType,
-} from "@/lib/billing";
+import { slotsBetween, type ResourceType } from "@/lib/billing";
 import {
   formatPfaDate,
   formatPfaTime,
@@ -38,6 +32,9 @@ export type AggregateSessionInput = {
   note: string | null;
   isTeamRental: boolean;
   pfaReferred: boolean;
+  isOnline: boolean;
+  /** Cents-per-30-min rate stamped on the session row at creation. */
+  ratePer30MinCents: number;
 };
 
 export type DetailRow = {
@@ -55,11 +52,11 @@ export type DetailRow = {
   coachEmail: string;
   useType: "hitting" | "pitching" | null;
   ratePerSlotCents: number;
-  rateSource: "default" | "override";
   totalCents: number;
   note: string | null;
   isTeamRental: boolean;
   pfaReferred: boolean;
+  isOnline: boolean;
 };
 
 export type SummaryRow = {
@@ -73,7 +70,7 @@ export type SummaryRow = {
   weightRoomSlots: number;
   weightRoomTotalCents: number;
   totalCents: number;
-  appliedOverride: boolean;
+  onlineSessions: number;
 };
 
 export type ReportData = {
@@ -83,27 +80,20 @@ export type ReportData = {
 };
 
 /**
- * Turns raw session inputs + rate overrides into the canonical report
- * shape. Detail is in the input order (caller should pre-sort by
- * date); Summary is sorted by coach name for stable UI / Excel output.
+ * Turns raw session inputs into the canonical report shape. Detail
+ * is in the input order (caller should pre-sort by date); Summary
+ * is sorted by coach name for stable UI / Excel output.
+ *
+ * Reads `ratePer30MinCents` straight off each input row — never
+ * recomputes. Online sessions arrive with rate 0 and naturally
+ * contribute $0 to totals.
  */
 export function aggregateReport(
   sessions: AggregateSessionInput[],
-  overrides: RateOverride[],
 ): ReportData {
   const detail: DetailRow[] = sessions.map((s) => {
-    const charge = chargeForSession(
-      {
-        coachId: s.coachId,
-        resourceType: s.resourceType,
-        startAt: s.startAt,
-        endAt: s.endAt,
-      },
-      overrides,
-    );
-    const hadOverride = overrides.some(
-      (o) => o.coachId === s.coachId && o.resourceType === s.resourceType,
-    );
+    const slots = slotsBetween(s.startAt, s.endAt);
+    const totalCents = slots * s.ratePer30MinCents;
     return {
       sessionId: s.sessionId,
       date: formatPfaDate(s.startAt),
@@ -113,19 +103,19 @@ export function aggregateReport(
       durationMinutes: Math.round(
         (s.endAt.getTime() - s.startAt.getTime()) / 60_000,
       ),
-      slots: charge.slots,
+      slots,
       resourceName: s.resourceName,
       resourceType: s.resourceType,
       coachId: s.coachId,
       coachName: s.coachName ?? s.coachEmail,
       coachEmail: s.coachEmail,
       useType: s.useType,
-      ratePerSlotCents: charge.ratePer30MinCents,
-      rateSource: hadOverride ? "override" : "default",
-      totalCents: charge.totalCents,
+      ratePerSlotCents: s.ratePer30MinCents,
+      totalCents,
       note: s.note,
       isTeamRental: s.isTeamRental,
       pfaReferred: s.pfaReferred,
+      isOnline: s.isOnline,
     };
   });
 
@@ -146,7 +136,7 @@ export function aggregateReport(
         weightRoomSlots: 0,
         weightRoomTotalCents: 0,
         totalCents: 0,
-        appliedOverride: false,
+        onlineSessions: 0,
       };
       summaryMap.set(row.coachId, entry);
     }
@@ -165,7 +155,7 @@ export function aggregateReport(
         break;
     }
     entry.totalCents += row.totalCents;
-    if (row.rateSource === "override") entry.appliedOverride = true;
+    if (row.isOnline) entry.onlineSessions += 1;
   }
 
   const summary = Array.from(summaryMap.values()).sort((a, b) =>

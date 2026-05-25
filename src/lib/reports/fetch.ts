@@ -6,13 +6,7 @@
 
 import { and, asc, eq, gte, inArray, lt } from "drizzle-orm";
 import { db } from "@/db";
-import {
-  coachRateOverrides,
-  resources,
-  sessionsBilling,
-  users,
-} from "@/db/schema";
-import type { RateOverride } from "@/lib/billing";
+import { resources, sessionsBilling, users } from "@/db/schema";
 import {
   aggregateReport,
   type AggregateSessionInput,
@@ -40,32 +34,33 @@ export async function fetchReportData(
     conditions.push(inArray(resources.type, filters.resourceTypes));
   }
 
-  // Overrides: fetch all rows (small table, <100 even at full coach
-  // roster scale). aggregateReport picks the matching one per session.
-  const [sessionRows, overrideRows] = await Promise.all([
-    db
-      .select({
-        sessionId: sessionsBilling.id,
-        coachId: sessionsBilling.coachId,
-        coachName: users.name,
-        coachEmail: users.email,
-        resourceId: sessionsBilling.resourceId,
-        resourceName: resources.name,
-        resourceType: resources.type,
-        startAt: sessionsBilling.startAt,
-        endAt: sessionsBilling.endAt,
-        useType: sessionsBilling.useType,
-        note: sessionsBilling.note,
-        isTeamRental: sessionsBilling.isTeamRental,
-        pfaReferred: sessionsBilling.pfaReferred,
-      })
-      .from(sessionsBilling)
-      .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
-      .innerJoin(users, eq(sessionsBilling.coachId, users.id))
-      .where(and(...conditions))
-      .orderBy(asc(sessionsBilling.startAt)),
-    db.select().from(coachRateOverrides),
-  ]);
+  // Snapshot rule: read ratePer30MinCents directly off the session
+  // row. No override fetch — overrides are only consulted at session
+  // CREATION time (in src/lib/server/session-actions.ts), never on
+  // the read path.
+  const sessionRows = await db
+    .select({
+      sessionId: sessionsBilling.id,
+      coachId: sessionsBilling.coachId,
+      coachName: users.name,
+      coachEmail: users.email,
+      resourceId: sessionsBilling.resourceId,
+      resourceName: resources.name,
+      resourceType: resources.type,
+      startAt: sessionsBilling.startAt,
+      endAt: sessionsBilling.endAt,
+      useType: sessionsBilling.useType,
+      note: sessionsBilling.note,
+      isTeamRental: sessionsBilling.isTeamRental,
+      pfaReferred: sessionsBilling.pfaReferred,
+      isOnline: sessionsBilling.isOnline,
+      ratePer30MinCents: sessionsBilling.ratePer30MinCents,
+    })
+    .from(sessionsBilling)
+    .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
+    .innerJoin(users, eq(sessionsBilling.coachId, users.id))
+    .where(and(...conditions))
+    .orderBy(asc(sessionsBilling.startAt));
 
   const aggregateInputs: AggregateSessionInput[] = sessionRows.map((r) => ({
     sessionId: r.sessionId,
@@ -81,13 +76,9 @@ export async function fetchReportData(
     note: r.note,
     isTeamRental: r.isTeamRental,
     pfaReferred: r.pfaReferred,
+    isOnline: r.isOnline,
+    ratePer30MinCents: r.ratePer30MinCents,
   }));
 
-  const overrides: RateOverride[] = overrideRows.map((o) => ({
-    coachId: o.coachId,
-    resourceType: o.resourceType,
-    ratePer30MinCents: o.ratePer30MinCents,
-  }));
-
-  return aggregateReport(aggregateInputs, overrides);
+  return aggregateReport(aggregateInputs);
 }

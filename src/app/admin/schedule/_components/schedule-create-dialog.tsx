@@ -24,7 +24,7 @@ import {
   type BlockActionResult,
 } from "../form-actions";
 import { TimeSelect } from "@/app/_components/time-select";
-import { TeamRentalCheckbox } from "@/app/_components/team-rental-checkbox";
+import { SessionFlagsRow } from "@/app/_components/session-flags-row";
 import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
 import {
   SessionSlotsList,
@@ -160,6 +160,8 @@ export function ScheduleCreateDialog({
       useType: "",
       note: "",
       isTeamRental: false,
+      pfaReferred: false,
+      isOnline: false,
     };
   }, [prefill, sessionState]);
 
@@ -294,6 +296,8 @@ function SessionTab({
     useType: string;
     note: string;
     isTeamRental: boolean;
+    pfaReferred: boolean;
+    isOnline: boolean;
   };
   coaches: CoachOption[];
   resources: ResourceOption[];
@@ -400,6 +404,8 @@ function SessionTab({
             endAt: s.endAt,
             note: s.note.trim() || null,
             isTeamRental: s.isTeamRental,
+            pfaReferred: s.pfaReferred,
+            isOnline: s.isOnline,
           })),
         });
         setSlots([]);
@@ -565,11 +571,17 @@ function SessionTab({
               name="note"
               defaultValue={defaults.note}
               maxLength={500}
-              placeholder="Optional context (e.g. JP De La Cruz, online)"
+              placeholder="Optional context (e.g. JP De La Cruz)"
               className={inputStyles}
             />
           </Field>
-          <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
+          <SessionFlagsRow
+            defaults={{
+              isTeamRental: defaults.isTeamRental,
+              pfaReferred: defaults.pfaReferred,
+              isOnline: defaults.isOnline,
+            }}
+          />
         </>
       ) : (
         <SessionSlotsList

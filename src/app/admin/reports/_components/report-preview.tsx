@@ -8,6 +8,7 @@
 
 import type { DetailRow, SummaryRow } from "@/lib/reports/aggregate";
 import { TeamRentalBadge } from "@/app/_components/team-rental-badge";
+import { OnlineBadge } from "@/app/_components/online-badge";
 
 export function ReportPreview({
   detail,
@@ -52,7 +53,7 @@ export function ReportPreview({
                 <th scope="col" className="px-4 py-3 text-right font-medium">Weight Room slots</th>
                 <th scope="col" className="px-4 py-3 text-right font-medium">Weight Room $</th>
                 <th scope="col" className="px-4 py-3 text-right font-medium">Total</th>
-                <th scope="col" className="px-4 py-3 text-center font-medium">Rate</th>
+                <th scope="col" className="px-4 py-3 text-center font-medium">Online</th>
               </tr>
             </thead>
             <tbody>
@@ -76,14 +77,12 @@ export function ReportPreview({
                     {formatCents(row.totalCents)}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    {row.appliedOverride ? (
-                      <span className="inline-block rounded-full bg-gold/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-gold">
-                        Override
+                    {row.onlineSessions > 0 ? (
+                      <span className="inline-block rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-sky-300 ring-1 ring-inset ring-sky-500/30">
+                        {row.onlineSessions}
                       </span>
                     ) : (
-                      <span className="text-[10px] text-fg-subtle uppercase tracking-wider">
-                        Default
-                      </span>
+                      <span className="text-[10px] text-fg-subtle">—</span>
                     )}
                   </td>
                 </tr>
@@ -136,6 +135,7 @@ export function ReportPreview({
                     <span className="inline-flex items-center gap-1.5 flex-wrap">
                       {row.coachName}
                       {row.isTeamRental ? <TeamRentalBadge /> : null}
+                      {row.isOnline ? <OnlineBadge /> : null}
                     </span>
                   </td>
                   <NumCell value={row.slots} />

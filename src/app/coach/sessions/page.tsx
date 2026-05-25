@@ -65,6 +65,7 @@ export default async function CoachSessionsPage({
         note: sessionsBilling.note,
         isTeamRental: sessionsBilling.isTeamRental,
         pfaReferred: sessionsBilling.pfaReferred,
+        isOnline: sessionsBilling.isOnline,
       })
       .from(sessionsBilling)
       .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
@@ -94,6 +95,7 @@ export default async function CoachSessionsPage({
     note: r.note,
     isTeamRental: r.isTeamRental,
     pfaReferred: r.pfaReferred,
+    isOnline: r.isOnline,
   }));
 
   const resourceOptions: ResourceOption[] = activeResources;

@@ -30,11 +30,11 @@ function makeReport(): ReportData {
         coachEmail: "alice@x.com",
         useType: "hitting",
         ratePerSlotCents: 1800,
-        rateSource: "override",
         totalCents: 3600,
         note: "warm-up",
         isTeamRental: false,
         pfaReferred: true,
+        isOnline: false,
       },
       {
         sessionId: "s2",
@@ -50,12 +50,33 @@ function makeReport(): ReportData {
         coachName: "Bob Coach",
         coachEmail: "bob@x.com",
         useType: null,
-        ratePerSlotCents: 500,
-        rateSource: "default",
-        totalCents: 1000,
+        ratePerSlotCents: 700,
+        totalCents: 1400,
         note: null,
         isTeamRental: true,
         pfaReferred: false,
+        isOnline: false,
+      },
+      {
+        sessionId: "s3",
+        date: "2026-05-08",
+        dayOfWeek: "Fri",
+        startTime: "10:00",
+        endTime: "11:00",
+        durationMinutes: 60,
+        slots: 2,
+        resourceName: "Cage 2",
+        resourceType: "cage",
+        coachId: "c1",
+        coachName: "Alice Coach",
+        coachEmail: "alice@x.com",
+        useType: "hitting",
+        ratePerSlotCents: 0,
+        totalCents: 0,
+        note: null,
+        isTeamRental: false,
+        pfaReferred: false,
+        isOnline: true,
       },
     ],
     summary: [
@@ -63,14 +84,14 @@ function makeReport(): ReportData {
         coachId: "c1",
         coachName: "Alice Coach",
         coachEmail: "alice@x.com",
-        cageSlots: 2,
+        cageSlots: 4,
         cageTotalCents: 3600,
         bullpenSlots: 0,
         bullpenTotalCents: 0,
         weightRoomSlots: 0,
         weightRoomTotalCents: 0,
         totalCents: 3600,
-        appliedOverride: true,
+        onlineSessions: 1,
       },
       {
         coachId: "c2",
@@ -81,12 +102,12 @@ function makeReport(): ReportData {
         bullpenSlots: 0,
         bullpenTotalCents: 0,
         weightRoomSlots: 2,
-        weightRoomTotalCents: 1000,
-        totalCents: 1000,
-        appliedOverride: false,
+        weightRoomTotalCents: 1400,
+        totalCents: 1400,
+        onlineSessions: 0,
       },
     ],
-    grandTotalCents: 4600,
+    grandTotalCents: 5000,
   };
 }
 
@@ -107,7 +128,7 @@ describe("buildReportWorkbook", () => {
       to: "2026-05-31",
     });
     expect(buf).toBeInstanceOf(Buffer);
-    expect(buf.length).toBeGreaterThan(2000); // a real .xlsx is never tiny
+    expect(buf.length).toBeGreaterThan(2000);
 
     const wb = await loadWorkbook(buf);
     expect(wb.worksheets.map((s) => s.name)).toEqual(["Summary", "Detail"]);
@@ -132,7 +153,6 @@ describe("buildReportWorkbook", () => {
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Summary")!;
       const headers = sheet.getRow(1).values as unknown[];
-      // values is 1-indexed; slice(1) drops the leading undefined.
       expect(headers.slice(1)).toEqual([
         "Coach",
         "Email",
@@ -143,16 +163,10 @@ describe("buildReportWorkbook", () => {
         "WeightRoom Slots",
         "WeightRoom $",
         "Total",
-        "Rate Source",
+        "Online Sessions",
       ]);
     });
 
-    // Summary column layout (1-based — Excel files don't persist
-    // the `key` aliases we set in the builder, so we index by number
-    // after a buffer round-trip):
-    //   1 Coach · 2 Email · 3 Cage Slots · 4 Cage $ · 5 Bullpen Slots
-    //   6 Bullpen $ · 7 WeightRoom Slots · 8 WeightRoom $ · 9 Total
-    //   10 Rate Source
     it("renders dollar values divided by 100 with currency numFmt", async () => {
       const buf = await buildReportWorkbook(makeReport(), {
         from: "2026-05-01",
@@ -160,14 +174,12 @@ describe("buildReportWorkbook", () => {
       });
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Summary")!;
-      // Row 2 = Alice (cage override $36)
       const row2 = sheet.getRow(2);
       expect(row2.getCell(1).value).toBe("Alice Coach");
       expect(row2.getCell(4).value).toBe(36); // cage $ = 3600 cents / 100
       expect(row2.getCell(9).value).toBe(36); // total
-      expect(row2.getCell(10).value).toBe("Override");
+      expect(row2.getCell(10).value).toBe(1); // 1 online session
 
-      // Number format on the dollar columns.
       expect(sheet.getColumn(4).numFmt).toBe('"$"#,##0.00');
       expect(sheet.getColumn(9).numFmt).toBe('"$"#,##0.00');
     });
@@ -179,12 +191,11 @@ describe("buildReportWorkbook", () => {
       });
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Summary")!;
-      // 1 header + 2 coach rows + 1 footer = 4 rows
-      expect(sheet.rowCount).toBe(4);
+      expect(sheet.rowCount).toBe(4); // 1 header + 2 coach rows + 1 footer
       const footer = sheet.getRow(4);
       expect(String(footer.getCell(1).value)).toContain("Grand total");
-      expect(String(footer.getCell(1).value)).toContain("2 sessions");
-      expect(footer.getCell(9).value).toBe(46); // total column
+      expect(String(footer.getCell(1).value)).toContain("3 sessions");
+      expect(footer.getCell(9).value).toBe(50); // 5000 cents / 100
       expect(footer.font?.bold).toBe(true);
     });
 
@@ -197,9 +208,6 @@ describe("buildReportWorkbook", () => {
       const sheet = wb.getWorksheet("Summary")!;
       const view = sheet.views?.[0];
       expect(view?.state).toBe("frozen");
-      // ySplit only exists on the frozen-view variant of the union;
-      // narrow via state, then read it as a number through a cast
-      // that's safe given the assertion above.
       const ySplit = (view as { ySplit?: number } | undefined)?.ySplit;
       expect(ySplit).toBe(1);
     });
@@ -213,15 +221,14 @@ describe("buildReportWorkbook", () => {
       });
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Detail")!;
-      // 1 header + 2 sessions = 3 rows (no grand-total in Detail)
-      expect(sheet.rowCount).toBe(3);
+      expect(sheet.rowCount).toBe(4); // header + 3 sessions
     });
 
-    // Detail column layout (1-based):
+    // Detail column layout (1-based) after the rate-snapshot refactor:
     //   1 Date · 2 Day · 3 Start · 4 End · 5 Duration · 6 Resource
-    //   7 Use · 8 Coach · 9 Team Rental · 10 PFA-Referred · 11 Slots
-    //   12 Rate · 13 $ · 14 Rate Source · 15 Note
-    it("writes the override flag + dollar amounts per session", async () => {
+    //   7 Use · 8 Coach · 9 Team Rental · 10 PFA-Referred · 11 Online
+    //   12 Slots · 13 Rate · 14 $ · 15 Note
+    it("writes flags + dollar amounts per session", async () => {
       const buf = await buildReportWorkbook(makeReport(), {
         from: "2026-05-01",
         to: "2026-05-31",
@@ -232,29 +239,21 @@ describe("buildReportWorkbook", () => {
       const row2 = sheet.getRow(2);
       expect(row2.getCell(1).value).toBe("2026-05-05");
       expect(row2.getCell(6).value).toBe("Cage 1");
-      expect(row2.getCell(7).value).toBe("hitting");
       expect(row2.getCell(8).value).toBe("Alice Coach");
       const teamRentalVal2 = row2.getCell(9).value;
       expect(teamRentalVal2 === "" || teamRentalVal2 === null).toBe(true);
       expect(row2.getCell(10).value).toBe("Yes"); // pfa-referred
-      expect(row2.getCell(11).value).toBe(2);
-      expect(row2.getCell(12).value).toBe(18); // 1800 cents / 100
-      expect(row2.getCell(13).value).toBe(36);
-      expect(row2.getCell(14).value).toBe("Override");
+      const onlineVal2 = row2.getCell(11).value;
+      expect(onlineVal2 === "" || onlineVal2 === null).toBe(true);
+      expect(row2.getCell(12).value).toBe(2);
+      expect(row2.getCell(13).value).toBe(18); // 1800 / 100
+      expect(row2.getCell(14).value).toBe(36);
       expect(row2.getCell(15).value).toBe("warm-up");
 
-      const row3 = sheet.getRow(3);
-      expect(row3.getCell(6).value).toBe("Weight Room 1");
-      // null useType/note: ExcelJS represents an empty cell as
-      // either "" or null depending on its codec path. Accept both.
-      const useVal = row3.getCell(7).value;
-      expect(useVal === "" || useVal === null).toBe(true);
-      expect(row3.getCell(9).value).toBe("Yes"); // team rental
-      const pfaRefVal3 = row3.getCell(10).value;
-      expect(pfaRefVal3 === "" || pfaRefVal3 === null).toBe(true);
-      expect(row3.getCell(14).value).toBe("Default");
-      const noteVal = row3.getCell(15).value;
-      expect(noteVal === "" || noteVal === null).toBe(true);
+      const row4 = sheet.getRow(4); // s3 — online session
+      expect(row4.getCell(11).value).toBe("Yes"); // online
+      expect(row4.getCell(13).value).toBe(0); // rate 0
+      expect(row4.getCell(14).value).toBe(0); // total 0
     });
   });
 
@@ -270,7 +269,6 @@ describe("buildReportWorkbook", () => {
     });
     const wb = await loadWorkbook(buf);
     const summary = wb.getWorksheet("Summary")!;
-    // Header only, no coach rows, no footer.
     expect(summary.rowCount).toBe(1);
     const detail = wb.getWorksheet("Detail")!;
     expect(detail.rowCount).toBe(1);

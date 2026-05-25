@@ -12,6 +12,7 @@ import {
 import type { ResourceOption } from "./types";
 import { TeamRentalBadge } from "@/app/_components/team-rental-badge";
 import { PfaReferredBadge } from "@/app/_components/pfa-referred-badge";
+import { OnlineBadge } from "@/app/_components/online-badge";
 
 // Renders the history list, owns the edit-dialog open/close + the
 // row delete pending state. Pagination links are server-side
@@ -29,6 +30,7 @@ export type HistoryRow = {
   note: string | null;
   isTeamRental: boolean;
   pfaReferred: boolean;
+  isOnline: boolean;
 };
 
 export function SessionsHistoryClient({
@@ -75,6 +77,7 @@ export function SessionsHistoryClient({
         note: editingRow.note,
         isTeamRental: editingRow.isTeamRental,
         pfaReferred: editingRow.pfaReferred,
+        isOnline: editingRow.isOnline,
       }
     : null;
 
@@ -129,6 +132,12 @@ export function SessionsHistoryClient({
                       <>
                         {" · "}
                         <PfaReferredBadge />
+                      </>
+                    ) : null}
+                    {row.isOnline ? (
+                      <>
+                        {" · "}
+                        <OnlineBadge />
                       </>
                     ) : null}
                   </p>

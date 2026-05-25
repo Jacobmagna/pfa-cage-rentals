@@ -53,7 +53,7 @@ function addSummarySheet(workbook: ExcelJS.Workbook, report: ReportData) {
     { header: "WeightRoom Slots", key: "weightRoomSlots", width: 18 },
     { header: "WeightRoom $", key: "weightRoomDollars", width: 14 },
     { header: "Total", key: "total", width: 12 },
-    { header: "Rate Source", key: "rateSource", width: 13 },
+    { header: "Online Sessions", key: "onlineSessions", width: 16 },
   ];
 
   for (const row of report.summary) {
@@ -67,7 +67,7 @@ function addSummarySheet(workbook: ExcelJS.Workbook, report: ReportData) {
       weightRoomSlots: row.weightRoomSlots,
       weightRoomDollars: row.weightRoomTotalCents / 100,
       total: row.totalCents / 100,
-      rateSource: row.appliedOverride ? "Override" : "Default",
+      onlineSessions: row.onlineSessions || "",
     });
   }
 
@@ -124,10 +124,10 @@ function addDetailSheet(workbook: ExcelJS.Workbook, report: ReportData) {
     { header: "Coach", key: "coach", width: 24 },
     { header: "Team Rental", key: "teamRental", width: 12 },
     { header: "PFA-Referred", key: "pfaReferred", width: 14 },
+    { header: "Online", key: "online", width: 8 },
     { header: "Slots", key: "slots", width: 8 },
     { header: "Rate", key: "rate", width: 10 },
     { header: "$", key: "total", width: 12 },
-    { header: "Rate Source", key: "rateSource", width: 13 },
     { header: "Note", key: "note", width: 40 },
   ];
 
@@ -143,10 +143,10 @@ function addDetailSheet(workbook: ExcelJS.Workbook, report: ReportData) {
       coach: row.coachName,
       teamRental: row.isTeamRental ? "Yes" : "",
       pfaReferred: row.pfaReferred ? "Yes" : "",
+      online: row.isOnline ? "Yes" : "",
       slots: row.slots,
       rate: row.ratePerSlotCents / 100,
       total: row.totalCents / 100,
-      rateSource: row.rateSource === "override" ? "Override" : "Default",
       note: row.note ?? "",
     });
   }

@@ -105,12 +105,17 @@ export default async function AdminCoachesPage() {
     };
   });
 
-  // Merge targets = real coaches only (never a synthetic into another
-  // synthetic). Pre-filtered server-side so the dialog dropdown is
-  // identical for every row.
-  const mergeTargets = rows
-    .filter((r) => !r.isSynthetic)
-    .map((r) => ({ id: r.id, name: r.name, email: r.email }));
+  // Merge targets = every coach. Synthetic-into-synthetic is allowed
+  // because the historical import can create multiple pseudo-coaches
+  // for what's logically one entity (e.g. "PFA Travel" + "PFA Summer
+  // Travel" + "PFA Travel JT" should consolidate into a single PFA
+  // Travel pseudo-coach). The merge dialog itself excludes the source
+  // row from the dropdown.
+  const mergeTargets = rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    email: r.email,
+  }));
 
   const monthLabel = formatPfaMonthYear(now);
 

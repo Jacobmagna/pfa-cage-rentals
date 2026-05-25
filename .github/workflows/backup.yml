@@ -46,11 +46,25 @@ jobs:
         run: |
           # Neon currently runs Postgres 17. Match the client version
           # so pg_dump can dump every feature the server uses without
-          # warnings (e.g. extension definitions like btree_gist).
-          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-          wget -qO - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          # a "server version mismatch" abort.
+          #
+          # The Ubuntu runner ships with postgresql-client-16 preinstalled,
+          # and /usr/bin/pg_dump points at that. We install the 17 client
+          # alongside via the official PGDG apt repo and invoke pg_dump
+          # by its absolute path in the dump step.
+          #
+          # apt-key is deprecated on Ubuntu 22.04+ and the GPG key import
+          # silently fails — use the signed-by keyring pattern instead.
+          sudo install -d /usr/share/keyrings
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /usr/share/keyrings/pgdg.gpg
+          sudo sh -c 'echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
           sudo apt-get update -qq
           sudo apt-get install -y postgresql-client-17
+          # Verify we got v17 specifically. The next step calls pg_dump
+          # by absolute path; this is just a sanity check that the
+          # install actually landed.
+          /usr/lib/postgresql/17/bin/pg_dump --version
 
       - name: Install rclone
         run: |
@@ -90,7 +104,10 @@ jobs:
           # (e.g. our "session" tables) safe.
           # gzip on the fly so we never write the uncompressed dump
           # to disk.
-          pg_dump \
+          # Absolute path to v17 binary — the runner's preinstalled
+          # /usr/bin/pg_dump is v16 and would fail with a version
+          # mismatch against Neon's v17 server.
+          /usr/lib/postgresql/17/bin/pg_dump \
             --no-owner \
             --no-acl \
             --quote-all-identifiers \

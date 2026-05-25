@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { requireSession } from "@/lib/authz";
 import { AppShell } from "../_components/app-shell";
+import { EditableName } from "../_components/editable-name";
 
 export default async function CoachHome() {
   const session = await requireSession();
@@ -13,7 +14,9 @@ export default async function CoachHome() {
           Welcome
         </p>
         <h1 className="text-2xl sm:text-3xl font-bold tracking-tight break-words">
-          {session.user.name?.split(" ")[0] ?? session.user.email?.split("@")[0]}
+          <EditableName
+            initialName={session.user.name ?? session.user.email?.split("@")[0] ?? "Coach"}
+          />
         </h1>
       </div>
 

@@ -1,8 +1,15 @@
 "use server";
 
 import { headers } from "next/headers";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { signIn } from "@/auth";
+import { db } from "@/db";
+import { users } from "@/db/schema";
+import { logAudit } from "@/lib/audit";
+import { requireSession } from "@/lib/authz";
 import { checkMagicLinkRateLimit } from "@/lib/ratelimit";
 
 // Magic-link request flow with rate limiting. Pulled out of the
@@ -35,4 +42,49 @@ export async function requestMagicLink(formData: FormData): Promise<void> {
   }
 
   await signIn("resend", { email, redirectTo: "/" });
+}
+
+// Lets a signed-in user edit their own display name. Solves two problems:
+// (1) Google sign-in pulls the OAuth account's display name, which often
+//     doesn't match how the coach is known (Gmail nickname, alias account);
+// (2) overlap-conflict errors show coachName ?? coachEmail — populating
+//     name reliably keeps the email fallback from firing in user-facing copy.
+//
+// Coach and admin both call the same action via [[updateOwnNameSchema]].
+// Trim + non-empty + reasonable max-length; longer trips Zod and surfaces
+// as a thrown ZodError caught by the caller's UI.
+const updateOwnNameSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Name cannot be empty")
+    .max(80, "Name must be 80 characters or fewer"),
+});
+
+export async function updateOwnName(input: unknown): Promise<{ name: string }> {
+  const session = await requireSession();
+  const { name } = updateOwnNameSchema.parse(input);
+
+  const [before] = await db
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
+
+  await db.update(users).set({ name }).where(eq(users.id, session.user.id));
+
+  await logAudit(db, {
+    actorUserId: session.user.id,
+    entityType: "user",
+    entityId: session.user.id,
+    action: "update",
+    before: { name: before?.name ?? null },
+    after: { name },
+  });
+
+  // Re-render every surface that shows the current user's name.
+  revalidatePath("/admin");
+  revalidatePath("/coach");
+  revalidatePath("/admin/coaches");
+  return { name };
 }

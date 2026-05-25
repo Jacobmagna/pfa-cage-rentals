@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireRole } from "@/lib/authz";
 import { AppShell } from "../_components/app-shell";
+import { EditableName } from "../_components/editable-name";
 
 export default async function AdminHome() {
   const session = await requireRole("admin");
@@ -12,7 +13,8 @@ export default async function AdminHome() {
           Dashboard
         </p>
         <h1 className="text-3xl font-bold tracking-tight">
-          Welcome back, {session.user.name?.split(" ")[0] ?? "Admin"}
+          Welcome back,{" "}
+          <EditableName initialName={session.user.name ?? "Admin"} />
         </h1>
         <p className="text-sm text-fg-muted">
           Phase 1 foundation is live. Schedule grid, reports, coach

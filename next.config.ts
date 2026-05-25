@@ -57,6 +57,12 @@ const nextConfig: NextConfig = {
       // connect-src includes Sentry's ingest endpoint (uses *.sentry.io wildcard)
       // and Resend's API (server-side, but client may also call via fetch).
       "connect-src 'self' https://api.resend.com https://*.sentry.io https://*.ingest.us.sentry.io",
+      // object-src + frame-src explicit even though default-src 'self' already
+      // restricts them — Mozilla Observatory looks for these as named
+      // directives, not the default-src fallback. We never embed <object>,
+      // <embed>, or <iframe>, so 'none' is correct.
+      "object-src 'none'",
+      "frame-src 'none'",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self' https://accounts.google.com",

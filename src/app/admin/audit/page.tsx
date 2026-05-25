@@ -10,7 +10,6 @@ import {
   normalizeAuditFilters,
 } from "@/lib/audit/filters";
 import { fetchAuditPage } from "@/lib/audit/fetch";
-import { AppShell } from "@/app/_components/app-shell";
 import { FiltersForm } from "./_components/filters-form";
 import { AuditTable } from "./_components/audit-table";
 
@@ -70,7 +69,7 @@ export default async function AdminAuditPage({
     `/admin/audit?${auditFiltersToQueryString(filters, { page: p })}`;
 
   return (
-    <AppShell role="admin">
+    <>
       <Link
         href="/admin"
         className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
@@ -126,7 +125,7 @@ export default async function AdminAuditPage({
           </div>
         </nav>
       ) : null}
-    </AppShell>
+    </>
   );
 }
 

@@ -9,7 +9,6 @@ import {
   filtersToQueryString,
   normalizeFilters,
 } from "@/lib/reports/filters";
-import { AppShell } from "@/app/_components/app-shell";
 import { FiltersForm } from "./_components/filters-form";
 import { ReportPreview } from "./_components/report-preview";
 
@@ -55,7 +54,7 @@ export default async function AdminReportsPage({
   const hasResults = report.detail.length > 0;
 
   return (
-    <AppShell role="admin">
+    <>
       <Link
         href="/admin"
         className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
@@ -111,6 +110,6 @@ export default async function AdminReportsPage({
         summary={report.summary}
         grandTotalCents={report.grandTotalCents}
       />
-    </AppShell>
+    </>
   );
 }

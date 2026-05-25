@@ -13,7 +13,6 @@ import {
   type RateOverride,
   type ResourceType,
 } from "@/lib/billing";
-import { AppShell } from "@/app/_components/app-shell";
 import { SessionsHistoryClient, type HistoryRow } from "./_components/sessions-history-client";
 import type { ResourceOption } from "./_components/types";
 
@@ -51,13 +50,13 @@ export default async function CoachSessionsPage({
   // Empty path skips the rest — render the friendly CTA card and exit.
   if (totalCount === 0) {
     return (
-      <AppShell role="coach">
+      <>
         <div className="max-w-2xl">
           <BackLink />
           <PageHeader />
           <EmptyState />
         </div>
-      </AppShell>
+      </>
     );
   }
 
@@ -130,7 +129,7 @@ export default async function CoachSessionsPage({
   const resourceOptions: ResourceOption[] = activeResources;
 
   return (
-    <AppShell role="coach">
+    <>
       <div className="max-w-2xl">
         <BackLink />
         <PageHeader />
@@ -142,7 +141,7 @@ export default async function CoachSessionsPage({
           totalCount={totalCount}
         />
       </div>
-    </AppShell>
+    </>
   );
 }
 

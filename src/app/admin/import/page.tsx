@@ -2,7 +2,6 @@ import { asc, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
-import { AppShell } from "@/app/_components/app-shell";
 import { ImportForm } from "./_components/import-form";
 
 export default async function AdminImportPage() {
@@ -19,7 +18,7 @@ export default async function AdminImportPage() {
     .orderBy(asc(users.name), asc(users.email));
 
   return (
-    <AppShell role="admin">
+    <>
       <div className="space-y-2 mb-8">
         <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
           Stage I — Historical import
@@ -32,6 +31,6 @@ export default async function AdminImportPage() {
         </p>
       </div>
       <ImportForm coaches={coaches} />
-    </AppShell>
+    </>
   );
 }

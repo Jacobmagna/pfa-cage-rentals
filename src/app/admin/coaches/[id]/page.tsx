@@ -10,7 +10,6 @@ import {
   type ResourceType,
 } from "@/lib/billing";
 import { formatPfaDateMedium } from "@/lib/timezone";
-import { AppShell } from "@/app/_components/app-shell";
 import {
   RateOverridesCard,
   type RateOverrideRow,
@@ -77,7 +76,7 @@ export default async function AdminCoachDetailPage({
   });
 
   return (
-    <AppShell role="admin">
+    <>
       <Link
         href="/admin/coaches"
         className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
@@ -107,6 +106,6 @@ export default async function AdminCoachDetailPage({
         coachEmail={coach.email}
         isAdmin={false}
       />
-    </AppShell>
+    </>
   );
 }

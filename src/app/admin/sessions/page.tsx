@@ -2,7 +2,6 @@ import { desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { resources, sessionsBilling, users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
-import { AppShell } from "@/app/_components/app-shell";
 import { SessionsClient } from "./_components/sessions-client";
 
 // Admin sessions page. Pulls the latest 50 bookings + all
@@ -62,7 +61,7 @@ export default async function AdminSessionsPage() {
   ]);
 
   return (
-    <AppShell role="admin">
+    <>
       <div className="mb-8 flex items-end justify-between gap-4">
         <div className="space-y-2">
           <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
@@ -80,6 +79,6 @@ export default async function AdminSessionsPage() {
         coachOptions={coachOptions}
         resourceOptions={resourceOptions}
       />
-    </AppShell>
+    </>
   );
 }

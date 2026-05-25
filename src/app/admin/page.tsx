@@ -1,13 +1,12 @@
 import Link from "next/link";
 import { requireRole } from "@/lib/authz";
-import { AppShell } from "../_components/app-shell";
 import { EditableName } from "../_components/editable-name";
 
 export default async function AdminHome() {
   const session = await requireRole("admin");
 
   return (
-    <AppShell role="admin">
+    <>
       <div className="space-y-2 mb-10">
         <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
           Dashboard
@@ -98,7 +97,7 @@ export default async function AdminHome() {
           </p>
         </Link>
       </div>
-    </AppShell>
+    </>
   );
 }
 

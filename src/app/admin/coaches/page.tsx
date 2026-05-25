@@ -15,7 +15,6 @@ import {
   type ResourceType,
 } from "@/lib/billing";
 import { formatPfaMonthYear } from "@/lib/timezone";
-import { AppShell } from "@/app/_components/app-shell";
 import { CoachesTable, type CoachRow } from "./_components/coaches-table";
 
 // /admin/coaches — list of every user with role=coach plus their
@@ -107,7 +106,7 @@ export default async function AdminCoachesPage() {
   const monthLabel = formatPfaMonthYear(now);
 
   return (
-    <AppShell role="admin">
+    <>
       <Link
         href="/admin"
         className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
@@ -130,6 +129,6 @@ export default async function AdminCoachesPage() {
       </div>
 
       <CoachesTable rows={rows} />
-    </AppShell>
+    </>
   );
 }

@@ -10,7 +10,6 @@ import {
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import { formatPfaDateLong, parsePfaInput, pfaDayEnd, pfaDayStart } from "@/lib/timezone";
-import { AppShell } from "@/app/_components/app-shell";
 import { AutoRefresh } from "./_components/auto-refresh";
 import { ScheduleGrid } from "./_components/schedule-grid";
 import { WeekNav } from "./_components/week-nav";
@@ -109,7 +108,7 @@ export default async function AdminSchedulePage({
   const sessionCount = sessions.length;
 
   return (
-    <AppShell role="admin">
+    <>
       <Link
         href="/admin"
         className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
@@ -144,7 +143,7 @@ export default async function AdminSchedulePage({
       />
 
       <AutoRefresh />
-    </AppShell>
+    </>
   );
 }
 

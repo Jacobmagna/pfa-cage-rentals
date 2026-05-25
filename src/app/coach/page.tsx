@@ -1,14 +1,13 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { requireSession } from "@/lib/authz";
-import { AppShell } from "../_components/app-shell";
 import { EditableName } from "../_components/editable-name";
 
 export default async function CoachHome() {
   const session = await requireSession();
 
   return (
-    <AppShell role="coach">
+    <>
       <div className="max-w-2xl space-y-2 mb-10">
         <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
           Welcome
@@ -34,7 +33,7 @@ export default async function CoachHome() {
           body="Review what you've logged, edit a slot, or correct a mistake."
         />
       </div>
-    </AppShell>
+    </>
   );
 }
 

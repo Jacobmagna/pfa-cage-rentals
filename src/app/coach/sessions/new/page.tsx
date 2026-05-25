@@ -4,7 +4,6 @@ import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import { resources } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
-import { AppShell } from "@/app/_components/app-shell";
 import { LogSessionForm } from "./_components/log-session-form";
 import type { ResourceOption } from "../_components/types";
 
@@ -29,7 +28,7 @@ export default async function NewSessionPage() {
   const displayName = session.user.name ?? session.user.email;
 
   return (
-    <AppShell role="coach">
+    <>
       <div className="max-w-md">
         <Link
           href="/coach"
@@ -54,6 +53,6 @@ export default async function NewSessionPage() {
 
         <LogSessionForm resources={resourceOptions} />
       </div>
-    </AppShell>
+    </>
   );
 }

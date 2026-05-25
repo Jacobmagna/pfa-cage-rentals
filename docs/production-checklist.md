@@ -531,7 +531,11 @@ is a second Resend account for PFA, free tier covers the volume.
 - Est: 30 min.
 - Priority: P2 — minor UX, not blocking.
 
-### J5. Loading skeletons on async pages — `[ ]`
+### J5. Loading skeletons on async pages — `[x]`
+- Extracted `AppShell` out of every page and into route-segment layouts at `src/app/admin/layout.tsx` and `src/app/coach/layout.tsx`. The shell now renders before the page suspends, so `loading.tsx` files render inside the nav + footer rather than replacing them — the chrome stays visible during route transitions.
+- Added a small `Skeleton` primitive (`src/app/_components/skeleton.tsx`) plus a `LoadingShell` wrapper that adds `role="status"` + `aria-live="polite"` + an `sr-only` "Loading…" so screen readers announce loading once.
+- Added `loading.tsx` for the six heaviest async pages: `/admin/schedule`, `/admin/coaches`, `/admin/reports`, `/admin/audit`, `/admin/import`, `/coach/sessions`. Each mirrors the page's hero (back link, kicker, h1, sublabel) + main content layout (grid / table / form).
+- Verified via curl that the initial HTML chunk on a slow-rendering page contains the skeleton (`animate-pulse`, `aria-live="polite"`, "Loading"), and that fast-rendering pages skip the skeleton entirely (correct Next.js streaming semantics).
 - Add `loading.tsx` files in:
   - `src/app/admin/sessions/`
   - `src/app/admin/reports/`

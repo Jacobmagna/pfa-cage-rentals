@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useMemo } from "react";
+import { useActionState, useMemo, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import {
   logOwnSessionFormAction,
@@ -9,6 +9,7 @@ import {
 import type { ResourceOption } from "../../_components/types";
 import { TimeSelect } from "@/app/_components/time-select";
 import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
+import { AvailabilityPanel } from "./availability-panel";
 
 const INITIAL_STATE: CoachActionResult = { ok: true, loggedAt: 0 };
 
@@ -91,6 +92,33 @@ export function LogSessionForm({
       : "fresh"
     : `err-${state.error.code}-${state.error.message}`;
 
+  // Live "echo" of the four fields the AvailabilityPanel below cares
+  // about. Form inputs are controlled (value + onChange) so the panel
+  // can react in real time and the resource tab strip can two-way bind
+  // back to the form select.
+  //
+  // When the form remounts (defaults change post-success or on error
+  // → useMemo recomputes), we need to reset the echo to match the
+  // new defaults. React 19 flags setState in useEffect for prop
+  // transitions; the canonical replacement is the "store prev in
+  // state, conditionally setState during render" pattern.
+  const [live, setLive] = useState({
+    date: defaults.date,
+    resourceId: defaults.resourceId,
+    startTime: defaults.startTime,
+    endTime: defaults.endTime,
+  });
+  const [prevDefaults, setPrevDefaults] = useState(defaults);
+  if (defaults !== prevDefaults) {
+    setPrevDefaults(defaults);
+    setLive({
+      date: defaults.date,
+      resourceId: defaults.resourceId,
+      startTime: defaults.startTime,
+      endTime: defaults.endTime,
+    });
+  }
+
   return (
     <div className="space-y-4">
       {showSuccess ? (
@@ -117,7 +145,10 @@ export function LogSessionForm({
           <select
             name="resourceId"
             required
-            defaultValue={defaults.resourceId}
+            value={live.resourceId}
+            onChange={(e) =>
+              setLive((p) => ({ ...p, resourceId: e.target.value }))
+            }
             className={selectStyles}
           >
             <option value="" disabled>
@@ -158,7 +189,10 @@ export function LogSessionForm({
             type="date"
             name="date"
             required
-            defaultValue={defaults.date}
+            value={live.date}
+            onChange={(e) =>
+              setLive((p) => ({ ...p, date: e.target.value }))
+            }
             className={inputStyles}
           />
         </Field>
@@ -169,7 +203,8 @@ export function LogSessionForm({
               name="startTime"
               variant="start"
               required
-              defaultValue={defaults.startTime}
+              value={live.startTime}
+              onChange={(v) => setLive((p) => ({ ...p, startTime: v }))}
               className={selectStyles}
             />
           </Field>
@@ -178,7 +213,8 @@ export function LogSessionForm({
               name="endTime"
               variant="end"
               required
-              defaultValue={defaults.endTime}
+              value={live.endTime}
+              onChange={(v) => setLive((p) => ({ ...p, endTime: v }))}
               className={selectStyles}
             />
           </Field>
@@ -218,6 +254,17 @@ export function LogSessionForm({
           {pending ? "Logging…" : "Log session"}
         </button>
       </form>
+
+      <AvailabilityPanel
+        resources={resources}
+        date={live.date}
+        resourceId={live.resourceId}
+        onResourceChange={(id) =>
+          setLive((p) => ({ ...p, resourceId: id }))
+        }
+        startTime={live.startTime}
+        endTime={live.endTime}
+      />
     </div>
   );
 }

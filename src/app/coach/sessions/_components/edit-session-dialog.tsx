@@ -7,6 +7,7 @@ import {
   type EditActionResult,
 } from "../form-actions";
 import type { ResourceOption } from "./types";
+import { TimeSelect } from "@/app/_components/time-select";
 import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 
 // Edit dialog for a coach's existing session. Mirrors the admin
@@ -200,23 +201,21 @@ export function EditSessionDialog({
               />
             </Field>
             <Field label="Start">
-              <input
-                type="time"
+              <TimeSelect
                 name="startTime"
+                variant="start"
                 required
-                step={1800}
                 defaultValue={defaults.startTime}
-                className={inputStyles}
+                className={selectStyles}
               />
             </Field>
             <Field label="End">
-              <input
-                type="time"
+              <TimeSelect
                 name="endTime"
+                variant="end"
                 required
-                step={1800}
                 defaultValue={defaults.endTime}
-                className={inputStyles}
+                className={selectStyles}
               />
             </Field>
           </div>

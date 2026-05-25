@@ -7,6 +7,7 @@ import {
   type CoachActionResult,
 } from "../form-actions";
 import type { ResourceOption } from "../../_components/types";
+import { TimeSelect } from "@/app/_components/time-select";
 import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 
 const INITIAL_STATE: CoachActionResult = { ok: true, loggedAt: 0 };
@@ -37,20 +38,38 @@ export function LogSessionForm({
 
   // Default field values. On error: echo back what the user typed.
   // On fresh / post-success: compute "now rounded down to last 30-min
-  // slot" so the coach can submit with minimal touch input. Memoized
-  // on state so a successful submit (which bumps loggedAt and remounts
-  // the form via key) gets a freshly computed "now".
+  // slot" so the coach can submit with minimal touch input. If the
+  // current PFA time is outside the facility's 8a–10p window (e.g. a
+  // coach logging last night's session at 11pm), fall back to a sane
+  // morning slot rather than showing a "(non-standard)" pseudo-option
+  // in the TimeSelect dropdown. Memoized on state so a successful
+  // submit (which bumps loggedAt and remounts the form via key) gets
+  // a freshly computed "now".
   const defaults = useMemo(() => {
     if (!state.ok) {
       return state.values;
     }
     const start = roundDownToHalfHour(new Date());
-    const end = new Date(start.getTime() + 60 * 60 * 1000);
+    const startWall = toTimeInput(start);
+    const inWindow = startWall >= "08:00" && startWall <= "21:30";
+    const startTime = inWindow ? startWall : "09:00";
+    // Bump end one hour past start. End may legitimately equal "22:00"
+    // (closing time), but cap there.
+    const endTime = (() => {
+      const [h, m] = startTime.split(":").map(Number);
+      let endH = h + 1;
+      let endM = m;
+      if (endH > 22 || (endH === 22 && endM > 0)) {
+        endH = 22;
+        endM = 0;
+      }
+      return `${endH.toString().padStart(2, "0")}:${endM.toString().padStart(2, "0")}`;
+    })();
     return {
       resourceId: "",
       date: toDateInput(start),
-      startTime: toTimeInput(start),
-      endTime: toTimeInput(end),
+      startTime,
+      endTime,
       useType: "",
       note: "",
     };
@@ -146,23 +165,21 @@ export function LogSessionForm({
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Start">
-            <input
-              type="time"
+            <TimeSelect
               name="startTime"
+              variant="start"
               required
-              step={1800}
               defaultValue={defaults.startTime}
-              className={inputStyles}
+              className={selectStyles}
             />
           </Field>
           <Field label="End">
-            <input
-              type="time"
+            <TimeSelect
               name="endTime"
+              variant="end"
               required
-              step={1800}
               defaultValue={defaults.endTime}
-              className={inputStyles}
+              className={selectStyles}
             />
           </Field>
         </div>

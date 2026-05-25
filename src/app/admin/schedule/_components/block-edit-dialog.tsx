@@ -16,6 +16,7 @@ import {
   type BlockActionResult,
 } from "../form-actions";
 import type { ResourceOption } from "@/app/admin/sessions/_components/sessions-client";
+import { TimeSelect } from "@/app/_components/time-select";
 import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 
 export type BlockEditInitialValues = {
@@ -190,23 +191,21 @@ export function BlockEditDialog({
               />
             </Field>
             <Field label="Start">
-              <input
-                type="time"
+              <TimeSelect
                 name="startTime"
+                variant="start"
                 required
-                step={1800}
                 defaultValue={defaults.startTime}
-                className={inputStyles}
+                className={selectStyles}
               />
             </Field>
             <Field label="End">
-              <input
-                type="time"
+              <TimeSelect
                 name="endTime"
+                variant="end"
                 required
-                step={1800}
                 defaultValue={defaults.endTime}
-                className={inputStyles}
+                className={selectStyles}
               />
             </Field>
           </div>

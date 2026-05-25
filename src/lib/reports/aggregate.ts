@@ -36,6 +36,7 @@ export type AggregateSessionInput = {
   endAt: Date;
   useType: "hitting" | "pitching" | null;
   note: string | null;
+  isTeamRental: boolean;
 };
 
 export type DetailRow = {
@@ -56,6 +57,7 @@ export type DetailRow = {
   rateSource: "default" | "override";
   totalCents: number;
   note: string | null;
+  isTeamRental: boolean;
 };
 
 export type SummaryRow = {
@@ -120,6 +122,7 @@ export function aggregateReport(
       rateSource: hadOverride ? "override" : "default",
       totalCents: charge.totalCents,
       note: s.note,
+      isTeamRental: s.isTeamRental,
     };
   });
 

@@ -72,6 +72,7 @@ export default async function CoachSessionsPage({
         endAt: sessionsBilling.endAt,
         useType: sessionsBilling.useType,
         note: sessionsBilling.note,
+        isTeamRental: sessionsBilling.isTeamRental,
       })
       .from(sessionsBilling)
       .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
@@ -120,6 +121,7 @@ export default async function CoachSessionsPage({
       endAt: r.endAt,
       useType: r.useType,
       note: r.note,
+      isTeamRental: r.isTeamRental,
       slots: charge.slots,
       ratePerSlotCents: charge.ratePer30MinCents,
       totalCents: charge.totalCents,

@@ -9,6 +9,7 @@ import {
 } from "../form-actions";
 import type { CoachOption, ResourceOption } from "./sessions-client";
 import { TimeSelect } from "@/app/_components/time-select";
+import { TeamRentalCheckbox } from "@/app/_components/team-rental-checkbox";
 import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 
 export type SessionFormInitialValues = {
@@ -19,6 +20,7 @@ export type SessionFormInitialValues = {
   endAt: Date;
   useType: "hitting" | "pitching" | null;
   note: string | null;
+  isTeamRental: boolean;
 };
 
 // Modal form for creating or editing a session. Uses the native
@@ -105,6 +107,7 @@ export function SessionFormDialog({
         endTime: toTimeInput(initial.endAt),
         useType: initial.useType ?? "",
         note: initial.note ?? "",
+        isTeamRental: initial.isTeamRental,
       };
     }
     const now = new Date();
@@ -116,6 +119,7 @@ export function SessionFormDialog({
       endTime: "10:00",
       useType: "",
       note: "",
+      isTeamRental: false,
     };
   }, [initial, state]);
 
@@ -269,6 +273,8 @@ export function SessionFormDialog({
               className={inputStyles}
             />
           </Field>
+
+          <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
         </div>
 
         <div className="flex items-center justify-end gap-2 pt-2">

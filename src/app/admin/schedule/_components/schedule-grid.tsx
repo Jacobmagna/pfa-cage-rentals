@@ -31,6 +31,7 @@ import {
 import type { ResourceType } from "@/lib/billing";
 import { updateSession } from "@/app/admin/sessions/actions";
 import { SessionFormDialog } from "@/app/admin/sessions/_components/session-form-dialog";
+import { TeamRentalBadge } from "@/app/_components/team-rental-badge";
 import type {
   CoachOption,
   ResourceOption as SessionResourceOption,
@@ -61,6 +62,7 @@ export type ScheduleSession = {
   endAt: Date;
   useType: "hitting" | "pitching" | null;
   note: string | null;
+  isTeamRental: boolean;
 };
 
 export type ScheduleBlock = {
@@ -451,6 +453,7 @@ export function ScheduleGrid({
           endAt: dialog.session.endAt,
           useType: dialog.session.useType,
           note: dialog.session.note,
+          isTeamRental: dialog.session.isTeamRental,
         }
       : undefined;
 
@@ -787,6 +790,7 @@ function DraggableSession({
   const accent = resource ? typeBorder(resource.type) : "";
   const tooltip = [
     session.coachName,
+    session.isTeamRental ? "Team rental" : null,
     session.useType ? cap(session.useType) : null,
     session.note,
   ]
@@ -820,6 +824,7 @@ function DraggableSession({
       title={tooltip}
     >
       <span className="truncate font-medium">{session.coachName}</span>
+      {session.isTeamRental ? <TeamRentalBadge variant="compact" /> : null}
       {session.useType ? (
         <span className="text-[9px] uppercase tracking-wider text-fg-subtle shrink-0">
           {session.useType[0]}

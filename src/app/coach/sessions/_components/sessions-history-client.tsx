@@ -10,6 +10,7 @@ import {
   type SessionInitial,
 } from "./edit-session-dialog";
 import type { ResourceOption } from "./types";
+import { TeamRentalBadge } from "@/app/_components/team-rental-badge";
 
 // Renders the history list, owns the edit-dialog open/close + the
 // row delete pending state. Pagination links are server-side
@@ -25,6 +26,7 @@ export type HistoryRow = {
   endAt: Date;
   useType: "hitting" | "pitching" | null;
   note: string | null;
+  isTeamRental: boolean;
   slots: number;
   ratePerSlotCents: number;
   totalCents: number;
@@ -72,6 +74,7 @@ export function SessionsHistoryClient({
         endAt: editingRow.endAt,
         useType: editingRow.useType,
         note: editingRow.note,
+        isTeamRental: editingRow.isTeamRental,
       }
     : null;
 
@@ -114,6 +117,12 @@ export function SessionsHistoryClient({
                       <>
                         {" · "}
                         <span className="capitalize">{row.useType}</span>
+                      </>
+                    ) : null}
+                    {row.isTeamRental ? (
+                      <>
+                        {" · "}
+                        <TeamRentalBadge />
                       </>
                     ) : null}
                   </p>

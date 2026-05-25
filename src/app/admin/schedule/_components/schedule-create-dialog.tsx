@@ -15,6 +15,7 @@ import {
   type BlockActionResult,
 } from "../form-actions";
 import { TimeSelect } from "@/app/_components/time-select";
+import { TeamRentalCheckbox } from "@/app/_components/team-rental-checkbox";
 import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 
 // Unified "create on the grid" dialog. Two tabs:
@@ -144,6 +145,7 @@ export function ScheduleCreateDialog({
       endTime: prefill ? toTimeInput(prefill.endAt) : "10:00",
       useType: "",
       note: "",
+      isTeamRental: false,
     };
   }, [prefill, sessionState]);
 
@@ -277,6 +279,7 @@ function SessionTab({
     endTime: string;
     useType: string;
     note: string;
+    isTeamRental: boolean;
   };
   coaches: CoachOption[];
   resources: ResourceOption[];
@@ -363,6 +366,8 @@ function SessionTab({
           className={inputStyles}
         />
       </Field>
+
+      <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
 
       <FormButtons pending={pending} submitLabel="Create session" onCancel={onCancel} />
     </form>

@@ -33,6 +33,7 @@ function makeReport(): ReportData {
         rateSource: "override",
         totalCents: 3600,
         note: "warm-up",
+        isTeamRental: false,
       },
       {
         sessionId: "s2",
@@ -52,6 +53,7 @@ function makeReport(): ReportData {
         rateSource: "default",
         totalCents: 1000,
         note: null,
+        isTeamRental: true,
       },
     ],
     summary: [
@@ -215,8 +217,8 @@ describe("buildReportWorkbook", () => {
 
     // Detail column layout (1-based):
     //   1 Date · 2 Day · 3 Start · 4 End · 5 Duration · 6 Resource
-    //   7 Use · 8 Coach · 9 Slots · 10 Rate · 11 $ · 12 Rate Source
-    //   13 Note
+    //   7 Use · 8 Coach · 9 Team Rental · 10 Slots · 11 Rate · 12 $
+    //   13 Rate Source · 14 Note
     it("writes the override flag + dollar amounts per session", async () => {
       const buf = await buildReportWorkbook(makeReport(), {
         from: "2026-05-01",
@@ -230,11 +232,13 @@ describe("buildReportWorkbook", () => {
       expect(row2.getCell(6).value).toBe("Cage 1");
       expect(row2.getCell(7).value).toBe("hitting");
       expect(row2.getCell(8).value).toBe("Alice Coach");
-      expect(row2.getCell(9).value).toBe(2);
-      expect(row2.getCell(10).value).toBe(18); // 1800 cents / 100
-      expect(row2.getCell(11).value).toBe(36);
-      expect(row2.getCell(12).value).toBe("Override");
-      expect(row2.getCell(13).value).toBe("warm-up");
+      const teamRentalVal2 = row2.getCell(9).value;
+      expect(teamRentalVal2 === "" || teamRentalVal2 === null).toBe(true);
+      expect(row2.getCell(10).value).toBe(2);
+      expect(row2.getCell(11).value).toBe(18); // 1800 cents / 100
+      expect(row2.getCell(12).value).toBe(36);
+      expect(row2.getCell(13).value).toBe("Override");
+      expect(row2.getCell(14).value).toBe("warm-up");
 
       const row3 = sheet.getRow(3);
       expect(row3.getCell(6).value).toBe("Weight Room 1");
@@ -242,8 +246,9 @@ describe("buildReportWorkbook", () => {
       // either "" or null depending on its codec path. Accept both.
       const useVal = row3.getCell(7).value;
       expect(useVal === "" || useVal === null).toBe(true);
-      expect(row3.getCell(12).value).toBe("Default");
-      const noteVal = row3.getCell(13).value;
+      expect(row3.getCell(9).value).toBe("Yes"); // team rental
+      expect(row3.getCell(13).value).toBe("Default");
+      const noteVal = row3.getCell(14).value;
       expect(noteVal === "" || noteVal === null).toBe(true);
     });
   });

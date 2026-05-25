@@ -191,6 +191,7 @@ export async function createSessionInternal(
         endAt: parsed.endAt,
         useType: parsed.useType ?? null,
         note: parsed.note,
+        isTeamRental: parsed.isTeamRental ?? false,
         createdBy: actor.id,
       })
       .returning();
@@ -269,6 +270,9 @@ export async function updateSessionInternal(
         ...(parsed.endAt !== undefined && { endAt: parsed.endAt }),
         ...(parsed.useType !== undefined && { useType: parsed.useType }),
         ...(parsed.note !== undefined && { note: parsed.note }),
+        ...(parsed.isTeamRental !== undefined && {
+          isTeamRental: parsed.isTeamRental,
+        }),
       })
       .where(eq(sessionsBilling.id, id))
       .returning();

@@ -24,6 +24,9 @@ export const createSessionSchema = z.object({
   // skips the column when the parsed value is `undefined` and writes
   // when it's `null`. See form-actions.ts buildSessionInput.
   note: z.string().max(500).nullish(),
+  // Team-rental flag. Optional on create (defaults to false); on
+  // update, omitted = keep existing, explicit value = overwrite.
+  isTeamRental: z.boolean().optional(),
 });
 
 export const updateSessionSchema = createSessionSchema.partial();

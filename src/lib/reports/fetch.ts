@@ -56,6 +56,7 @@ export async function fetchReportData(
         endAt: sessionsBilling.endAt,
         useType: sessionsBilling.useType,
         note: sessionsBilling.note,
+        isTeamRental: sessionsBilling.isTeamRental,
       })
       .from(sessionsBilling)
       .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
@@ -77,6 +78,7 @@ export async function fetchReportData(
     endAt: r.endAt,
     useType: r.useType,
     note: r.note,
+    isTeamRental: r.isTeamRental,
   }));
 
   const overrides: RateOverride[] = overrideRows.map((o) => ({

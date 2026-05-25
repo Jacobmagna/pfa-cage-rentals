@@ -33,6 +33,7 @@ function session(
     endAt,
     useType: "hitting",
     note: null,
+    isTeamRental: false,
     ...overrides,
   };
 }

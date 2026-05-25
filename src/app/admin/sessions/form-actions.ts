@@ -37,6 +37,7 @@ export type SubmittedFormValues = {
   endTime: string;
   useType: string;
   note: string;
+  isTeamRental: boolean;
 };
 
 export type ActionResult =
@@ -59,6 +60,7 @@ function snapshotFormValues(formData: FormData): SubmittedFormValues {
     endTime: formData.get("endTime")?.toString() ?? "",
     useType: formData.get("useType")?.toString() ?? "",
     note: formData.get("note")?.toString() ?? "",
+    isTeamRental: formData.get("isTeamRental") === "on",
   };
 }
 
@@ -91,6 +93,7 @@ function buildSessionInput(formData: FormData) {
         ? useTypeRaw
         : null,
     note: formData.get("note")?.toString().trim() || null,
+    isTeamRental: formData.get("isTeamRental") === "on",
   };
 }
 

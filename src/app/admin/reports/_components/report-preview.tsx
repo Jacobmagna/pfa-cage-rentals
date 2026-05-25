@@ -7,6 +7,7 @@
 // form's GET submit; this just re-renders against the new data.
 
 import type { DetailRow, SummaryRow } from "@/lib/reports/aggregate";
+import { TeamRentalBadge } from "@/app/_components/team-rental-badge";
 
 export function ReportPreview({
   detail,
@@ -131,7 +132,12 @@ export function ReportPreview({
                   <td className="px-3 py-3 text-fg-muted capitalize">
                     {row.useType ?? "—"}
                   </td>
-                  <td className="px-3 py-3 text-fg">{row.coachName}</td>
+                  <td className="px-3 py-3 text-fg">
+                    <span className="inline-flex items-center gap-1.5 flex-wrap">
+                      {row.coachName}
+                      {row.isTeamRental ? <TeamRentalBadge /> : null}
+                    </span>
+                  </td>
                   <NumCell value={row.slots} />
                   <CashCell cents={row.ratePerSlotCents} />
                   <td className="px-3 py-3 text-right font-mono tabular-nums font-semibold text-fg">

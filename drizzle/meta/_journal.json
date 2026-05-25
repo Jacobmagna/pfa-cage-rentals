@@ -71,6 +71,13 @@
       "when": 1779671188347,
       "tag": "0009_confused_shape",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1779684244132,
+      "tag": "0010_blue_anthem",
+      "breakpoints": true
     }
   ]
 }

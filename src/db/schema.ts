@@ -213,6 +213,12 @@ export const sessionsBilling = pgTable(
     // selectively delete a botched historical batch without
     // touching live data.
     source: text("source"),
+    // Team-rental flag: a paying group/team booked the resource, not
+    // a coach's private lesson. Display surfaces show a badge next to
+    // the coach name; reports + filters can split by it. Doesn't
+    // affect billing math — the coach (or team-rental pseudo-coach)
+    // still gets billed at their rate.
+    isTeamRental: boolean("is_team_rental").notNull().default(false),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),

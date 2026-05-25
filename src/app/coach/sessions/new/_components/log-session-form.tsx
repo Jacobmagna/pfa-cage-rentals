@@ -8,6 +8,7 @@ import {
 } from "../form-actions";
 import type { ResourceOption } from "../../_components/types";
 import { TimeSelect } from "@/app/_components/time-select";
+import { TeamRentalCheckbox } from "@/app/_components/team-rental-checkbox";
 import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 import { AvailabilityPanel } from "./availability-panel";
 
@@ -73,6 +74,7 @@ export function LogSessionForm({
       endTime,
       useType: "",
       note: "",
+      isTeamRental: false,
     };
   }, [state]);
 
@@ -245,6 +247,8 @@ export function LogSessionForm({
             className={inputStyles}
           />
         </Field>
+
+        <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
 
         <button
           type="submit"

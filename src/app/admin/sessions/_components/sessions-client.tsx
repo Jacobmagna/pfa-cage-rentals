@@ -5,6 +5,7 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import { SessionFormDialog, type SessionFormInitialValues } from "./session-form-dialog";
 import { deleteSessionAction } from "../form-actions";
 import { PFA_TIMEZONE } from "@/lib/timezone";
+import { TeamRentalBadge } from "@/app/_components/team-rental-badge";
 
 // Top-level client island for the admin sessions page. Owns the
 // dialog open/close state (create vs edit), the row delete pending
@@ -28,6 +29,7 @@ export type SessionRow = {
   endAt: Date;
   useType: "hitting" | "pitching" | null;
   note: string | null;
+  isTeamRental: boolean;
 };
 
 export type CoachOption = {
@@ -96,6 +98,7 @@ export function SessionsClient({
           endAt: dialogState.row.endAt,
           useType: dialogState.row.useType,
           note: dialogState.row.note,
+          isTeamRental: dialogState.row.isTeamRental,
         }
       : undefined;
 
@@ -156,8 +159,11 @@ export function SessionsClient({
                       {formatWhen(row.startAt, row.endAt)}
                     </td>
                     <td className="px-4 py-3 text-sm">
-                      <span className="text-fg">
-                        {row.coachName ?? row.coachEmail}
+                      <span className="inline-flex items-center gap-1.5 flex-wrap">
+                        <span className="text-fg">
+                          {row.coachName ?? row.coachEmail}
+                        </span>
+                        {row.isTeamRental ? <TeamRentalBadge /> : null}
                       </span>
                       {row.note ? (
                         <span className="block text-xs text-fg-subtle mt-0.5">

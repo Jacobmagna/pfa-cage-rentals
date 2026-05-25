@@ -35,6 +35,7 @@ type FilterValues = {
   coachIds: string[];
   resourceIds: string[];
   useTypes: ("hitting" | "pitching")[];
+  teamRental: ("yes" | "no")[];
 };
 
 export function FiltersForm({
@@ -60,6 +61,10 @@ export function FiltersForm({
     { value: "hitting", label: "Hitting" },
     { value: "pitching", label: "Pitching" },
   ];
+  const teamRentalOptions = [
+    { value: "yes", label: "Team rentals only" },
+    { value: "no", label: "Private lessons only" },
+  ];
 
   return (
     <form
@@ -67,7 +72,7 @@ export function FiltersForm({
       action="/admin/sessions"
       className="rounded-lg border border-line bg-surface p-5 mb-6"
     >
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 lg:items-end">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6 lg:items-end">
         <Field label="From">
           <input
             type="date"
@@ -114,6 +119,16 @@ export function FiltersForm({
             defaultSelected={values.useTypes}
             placeholder="All uses"
             aria-label="Filter by use type"
+          />
+        </Field>
+
+        <Field label="Team rental">
+          <MultiSelect
+            name="teamRental"
+            options={teamRentalOptions}
+            defaultSelected={values.teamRental}
+            placeholder="All bookings"
+            aria-label="Filter by team rental"
           />
         </Field>
       </div>

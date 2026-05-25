@@ -8,6 +8,7 @@ import {
 } from "../form-actions";
 import type { ResourceOption } from "./types";
 import { TimeSelect } from "@/app/_components/time-select";
+import { TeamRentalCheckbox } from "@/app/_components/team-rental-checkbox";
 import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 
 // Edit dialog for a coach's existing session. Mirrors the admin
@@ -22,6 +23,7 @@ export type SessionInitial = {
   endAt: Date;
   useType: "hitting" | "pitching" | null;
   note: string | null;
+  isTeamRental: boolean;
 };
 
 const INITIAL_STATE: EditActionResult = { ok: true };
@@ -91,6 +93,7 @@ export function EditSessionDialog({
         endTime: toTimeInput(initial.endAt),
         useType: initial.useType ?? "",
         note: initial.note ?? "",
+        isTeamRental: initial.isTeamRental,
       };
     }
     return {
@@ -100,6 +103,7 @@ export function EditSessionDialog({
       endTime: "",
       useType: "",
       note: "",
+      isTeamRental: false,
     };
   }, [initial, state]);
 
@@ -245,6 +249,8 @@ export function EditSessionDialog({
               className={inputStyles}
             />
           </Field>
+
+          <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
         </div>
 
         <div className="flex items-center justify-end gap-2 pt-2">

@@ -1,0 +1,1 @@
+ALTER TABLE "sessions_billing" ADD COLUMN "is_team_rental" boolean DEFAULT false NOT NULL;

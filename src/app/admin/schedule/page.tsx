@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, asc, eq, gte, lt } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, lt } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import {
@@ -82,7 +82,7 @@ export default async function AdminSchedulePage({
     db
       .select({ id: users.id, name: users.name, email: users.email })
       .from(users)
-      .where(eq(users.role, "coach"))
+      .where(and(eq(users.role, "coach"), isNull(users.deletedAt)))
       .orderBy(asc(users.name), asc(users.email)),
   ]);
 

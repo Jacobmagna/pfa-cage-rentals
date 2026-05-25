@@ -19,6 +19,16 @@ export const resourceType = pgEnum("resource_type", [
 ]);
 export const sessionUseType = pgEnum("use_type", ["hitting", "pitching"]);
 
+// `deletedAt`: soft-delete timestamp for the J9 GDPR-style account-
+// removal flow. NULL = active. When set, the row is anonymized:
+// `name` becomes "Former coach" and `email` becomes
+// `deleted-<id>@pfacagerentals.invalid` (`.invalid` TLD by RFC 2606,
+// so the address can never collide with a real inbox and frees the
+// real email for re-signup). Billing rows still FK to the user id,
+// so historical reports remain accurate while the identity link is
+// broken. Active-coach surfaces filter `isNull(users.deletedAt)`;
+// reports + audit log do not, so historical "Former coach" rows
+// keep their billing context.
 export const users = pgTable("users", {
   id: text("id")
     .primaryKey()
@@ -29,6 +39,7 @@ export const users = pgTable("users", {
   image: text("image"),
   role: roleEnum("role").notNull().default("coach"),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at", { mode: "date" }),
 });
 
 export const accounts = pgTable(

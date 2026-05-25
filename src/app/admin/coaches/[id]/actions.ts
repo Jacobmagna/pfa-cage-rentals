@@ -19,6 +19,7 @@ import {
   deleteRateOverrideInternal,
   upsertRateOverrideInternal,
 } from "@/lib/server/rate-override-actions";
+import { deleteCoachInternal } from "@/lib/server/user-actions";
 
 function revalidateOverrideSurfaces(coachId: string) {
   revalidatePath(`/admin/coaches/${coachId}`);
@@ -43,4 +44,19 @@ export async function deleteRateOverride(
   const session = await requireRole("admin");
   await deleteRateOverrideInternal(session.user, { coachId, resourceType });
   revalidateOverrideSurfaces(coachId);
+}
+
+// J9 account deletion. Soft-delete + anonymize. See
+// src/lib/server/user-actions.ts for the shape; this wrapper just
+// gates with requireRole and revalidates every surface that lists
+// active coaches.
+export async function deleteCoach(coachId: string) {
+  const session = await requireRole("admin");
+  await deleteCoachInternal(session.user, { coachId });
+  revalidatePath(`/admin/coaches/${coachId}`);
+  revalidatePath("/admin/coaches");
+  revalidatePath("/admin/sessions");
+  revalidatePath("/admin/schedule");
+  revalidatePath("/admin/reports");
+  revalidatePath("/admin/audit");
 }

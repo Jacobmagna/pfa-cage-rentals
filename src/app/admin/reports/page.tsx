@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { ArrowLeft, Download } from "lucide-react";
 import { db } from "@/db";
 import { users } from "@/db/schema";
@@ -38,10 +38,15 @@ export default async function AdminReportsPage({
 
   // Fetch coaches list (for the filter form) + report data in parallel.
   const [coachOptions, report] = await Promise.all([
+    // Reports themselves include historical "Former coach" rows
+    // (the report data fetch joins unfiltered). This list is just the
+    // filter dropdown — only active coaches need to appear, since the
+    // admin can't meaningfully filter to a coach who was deleted before
+    // they had a chance to learn the new system.
     db
       .select({ id: users.id, name: users.name, email: users.email })
       .from(users)
-      .where(eq(users.role, "coach"))
+      .where(and(eq(users.role, "coach"), isNull(users.deletedAt)))
       .orderBy(asc(users.name), asc(users.email)),
     fetchReportData(filters),
   ]);

@@ -99,6 +99,36 @@ export class RateOverrideNotFoundError extends Error {
   }
 }
 
+export class CoachNotFoundError extends Error {
+  readonly code = "COACH_NOT_FOUND" as const;
+  constructor(public readonly coachId: string) {
+    super(`Coach ${coachId} not found`);
+    this.name = "CoachNotFoundError";
+  }
+}
+
+// Refused J9 delete because the target is an admin. Admin lifecycle
+// is managed via the hardcoded `isAdminEmail` allowlist, not the
+// coach-detail UI.
+export class CannotDeleteAdminError extends Error {
+  readonly code = "CANNOT_DELETE_ADMIN" as const;
+  constructor(public readonly coachId: string) {
+    super(`Cannot delete an admin via the coach-delete flow`);
+    this.name = "CannotDeleteAdminError";
+  }
+}
+
+// Soft-delete is idempotent in spirit but we want callers to know
+// they hit an already-anonymized row (so the UI doesn't pretend it
+// just happened).
+export class CoachAlreadyDeletedError extends Error {
+  readonly code = "COACH_ALREADY_DELETED" as const;
+  constructor(public readonly coachId: string) {
+    super(`Coach ${coachId} is already deleted`);
+    this.name = "CoachAlreadyDeletedError";
+  }
+}
+
 export class BlockConflictsWithSessionError extends Error {
   readonly code = "BLOCK_CONFLICTS_WITH_SESSION" as const;
   constructor(

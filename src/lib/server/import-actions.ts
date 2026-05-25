@@ -4,7 +4,7 @@
 // safeLogAudit swallows audit failures without blocking the mutation.
 
 import * as Sentry from "@sentry/nextjs";
-import { and, eq, gte, lt } from "drizzle-orm";
+import { and, eq, gte, isNull, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { resources, sessionsBilling, users } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
@@ -247,9 +247,13 @@ async function fetchImportedKeySet(normalized: NormalizedSession[]): Promise<Set
 }
 
 async function fetchExistingUserLites(): Promise<ExistingUserLite[]> {
+  // Soft-deleted users are excluded so the preview's name-matching
+  // can't pull Excel raw names into the "Former coach" row (which
+  // would also un-anonymize the row by association).
   return db
     .select({ id: users.id, name: users.name, email: users.email })
-    .from(users);
+    .from(users)
+    .where(isNull(users.deletedAt));
 }
 
 function describeSession(s: NormalizedSession): string {

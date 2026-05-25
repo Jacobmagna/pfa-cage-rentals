@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import { coachRateOverrides, users } from "@/db/schema";
@@ -15,6 +15,7 @@ import {
   RateOverridesCard,
   type RateOverrideRow,
 } from "./_components/rate-overrides-card";
+import { DeleteCoachCard } from "./_components/delete-coach-card";
 
 // Coach detail page. Renders the coach identity header + the H3
 // rate-override editor (one row per resource type, inline save +
@@ -42,7 +43,7 @@ export default async function AdminCoachDetailPage({
         createdAt: users.createdAt,
       })
       .from(users)
-      .where(eq(users.id, id))
+      .where(and(eq(users.id, id), isNull(users.deletedAt)))
       .limit(1),
     db
       .select()
@@ -51,6 +52,11 @@ export default async function AdminCoachDetailPage({
   ]);
 
   const coach = coachResult[0];
+  // Active coaches only: soft-deleted (deletedAt != null) rows behave
+  // like notFound() in admin navigation. Admins are still 404'd here
+  // because /admin/coaches lists role=coach only and the URL is
+  // surrogate-id; landing on an admin's detail page would be a stale
+  // bookmark.
   if (!coach || coach.role !== "coach") notFound();
 
   // Always render one row per resource type; merge in the override
@@ -94,6 +100,13 @@ export default async function AdminCoachDetailPage({
       </div>
 
       <RateOverridesCard coachId={coach.id} rows={rateRows} />
+
+      <DeleteCoachCard
+        coachId={coach.id}
+        coachName={coach.name}
+        coachEmail={coach.email}
+        isAdmin={false}
+      />
     </AppShell>
   );
 }

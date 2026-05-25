@@ -565,12 +565,14 @@ is a second Resend account for PFA, free tier covers the volume.
 - Acceptance: signed-out incognito Gmail can sign in without being on the test-users list.
 - Est: 1 h (+ AWS-style waiting if domain verification needed).
 
-### J9. Account deletion + soft-delete — `[ ]`
-- Admin-only `deleteCoach(id)` action: marks user soft-deleted (sets `deletedAt`, anonymizes `name` to "Former coach", preserves billing history).
-- UI in coach detail page (Stage H2): "Delete coach" button with confirmation.
-- All session queries filter `deletedAt IS NULL` for active operations; reports still show historical billing.
-- Acceptance: deleting a coach hides them from active lists but preserves their session rows for past reports.
-- Est: 2 h.
+### J9. Account deletion + soft-delete — `[x]`
+- Admin-only `deleteCoach(id)` action: soft-deletes a coach (sets `deletedAt`, anonymizes `name` to "Former coach", scrubs `email` to `deleted-<id>@pfacagerentals.invalid`, clears `image`).
+- Revokes the user's Auth.js sessions + linked OAuth `accounts` + pending `verification_tokens` so an active cookie is invalidated immediately and a future sign-in via the same Google account creates a fresh user.
+- UI on `/admin/coaches/[id]`: "Danger zone" card with typed-confirmation modal (user must type the coach's exact display name before the Delete button enables). Admins are excluded from this surface entirely — `/admin/coaches/[id]` is gated to `role=coach AND deletedAt IS NULL`.
+- Active-coach surfaces filter `isNull(users.deletedAt)`: `/admin/coaches`, `/admin/coaches/[id]`, `/admin/schedule` coach picker, `/admin/sessions` coach picker, `/admin/reports` coach filter, `/admin/import` mapping dropdown, and the import preview's name-matching pool. Joined display surfaces (schedule sessions, audit log, reports data, overlap error messages) keep showing "Former coach" so historical rows stay attributable.
+- Audit log: `entityType="user"`, `action="delete"`, `before` snapshot captures the full pre-anonymization row.
+- Tests: 8 integration cases in `tests/integration/user-actions.test.ts` (anonymize + audit, billing preserved, sessions revoked, accounts revoked, verification tokens cleared, CoachNotFoundError, CannotDeleteAdminError, CoachAlreadyDeletedError).
+- Acceptance: confirmed via browser smoke — created throwaway coach, opened modal, typed name, confirmed; DB shows anonymized identity + audit row + zero remaining sessions/accounts; coach disappears from `/admin/coaches`; direct visit to their detail URL 404s.
 
 ---
 

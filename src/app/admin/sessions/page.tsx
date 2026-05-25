@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { resources, sessionsBilling, users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
@@ -36,6 +36,10 @@ export default async function AdminSessionsPage() {
       .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
       .orderBy(desc(sessionsBilling.startAt))
       .limit(50),
+    // The session-list table joins users unfiltered above, so an
+    // already-recorded session by a deleted coach still shows under
+    // "Former coach". This dropdown is for the create/edit dialog —
+    // only active coaches can have new sessions assigned to them.
     db
       .select({
         id: users.id,
@@ -43,6 +47,7 @@ export default async function AdminSessionsPage() {
         email: users.email,
       })
       .from(users)
+      .where(isNull(users.deletedAt))
       .orderBy(users.name),
     db
       .select({

@@ -1,4 +1,4 @@
-import { asc } from "drizzle-orm";
+import { asc, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
@@ -9,10 +9,13 @@ export default async function AdminImportPage() {
   await requireRole("admin");
 
   // Pre-fetch the coach roster so the "map to existing coach" dropdown
-  // can render without an extra round-trip per row.
+  // can render without an extra round-trip per row. Soft-deleted users
+  // are excluded — re-mapping an Excel row to "Former coach" would just
+  // re-create the privacy leak we promised to fix.
   const coaches = await db
     .select({ id: users.id, name: users.name, email: users.email })
     .from(users)
+    .where(isNull(users.deletedAt))
     .orderBy(asc(users.name), asc(users.email));
 
   return (

@@ -26,5 +26,12 @@ export const updateUserSchema = z.object({
   role: userRoleSchema.optional(),
 });
 
+// J9 account-deletion input. Just the coachId — the internal looks
+// up the row to capture the before-snapshot for audit.
+export const deleteCoachSchema = z.object({
+  coachId: z.string().min(1, "coachId is required"),
+});
+
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
+export type DeleteCoachInput = z.infer<typeof deleteCoachSchema>;

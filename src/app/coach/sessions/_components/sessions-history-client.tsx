@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
 import { deleteOwnSessionAction } from "../form-actions";
+import { PFA_TIMEZONE } from "@/lib/timezone";
 import {
   EditSessionDialog,
   type SessionInitial,
@@ -235,6 +236,7 @@ function formatWhen(start: Date, end: Date): string {
 
 function formatDate(d: Date): string {
   return d.toLocaleDateString("en-US", {
+    timeZone: PFA_TIMEZONE,
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -243,10 +245,12 @@ function formatDate(d: Date): string {
 
 function formatTimeRange(start: Date, end: Date): string {
   const startTime = start.toLocaleTimeString("en-US", {
+    timeZone: PFA_TIMEZONE,
     hour: "numeric",
     minute: "2-digit",
   });
   const endTime = end.toLocaleTimeString("en-US", {
+    timeZone: PFA_TIMEZONE,
     hour: "numeric",
     minute: "2-digit",
   });

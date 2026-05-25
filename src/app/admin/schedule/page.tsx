@@ -9,7 +9,7 @@ import {
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
-import { formatPfaDateLong } from "@/lib/timezone";
+import { formatPfaDateLong, parsePfaInput, pfaDayEnd, pfaDayStart } from "@/lib/timezone";
 import { AppShell } from "@/app/_components/app-shell";
 import { AutoRefresh } from "./_components/auto-refresh";
 import { ScheduleGrid } from "./_components/schedule-grid";
@@ -35,10 +35,8 @@ export default async function AdminSchedulePage({
   const params = await searchParams;
   const selectedDate = parseDateInput(params.date) ?? startOfToday();
 
-  const dayStart = new Date(selectedDate);
-  dayStart.setHours(0, 0, 0, 0);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setDate(dayEnd.getDate() + 1);
+  const dayStart = pfaDayStart(selectedDate);
+  const dayEnd = pfaDayEnd(selectedDate);
 
   const [activeResources, sessionRows, blockRows, coachRows] = await Promise.all([
     db
@@ -152,14 +150,9 @@ export default async function AdminSchedulePage({
 
 function parseDateInput(s: string | undefined): Date | null {
   if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
-  const [y, m, d] = s.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  date.setHours(0, 0, 0, 0);
-  return date;
+  return parsePfaInput(s, "00:00");
 }
 
 function startOfToday(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
+  return pfaDayStart(new Date());
 }

@@ -15,6 +15,7 @@ import {
   SessionOverlapError,
   UseTypeValidationError,
 } from "@/lib/errors";
+import { parsePfaInput } from "@/lib/timezone";
 
 export type EditFormValues = {
   resourceId: string;
@@ -51,8 +52,8 @@ function buildInput(formData: FormData) {
   if (!dateStr || !startStr || !endStr) {
     throw new Error("Missing date, start, or end time");
   }
-  const startAt = new Date(`${dateStr}T${startStr}:00`);
-  const endAt = new Date(`${dateStr}T${endStr}:00`);
+  const startAt = parsePfaInput(dateStr, startStr);
+  const endAt = parsePfaInput(dateStr, endStr);
   const useTypeRaw = formData.get("useType")?.toString().trim();
   return {
     resourceId: formData.get("resourceId")?.toString() ?? "",

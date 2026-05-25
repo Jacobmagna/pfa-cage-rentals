@@ -118,6 +118,84 @@ export function pfaWallClockToUtc(date: string, time: string): Date {
 }
 
 /**
+ * Form-action alias for pfaWallClockToUtc. Semantically clearer
+ * at call sites that translate a `<input type="date">` + `<input type="time">`
+ * pair into a UTC instant for DB insert.
+ */
+export const parsePfaInput = pfaWallClockToUtc;
+
+/**
+ * PFA wall-clock hour at instant `d` (0-23). For schedule-grid math
+ * that places a session in a column based on its hour.
+ */
+export function pfaHour(d: Date): number {
+  return pfaParts(d).hour;
+}
+
+/**
+ * PFA wall-clock minute at instant `d` (0-59).
+ */
+export function pfaMinute(d: Date): number {
+  return pfaParts(d).minute;
+}
+
+/**
+ * Returns the UTC instant whose PFA wall-clock is `(hour, minute)` on the
+ * same PFA calendar day as `d`. Used by the schedule grid for click-to-create
+ * and drag-to-move: "the slot at 9:00 AM on the day currently shown."
+ */
+export function pfaWallClockAt(d: Date, hour: number, minute: number): Date {
+  const p = pfaParts(d);
+  return pfaWallClockToUtc(
+    `${p.year}-${pad2(p.month)}-${pad2(p.day)}`,
+    `${pad2(hour)}:${pad2(minute)}`,
+  );
+}
+
+/**
+ * First UTC instant of the PFA calendar day containing `d`. Used for
+ * server-side bucketing — e.g. "today's sessions" / "May reports". Safe
+ * on Vercel UTC: a 11:30 PM ET session on May 31 lands in the May bucket
+ * even though its UTC time is in June.
+ */
+export function pfaDayStart(d: Date): Date {
+  return pfaWallClockAt(d, 0, 0);
+}
+
+/**
+ * First UTC instant of the PFA calendar day AFTER `d`. DST-safe: walks
+ * forward by 25h then snaps to PFA midnight, so spring-forward (23h
+ * day) and fall-back (25h day) both land on the right boundary.
+ */
+export function pfaDayEnd(d: Date): Date {
+  const tomorrow = new Date(d.getTime() + 25 * 60 * 60 * 1000);
+  return pfaDayStart(tomorrow);
+}
+
+/**
+ * First UTC instant of the PFA calendar month containing `d`.
+ */
+export function pfaMonthStart(d: Date): Date {
+  const p = pfaParts(d);
+  return pfaWallClockToUtc(`${p.year}-${pad2(p.month)}-01`, "00:00");
+}
+
+/**
+ * First UTC instant of the PFA calendar month AFTER `d`. Used as the
+ * exclusive upper bound when querying "all sessions in month X".
+ */
+export function pfaMonthEnd(d: Date): Date {
+  const p = pfaParts(d);
+  const nextMonth = p.month === 12 ? 1 : p.month + 1;
+  const nextYear = p.month === 12 ? p.year + 1 : p.year;
+  return pfaWallClockToUtc(`${nextYear}-${pad2(nextMonth)}-01`, "00:00");
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/**
  * Returns the wall-clock parts (year, month, day, hour, minute) at
  * `d` in PFA TZ. Useful for "what is the current PFA day" without
  * relying on the runtime's local TZ.

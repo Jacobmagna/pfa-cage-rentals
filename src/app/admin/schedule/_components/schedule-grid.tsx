@@ -39,6 +39,7 @@ import {
   ScheduleCreateDialog,
   type CreatePrefill,
 } from "./schedule-create-dialog";
+import { pfaHour, pfaMinute, pfaWallClockAt } from "@/lib/timezone";
 
 const FIRST_HOUR = 8;
 const LAST_HOUR = 22;
@@ -288,21 +289,17 @@ export function ScheduleGrid({
       if (current.kind === "active") {
         const min = Math.min(current.startSlot, current.endSlot);
         const max = Math.max(current.startSlot, current.endSlot);
-        const startAt = new Date(selectedDateRef.current);
-        startAt.setHours(
+        const startAt = pfaWallClockAt(
+          selectedDateRef.current,
           FIRST_HOUR + Math.floor(min / 2),
           (min % 2) * 30,
-          0,
-          0,
         );
-        const endAt = new Date(selectedDateRef.current);
         // max is inclusive; the block runs through the END of slot `max`.
         const endSlotBoundary = max + 1;
-        endAt.setHours(
+        const endAt = pfaWallClockAt(
+          selectedDateRef.current,
           FIRST_HOUR + Math.floor(endSlotBoundary / 2),
           (endSlotBoundary % 2) * 30,
-          0,
-          0,
         );
         setDialog({
           kind: "create",
@@ -325,15 +322,16 @@ export function ScheduleGrid({
   }, []);
 
   const openCreateAt = (resource: ScheduleResource, slotIdx: number) => {
-    const startAt = new Date(selectedDate);
-    startAt.setHours(
+    const startAt = pfaWallClockAt(
+      selectedDate,
       FIRST_HOUR + Math.floor(slotIdx / 2),
       (slotIdx % 2) * 30,
-      0,
-      0,
     );
-    const endAt = new Date(startAt);
-    endAt.setHours(startAt.getHours() + 1);
+    const endAt = pfaWallClockAt(
+      selectedDate,
+      pfaHour(startAt) + 1,
+      pfaMinute(startAt),
+    );
     setDialog({
       kind: "create",
       prefill: { resourceId: resource.id, startAt, endAt },
@@ -361,12 +359,10 @@ export function ScheduleGrid({
     const oldEnd = new Date(sessionData.endAt);
     const durationMs = oldEnd.getTime() - oldStart.getTime();
 
-    const newStart = new Date(selectedDate);
-    newStart.setHours(
+    const newStart = pfaWallClockAt(
+      selectedDate,
       FIRST_HOUR + Math.floor(dropData.slotIdx / 2),
       (dropData.slotIdx % 2) * 30,
-      0,
-      0,
     );
     const newEnd = new Date(newStart.getTime() + durationMs);
 
@@ -408,7 +404,7 @@ export function ScheduleGrid({
   resources.forEach((r, i) => resourceRow.set(r.id, i + 2));
 
   const inRange = (when: Date) =>
-    when.getHours() >= FIRST_HOUR && when.getHours() < LAST_HOUR;
+    pfaHour(when) >= FIRST_HOUR && pfaHour(when) < LAST_HOUR;
   const visibleSessions = sessions.filter((s) => inRange(s.startAt));
   const hiddenCount = sessions.length - visibleSessions.length;
   const visibleBlocks = blocks.filter((b) => inRange(b.startAt));
@@ -823,9 +819,9 @@ function placeOnGrid(
   endAt: Date,
 ): { col: number; span: number } | null {
   const startSlots =
-    (startAt.getHours() - FIRST_HOUR) * 2 + Math.floor(startAt.getMinutes() / 30);
+    (pfaHour(startAt) - FIRST_HOUR) * 2 + Math.floor(pfaMinute(startAt) / 30);
   const endSlots =
-    (endAt.getHours() - FIRST_HOUR) * 2 + Math.ceil(endAt.getMinutes() / 30);
+    (pfaHour(endAt) - FIRST_HOUR) * 2 + Math.ceil(pfaMinute(endAt) / 30);
   const clippedStart = Math.max(startSlots, 0);
   const clippedEnd = Math.min(endSlots, SLOTS);
   if (clippedEnd <= clippedStart) return null;

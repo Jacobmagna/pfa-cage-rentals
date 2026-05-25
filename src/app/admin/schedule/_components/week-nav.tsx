@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { formatPfaDate, formatPfaWeekday, pfaDayStart, pfaParts } from "@/lib/timezone";
 
 // Week-strip date navigator. Shows Mon–Sun of the week containing
 // the currently-selected date, with prev/next chevrons flanking.
@@ -7,30 +8,33 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 // changes the URL ?date= and the page re-renders against the new
 // day. No client JS needed.
 
-export function WeekNav({ selectedDate }: { selectedDate: Date }) {
-  const monday = startOfWeek(selectedDate);
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    return d;
-  });
-  const prevWeek = new Date(monday);
-  prevWeek.setDate(monday.getDate() - 7);
-  const nextWeek = new Date(monday);
-  nextWeek.setDate(monday.getDate() + 7);
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-  const today = startOfDay(new Date());
-  const selectedKey = formatDateInput(selectedDate);
+export function WeekNav({ selectedDate }: { selectedDate: Date }) {
+  const monday = pfaWeekStart(selectedDate);
+  const days = Array.from({ length: 7 }, (_, i) =>
+    // Add 0.5 day per step then snap to PFA midnight — handles DST
+    // boundary (23h spring-forward / 25h fall-back) cleanly because
+    // pfaDayStart maps any instant inside a PFA day to that day's midnight.
+    pfaDayStart(new Date(monday.getTime() + (i + 0.5) * DAY_MS)),
+  );
+  days[0] = monday; // exact, no rounding error on day 0
+
+  const prevWeek = pfaDayStart(new Date(monday.getTime() - 6.5 * DAY_MS));
+  const nextWeek = pfaDayStart(new Date(monday.getTime() + 7.5 * DAY_MS));
+
+  const todayKey = formatPfaDate(new Date());
+  const selectedKey = formatPfaDate(selectedDate);
 
   return (
     <div className="mb-5 flex items-center gap-2">
-      <NavChevron href={`?date=${formatDateInput(prevWeek)}`} dir="left" />
+      <NavChevron href={`?date=${formatPfaDate(prevWeek)}`} dir="left" />
 
       <div className="flex flex-1 gap-1">
         {days.map((d) => {
-          const key = formatDateInput(d);
+          const key = formatPfaDate(d);
           const isSelected = key === selectedKey;
-          const isToday = startOfDay(d).getTime() === today.getTime();
+          const isToday = key === todayKey;
           return (
             <Link
               key={key}
@@ -43,10 +47,10 @@ export function WeekNav({ selectedDate }: { selectedDate: Date }) {
               ].join(" ")}
             >
               <p className="text-[10px] uppercase tracking-[0.14em]">
-                {d.toLocaleDateString("en-US", { weekday: "short" })}
+                {formatPfaWeekday(d)}
               </p>
               <p className="mt-0.5 text-sm font-semibold tabular-nums">
-                {d.getDate()}
+                {pfaParts(d).day}
                 {isToday ? (
                   <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-gold align-middle" />
                 ) : null}
@@ -56,7 +60,7 @@ export function WeekNav({ selectedDate }: { selectedDate: Date }) {
         })}
       </div>
 
-      <NavChevron href={`?date=${formatDateInput(nextWeek)}`} dir="right" />
+      <NavChevron href={`?date=${formatPfaDate(nextWeek)}`} dir="right" />
     </div>
   );
 }
@@ -80,24 +84,13 @@ function NavChevron({
   );
 }
 
-function startOfWeek(d: Date): Date {
-  const copy = startOfDay(d);
-  const dayOfWeek = copy.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-  // Treat Monday as week start (ISO).
-  const offset = (dayOfWeek + 6) % 7;
-  copy.setDate(copy.getDate() - offset);
-  return copy;
-}
-
-function startOfDay(d: Date): Date {
-  const copy = new Date(d);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
-}
-
-function formatDateInput(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+// Returns PFA midnight of the Monday in the PFA week containing d.
+// ISO week = Monday-start.
+function pfaWeekStart(d: Date): Date {
+  const dayMidnight = pfaDayStart(d);
+  // PFA midnight rendered as a UTC instant — getUTCDay reads the same
+  // calendar day as the PFA wall clock (since both agree on midnight).
+  const dayOfWeek = dayMidnight.getUTCDay(); // 0=Sun..6=Sat
+  const offsetDays = (dayOfWeek + 6) % 7; // days back to Monday
+  return pfaDayStart(new Date(dayMidnight.getTime() - (offsetDays - 0.5) * DAY_MS));
 }

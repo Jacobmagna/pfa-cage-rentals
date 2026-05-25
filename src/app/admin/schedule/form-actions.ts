@@ -17,6 +17,7 @@ import {
   BlockOverlapError,
   ResourceNotFoundError,
 } from "@/lib/errors";
+import { parsePfaInput } from "@/lib/timezone";
 
 export type BlockFormValues = {
   resourceId: string;
@@ -53,8 +54,8 @@ function buildInput(formData: FormData) {
   }
   return {
     resourceId: formData.get("resourceId")?.toString() ?? "",
-    startAt: new Date(`${dateStr}T${startStr}:00`),
-    endAt: new Date(`${dateStr}T${endStr}:00`),
+    startAt: parsePfaInput(dateStr, startStr),
+    endAt: parsePfaInput(dateStr, endStr),
     reason: formData.get("reason")?.toString().trim() ?? "",
   };
 }

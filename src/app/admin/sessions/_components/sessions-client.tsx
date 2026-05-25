@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { SessionFormDialog, type SessionFormInitialValues } from "./session-form-dialog";
 import { deleteSessionAction } from "../form-actions";
+import { PFA_TIMEZONE } from "@/lib/timezone";
 
 // Top-level client island for the admin sessions page. Owns the
 // dialog open/close state (create vs edit), the row delete pending
@@ -214,19 +215,23 @@ export function SessionsClient({
   );
 }
 
-// Formats a session window as "Mon May 24 · 9:00 AM – 10:30 AM".
-// Uses local timezone — coaches enter and read times in their TZ.
+// Formats a session window as "Mon May 24 · 9:00 AM – 10:30 AM" in PFA TZ.
+// Explicit timeZone: any user (in any browser TZ) sees the same wall-clock
+// time, matching what was originally entered by the admin or coach.
 function formatWhen(start: Date, end: Date): string {
   const date = start.toLocaleDateString("en-US", {
+    timeZone: PFA_TIMEZONE,
     weekday: "short",
     month: "short",
     day: "numeric",
   });
   const startTime = start.toLocaleTimeString("en-US", {
+    timeZone: PFA_TIMEZONE,
     hour: "numeric",
     minute: "2-digit",
   });
   const endTime = end.toLocaleTimeString("en-US", {
+    timeZone: PFA_TIMEZONE,
     hour: "numeric",
     minute: "2-digit",
   });

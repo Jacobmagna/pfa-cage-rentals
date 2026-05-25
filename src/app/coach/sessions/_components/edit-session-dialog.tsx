@@ -7,6 +7,7 @@ import {
   type EditActionResult,
 } from "../form-actions";
 import type { ResourceOption } from "./types";
+import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 
 // Edit dialog for a coach's existing session. Mirrors the admin
 // session-form-dialog (native <dialog>, useActionState, error
@@ -303,15 +304,6 @@ const inputStyles =
   "w-full rounded-md bg-page border border-line text-fg placeholder:text-fg-subtle px-3 py-2 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40";
 const selectStyles = `${inputStyles} appearance-none pr-8`;
 
-function toDateInput(d: Date): string {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function toTimeInput(d: Date): string {
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${hh}:${mm}`;
-}
+// Inputs render PFA wall-clock — same value regardless of viewer's browser TZ.
+const toDateInput = formatPfaDate;
+const toTimeInput = formatPfaTime;

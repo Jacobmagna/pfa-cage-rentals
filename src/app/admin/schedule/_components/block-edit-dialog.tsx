@@ -16,6 +16,7 @@ import {
   type BlockActionResult,
 } from "../form-actions";
 import type { ResourceOption } from "@/app/admin/sessions/_components/sessions-client";
+import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 
 export type BlockEditInitialValues = {
   id: string;
@@ -285,13 +286,6 @@ const inputStyles =
   "w-full rounded-md bg-page border border-line text-fg placeholder:text-fg-subtle px-3 py-2 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40";
 const selectStyles = `${inputStyles} appearance-none pr-8`;
 
-function toDateInput(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function toTimeInput(d: Date): string {
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
+// Inputs render PFA wall-clock — same value regardless of viewer's browser TZ.
+const toDateInput = formatPfaDate;
+const toTimeInput = formatPfaTime;

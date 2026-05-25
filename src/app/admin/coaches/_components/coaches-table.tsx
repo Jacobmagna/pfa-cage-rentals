@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { PFA_TIMEZONE } from "@/lib/timezone";
 
 // Client-side sortable table. The page pre-aggregates one row per
 // coach, so sorting here is purely O(n log n) on a small array — no
@@ -215,6 +216,7 @@ function compareByKey(a: CoachRow, b: CoachRow, key: SortKey): number {
 
 function formatJoined(d: Date): string {
   return d.toLocaleDateString("en-US", {
+    timeZone: PFA_TIMEZONE,
     month: "short",
     day: "numeric",
     year: "numeric",

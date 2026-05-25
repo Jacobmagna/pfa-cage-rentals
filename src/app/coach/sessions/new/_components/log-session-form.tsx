@@ -7,6 +7,7 @@ import {
   type CoachActionResult,
 } from "../form-actions";
 import type { ResourceOption } from "../../_components/types";
+import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 
 const INITIAL_STATE: CoachActionResult = { ok: true, loggedAt: 0 };
 
@@ -246,15 +247,6 @@ function roundDownToHalfHour(d: Date): Date {
   return copy;
 }
 
-function toDateInput(d: Date): string {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function toTimeInput(d: Date): string {
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${hh}:${mm}`;
-}
+// Inputs render PFA wall-clock — same value regardless of viewer's browser TZ.
+const toDateInput = formatPfaDate;
+const toTimeInput = formatPfaTime;

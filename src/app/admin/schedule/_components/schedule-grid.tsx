@@ -529,13 +529,19 @@ export function ScheduleGrid({
               );
             })}
 
-            {/* Resource label cells. */}
+            {/* Resource label cells. A type-colored stripe on the left
+                lets the eye correlate row → resource type → session
+                accent border without reading the legend. */}
             {resources.map((r, i) => (
               <div
                 key={`label-${r.id}`}
-                className="sticky left-0 z-10 border-r border-line bg-surface px-3 py-2 text-sm font-medium text-fg flex items-center"
+                className="sticky left-0 z-10 border-r border-line bg-surface flex items-center gap-2.5 pl-2 pr-3 py-2 text-sm font-medium text-fg"
                 style={{ gridRow: i + 2, gridColumn: 1 }}
               >
+                <span
+                  aria-hidden
+                  className={`h-6 w-0.5 rounded-full ${typeStripe(r.type)}`}
+                />
                 <span className="truncate">{r.name}</span>
               </div>
             ))}
@@ -845,6 +851,20 @@ function typeBorder(type: ResourceType): string {
       return "border-l-4 border-l-success";
     case "weight_room":
       return "border-l-4 border-l-warning";
+  }
+}
+
+// Solid background variant of typeBorder for the resource-row label
+// stripe. Same color semantics — cage gold, bullpen green, weight
+// room amber — but as a fill since the stripe is its own element.
+function typeStripe(type: ResourceType): string {
+  switch (type) {
+    case "cage":
+      return "bg-gold";
+    case "bullpen":
+      return "bg-success";
+    case "weight_room":
+      return "bg-warning";
   }
 }
 

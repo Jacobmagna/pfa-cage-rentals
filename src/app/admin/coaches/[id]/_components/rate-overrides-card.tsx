@@ -45,27 +45,24 @@ export function RateOverridesCard({
   rows: RateOverrideRow[];
 }) {
   return (
-    <div className="rounded-lg border border-line bg-surface overflow-hidden">
-      <div className="px-5 py-4 border-b border-line bg-surface-2">
-        <p className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
-          Phase 7 · H3
-        </p>
-        <h3 className="mt-1 text-base font-semibold text-fg">
+    <section className="rounded-xl border border-line bg-surface overflow-hidden">
+      <header className="px-5 py-4 border-b border-line">
+        <h3 className="text-base font-semibold text-fg">
           Rate overrides
         </h3>
-        <p className="mt-1.5 text-xs text-fg-muted leading-relaxed">
-          Per-resource-type rates for this coach. Leave a row at the
-          default to use the standard rate; set an override to bill at a
-          different amount. Changes apply to <span className="text-fg">future</span>{" "}
-          sessions only — past sessions stay at the rate they were billed at.
+        <p className="mt-1 text-xs text-fg-muted leading-relaxed">
+          Override the standard rate for this coach per resource type.
+          Changes apply to{" "}
+          <span className="text-fg">future sessions only</span> — past
+          sessions stay at the rate they were billed at.
         </p>
-      </div>
-      <div className="divide-y divide-line">
+      </header>
+      <div className="divide-y divide-line/60">
         {rows.map((row) => (
           <Row key={row.resourceType} coachId={coachId} row={row} />
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 

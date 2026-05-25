@@ -1,7 +1,7 @@
 # PFA Cage Rentals — architecture
 
 One-page tour of how a request flows through the stack and where the
-load-bearing pieces live. Read [README.md](../README.md) first if
+load-bearing pieces live. Read [README.md](../../README.md) first if
 you're new; this doc assumes you know what the app does.
 
 ## Request flow

@@ -18,10 +18,10 @@ Tracking active hooks fire on session start; surface the "Tracking active" line 
 ## Pre-flight reads
 {{Delete any that don't apply}}
 - `MEMORY.md` (auto-loaded — gives stack, admins, design direction, workflow, product decisions)
-- `docs/production-checklist.md` (state of the build)
-- `docs/design-spec.md` (UI work)
-- `docs/architecture.md` (backend / data-flow work)
-- `docs/runbook.md` (ops / incident work)
+- `docs/process/production-checklist.md` (state of the build)
+- `docs/reference/design-spec.md` (UI work)
+- `docs/reference/architecture.md` (backend / data-flow work)
+- `docs/operations/runbook.md` (ops / incident work)
 - `HANDOFF.md` (full prior-session context — only if this task threads from a recent landed change)
 
 ## Goal

@@ -5,10 +5,10 @@ Continuing the PFA Cage Rentals build in a fresh context. I'm Jacob — billable
 ## Before doing anything
 
 1. Read project memory (auto-loaded via `MEMORY.md` at `/Users/jacobmagna/.claude/projects/-Users-jacobmagna-coaches-cage-ai/memory/`) — gives you stack, admins, design direction, workflow, product decisions.
-2. Re-read `docs/production-checklist.md` (canonical work doc, stages A through L by dependency order).
-3. Re-read `docs/design-spec.md` before any UI work (dark + warm gold, Vercel/Linear vibe).
-4. Skim `docs/architecture.md` for the 1-page request-flow + auth/billing/email/audit deep dive.
-5. `docs/runbook.md` is the on-call doc — restore from backup, secret rotation, billing-dispute audit queries.
+2. Re-read `docs/process/production-checklist.md` (canonical work doc, stages A through L by dependency order).
+3. Re-read `docs/reference/design-spec.md` before any UI work (dark + warm gold, Vercel/Linear vibe).
+4. Skim `docs/reference/architecture.md` for the 1-page request-flow + auth/billing/email/audit deep dive.
+5. `docs/operations/runbook.md` is the on-call doc — restore from backup, secret rotation, billing-dispute audit queries.
 6. Skim `BRAINSTORM.md` if Stage I work resurfaces.
 
 ## Project one-liner
@@ -24,7 +24,7 @@ Replacing Dad's shared-Excel cage-rental tracker with a real web app at `pfacage
 **Stage K-launch: K8 + K10 done; K9 + K5 pending.**
 - **K8 admin soft-launch (2026-05-26):** Dad + Mom walked the app. Surfaced two real asks — see "Post-K8 feature shipped this session" below.
 - **K10 historical import:** Live on prod. 345 sessions, 40 → 34 coaches (after 6 consolidation merges), 8 team-rental sessions flagged. Verified against Dad's tally during walkthrough. R2 backup taken before commit (run 26383162976).
-- **K9 coach rollout:** Not started. `docs/coach-onboarding-email.md` is the template. Plan is 2–3 friendly coaches first, then expand.
+- **K9 coach rollout:** Not started. `docs/operations/coach-onboarding-email.md` is the template. Plan is 2–3 friendly coaches first, then expand.
 
 **Post-launch features shipped this session (newest first):**
 
@@ -66,8 +66,8 @@ J8   OAuth → production               [x]
 J9   Account deletion + soft-delete   [x]
 
 K1   README                           [x]
-K2   docs/runbook.md                  [x]
-K3   docs/architecture.md             [x]
+K2   docs/operations/runbook.md       [x]
+K3   docs/reference/architecture.md   [x]
 K4   Nightly R2 backup                [x]   (verified live)
 K5   Status page                      [ ]   parked post-launch
 K6   Security pass                    [~]   external scans pending
@@ -141,7 +141,7 @@ Code-side checks done; three live-site verifications still on Jacob:
 
 ### K9 coach rollout
 - Pick 2–3 friendly coaches first. David Lusk is the primary user behind the multi-slot feature — he's the obvious first invite.
-- Send `docs/coach-onboarding-email.md` template.
+- Send `docs/operations/coach-onboarding-email.md` template.
 - After each signup, scan `/admin/coaches` for an "Imported" pill matching their name → click Merge to re-point their historical sessions to the real account.
 - Wait ~3 days, fix anything, expand.
 

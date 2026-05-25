@@ -13,7 +13,7 @@
 Cross-refs:
 - Categories (1–14) reference `docs/production-diagnostic.md` (or this file's section headers — same numbering as the deep-dive diagnostic).
 - Phase numbers (Phase 0–9) reference `BRAINSTORM.md`.
-- Design tokens reference `docs/design-spec.md`.
+- Design tokens reference `docs/reference/design-spec.md`.
 
 ---
 
@@ -589,11 +589,11 @@ Shipped across four batches in a single session (2026-05-25):
 - Replaced the stock create-next-app boilerplate with a real intro: what the app is, full stack list, `cp .env.example`/install/migrate/seed/dev quickstart, script table, deploy procedure (direct-to-main + the pre-prod-migration step), and links to BRAINSTORM / design-spec / production-checklist / runbook.
 - Also added the missing `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` entries to `.env.example` (they were referenced in code but not in the example file).
 
-### K2. docs/runbook.md — `[x]`
+### K2. docs/operations/runbook.md — `[x]`
 - New file with every required section: site-down diagnostic order (Vercel → Neon → DNS at GoDaddy → CSP → rate-limit), PITR restore from Neon, secret rotation for `AUTH_SECRET` / Google OAuth / `AUTH_RESEND_KEY` / `UPSTASH_*` / `DATABASE_URL` / Sentry, manual coach insert, redeploy via empty commit or Vercel UI, billing-dispute audit-log queries, and admin onboarding (which is hardcoded in `src/lib/admin-emails.ts`, not env-var — clarified that in the doc).
 - Added a "delete a coach (account deletion request)" section that points at the J9 UI as the canonical path, with SQL-only fallback for emergencies.
 
-### K3. docs/architecture.md — `[ ]`
+### K3. docs/reference/architecture.md — `[ ]`
 - One-page request-flow diagram (textual ASCII or Mermaid): Browser → Vercel Edge → Next.js server function → Auth.js or business action → Drizzle → Neon Postgres. Side branches: Sentry, Resend/SES, Upstash.
 - One paragraph each on: auth strategy, billing math location, email flow, audit logging.
 - Acceptance: doc exists, accurate.
@@ -604,7 +604,7 @@ Decision (2026-05-25): stay on Neon free tier (24h PITR) + nightly `pg_dump` to 
 - **Implementation:** `.github/workflows/backup.yml` runs at 06:00 UTC daily (manually dispatchable too). Installs `postgresql-client-17` via PGDG apt repo + modern signed-by GPG keyring (apt-key is deprecated and silently fails on Ubuntu 22.04+), runs `/usr/lib/postgresql/17/bin/pg_dump --no-owner --no-acl --quote-all-identifiers` by absolute path (preinstalled v16 on PATH would otherwise abort with a version mismatch against Neon's v17 server), gzips the output, uploads via rclone with `no_check_bucket = true` (our R2 token is scoped to the single bucket and can't satisfy rclone's default HeadBucket probe). Total runtime ~30s.
 - **R2 provisioning done:** bucket `pfa-cage-rentals-backups` (WNAM region) with a `expire-after-30-days` lifecycle rule scoped to the `nightly/` prefix. R2 API token scoped Object Read & Write to that bucket only. GitHub secrets `DATABASE_URL_PROD`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` configured.
 - **Verified:** first manual dispatch (2026-05-25) produced `pfa-cage-rentals-2026-05-25T02-39-...sql.gz` in `nightly/` (~7KB given the current small dataset).
-- **Restore procedure:** documented in `docs/runbook.md` ("Restore from nightly backup").
+- **Restore procedure:** documented in `docs/operations/runbook.md` ("Restore from nightly backup").
 
 ### K5. Status page — `[ ]` (parked post-launch)
 Not a launch blocker. Pick this up after Stage K-launch (K8–K10) is comfortable.
@@ -625,7 +625,7 @@ Code-side checks closed; live-site scans + Sentry alert test still on Jacob.
 - Flip to `[x]` once the three external checks pass.
 
 ### K7. Onboarding email template for coaches — `[x]`
-- Draft committed at `docs/coach-onboarding-email.md`. Sender-from-Mike voice; covers what's the same (rates, cages, billing), what's different (self-serve logging, visible totals, conflict messages), and the first-sign-in walkthrough (Google or magic link). Includes a "keep texting me for the first week" safety net while the cutover runs in parallel.
+- Draft committed at `docs/operations/coach-onboarding-email.md`. Sender-from-Mike voice; covers what's the same (rates, cages, billing), what's different (self-serve logging, visible totals, conflict messages), and the first-sign-in walkthrough (Google or magic link). Includes a "keep texting me for the first week" safety net while the cutover runs in parallel.
 - Sender notes at the bottom of the file (not included in the email itself) flag: coach doesn't appear in `/admin/coaches` until first sign-in, runbook has the manual-insert procedure if pre-population is needed, send to the 2–3 pilot coaches first during K8.
 - Add screenshots before sending: open `/coach` while logged in as a coach, capture (a) the dashboard, (b) the "Log a session" flow. Drop those inline above the "How to sign in" section.
 
@@ -639,7 +639,7 @@ Calendar-time activity; closed when complete.
 ### K9. Coach rollout — `[ ]` (Jacob QA)
 Calendar-time activity; closed when complete.
 - Pick 3 friendly coaches first (e.g. David Lusk, J. Tyler, Shannon).
-- Send onboarding email (template ready at `docs/coach-onboarding-email.md`) → confirm they can sign in + log a session.
+- Send onboarding email (template ready at `docs/operations/coach-onboarding-email.md`) → confirm they can sign in + log a session.
 - Wait 3 days, fix anything weird.
 - Open to all coaches with same email.
 - Acceptance: ≥ 80% of coaches have signed in at least once within 2 weeks of full rollout.

@@ -73,7 +73,7 @@ Thanks for being patient with the upgrade.
   until they actually sign in for the first time (Auth.js creates
   the row on first sign-in). If you want them visible in the picker
   before then, follow the "Add a new coach manually" section in
-  [docs/runbook.md](./runbook.md).
+  [docs/operations/runbook.md](./runbook.md).
 - During the soft launch (K8), send this only to the 2–3 friendly
   pilot coaches first. Watch their feedback for a few days before
   expanding to the full roster.

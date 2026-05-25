@@ -5,8 +5,8 @@ Operational procedures for keeping the production site at
 should be runnable end-to-end without asking the original author a
 question.
 
-If you're new to this codebase, start with [README.md](../README.md)
-and [BRAINSTORM.md](../BRAINSTORM.md) for context, then come back here
+If you're new to this codebase, start with [README.md](../../README.md)
+and [BRAINSTORM.md](../../BRAINSTORM.md) for context, then come back here
 when something goes sideways.
 
 ---
@@ -40,8 +40,8 @@ Work through these in order. Stop as soon as one is the obvious cause.
 If none of those apply, walk the request path manually: browser →
 Vercel Edge → Next.js server function → Auth.js or business action →
 Drizzle → Neon. Read `src/db/schema.ts` for the data model and
-`docs/production-checklist.md` for stage history. A dedicated
-`docs/architecture.md` (K3 in the checklist) is on the list.
+`docs/process/production-checklist.md` for stage history. The dedicated
+`docs/reference/architecture.md` (K3 in the checklist) is also up.
 
 ---
 

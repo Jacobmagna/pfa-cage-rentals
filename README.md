@@ -81,6 +81,7 @@ git push
 ## More docs
 
 - [BRAINSTORM.md](./BRAINSTORM.md) — product / scope source of truth
-- [docs/design-spec.md](./docs/design-spec.md) — visual design system (dark + warm gold, Vercel/Linear vibe)
-- [docs/production-checklist.md](./docs/production-checklist.md) — canonical work tracker (stages A–L)
-- [docs/runbook.md](./docs/runbook.md) — site-down diagnostic order, PITR restore, secret rotation
+- [docs/reference/design-spec.md](./docs/reference/design-spec.md) — visual design system (dark + warm gold, Vercel/Linear vibe)
+- [docs/reference/architecture.md](./docs/reference/architecture.md) — 1-page request-flow + auth/billing/email/audit deep dive
+- [docs/process/production-checklist.md](./docs/process/production-checklist.md) — canonical work tracker (stages A–L)
+- [docs/operations/runbook.md](./docs/operations/runbook.md) — site-down diagnostic order, PITR restore, secret rotation

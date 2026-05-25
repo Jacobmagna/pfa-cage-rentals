@@ -36,20 +36,20 @@ export function AuditTable({ rows }: { rows: AuditRow[] }) {
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-line">
+    <div className="overflow-x-auto">
       <table className="w-full min-w-[820px] text-sm">
-        <thead className="bg-surface-2 text-xs uppercase tracking-wider text-fg-muted">
+        <thead className="text-[11px] uppercase tracking-[0.14em] text-fg-subtle border-b border-line">
           <tr>
-            <th className="px-4 py-3 text-left font-medium">When</th>
-            <th className="px-4 py-3 text-left font-medium">Actor</th>
-            <th className="px-4 py-3 text-left font-medium">Action</th>
-            <th className="px-4 py-3 text-left font-medium">Entity</th>
-            <th className="px-4 py-3 text-left font-medium">Detail</th>
+            <th scope="col" className="px-4 py-3 text-left font-medium">When</th>
+            <th scope="col" className="px-4 py-3 text-left font-medium">Actor</th>
+            <th scope="col" className="px-4 py-3 text-left font-medium">Action</th>
+            <th scope="col" className="px-4 py-3 text-left font-medium">Entity</th>
+            <th scope="col" className="px-4 py-3 text-left font-medium">Detail</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.id} className="border-t border-line align-top">
+            <tr key={row.id} className="border-b border-line/50 last:border-b-0 align-top">
               <td className="px-4 py-3 whitespace-nowrap font-mono tabular-nums text-xs text-fg-muted">
                 <p>{formatPfaDate(row.ts)}</p>
                 <p className="text-fg-subtle text-[10px] mt-0.5">

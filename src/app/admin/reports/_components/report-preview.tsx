@@ -39,24 +39,24 @@ export function ReportPreview({
             <GrandTotal cents={grandTotalCents} sessionCount={detail.length} />
           }
         />
-        <div className="overflow-x-auto rounded-lg border border-line">
+        <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
-            <thead className="bg-surface-2 text-xs uppercase tracking-wider text-fg-muted">
+            <thead className="text-[11px] uppercase tracking-[0.14em] text-fg-subtle border-b border-line">
               <tr>
-                <th className="px-4 py-3 text-left font-medium">Coach</th>
-                <th className="px-4 py-3 text-right font-medium">Cage slots</th>
-                <th className="px-4 py-3 text-right font-medium">Cage $</th>
-                <th className="px-4 py-3 text-right font-medium">Bullpen slots</th>
-                <th className="px-4 py-3 text-right font-medium">Bullpen $</th>
-                <th className="px-4 py-3 text-right font-medium">Weight Room slots</th>
-                <th className="px-4 py-3 text-right font-medium">Weight Room $</th>
-                <th className="px-4 py-3 text-right font-medium">Total</th>
-                <th className="px-4 py-3 text-center font-medium">Rate</th>
+                <th scope="col" className="px-4 py-3 text-left font-medium">Coach</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">Cage slots</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">Cage $</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">Bullpen slots</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">Bullpen $</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">Weight Room slots</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">Weight Room $</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">Total</th>
+                <th scope="col" className="px-4 py-3 text-center font-medium">Rate</th>
               </tr>
             </thead>
             <tbody>
               {summary.map((row) => (
-                <tr key={row.coachId} className="border-t border-line">
+                <tr key={row.coachId} className="border-b border-line/50 last:border-b-0">
                   <td className="px-4 py-3 text-fg">
                     {row.coachName}
                     {row.coachName !== row.coachEmail ? (
@@ -101,22 +101,22 @@ export function ReportPreview({
           <table className="w-full min-w-[960px] text-sm">
             <thead className="bg-surface-2 text-xs uppercase tracking-wider text-fg-muted">
               <tr>
-                <th className="px-3 py-3 text-left font-medium">Date</th>
-                <th className="px-3 py-3 text-left font-medium">Day</th>
-                <th className="px-3 py-3 text-left font-medium">Start</th>
-                <th className="px-3 py-3 text-left font-medium">End</th>
-                <th className="px-3 py-3 text-left font-medium">Resource</th>
-                <th className="px-3 py-3 text-left font-medium">Use</th>
-                <th className="px-3 py-3 text-left font-medium">Coach</th>
-                <th className="px-3 py-3 text-right font-medium">Slots</th>
-                <th className="px-3 py-3 text-right font-medium">Rate</th>
-                <th className="px-3 py-3 text-right font-medium">$</th>
-                <th className="px-3 py-3 text-left font-medium">Note</th>
+                <th scope="col" className="px-3 py-3 text-left font-medium">Date</th>
+                <th scope="col" className="px-3 py-3 text-left font-medium">Day</th>
+                <th scope="col" className="px-3 py-3 text-left font-medium">Start</th>
+                <th scope="col" className="px-3 py-3 text-left font-medium">End</th>
+                <th scope="col" className="px-3 py-3 text-left font-medium">Resource</th>
+                <th scope="col" className="px-3 py-3 text-left font-medium">Use</th>
+                <th scope="col" className="px-3 py-3 text-left font-medium">Coach</th>
+                <th scope="col" className="px-3 py-3 text-right font-medium">Slots</th>
+                <th scope="col" className="px-3 py-3 text-right font-medium">Rate</th>
+                <th scope="col" className="px-3 py-3 text-right font-medium">$</th>
+                <th scope="col" className="px-3 py-3 text-left font-medium">Note</th>
               </tr>
             </thead>
             <tbody>
               {detail.map((row) => (
-                <tr key={row.sessionId} className="border-t border-line">
+                <tr key={row.sessionId} className="border-b border-line/50 last:border-b-0">
                   <td className="px-3 py-3 font-mono tabular-nums whitespace-nowrap text-fg-muted">
                     {row.date}
                   </td>

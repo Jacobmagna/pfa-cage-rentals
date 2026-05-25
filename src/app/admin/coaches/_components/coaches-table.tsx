@@ -73,9 +73,9 @@ export function CoachesTable({ rows }: { rows: CoachRow[] }) {
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-line">
+    <div className="overflow-x-auto">
       <table className="w-full min-w-[720px] text-sm">
-        <thead className="bg-surface-2 text-xs uppercase tracking-wider text-fg-muted">
+        <thead className="text-[11px] uppercase tracking-[0.14em] text-fg-subtle border-b border-line">
           <tr>
             <SortHeader
               label="Coach"
@@ -118,7 +118,7 @@ export function CoachesTable({ rows }: { rows: CoachRow[] }) {
           {sorted.map((row) => (
             <tr
               key={row.id}
-              className="border-t border-line hover:bg-surface-2/40 transition-colors"
+              className="border-b border-line/50 last:border-b-0 hover:bg-surface/60 transition-colors"
             >
               <td className="px-4 py-3">
                 <Link
@@ -168,9 +168,13 @@ function SortHeader({
   onClick: (col: SortKey) => void;
 }) {
   const active = sort.key === col;
-  const Icon = !active ? ArrowUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown;
+  // Inactive headers don't render an arrow — keeps the row quiet. The
+  // ArrowUpDown reveals on hover only via the group class. Active
+  // header shows the directional arrow in gold.
+  const Icon = sort.dir === "asc" ? ArrowUp : ArrowDown;
   return (
     <th
+      scope="col"
       className={[
         "px-4 py-3 font-medium",
         align === "right" ? "text-right" : "text-left",
@@ -180,17 +184,16 @@ function SortHeader({
         type="button"
         onClick={() => onClick(col)}
         className={[
-          "inline-flex items-center gap-1.5 transition-colors",
-          active ? "text-fg" : "hover:text-fg",
+          "group inline-flex items-center gap-1.5 transition-colors",
+          active ? "text-fg" : "text-fg-subtle hover:text-fg",
         ].join(" ")}
       >
         {label}
-        <Icon
-          className={[
-            "h-3 w-3",
-            active ? "text-gold" : "text-fg-subtle",
-          ].join(" ")}
-        />
+        {active ? (
+          <Icon className="h-3 w-3 text-gold" />
+        ) : (
+          <ArrowUpDown className="h-3 w-3 text-fg-disabled opacity-0 transition-opacity group-hover:opacity-100" />
+        )}
       </button>
     </th>
   );

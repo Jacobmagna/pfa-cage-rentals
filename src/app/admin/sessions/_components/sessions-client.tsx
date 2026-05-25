@@ -112,23 +112,23 @@ export function SessionsClient({
       </div>
 
       {rows.length === 0 ? (
-        <div className="rounded-lg border border-line bg-surface p-12 text-center">
+        <div className="rounded-lg border border-line/60 bg-surface/40 p-12 text-center">
           <p className="text-sm text-fg-muted">
             No sessions yet. Click <span className="text-fg">New session</span>{" "}
             to log the first one.
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line">
+        <div className="overflow-x-auto">
           <table className="w-full min-w-[640px]">
-            <thead className="bg-surface-2 text-xs uppercase tracking-wider text-fg-muted">
+            <thead className="text-[11px] uppercase tracking-[0.14em] text-fg-subtle border-b border-line">
               <tr>
-                <th className="px-4 py-3 text-left font-medium">When</th>
-                <th className="px-4 py-3 text-left font-medium">Coach</th>
-                <th className="px-4 py-3 text-left font-medium">Resource</th>
-                <th className="px-4 py-3 text-left font-medium">Use</th>
-                <th className="px-4 py-3 text-right font-medium">Duration</th>
-                <th className="px-4 py-3 text-right font-medium sr-only">
+                <th scope="col" className="px-4 py-3 text-left font-medium">When</th>
+                <th scope="col" className="px-4 py-3 text-left font-medium">Coach</th>
+                <th scope="col" className="px-4 py-3 text-left font-medium">Resource</th>
+                <th scope="col" className="px-4 py-3 text-left font-medium">Use</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">Duration</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium sr-only">
                   Actions
                 </th>
               </tr>
@@ -139,7 +139,7 @@ export function SessionsClient({
                 return (
                   <tr
                     key={row.id}
-                    className={`border-t border-line hover:bg-surface-2/40 transition-colors ${
+                    className={`border-b border-line/50 last:border-b-0 hover:bg-surface/60 transition-colors ${
                       isPendingDelete ? "opacity-50" : ""
                     }`}
                   >

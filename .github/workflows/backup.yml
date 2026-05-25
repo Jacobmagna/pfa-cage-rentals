@@ -79,6 +79,12 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           mkdir -p ~/.config/rclone
+          # no_check_bucket = true: skip the implicit CreateBucket /
+          # HeadBucket probe on upload. Our R2 token is scoped to read+
+          # write inside pfa-cage-rentals-backups only, so the probe
+          # returns 403 even though the bucket exists and the object
+          # PUT itself would succeed. Without this flag rclone refuses
+          # to attempt the upload.
           cat > ~/.config/rclone/rclone.conf <<EOF
           [r2]
           type = s3
@@ -87,6 +93,7 @@ jobs:
           secret_access_key = ${R2_SECRET_ACCESS_KEY}
           endpoint = https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
           acl = private
+          no_check_bucket = true
           EOF
 
       - name: Dump + compress + upload

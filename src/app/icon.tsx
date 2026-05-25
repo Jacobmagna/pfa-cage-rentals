@@ -5,10 +5,16 @@ import { ImageResponse } from "next/og";
 // Used by the PWA manifest as the 192px web-app icon and as the
 // browser tab favicon at retina sizes.
 //
-// Rendered programmatically via next/og rather than checked-in PNGs:
-// the design is a flat type lockup that scales cleanly, and keeping
-// the source as JSX means future theme tweaks (gold hue, bg color)
-// flow through automatically.
+// Brand mark: a filled gold diamond on a near-black square. Same
+// shape as the inline <DiamondMark> SVG used in the nav and landing
+// page — see src/app/_components/diamond-mark.tsx. At 16px tab size
+// a stroked outline disappears, so we render filled here. The mark
+// reads as a baseball diamond at a glance without being a literal
+// home-plate icon.
+//
+// Drawn as a 45°-rotated <div> rather than inline <svg> because
+// next/og's HTML+CSS subset handles rotated boxes more reliably
+// than arbitrary SVG.
 
 export const size = { width: 192, height: 192 };
 export const contentType = "image/png";
@@ -24,14 +30,17 @@ export default function Icon() {
           alignItems: "center",
           justifyContent: "center",
           background: "#0a0a0a",
-          color: "#e9b13c",
-          fontSize: 92,
-          fontWeight: 900,
-          letterSpacing: "-0.04em",
-          fontFamily: "system-ui, -apple-system, sans-serif",
         }}
       >
-        PFA
+        <div
+          style={{
+            width: "108px",
+            height: "108px",
+            background: "#e9b13c",
+            transform: "rotate(45deg)",
+            borderRadius: "10px",
+          }}
+        />
       </div>
     ),
     { ...size },

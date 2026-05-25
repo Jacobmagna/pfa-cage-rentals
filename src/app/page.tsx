@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { DiamondMark } from "./_components/diamond-mark";
 import { GoogleSignInButton } from "./_components/google-signin-button";
 import { requestMagicLink } from "./actions";
 
@@ -41,6 +42,15 @@ export default async function Home({
       </div>
 
       <div className="relative w-full max-w-sm">
+        {/* Brand lockup. Three-tier vertical hierarchy:
+             1. PFA Sports logo (parent brand)
+             2. "Cage Rentals" — the product wordmark, promoted from
+                eyebrow label to a proper Geist-bold gold wordmark
+             3. Hairline-rule-with-diamond divider, signalling that
+                anything beneath is descriptive copy and not part of
+                the name
+             4. The positioning sentence, wrapped tight so it reads
+                as a placard rather than a marketing tagline */}
         <div className="mb-10 text-center">
           <Image
             src="/pfa-logo.png"
@@ -50,11 +60,20 @@ export default async function Home({
             priority
             className="mx-auto h-24 w-auto"
           />
-          <h1 className="mt-5 text-base font-semibold tracking-[0.32em] text-gold uppercase">
+          <h1 className="mt-7 text-3xl font-bold tracking-tight text-gold">
             Cage Rentals
           </h1>
-          <p className="mt-3 text-sm text-fg-muted">
-            Schedule and bill your time at the PFA facility.
+          <div
+            aria-hidden
+            className="mt-4 mx-auto flex items-center justify-center gap-2.5"
+          >
+            <span className="h-px w-10 bg-gold/30" />
+            <DiamondMark className="h-2 w-2 text-gold/60" filled />
+            <span className="h-px w-10 bg-gold/30" />
+          </div>
+          <p className="mt-4 mx-auto max-w-[24ch] text-sm leading-relaxed text-fg-muted">
+            A private reservation system, built by PFA for the coaches who
+            train with us.
           </p>
         </div>
 
@@ -93,24 +112,40 @@ export default async function Home({
           </form>
         </div>
 
-        <p className="mt-8 flex items-center justify-center gap-3 text-[11px] text-fg-subtle">
-          <Link
-            href="https://pfasports.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="transition-colors hover:text-fg-muted"
-          >
-            PFA Sports
-          </Link>
-          <span aria-hidden className="text-fg-disabled">·</span>
-          <Link href="/privacy" className="transition-colors hover:text-fg-muted">
-            Privacy
-          </Link>
-          <span aria-hidden className="text-fg-disabled">·</span>
-          <Link href="/terms" className="transition-colors hover:text-fg-muted">
-            Terms
-          </Link>
-        </p>
+        {/* Footer, two tiers — existing nav links centered on top, Magna
+            attribution beneath at lower visual weight. The credit is an
+            unlinked legal signature (Apple-California cadence) rather
+            than a marketing line; when magnasoftware.com exists we
+            promote it to a link. */}
+        <div className="mt-8 flex flex-col items-center gap-3">
+          <p className="flex items-center justify-center gap-3 text-[11px] text-fg-subtle">
+            <Link
+              href="https://pfasports.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="transition-colors hover:text-fg-muted"
+            >
+              PFA Sports
+            </Link>
+            <span aria-hidden className="text-fg-disabled">·</span>
+            <Link
+              href="/privacy"
+              className="transition-colors hover:text-fg-muted"
+            >
+              Privacy
+            </Link>
+            <span aria-hidden className="text-fg-disabled">·</span>
+            <Link
+              href="/terms"
+              className="transition-colors hover:text-fg-muted"
+            >
+              Terms
+            </Link>
+          </p>
+          <p className="text-[10px] uppercase tracking-[0.14em] text-fg-disabled">
+            Built by Magna Software LLC
+          </p>
+        </div>
       </div>
     </main>
   );

@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { auth } from "@/auth";
+import { DiamondMark } from "./diamond-mark";
 
 // Shell for public legal pages (/privacy, /terms). Unlike AppShell,
 // requires no role and doesn't render a sign-out button — these pages
 // must load for signed-out visitors (the Google OAuth consent screen
 // links here, for example). Top-right shows a "Back to dashboard" link
 // for signed-in users or "Sign in" for guests.
+//
+// Matches AppShell's brand-mark + footer treatment so the same lockup
+// and signature appear regardless of whether the visitor is signed in.
 
 export async function PublicShell({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -20,7 +24,11 @@ export async function PublicShell({ children }: { children: React.ReactNode }) {
     <>
       <header className="sticky top-0 z-40 h-14 border-b border-line bg-surface/80 backdrop-blur-md">
         <div className="mx-auto flex h-full max-w-3xl items-center justify-between px-6">
-          <Link href="/" className="group">
+          <Link href="/" className="flex items-center gap-2.5 group">
+            <DiamondMark
+              className="h-2.5 w-2.5 text-gold/70 transition-colors group-hover:text-gold"
+              filled
+            />
             <span className="text-base font-bold tracking-tight text-gold group-hover:text-gold-hover transition-colors">
               PFA Cage Rentals
             </span>
@@ -36,13 +44,26 @@ export async function PublicShell({ children }: { children: React.ReactNode }) {
 
       <main className="flex-1 mx-auto w-full max-w-3xl px-6 py-12">
         {children}
-        <div className="mt-12 border-t border-line pt-6 text-xs text-fg-subtle flex gap-6">
-          <Link href="/privacy" className="hover:text-fg-muted transition-colors">
-            Privacy Policy
-          </Link>
-          <Link href="/terms" className="hover:text-fg-muted transition-colors">
-            Terms of Service
-          </Link>
+        <div className="mt-12 border-t border-line pt-6 text-xs text-fg-subtle">
+          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+            <div className="flex gap-6">
+              <Link
+                href="/privacy"
+                className="hover:text-fg-muted transition-colors"
+              >
+                Privacy Policy
+              </Link>
+              <Link
+                href="/terms"
+                className="hover:text-fg-muted transition-colors"
+              >
+                Terms of Service
+              </Link>
+            </div>
+            <p className="text-[10px] uppercase tracking-[0.14em] text-fg-disabled">
+              Built by Magna Software LLC
+            </p>
+          </div>
         </div>
       </main>
     </>

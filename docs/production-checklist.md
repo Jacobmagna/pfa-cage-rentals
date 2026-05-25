@@ -557,7 +557,7 @@ is a second Resend account for PFA, free tier covers the volume.
 - Acceptance: pages live at `/privacy` + `/terms`, linked from sign-in, Google consent screen updated.
 - Est: 2 h.
 
-### J8. Google OAuth consent → Production — `[ ]`
+### J8. Google OAuth consent → Production — `[x]`
 - Google Cloud Console → OAuth consent screen → "Publish App".
 - Google may require domain verification (Search Console TXT record at GoDaddy).
 - May require app verification if scopes were sensitive (ours are not — userinfo only is fine for unverified).

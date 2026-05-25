@@ -98,6 +98,15 @@ export default async function Home({
             PFA Sports
           </Link>
         </p>
+        <p className="mt-2 text-center text-xs text-fg-subtle flex gap-3 justify-center">
+          <Link href="/privacy" className="hover:text-fg-muted transition-colors">
+            Privacy
+          </Link>
+          <span>·</span>
+          <Link href="/terms" className="hover:text-fg-muted transition-colors">
+            Terms
+          </Link>
+        </p>
       </div>
     </main>
   );

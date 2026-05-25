@@ -549,7 +549,7 @@ is a second Resend account for PFA, free tier covers the volume.
 - Acceptance: scorecard committed to `docs/lighthouse-2026-XX-XX.md`.
 - Est: 3 h.
 
-### J7. Privacy Policy + Terms of Service — `[ ]`
+### J7. Privacy Policy + Terms of Service — `[~]`
 - Use Termly (https://termly.io) free generator → customize for: data we collect (email, name, session timestamps), how we use it (billing, reports), who we share with (no one), retention (7 years for tax-billing reasons), deletion request procedure.
 - Pages: `src/app/privacy/page.tsx`, `src/app/terms/page.tsx` — render generated HTML inside `<AppShell>` (no auth required).
 - Link from sign-in footer + every page footer.

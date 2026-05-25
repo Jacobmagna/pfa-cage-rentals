@@ -56,6 +56,15 @@ export async function AppShell({
       <div className="flex-1 mx-auto w-full max-w-7xl px-6 lg:px-8 py-10">
         {children}
       </div>
+
+      <footer className="mx-auto w-full max-w-7xl px-6 lg:px-8 pb-6 pt-4 border-t border-line/60 text-xs text-fg-subtle flex gap-4">
+        <Link href="/privacy" className="hover:text-fg-muted transition-colors">
+          Privacy
+        </Link>
+        <Link href="/terms" className="hover:text-fg-muted transition-colors">
+          Terms
+        </Link>
+      </footer>
     </>
   );
 }

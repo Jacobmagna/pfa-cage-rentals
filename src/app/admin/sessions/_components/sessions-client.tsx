@@ -47,10 +47,14 @@ export function SessionsClient({
   rows,
   coachOptions,
   resourceOptions,
+  truncated = false,
+  maxRows,
 }: {
   rows: SessionRow[];
   coachOptions: CoachOption[];
   resourceOptions: ResourceOption[];
+  truncated?: boolean;
+  maxRows?: number;
 }) {
   const [dialogState, setDialogState] = useState<
     { mode: "closed" } | { mode: "create" } | { mode: "edit"; row: SessionRow }
@@ -100,6 +104,11 @@ export function SessionsClient({
       <div className="mb-4 flex items-center justify-between">
         <p className="text-xs uppercase tracking-[0.14em] text-fg-subtle">
           {rows.length} {rows.length === 1 ? "session" : "sessions"}
+          {truncated && maxRows ? (
+            <span className="ml-2 normal-case tracking-normal text-fg-subtle">
+              · showing first {maxRows}, narrow filters to see more
+            </span>
+          ) : null}
         </p>
         <button
           type="button"
@@ -114,8 +123,8 @@ export function SessionsClient({
       {rows.length === 0 ? (
         <div className="rounded-lg border border-line/60 bg-surface/40 p-12 text-center">
           <p className="text-sm text-fg-muted">
-            No sessions yet. Click <span className="text-fg">New session</span>{" "}
-            to log the first one.
+            No sessions match these filters. Try widening the date range or
+            clearing some filters.
           </p>
         </div>
       ) : (

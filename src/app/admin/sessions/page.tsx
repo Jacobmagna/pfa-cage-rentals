@@ -1,21 +1,64 @@
-import { desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { resources, sessionsBilling, users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
+import { parsePfaInput, pfaDayEnd, pfaParts } from "@/lib/timezone";
+import { FiltersForm } from "./_components/filters-form";
 import { SessionsClient } from "./_components/sessions-client";
 
-// Admin sessions page. Pulls the latest 50 bookings + all
-// coaches + all active resources, hands them to a single client
-// component (SessionsClient) that owns the table + create/edit
-// dialog state. Splitting into more granular client components
-// would mean prop drilling the coaches/resources lists; for v1 the
-// page is small enough that one client island is the cleanest
-// trade.
+// Admin sessions page. Filterable row-level view of bookings —
+// complements the day-grid (`/admin/schedule`) and the per-coach
+// rollup (`/admin/reports`). All filter state lives in the URL,
+// so the page is shareable and the browser back button works.
+//
+// Default window is the last 14 days, which empirically keeps the
+// list short enough to scan without pagination. To go further back
+// the admin extends the date range.
+//
+// Coach + resource filter dropdowns only list active coaches /
+// active resources, but the table itself joins unfiltered — so
+// existing sessions by a since-deleted coach or for a since-
+// deactivated resource still appear and can still be edited /
+// deleted in the dialog.
 
-export default async function AdminSessionsPage() {
+const DEFAULT_LOOKBACK_DAYS = 14;
+const MAX_ROWS = 500;
+
+const VALID_USE_TYPES = new Set(["hitting", "pitching"] as const);
+
+type RawSearchParams = Promise<{
+  from?: string | string[];
+  to?: string | string[];
+  coachIds?: string | string[];
+  resourceIds?: string | string[];
+  useTypes?: string | string[];
+}>;
+
+export default async function AdminSessionsPage({
+  searchParams,
+}: {
+  searchParams: RawSearchParams;
+}) {
   await requireRole("admin");
+  const params = await searchParams;
 
-  const [rows, coachOptions, resourceOptions] = await Promise.all([
+  const filters = normalizeFilters(params);
+
+  const whereClauses = [
+    gte(sessionsBilling.startAt, filters.fromInstant),
+    lt(sessionsBilling.startAt, filters.toInstantExclusive),
+  ];
+  if (filters.coachIds.length > 0) {
+    whereClauses.push(inArray(sessionsBilling.coachId, filters.coachIds));
+  }
+  if (filters.resourceIds.length > 0) {
+    whereClauses.push(inArray(sessionsBilling.resourceId, filters.resourceIds));
+  }
+  if (filters.useTypes.length > 0) {
+    whereClauses.push(inArray(sessionsBilling.useType, filters.useTypes));
+  }
+
+  const [rows, coachOptions, resourceOptions, allCoaches] = await Promise.all([
     db
       .select({
         id: sessionsBilling.id,
@@ -33,21 +76,15 @@ export default async function AdminSessionsPage() {
       .from(sessionsBilling)
       .innerJoin(users, eq(sessionsBilling.coachId, users.id))
       .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
+      .where(and(...whereClauses))
       .orderBy(desc(sessionsBilling.startAt))
-      .limit(50),
-    // The session-list table joins users unfiltered above, so an
-    // already-recorded session by a deleted coach still shows under
-    // "Former coach". This dropdown is for the create/edit dialog —
-    // only active coaches can have new sessions assigned to them.
+      .limit(MAX_ROWS + 1),
+    // Dialog dropdown — only active coaches can have new sessions assigned.
     db
-      .select({
-        id: users.id,
-        name: users.name,
-        email: users.email,
-      })
+      .select({ id: users.id, name: users.name, email: users.email })
       .from(users)
       .where(isNull(users.deletedAt))
-      .orderBy(users.name),
+      .orderBy(asc(users.name)),
     db
       .select({
         id: resources.id,
@@ -57,28 +94,142 @@ export default async function AdminSessionsPage() {
       })
       .from(resources)
       .where(eq(resources.active, true))
-      .orderBy(resources.sortOrder),
+      .orderBy(asc(resources.sortOrder)),
+    // Filter dropdown — coaches role only, active only. (Dialog dropdown
+    // above allows admin too, since admins can also be booked.)
+    db
+      .select({ id: users.id, name: users.name, email: users.email })
+      .from(users)
+      .where(and(eq(users.role, "coach"), isNull(users.deletedAt)))
+      .orderBy(asc(users.name), asc(users.email)),
   ]);
+
+  const truncated = rows.length > MAX_ROWS;
+  const visibleRows = truncated ? rows.slice(0, MAX_ROWS) : rows;
 
   return (
     <>
-      <div className="mb-8 flex items-end justify-between gap-4">
-        <div className="space-y-2">
-          <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
-            Admin
-          </p>
-          <h1 className="text-3xl font-bold tracking-tight">Sessions</h1>
-          <p className="text-sm text-fg-muted">
-            Latest 50 bookings across every cage, bullpen, and weight room.
-          </p>
-        </div>
+      <div className="mb-8 space-y-2">
+        <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
+          Admin
+        </p>
+        <h1 className="text-3xl font-bold tracking-tight">Sessions</h1>
+        <p className="text-sm text-fg-muted">
+          Filter and edit individual bookings. Defaults to the last{" "}
+          {DEFAULT_LOOKBACK_DAYS} days.
+        </p>
       </div>
 
+      <FiltersForm
+        coaches={allCoaches}
+        resources={resourceOptions}
+        values={{
+          from: filters.from,
+          to: filters.to,
+          coachIds: filters.coachIds,
+          resourceIds: filters.resourceIds,
+          useTypes: filters.useTypes,
+        }}
+        isFiltered={filters.isFiltered}
+      />
+
       <SessionsClient
-        rows={rows}
+        rows={visibleRows}
         coachOptions={coachOptions}
         resourceOptions={resourceOptions}
+        truncated={truncated}
+        maxRows={MAX_ROWS}
       />
     </>
   );
+}
+
+type NormalizedFilters = {
+  from: string;
+  to: string;
+  fromInstant: Date;
+  toInstantExclusive: Date;
+  coachIds: string[];
+  resourceIds: string[];
+  useTypes: ("hitting" | "pitching")[];
+  /** True if any filter differs from the default (last 14 days, all coaches/resources/uses). */
+  isFiltered: boolean;
+};
+
+function normalizeFilters(input: {
+  from?: string | string[];
+  to?: string | string[];
+  coachIds?: string | string[];
+  resourceIds?: string | string[];
+  useTypes?: string | string[];
+}): NormalizedFilters {
+  const fromInput = pickFirst(input.from);
+  const toInput = pickFirst(input.to);
+
+  // Defaults in PFA TZ: today and (LOOKBACK - 1) days ago, so the
+  // inclusive window covers exactly DEFAULT_LOOKBACK_DAYS calendar
+  // days. Calendar arithmetic on detached YMD numbers — the JS Date
+  // here is just a counter, never compared as an instant, so the
+  // server's UTC clock doesn't matter.
+  const todayParts = pfaParts(new Date());
+  const todayInput = `${todayParts.year}-${pad2(todayParts.month)}-${pad2(todayParts.day)}`;
+  const lookbackInput = (() => {
+    const counter = new Date(
+      todayParts.year,
+      todayParts.month - 1,
+      todayParts.day,
+    );
+    counter.setDate(counter.getDate() - (DEFAULT_LOOKBACK_DAYS - 1));
+    return `${counter.getFullYear()}-${pad2(counter.getMonth() + 1)}-${pad2(counter.getDate())}`;
+  })();
+
+  const from = isDateInput(fromInput) ? fromInput : lookbackInput;
+  const to = isDateInput(toInput) ? toInput : todayInput;
+
+  const coachIds = toArray(input.coachIds).filter(Boolean);
+  const resourceIds = toArray(input.resourceIds).filter(Boolean);
+  const useTypes = toArray(input.useTypes).filter(
+    (t): t is "hitting" | "pitching" =>
+      VALID_USE_TYPES.has(t as "hitting" | "pitching"),
+  );
+
+  const fromInstant = parsePfaInput(from, "00:00");
+  // `to` is inclusive — convert to exclusive upper bound at next PFA midnight.
+  const toInstantExclusive = pfaDayEnd(parsePfaInput(to, "00:00"));
+
+  const isFiltered =
+    from !== lookbackInput ||
+    to !== todayInput ||
+    coachIds.length > 0 ||
+    resourceIds.length > 0 ||
+    useTypes.length > 0;
+
+  return {
+    from,
+    to,
+    fromInstant,
+    toInstantExclusive,
+    coachIds,
+    resourceIds,
+    useTypes,
+    isFiltered,
+  };
+}
+
+function pickFirst(v: string | string[] | undefined): string | undefined {
+  if (v === undefined) return undefined;
+  return Array.isArray(v) ? v[0] : v;
+}
+
+function toArray(v: string | string[] | undefined): string[] {
+  if (v === undefined) return [];
+  return Array.isArray(v) ? v : [v];
+}
+
+function isDateInput(v: string | undefined): v is string {
+  return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+}
+
+function pad2(n: number): string {
+  return n.toString().padStart(2, "0");
 }

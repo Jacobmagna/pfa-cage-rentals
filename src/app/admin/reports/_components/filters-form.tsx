@@ -1,14 +1,16 @@
 // Filter form for /admin/reports. Native HTML form with method=GET,
-// no client-side state — submitting just updates the URL and the
-// server re-renders. Shareable, browser-back works, no JS required.
+// so the URL is the source of truth — refresh / deep-link / browser
+// back all just work, no client-side state needed for submission.
 //
-// Checkbox semantics for "no filter" (e.g. all coaches): when the
-// URL has no `coachIds` param, we render all checkboxes checked.
-// If the user submits with all unchecked, the URL omits `coachIds`
-// entirely → same state as "no filter" → all coaches show. We
-// surface that with helper copy.
+// Coaches use the shared MultiSelect popover (scales past a couple
+// dozen coaches without the page growing a wall of checkboxes).
+// Resource types stay as inline checkbox chips because there are
+// only three. "No selection" semantics: an empty MultiSelect or
+// fully-checked resource-type set both serialize to "no filter" →
+// the URL omits the param → the page treats it as "all".
 
 import { Search } from "lucide-react";
+import { MultiSelect } from "@/app/_components/multi-select";
 
 type FilterValues = {
   from: string;
@@ -37,11 +39,13 @@ export function FiltersForm({
   coaches: CoachOption[];
   values: FilterValues;
 }) {
-  const coachFilterActive = values.coachIds.length > 0;
-  const isCoachChecked = (id: string) =>
-    !coachFilterActive || values.coachIds.includes(id);
   const isTypeChecked = (t: (typeof ALL_RESOURCE_TYPES)[number]) =>
     values.resourceTypes.length === 0 || values.resourceTypes.includes(t);
+
+  const coachOptions = coaches.map((c) => ({
+    value: c.id,
+    label: c.name ?? c.email,
+  }));
 
   return (
     <form
@@ -49,7 +53,7 @@ export function FiltersForm({
       action="/admin/reports"
       className="rounded-lg border border-line bg-surface p-5 mb-6"
     >
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_2fr_auto] lg:items-end">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
         <Field label="From">
           <input
             type="date"
@@ -67,11 +71,28 @@ export function FiltersForm({
           />
         </Field>
 
+        <Field label="Coaches">
+          {coaches.length === 0 ? (
+            <p className="h-10 inline-flex items-center text-xs text-fg-subtle">
+              No coaches yet.
+            </p>
+          ) : (
+            <MultiSelect
+              name="coachIds"
+              options={coachOptions}
+              defaultSelected={values.coachIds}
+              placeholder="All coaches"
+              searchPlaceholder="Search coaches…"
+              aria-label="Filter by coach"
+            />
+          )}
+        </Field>
+
         <Field
           label="Resource types"
           hint="Leave all unchecked for everything."
         >
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-3 h-10 items-center">
             {ALL_RESOURCE_TYPES.map((t) => (
               <CheckboxChip
                 key={t}
@@ -83,7 +104,9 @@ export function FiltersForm({
             ))}
           </div>
         </Field>
+      </div>
 
+      <div className="mt-4">
         <button
           type="submit"
           className="inline-flex items-center justify-center gap-1.5 rounded-md bg-gold px-5 h-10 text-sm font-medium text-gold-ink hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
@@ -92,34 +115,6 @@ export function FiltersForm({
           Apply filters
         </button>
       </div>
-
-      <Field
-        label="Coaches"
-        hint={
-          coachFilterActive
-            ? "Only checked coaches are included."
-            : "All coaches included. Check specific ones to filter."
-        }
-        className="mt-5"
-      >
-        <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
-          {coaches.length === 0 ? (
-            <p className="text-xs text-fg-subtle">
-              No coaches in the system yet.
-            </p>
-          ) : (
-            coaches.map((c) => (
-              <CheckboxChip
-                key={c.id}
-                name="coachIds"
-                value={c.id}
-                label={c.name ?? c.email}
-                defaultChecked={isCoachChecked(c.id)}
-              />
-            ))
-          )}
-        </div>
-      </Field>
     </form>
   );
 }

@@ -516,12 +516,12 @@ is a second Resend account for PFA, free tier covers the volume.
 - Est: 30 min.
 - Priority: P1 — visual identity for launch.
 
-### J4e. UI polish pass (parked task) — `[ ]`
-- **Scope:** the "Premium UI polish pass" task Jacob has parked as a separate session chip. Kill the AI-stale aesthetic across the entire app — typography rhythm, spacing, micro-interactions, hover states, empty-state copy, card density. NOT a redesign — the design spec (dark + warm gold, Vercel/Linear vibe) stays. This is the level-up from "functional + tokens applied" to "feels intentional".
-- **Suggested sequencing:** sign-in (after J4d) → /admin landing → /admin/sessions table → /admin/reports tables → /admin/schedule grid (denser type, tighter borders, better hover affordances) → /coach pages.
-- **Don't bundle with feature work** — let it run as its own spinoff session (Jacob clicks the chip when he's ready) so the diff is reviewable in isolation.
-- Est: 6–10 h depending on depth.
-- Priority: P1 — pre-launch finish.
+### J4e. UI polish pass — `[x]`
+Shipped across four batches in a single session (2026-05-25):
+- **Batch 1 — landings + sign-in:** anchored sign-in with brand mark, tagline, ambient gold glow; admin landing now a real dashboard with live stats hero (sessions today, owed this month, blocks today) + sectioned nav cards carrying embedded stats (e.g. Coaches → "12 active"); coach landing mirror with scoped data.
+- **Batch 2 — tables:** removed heavy `bg-surface-2` header bands across coaches/sessions/reports/audit; quieter `border-line/50` row dividers; subtler hover (`bg-surface/60`); active-only sort arrows that fade in on hover.
+- **Batch 3 — schedule + coach detail:** resource-row labels in the schedule grid now show a type-colored stripe (cage gold, bullpen green, weight room amber) so the eye correlates row → resource type → session accent at a glance; killed the dev-y "Phase 7 · H3" kicker on the rate-overrides card.
+- **Batch 4 — sweep:** unified empty-state pattern (`border-line/60 bg-surface/40`, no trailing period, consistent copy register).
 
 ### J4c. Drag-self-overlap snap-back UX — `[x]`
 - **Fix:** `src/app/admin/schedule/_components/schedule-grid.tsx` — added `if (s.id === draggingSessionId) continue;` to the loop that builds `occupiedSlots`. With this skip, the cells under the actively-dragged session are no longer marked occupied, so dropping at a half-slot inside the source footprint works.

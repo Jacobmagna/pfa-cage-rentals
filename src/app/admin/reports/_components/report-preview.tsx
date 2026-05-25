@@ -19,8 +19,8 @@ export function ReportPreview({
 }) {
   if (detail.length === 0) {
     return (
-      <div className="rounded-lg border border-line bg-surface p-10 text-center">
-        <p className="text-sm font-medium text-fg">No sessions match.</p>
+      <div className="rounded-lg border border-line/60 bg-surface/40 p-10 text-center">
+        <p className="text-sm font-medium text-fg">No sessions match</p>
         <p className="mt-1.5 text-sm text-fg-muted max-w-md mx-auto">
           Try widening the date range or unchecking some filters. Coaches
           with zero sessions in the range are not listed.

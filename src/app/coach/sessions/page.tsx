@@ -170,8 +170,8 @@ function PageHeader() {
 
 function EmptyState() {
   return (
-    <div className="rounded-lg border border-line bg-surface p-10 text-center">
-      <div className="inline-flex items-center justify-center h-10 w-10 rounded-full bg-surface-2 text-gold mb-4">
+    <div className="rounded-lg border border-line/60 bg-surface/40 p-10 text-center">
+      <div className="inline-flex items-center justify-center h-10 w-10 rounded-full bg-surface text-gold mb-4">
         <CalendarPlus className="h-5 w-5" />
       </div>
       <h2 className="text-base font-semibold text-fg">No sessions yet</h2>
@@ -181,7 +181,7 @@ function EmptyState() {
       </p>
       <Link
         href="/coach/sessions/new"
-        className="mt-5 inline-flex items-center justify-center rounded-md border border-gold/40 bg-gold/10 text-gold hover:bg-gold/20 px-4 h-10 text-sm font-medium transition-colors"
+        className="mt-5 inline-flex items-center justify-center rounded-md border border-gold/40 bg-gold/10 text-gold hover:bg-gold/20 px-4 h-10 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
       >
         Log your first session
       </Link>

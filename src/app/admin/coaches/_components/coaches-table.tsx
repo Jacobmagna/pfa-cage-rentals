@@ -63,10 +63,11 @@ export function CoachesTable({ rows }: { rows: CoachRow[] }) {
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-line bg-surface p-12 text-center">
-        <p className="text-sm font-medium text-fg">No coaches yet.</p>
+      <div className="rounded-lg border border-line/60 bg-surface/40 p-12 text-center">
+        <p className="text-sm font-medium text-fg">No coaches yet</p>
         <p className="mt-1.5 text-sm text-fg-muted">
-          Coaches show up here automatically the first time they sign in.
+          The first time a coach signs in, they&apos;ll appear here
+          automatically.
         </p>
       </div>
     );

@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { asc, isNull } from "drizzle-orm";
+import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
@@ -19,6 +21,14 @@ export default async function AdminImportPage() {
 
   return (
     <>
+      <Link
+        href="/admin"
+        className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" />
+        Back
+      </Link>
+
       <div className="space-y-2 mb-8">
         <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
           Stage I — Historical import

@@ -65,6 +65,51 @@ db:migrate && npm run db:seed`.
 
 ---
 
+## Restore from nightly backup (Cloudflare R2)
+
+The PITR window above only covers the last 24 hours on Neon's free
+tier. Beyond that, the canonical recovery path is the nightly
+`pg_dump` written to Cloudflare R2 by `.github/workflows/backup.yml`.
+The bucket has a 30-day lifecycle rule so each file is around for
+roughly a month.
+
+To restore:
+
+1. Pick the dump you need. From R2's dashboard or via rclone:
+   ```bash
+   rclone ls r2:pfa-cage-rentals-backups/nightly/ | sort
+   ```
+2. Download it locally:
+   ```bash
+   rclone copy r2:pfa-cage-rentals-backups/nightly/pfa-cage-rentals-2026-05-25T06-00-00Z.sql.gz .
+   gunzip pfa-cage-rentals-2026-05-25T06-00-00Z.sql.gz
+   ```
+3. Create a fresh Neon branch (Neon console → Branches → New) so the
+   restore goes to a side-channel before you cut over. Copy its
+   connection string.
+4. Replay the dump:
+   ```bash
+   psql "<recovery branch connection string>" < pfa-cage-rentals-2026-05-25T06-00-00Z.sql
+   ```
+5. Smoke the recovery branch by setting it as `DATABASE_URL` locally
+   and running `npm run dev`. When confident, swap Vercel's
+   `DATABASE_URL` to the recovery branch and redeploy.
+
+The dumps include the schema + data + extension definitions
+(`btree_gist`). You don't need to run migrations against the restore
+target first.
+
+### Provisioning the backup pipeline
+
+If the workflow has never been wired up (or you're moving R2 accounts):
+
+1. Cloudflare dashboard → R2 → Create bucket `pfa-cage-rentals-backups`. Set the bucket's **Object Lifecycle Rule** to delete objects older than 30 days.
+2. R2 → Manage R2 API Tokens → create a token with read+write to that bucket only. Copy the access key id + secret + account id.
+3. GitHub repo → Settings → Secrets and variables → Actions → New repository secret. Add: `DATABASE_URL_PROD` (Neon prod pooler URL), `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` (just `pfa-cage-rentals-backups`).
+4. Manually run the workflow once: GitHub → Actions → "Nightly backup" → Run workflow. Verify the dump appears under `nightly/` in R2.
+
+---
+
 ## Rotate a leaked secret
 
 Always rotate the **provider side first**, then update Vercel and

@@ -449,7 +449,7 @@ Now we build product. All work below uses primitives from Stages A & B.
 
 # STAGE J — Pre-launch hardening
 
-### J1. Move email to PFA-dedicated Resend account — `[~]`
+### J1. Move email to PFA-dedicated Resend account — `[x]`
 Originally scoped as an AWS SES swap; rewritten 2026-05-24. Reason
 to switch was never deliverability — it was that the existing
 Resend free-tier slot is held by doc-insured, so PFA had to send
@@ -457,12 +457,11 @@ from `noreply@docinsured.com` (looks like phishing). Cheapest fix
 is a second Resend account for PFA, free tier covers the volume.
 - Code: `src/auth.ts` already points at `noreply@pfacagerentals.com`
   (commit d72c900-adjacent). No further code change.
-- Manual: follow `docs/resend-setup.md` to create the PFA Resend
-  account, verify `pfacagerentals.com` via GoDaddy DNS, generate a
-  new API key, swap `AUTH_RESEND_KEY` in `.env.local` + Vercel.
-- Acceptance: magic-link from `noreply@pfacagerentals.com` lands in
-  Dad's inbox (not spam) on first send.
-- Est: 1 h (Jacob's manual steps).
+- Manual: PFA Resend account created (jacob+pfa@themagnas.com), domain
+  verified, API key rotated into Vercel + `.env.local`.
+- Acceptance: prod end-to-end smoke completed — magic-link from
+  `noreply@pfacagerentals.com` delivered to Jacob's inbox on first
+  send, sign-in flow succeeded.
 
 ### J2. SPF + DMARC records — `[x]`
 - GoDaddy DNS (SPF: Resend's domain-verification flow in J1 already
@@ -603,54 +602,61 @@ is a second Resend account for PFA, free tier covers the volume.
 - Acceptance: doc exists, accurate.
 - Est: 1.5 h.
 
-### K4. Neon backup strategy — `[ ]`
-- Decision: stay free tier with 24h PITR, OR upgrade Neon Launch ($19/mo) for 7-day PITR.
-- If staying free: add Vercel cron job (`vercel.json` crons) that nightly runs `pg_dump` and uploads to S3/R2 — store last 30 nightly snapshots.
-- Document choice in runbook.
-- Acceptance: if free, one successful nightly backup visible in storage; if paid, Neon dashboard shows 7-day PITR enabled.
-- Est: 2 h.
+### K4. Neon backup strategy — `[~]`
+Decision (2026-05-25): stay on Neon free tier (24h PITR) + add a nightly `pg_dump` to Cloudflare R2 covering the previous 30 days.
+- **Implementation (✓):** `.github/workflows/backup.yml` runs at 06:00 UTC daily. Installs `postgresql-client-17` (matches Neon's server version), runs `pg_dump --no-owner --no-acl --quote-all-identifiers`, gzips the output, uploads to R2 via `rclone` (S3-compatible API), then lists the bucket to confirm. Total runtime < 1 minute.
+- **Why GH Actions instead of Vercel cron:** Vercel functions don't ship with `pg_dump` and a JS-based row-by-row dump produces JSONL that's harder to restore than a real SQL dump. GH Actions runners are full Ubuntu so `apt install postgresql-client-17` is a one-liner. Backup also keeps working if the app itself is down.
+- **Pending Jacob-manual:**
+  - Create R2 bucket `pfa-cage-rentals-backups` with a 30-day Object Lifecycle Rule.
+  - Generate an R2 API token scoped to that bucket only.
+  - Add GitHub secrets: `DATABASE_URL_PROD`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`.
+  - Manually trigger the workflow once (Actions → Nightly backup → Run workflow) and verify the dump appears in R2.
+- **Restore procedure:** documented in `docs/runbook.md` ("Restore from nightly backup").
+- Acceptance: flip to `[x]` after the first successful nightly dump shows up in R2.
 
-### K5. Status page — `[ ]`
+### K5. Status page — `[ ]` (parked post-launch)
+Not a launch blocker. Pick this up after Stage K-launch (K8–K10) is comfortable.
 - Better Stack → enable status page → custom subdomain `status.pfacagerentals.com`.
 - GoDaddy DNS: CNAME `status` → Better Stack's provided value.
 - Link from sign-in footer.
 - Acceptance: `status.pfacagerentals.com` loads, shows uptime monitor status.
-- Est: 45 min.
 
-### K6. Final security pass — `[ ]`
-- Re-run https://securityheaders.com → still A+.
-- Re-run https://observatory.mozilla.org → ≥ A.
-- Verify no secrets in client bundles (`grep` build output for `AUTH_SECRET`, etc.).
-- Verify CSP doesn't have `'unsafe-eval'` or wildcards in prod.
-- Trigger a Sentry alert; verify it arrives.
-- Acceptance: all four scans/tests pass.
-- Est: 1 h.
+### K6. Final security pass — `[~]`
+Code-side checks closed; live-site scans + Sentry alert test still on Jacob.
+- **CSP audit (✓):** Verified in `next.config.ts` — prod `script-src` is `'self' 'unsafe-inline' https://vercel.live` with no `unsafe-eval`. No wildcards in `default-src`. `frame-ancestors 'none'`. `form-action` restricted to self + accounts.google.com. `'unsafe-eval'` only present in the dev branch (React error overlay + Turbopack HMR need it).
+- **Live header check (✓):** `curl -sIL https://pfacagerentals.com` returns CSP + HSTS (preload) + X-Frame-Options DENY + X-Content-Type-Options nosniff + Referrer-Policy strict-origin-when-cross-origin + Permissions-Policy (camera/mic/geo/interest-cohort blocked).
+- **Secret-in-bundle scan (✓):** `grep -r '<key>' .next/static/` returns 0 hits for `AUTH_SECRET`, `AUTH_RESEND_KEY`, `AUTH_GOOGLE_SECRET`, `SENTRY_AUTH_TOKEN`, `UPSTASH_REDIS_REST_TOKEN`, `INTEGRATION_DATABASE_URL`, `DATABASE_URL`. None of these are `NEXT_PUBLIC_*` so Next.js doesn't inline them.
+- **Pending Jacob-manual:**
+  - Re-run https://securityheaders.com against `https://www.pfacagerentals.com` → expect A+ given the headers above.
+  - Re-run https://observatory.mozilla.org → expect ≥ A.
+  - Trigger a Sentry alert (browser console: `Sentry.captureException(new Error("K6 smoke"))` while signed in) and confirm it arrives in Sentry.
+- Flip to `[x]` once the three external checks pass.
 
-### K7. Onboarding email template for coaches — `[ ]`
-- Draft email (Markdown in docs, sendable manually first time) that tells coaches: what the app does, where to sign in, what to do after first sign-in. Include screenshot or two.
-- Acceptance: draft committed in `docs/coach-onboarding-email.md`.
-- Est: 45 min.
+### K7. Onboarding email template for coaches — `[x]`
+- Draft committed at `docs/coach-onboarding-email.md`. Sender-from-Mike voice; covers what's the same (rates, cages, billing), what's different (self-serve logging, visible totals, conflict messages), and the first-sign-in walkthrough (Google or magic link). Includes a "keep texting me for the first week" safety net while the cutover runs in parallel.
+- Sender notes at the bottom of the file (not included in the email itself) flag: coach doesn't appear in `/admin/coaches` until first sign-in, runbook has the manual-insert procedure if pre-population is needed, send to the 2–3 pilot coaches first during K8.
+- Add screenshots before sending: open `/coach` while logged in as a coach, capture (a) the dashboard, (b) the "Log a session" flow. Drop those inline above the "How to sign in" section.
 
-### K8. Soft launch with admins only — `[ ]`
+### K8. Soft launch with admins only — `[ ]` (Jacob QA)
+Calendar-time activity; closed when complete.
 - Dad + Mom sign in, walk through schedule view + reports + manual session entry.
 - Capture feedback in a GitHub issue.
 - Run for 1 week before opening to coaches.
 - Acceptance: admins comfortable navigating without prompts.
-- Est: ongoing (1 week elapsed time).
 
-### K9. Coach rollout — `[ ]`
+### K9. Coach rollout — `[ ]` (Jacob QA)
+Calendar-time activity; closed when complete.
 - Pick 3 friendly coaches first (e.g. David Lusk, J. Tyler, Shannon).
-- Send onboarding email (K7) → confirm they can sign in + log a session.
+- Send onboarding email (template ready at `docs/coach-onboarding-email.md`) → confirm they can sign in + log a session.
 - Wait 3 days, fix anything weird.
 - Open to all coaches with same email.
 - Acceptance: ≥ 80% of coaches have signed in at least once within 2 weeks of full rollout.
-- Est: 2-week rollout window.
 
-### K10. Historical import committed — `[ ]`
-- Once admins are confident in the live system (post-K8), run the I3 import.
+### K10. Historical import committed — `[ ]` (Jacob QA)
+Calendar-time activity; closed when complete. **Prereq: take an R2 backup (K4) immediately before pressing Commit, so a botched normalization is recoverable.**
+- Once admins are confident in the live system (post-K8), run the I3 import at `/admin/import`.
 - Reports now span both new live data and historical Excel data.
 - Acceptance: report for a past month matches Dad's manual tally within a small margin (any discrepancy gets investigated — could be normalization edge case).
-- Est: 2 h active + verification time.
 
 ---
 

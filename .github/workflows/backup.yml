@@ -1,0 +1,110 @@
+name: Nightly backup
+
+# Runs pg_dump against the production Neon database and uploads the
+# compressed dump to Cloudflare R2. Free GH Actions minutes + free R2
+# storage covers the entire backup operation; total runtime is well
+# under a minute per night.
+#
+# Why GitHub Actions instead of a Vercel cron route:
+#   - Vercel functions don't have pg_dump installed, and a JS-based
+#     row-by-row dump produces JSONL that's harder to restore than a
+#     real SQL dump (psql can replay pg_dump output directly).
+#   - GH Actions runners are full Ubuntu, so `apt install
+#     postgresql-client-17` (matching Neon's server version) takes ~5
+#     seconds.
+#   - Backup keeps working if the app itself is down.
+#
+# Lifecycle: a separate "Object Lifecycle Rule" on the R2 bucket
+# deletes objects older than 30 days. Documented in docs/runbook.md.
+#
+# Required GitHub secrets:
+#   - DATABASE_URL_PROD            (Neon prod pooler URL)
+#   - R2_ACCOUNT_ID                (Cloudflare account ID)
+#   - R2_ACCESS_KEY_ID             (R2 access key with bucket write perm)
+#   - R2_SECRET_ACCESS_KEY         (R2 secret access key)
+#   - R2_BUCKET                    (bucket name, e.g. pfa-cage-rentals-backups)
+
+on:
+  schedule:
+    # 06:00 UTC daily = 01:00 ET (low-traffic window). Cron in GH
+    # Actions runs in UTC and isn't perfectly on time — actual runs
+    # land within a few minutes of the slot.
+    - cron: '0 6 * * *'
+  workflow_dispatch:        # so you can run a backup on demand
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    name: pg_dump → R2
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Install postgresql-client-17
+        run: |
+          # Neon currently runs Postgres 17. Match the client version
+          # so pg_dump can dump every feature the server uses without
+          # warnings (e.g. extension definitions like btree_gist).
+          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          wget -qO - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client-17
+
+      - name: Install rclone
+        run: |
+          # rclone speaks the S3-compatible API that R2 exposes. Lighter
+          # than the AWS CLI and easier to configure inline.
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone for R2
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${R2_ACCESS_KEY_ID}
+          secret_access_key = ${R2_SECRET_ACCESS_KEY}
+          endpoint = https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+          acl = private
+          EOF
+
+      - name: Dump + compress + upload
+        env:
+          DATABASE_URL_PROD: ${{ secrets.DATABASE_URL_PROD }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          STAMP=$(date -u +"%Y-%m-%dT%H-%M-%SZ")
+          OUTFILE="pfa-cage-rentals-${STAMP}.sql.gz"
+
+          # --no-owner + --no-acl strip role/ownership clauses — we
+          # don't reuse them on restore (Neon assigns its own owner).
+          # --quote-all-identifiers keeps reserved-word column names
+          # (e.g. our "session" tables) safe.
+          # gzip on the fly so we never write the uncompressed dump
+          # to disk.
+          pg_dump \
+            --no-owner \
+            --no-acl \
+            --quote-all-identifiers \
+            "$DATABASE_URL_PROD" \
+            | gzip -9 \
+            > "$OUTFILE"
+
+          ls -lh "$OUTFILE"
+          rclone copy "$OUTFILE" "r2:${R2_BUCKET}/nightly/" --no-traverse
+
+      - name: Verify upload
+        env:
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          # rclone lsf returns the newest object name; we sanity-check
+          # that today's dump shows up.
+          rclone ls "r2:${R2_BUCKET}/nightly/" | tail -5

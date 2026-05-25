@@ -23,7 +23,7 @@ export default function PrivacyPage() {
             facility. The site lives at{" "}
             <code className="text-fg">pfacagerentals.com</code>. Contact for
             privacy questions:{" "}
-            <a className="text-gold hover:text-gold-hover" href="mailto:mdm@pfasports.com">
+            <a className="text-gold underline underline-offset-2 hover:text-gold-hover" href="mailto:mdm@pfasports.com">
               mdm@pfasports.com
             </a>
             .
@@ -142,7 +142,7 @@ export default function PrivacyPage() {
             </li>
             <li>
               <strong>Request deletion</strong> of your account. Email{" "}
-              <a className="text-gold hover:text-gold-hover" href="mailto:mdm@pfasports.com">
+              <a className="text-gold underline underline-offset-2 hover:text-gold-hover" href="mailto:mdm@pfasports.com">
                 mdm@pfasports.com
               </a>
               . We&apos;ll anonymize your account and remove your displayed

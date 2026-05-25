@@ -34,7 +34,7 @@ export async function PublicShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <div className="flex-1 mx-auto w-full max-w-3xl px-6 py-12">
+      <main className="flex-1 mx-auto w-full max-w-3xl px-6 py-12">
         {children}
         <div className="mt-12 border-t border-line pt-6 text-xs text-fg-subtle flex gap-6">
           <Link href="/privacy" className="hover:text-fg-muted transition-colors">
@@ -44,7 +44,7 @@ export async function PublicShell({ children }: { children: React.ReactNode }) {
             Terms of Service
           </Link>
         </div>
-      </div>
+      </main>
     </>
   );
 }

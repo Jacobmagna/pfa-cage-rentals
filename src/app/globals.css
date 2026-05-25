@@ -21,7 +21,11 @@
 
   --color-fg: #fafafa;
   --color-fg-muted: #a3a3a3;
-  --color-fg-subtle: #737373;
+  /* fg-subtle bumped from #737373 to #8a8a8a (J6) so WCAG AA 4.5:1
+   * holds on both bg-page and bg-surface — old value scored 3.78/4.17
+   * on Lighthouse, this scores ~5.32/5.75. fg-disabled stays dim
+   * because WCAG exempts disabled controls. */
+  --color-fg-subtle: #8a8a8a;
   --color-fg-disabled: #525252;
 
   --color-gold: #e9b13c;

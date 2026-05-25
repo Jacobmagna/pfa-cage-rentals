@@ -62,7 +62,7 @@ export default function TermsPage() {
             tally. Actual invoicing and payment happens directly between you
             and PFA Sports outside this site. If you believe a session was
             logged incorrectly, contact{" "}
-            <a className="text-gold hover:text-gold-hover" href="mailto:mdm@pfasports.com">
+            <a className="text-gold underline underline-offset-2 hover:text-gold-hover" href="mailto:mdm@pfasports.com">
               mdm@pfasports.com
             </a>{" "}
             — every change to a session row is audit-logged and reviewable.
@@ -95,7 +95,7 @@ export default function TermsPage() {
             these terms, misuse the site, or are no longer authorized to use
             PFA facilities. You can request deletion of your account at any
             time per the procedure in our{" "}
-            <a className="text-gold hover:text-gold-hover" href="/privacy">
+            <a className="text-gold underline underline-offset-2 hover:text-gold-hover" href="/privacy">
               Privacy Policy
             </a>
             .
@@ -123,7 +123,7 @@ export default function TermsPage() {
         <Section title="Contact">
           <p>
             Questions about these terms?{" "}
-            <a className="text-gold hover:text-gold-hover" href="mailto:mdm@pfasports.com">
+            <a className="text-gold underline underline-offset-2 hover:text-gold-hover" href="mailto:mdm@pfasports.com">
               mdm@pfasports.com
             </a>
             .

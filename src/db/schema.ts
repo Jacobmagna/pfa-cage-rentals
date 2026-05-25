@@ -38,8 +38,32 @@ export const users = pgTable("users", {
   emailVerified: timestamp("email_verified", { mode: "date" }),
   image: text("image"),
   role: roleEnum("role").notNull().default("coach"),
+  // Payment handles. Coach-facing surfaces never expose these to other
+  // coaches; admin sees them on /admin/coaches/[id] and /admin/payments
+  // as reconciliation hints. NULL = not set. Stored without the @
+  // prefix (Venmo) — the UI prepends it on display.
+  venmoHandle: text("venmo_handle"),
+  zelleContact: text("zelle_contact"),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { mode: "date" }),
+});
+
+// Org-wide settings singleton. One row with id='default' (seeded in
+// the migration). Holds the handles coaches will deep-link to when
+// paying PFA — separate from any one admin's personal handles so Dad
+// can change the receiver without touching his user record. The
+// `pfaDisplayName` ("Pay PFA Sports") is what the coach UI shows on
+// the Pay button label.
+export const orgSettings = pgTable("org_settings", {
+  id: text("id").primaryKey(),
+  pfaVenmoHandle: text("pfa_venmo_handle"),
+  pfaZelleContact: text("pfa_zelle_contact"),
+  pfaDisplayName: text("pfa_display_name").notNull().default("PFA Sports"),
+  updatedAt: timestamp("updated_at", { mode: "date" })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+  updatedBy: text("updated_by").references(() => users.id),
 });
 
 export const accounts = pgTable(
@@ -219,6 +243,11 @@ export const sessionsBilling = pgTable(
     // affect billing math — the coach (or team-rental pseudo-coach)
     // still gets billed at their rate.
     isTeamRental: boolean("is_team_rental").notNull().default(false),
+    // PFA-referred flag: PFA arranged this client for the coach. Pure
+    // bookkeeping marker for Dad's offline records — payouts to the
+    // coach happen outside the app. Doesn't affect what the coach owes
+    // PFA. Filterable on /admin/sessions and exported in the report.
+    pfaReferred: boolean("pfa_referred").notNull().default(false),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),
@@ -279,6 +308,59 @@ export const blockedTimes = pgTable(
   ],
 );
 
+export const paymentMethod = pgEnum("payment_method", [
+  "venmo",
+  "zelle",
+  "check",
+  "cash",
+  "other",
+]);
+
+export const paymentStatus = pgEnum("payment_status", ["pending", "confirmed"]);
+
+// Ledger of payments from a coach to PFA. One direction only — Dad's
+// own payouts to coaches (the pfaReferred flag flow) happen outside
+// the app. Admin-recorded payments auto-confirm (recordedBy === confirmedBy);
+// coach-self-reported payments stay `pending` until an admin reviews.
+//
+// Only `confirmed` payments reduce a coach's outstanding balance on
+// /admin/payments — pending sits in an inbox section so Dad can
+// approve or reject without losing it. Soft-delete (deletedAt) so the
+// audit trail keeps a record of corrections.
+//
+// Indexes: (coach_id, paid_at desc) for the per-coach payment list
+// + balance query; (status, paid_at desc) for the pending-inbox feed.
+export const coachPayments = pgTable(
+  "coach_payments",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id),
+    amountCents: integer("amount_cents").notNull(),
+    method: paymentMethod("method").notNull(),
+    paidAt: timestamp("paid_at", { mode: "date" }).notNull(),
+    // Free-text: Venmo txn id, check number, etc. Optional — cash
+    // payments don't have one and that's fine.
+    reference: text("reference"),
+    note: text("note"),
+    status: paymentStatus("status").notNull().default("pending"),
+    recordedBy: text("recorded_by")
+      .notNull()
+      .references(() => users.id),
+    confirmedBy: text("confirmed_by").references(() => users.id),
+    confirmedAt: timestamp("confirmed_at", { mode: "date" }),
+    recordedAt: timestamp("recorded_at", { mode: "date" }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { mode: "date" }),
+  },
+  (table) => [
+    index("coach_payments_coach_paid_idx").on(table.coachId, table.paidAt),
+    index("coach_payments_status_paid_idx").on(table.status, table.paidAt),
+  ],
+);
+
 export const auditAction = pgEnum("audit_action", ["create", "update", "delete"]);
 
 // Append-only audit trail for every billing-relevant mutation. `diff`
@@ -310,6 +392,12 @@ export const auditLog = pgTable(
     index("audit_log_ts_idx").on(table.ts),
   ],
 );
+
+export type CoachPayment = typeof coachPayments.$inferSelect;
+export type NewCoachPayment = typeof coachPayments.$inferInsert;
+
+export type OrgSettings = typeof orgSettings.$inferSelect;
+export type NewOrgSettings = typeof orgSettings.$inferInsert;
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;

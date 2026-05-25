@@ -34,6 +34,7 @@ function makeReport(): ReportData {
         totalCents: 3600,
         note: "warm-up",
         isTeamRental: false,
+        pfaReferred: true,
       },
       {
         sessionId: "s2",
@@ -54,6 +55,7 @@ function makeReport(): ReportData {
         totalCents: 1000,
         note: null,
         isTeamRental: true,
+        pfaReferred: false,
       },
     ],
     summary: [
@@ -217,8 +219,8 @@ describe("buildReportWorkbook", () => {
 
     // Detail column layout (1-based):
     //   1 Date · 2 Day · 3 Start · 4 End · 5 Duration · 6 Resource
-    //   7 Use · 8 Coach · 9 Team Rental · 10 Slots · 11 Rate · 12 $
-    //   13 Rate Source · 14 Note
+    //   7 Use · 8 Coach · 9 Team Rental · 10 PFA-Referred · 11 Slots
+    //   12 Rate · 13 $ · 14 Rate Source · 15 Note
     it("writes the override flag + dollar amounts per session", async () => {
       const buf = await buildReportWorkbook(makeReport(), {
         from: "2026-05-01",
@@ -234,11 +236,12 @@ describe("buildReportWorkbook", () => {
       expect(row2.getCell(8).value).toBe("Alice Coach");
       const teamRentalVal2 = row2.getCell(9).value;
       expect(teamRentalVal2 === "" || teamRentalVal2 === null).toBe(true);
-      expect(row2.getCell(10).value).toBe(2);
-      expect(row2.getCell(11).value).toBe(18); // 1800 cents / 100
-      expect(row2.getCell(12).value).toBe(36);
-      expect(row2.getCell(13).value).toBe("Override");
-      expect(row2.getCell(14).value).toBe("warm-up");
+      expect(row2.getCell(10).value).toBe("Yes"); // pfa-referred
+      expect(row2.getCell(11).value).toBe(2);
+      expect(row2.getCell(12).value).toBe(18); // 1800 cents / 100
+      expect(row2.getCell(13).value).toBe(36);
+      expect(row2.getCell(14).value).toBe("Override");
+      expect(row2.getCell(15).value).toBe("warm-up");
 
       const row3 = sheet.getRow(3);
       expect(row3.getCell(6).value).toBe("Weight Room 1");
@@ -247,8 +250,10 @@ describe("buildReportWorkbook", () => {
       const useVal = row3.getCell(7).value;
       expect(useVal === "" || useVal === null).toBe(true);
       expect(row3.getCell(9).value).toBe("Yes"); // team rental
-      expect(row3.getCell(13).value).toBe("Default");
-      const noteVal = row3.getCell(14).value;
+      const pfaRefVal3 = row3.getCell(10).value;
+      expect(pfaRefVal3 === "" || pfaRefVal3 === null).toBe(true);
+      expect(row3.getCell(14).value).toBe("Default");
+      const noteVal = row3.getCell(15).value;
       expect(noteVal === "" || noteVal === null).toBe(true);
     });
   });

@@ -25,6 +25,7 @@ export type EditFormValues = {
   useType: string;
   note: string;
   isTeamRental: boolean;
+  pfaReferred: boolean;
 };
 
 export type EditActionResult =
@@ -44,6 +45,7 @@ function snapshot(formData: FormData): EditFormValues {
     useType: formData.get("useType")?.toString() ?? "",
     note: formData.get("note")?.toString() ?? "",
     isTeamRental: formData.get("isTeamRental") === "on",
+    pfaReferred: formData.get("pfaReferred") === "on",
   };
 }
 
@@ -67,6 +69,7 @@ function buildInput(formData: FormData) {
         : null,
     note: formData.get("note")?.toString().trim() || null,
     isTeamRental: formData.get("isTeamRental") === "on",
+    pfaReferred: formData.get("pfaReferred") === "on",
   };
 }
 

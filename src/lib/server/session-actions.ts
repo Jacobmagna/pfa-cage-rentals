@@ -193,6 +193,7 @@ export async function createSessionInternal(
         useType: parsed.useType ?? null,
         note: parsed.note,
         isTeamRental: parsed.isTeamRental ?? false,
+        pfaReferred: parsed.pfaReferred ?? false,
         createdBy: actor.id,
       })
       .returning();
@@ -273,6 +274,9 @@ export async function updateSessionInternal(
         ...(parsed.note !== undefined && { note: parsed.note }),
         ...(parsed.isTeamRental !== undefined && {
           isTeamRental: parsed.isTeamRental,
+        }),
+        ...(parsed.pfaReferred !== undefined && {
+          pfaReferred: parsed.pfaReferred,
         }),
       })
       .where(eq(sessionsBilling.id, id))
@@ -421,6 +425,7 @@ export async function createSessionsBatchInternal(
           useType: parsed.useType ?? null,
           note: s.note ?? null,
           isTeamRental: s.isTeamRental ?? false,
+          pfaReferred: s.pfaReferred ?? false,
           createdBy: actor.id,
         })),
       )

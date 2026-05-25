@@ -20,6 +20,7 @@ import {
   upsertRateOverrideInternal,
 } from "@/lib/server/rate-override-actions";
 import { deleteCoachInternal } from "@/lib/server/user-actions";
+import { updateUserHandlesInternal } from "@/lib/server/handles-actions";
 
 function revalidateOverrideSurfaces(coachId: string) {
   revalidatePath(`/admin/coaches/${coachId}`);
@@ -44,6 +45,19 @@ export async function deleteRateOverride(
   const session = await requireRole("admin");
   await deleteRateOverrideInternal(session.user, { coachId, resourceType });
   revalidateOverrideSurfaces(coachId);
+}
+
+// Update Venmo + Zelle handles for a coach. Revalidates the coach
+// detail page (so the chip on the handles card re-renders) and
+// /admin/payments (so the reconciliation hints there pick up the
+// change). No revalidate on /admin/coaches — that page doesn't show
+// handles.
+export async function updateCoachHandles(input: unknown) {
+  const session = await requireRole("admin");
+  const result = await updateUserHandlesInternal(session.user, input);
+  revalidatePath(`/admin/coaches/${result.id}`);
+  revalidatePath("/admin/payments");
+  return result;
 }
 
 // J9 account deletion. Soft-delete + anonymize. See

@@ -27,6 +27,9 @@ export const createSessionSchema = z.object({
   // Team-rental flag. Optional on create (defaults to false); on
   // update, omitted = keep existing, explicit value = overwrite.
   isTeamRental: z.boolean().optional(),
+  // PFA-referred flag. Same semantics as isTeamRental — Dad's
+  // bookkeeping marker, no billing impact.
+  pfaReferred: z.boolean().optional(),
 });
 
 export const updateSessionSchema = createSessionSchema.partial();
@@ -51,6 +54,7 @@ export const createSessionBatchSchema = z.object({
         endAt: z.coerce.date(),
         note: z.string().max(500).nullish(),
         isTeamRental: z.boolean().optional(),
+        pfaReferred: z.boolean().optional(),
       }),
     )
     .min(1, "at least one slot is required")

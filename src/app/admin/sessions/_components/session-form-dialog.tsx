@@ -19,6 +19,7 @@ import { createSessionsBatch } from "../actions";
 import type { CoachOption, ResourceOption } from "./sessions-client";
 import { TimeSelect } from "@/app/_components/time-select";
 import { TeamRentalCheckbox } from "@/app/_components/team-rental-checkbox";
+import { PfaReferredCheckbox } from "@/app/_components/pfa-referred-checkbox";
 import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
 import {
   SessionSlotsList,
@@ -39,6 +40,7 @@ export type SessionFormInitialValues = {
   useType: "hitting" | "pitching" | null;
   note: string | null;
   isTeamRental: boolean;
+  pfaReferred: boolean;
 };
 
 // Modal form for creating or editing a session.
@@ -123,6 +125,7 @@ export function SessionFormDialog({
         useType: initial.useType ?? "",
         note: initial.note ?? "",
         isTeamRental: initial.isTeamRental,
+        pfaReferred: initial.pfaReferred,
       };
     }
     const now = new Date();
@@ -135,6 +138,7 @@ export function SessionFormDialog({
       useType: "",
       note: "",
       isTeamRental: false,
+      pfaReferred: false,
     };
   }, [initial, state]);
 
@@ -245,6 +249,7 @@ export function SessionFormDialog({
             endAt: s.endAt,
             note: s.note.trim() || null,
             isTeamRental: s.isTeamRental,
+            pfaReferred: s.pfaReferred,
           })),
         });
         setSlots([]);
@@ -452,7 +457,10 @@ export function SessionFormDialog({
                 />
               </Field>
 
-              <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
+              <div className="space-y-2">
+                <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
+                <PfaReferredCheckbox defaultChecked={defaults.pfaReferred} />
+              </div>
             </>
           ) : (
             <SessionSlotsList

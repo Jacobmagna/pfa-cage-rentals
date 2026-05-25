@@ -63,6 +63,7 @@ export type ScheduleSession = {
   useType: "hitting" | "pitching" | null;
   note: string | null;
   isTeamRental: boolean;
+  pfaReferred: boolean;
 };
 
 export type ScheduleBlock = {
@@ -454,6 +455,7 @@ export function ScheduleGrid({
           useType: dialog.session.useType,
           note: dialog.session.note,
           isTeamRental: dialog.session.isTeamRental,
+          pfaReferred: dialog.session.pfaReferred,
         }
       : undefined;
 

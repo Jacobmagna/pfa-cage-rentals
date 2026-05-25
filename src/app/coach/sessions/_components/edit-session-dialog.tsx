@@ -9,6 +9,7 @@ import {
 import type { ResourceOption } from "./types";
 import { TimeSelect } from "@/app/_components/time-select";
 import { TeamRentalCheckbox } from "@/app/_components/team-rental-checkbox";
+import { PfaReferredCheckbox } from "@/app/_components/pfa-referred-checkbox";
 import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 
 // Edit dialog for a coach's existing session. Mirrors the admin
@@ -24,6 +25,7 @@ export type SessionInitial = {
   useType: "hitting" | "pitching" | null;
   note: string | null;
   isTeamRental: boolean;
+  pfaReferred: boolean;
 };
 
 const INITIAL_STATE: EditActionResult = { ok: true };
@@ -94,6 +96,7 @@ export function EditSessionDialog({
         useType: initial.useType ?? "",
         note: initial.note ?? "",
         isTeamRental: initial.isTeamRental,
+        pfaReferred: initial.pfaReferred,
       };
     }
     return {
@@ -104,6 +107,7 @@ export function EditSessionDialog({
       useType: "",
       note: "",
       isTeamRental: false,
+      pfaReferred: false,
     };
   }, [initial, state]);
 
@@ -250,7 +254,10 @@ export function EditSessionDialog({
             />
           </Field>
 
-          <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
+          <div className="space-y-2">
+            <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
+            <PfaReferredCheckbox defaultChecked={defaults.pfaReferred} />
+          </div>
         </div>
 
         <div className="flex items-center justify-end gap-2 pt-2">

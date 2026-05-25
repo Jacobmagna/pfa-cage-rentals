@@ -7,13 +7,16 @@ import {
   Coins,
   FileText,
   History,
+  Settings,
   Upload,
   Users,
+  Wallet,
 } from "lucide-react";
 import { db } from "@/db";
 import {
   auditLog,
   blockedTimes,
+  coachPayments,
   coachRateOverrides,
   resources,
   sessionsBilling,
@@ -70,6 +73,9 @@ export default async function AdminHome() {
     overrideRows,
     [{ count: activeCoaches }],
     [{ ts: lastAuditTs }],
+    allSessionsForBalance,
+    confirmedPaymentRows,
+    [{ count: pendingPaymentsCount }],
   ] = await Promise.all([
     db
       .select({ count: drizzleSql<number>`count(*)::int` })
@@ -114,6 +120,39 @@ export default async function AdminHome() {
     db
       .select({ ts: drizzleSql<string | null>`max(ts)` })
       .from(auditLog),
+    // Balance feed for the Payments NavCard: lifetime owed (rentals)
+    // minus lifetime confirmed payments. Same all-time scope as
+    // /admin/payments — keeps the NavCard's number consistent with
+    // what Dad sees on the detail page.
+    db
+      .select({
+        coachId: sessionsBilling.coachId,
+        resourceType: resources.type,
+        startAt: sessionsBilling.startAt,
+        endAt: sessionsBilling.endAt,
+      })
+      .from(sessionsBilling)
+      .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id)),
+    db
+      .select({
+        amountCents: coachPayments.amountCents,
+      })
+      .from(coachPayments)
+      .where(
+        and(
+          isNull(coachPayments.deletedAt),
+          eq(coachPayments.status, "confirmed"),
+        ),
+      ),
+    db
+      .select({ count: drizzleSql<number>`count(*)::int` })
+      .from(coachPayments)
+      .where(
+        and(
+          isNull(coachPayments.deletedAt),
+          eq(coachPayments.status, "pending"),
+        ),
+      ),
   ]);
 
   // Aggregate the month's billing total using the same charge logic as
@@ -136,6 +175,28 @@ export default async function AdminHome() {
     );
     monthCents += charge.totalCents;
   }
+
+  // Lifetime balance for the Payments tile: same overrides feed,
+  // every session ever, minus confirmed payments. Pending payments
+  // are NOT netted — they wait in the inbox until Dad confirms.
+  let lifetimeOwedCents = 0;
+  for (const s of allSessionsForBalance) {
+    const charge = chargeForSession(
+      {
+        coachId: s.coachId,
+        resourceType: s.resourceType as ResourceType,
+        startAt: s.startAt,
+        endAt: s.endAt,
+      },
+      overrides,
+    );
+    lifetimeOwedCents += charge.totalCents;
+  }
+  const lifetimePaidCents = confirmedPaymentRows.reduce(
+    (sum, p) => sum + p.amountCents,
+    0,
+  );
+  const outstandingCents = lifetimeOwedCents - lifetimePaidCents;
 
   return (
     <>
@@ -232,10 +293,26 @@ export default async function AdminHome() {
             }
           />
           <NavCard
+            href="/admin/payments"
+            icon={<Wallet className="h-4 w-4" />}
+            title="Payments"
+            stat={
+              pendingPaymentsCount > 0
+                ? `${formatDollars(outstandingCents)} outstanding · ${pendingPaymentsCount} to confirm`
+                : `${formatDollars(outstandingCents)} outstanding`
+            }
+          />
+          <NavCard
             href="/admin/import"
             icon={<Upload className="h-4 w-4" />}
             title="Historical import"
             stat="Excel → preview → commit"
+          />
+          <NavCard
+            href="/admin/settings"
+            icon={<Settings className="h-4 w-4" />}
+            title="Settings"
+            stat="PFA handles, org-wide config"
           />
         </div>
       </section>

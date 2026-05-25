@@ -27,6 +27,7 @@ export type CoachFormValues = {
   useType: string;
   note: string;
   isTeamRental: boolean;
+  pfaReferred: boolean;
 };
 
 export type CoachActionResult =
@@ -46,6 +47,7 @@ function snapshot(formData: FormData): CoachFormValues {
     useType: formData.get("useType")?.toString() ?? "",
     note: formData.get("note")?.toString() ?? "",
     isTeamRental: formData.get("isTeamRental") === "on",
+    pfaReferred: formData.get("pfaReferred") === "on",
   };
 }
 
@@ -73,6 +75,7 @@ function buildInput(formData: FormData) {
         : null,
     note: formData.get("note")?.toString().trim() || null,
     isTeamRental: formData.get("isTeamRental") === "on",
+    pfaReferred: formData.get("pfaReferred") === "on",
   };
 }
 

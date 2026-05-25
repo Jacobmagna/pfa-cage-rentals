@@ -35,6 +35,7 @@ type RawSearchParams = Promise<{
   resourceIds?: string | string[];
   useTypes?: string | string[];
   teamRental?: string | string[];
+  pfaReferred?: string | string[];
 }>;
 
 export default async function AdminSessionsPage({
@@ -68,6 +69,11 @@ export default async function AdminSessionsPage({
       eq(sessionsBilling.isTeamRental, filters.teamRental[0] === "yes"),
     );
   }
+  if (filters.pfaReferred.length === 1) {
+    whereClauses.push(
+      eq(sessionsBilling.pfaReferred, filters.pfaReferred[0] === "yes"),
+    );
+  }
 
   const [rows, coachOptions, resourceOptions, allCoaches] = await Promise.all([
     db
@@ -84,6 +90,7 @@ export default async function AdminSessionsPage({
         useType: sessionsBilling.useType,
         note: sessionsBilling.note,
         isTeamRental: sessionsBilling.isTeamRental,
+        pfaReferred: sessionsBilling.pfaReferred,
       })
       .from(sessionsBilling)
       .innerJoin(users, eq(sessionsBilling.coachId, users.id))
@@ -150,6 +157,7 @@ export default async function AdminSessionsPage({
           resourceIds: filters.resourceIds,
           useTypes: filters.useTypes,
           teamRental: filters.teamRental,
+          pfaReferred: filters.pfaReferred,
         }}
         isFiltered={filters.isFiltered}
       />
@@ -175,11 +183,13 @@ type NormalizedFilters = {
   useTypes: ("hitting" | "pitching")[];
   /** ["yes"] / ["no"] / ["yes","no"] or empty. Length 1 → filter; otherwise no filter. */
   teamRental: ("yes" | "no")[];
+  /** Same yes/no semantics as teamRental. */
+  pfaReferred: ("yes" | "no")[];
   /** True if any filter differs from the default (last 14 days, all coaches/resources/uses/rentals). */
   isFiltered: boolean;
 };
 
-const VALID_TEAM_RENTAL = new Set(["yes", "no"] as const);
+const VALID_YES_NO = new Set(["yes", "no"] as const);
 
 function normalizeFilters(input: {
   from?: string | string[];
@@ -188,6 +198,7 @@ function normalizeFilters(input: {
   resourceIds?: string | string[];
   useTypes?: string | string[];
   teamRental?: string | string[];
+  pfaReferred?: string | string[];
 }): NormalizedFilters {
   const fromInput = pickFirst(input.from);
   const toInput = pickFirst(input.to);
@@ -219,7 +230,10 @@ function normalizeFilters(input: {
       VALID_USE_TYPES.has(t as "hitting" | "pitching"),
   );
   const teamRental = toArray(input.teamRental).filter(
-    (t): t is "yes" | "no" => VALID_TEAM_RENTAL.has(t as "yes" | "no"),
+    (t): t is "yes" | "no" => VALID_YES_NO.has(t as "yes" | "no"),
+  );
+  const pfaReferred = toArray(input.pfaReferred).filter(
+    (t): t is "yes" | "no" => VALID_YES_NO.has(t as "yes" | "no"),
   );
 
   const fromInstant = parsePfaInput(from, "00:00");
@@ -232,7 +246,8 @@ function normalizeFilters(input: {
     coachIds.length > 0 ||
     resourceIds.length > 0 ||
     useTypes.length > 0 ||
-    teamRental.length === 1;
+    teamRental.length === 1 ||
+    pfaReferred.length === 1;
 
   return {
     from,
@@ -243,6 +258,7 @@ function normalizeFilters(input: {
     resourceIds,
     useTypes,
     teamRental,
+    pfaReferred,
     isFiltered,
   };
 }

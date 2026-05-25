@@ -38,6 +38,7 @@ export type SubmittedFormValues = {
   useType: string;
   note: string;
   isTeamRental: boolean;
+  pfaReferred: boolean;
 };
 
 export type ActionResult =
@@ -61,6 +62,7 @@ function snapshotFormValues(formData: FormData): SubmittedFormValues {
     useType: formData.get("useType")?.toString() ?? "",
     note: formData.get("note")?.toString() ?? "",
     isTeamRental: formData.get("isTeamRental") === "on",
+    pfaReferred: formData.get("pfaReferred") === "on",
   };
 }
 
@@ -94,6 +96,7 @@ function buildSessionInput(formData: FormData) {
         : null,
     note: formData.get("note")?.toString().trim() || null,
     isTeamRental: formData.get("isTeamRental") === "on",
+    pfaReferred: formData.get("pfaReferred") === "on",
   };
 }
 

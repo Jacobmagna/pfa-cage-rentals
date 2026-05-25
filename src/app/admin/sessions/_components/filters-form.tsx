@@ -36,6 +36,7 @@ type FilterValues = {
   resourceIds: string[];
   useTypes: ("hitting" | "pitching")[];
   teamRental: ("yes" | "no")[];
+  pfaReferred: ("yes" | "no")[];
 };
 
 export function FiltersForm({
@@ -65,6 +66,10 @@ export function FiltersForm({
     { value: "yes", label: "Team rentals only" },
     { value: "no", label: "Private lessons only" },
   ];
+  const pfaReferredOptions = [
+    { value: "yes", label: "PFA-referred only" },
+    { value: "no", label: "Coach-sourced only" },
+  ];
 
   return (
     <form
@@ -72,7 +77,7 @@ export function FiltersForm({
       action="/admin/sessions"
       className="rounded-lg border border-line bg-surface p-5 mb-6"
     >
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6 lg:items-end">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-7 lg:items-end">
         <Field label="From">
           <input
             type="date"
@@ -129,6 +134,16 @@ export function FiltersForm({
             defaultSelected={values.teamRental}
             placeholder="All bookings"
             aria-label="Filter by team rental"
+          />
+        </Field>
+
+        <Field label="PFA-referred">
+          <MultiSelect
+            name="pfaReferred"
+            options={pfaReferredOptions}
+            defaultSelected={values.pfaReferred}
+            placeholder="All sources"
+            aria-label="Filter by PFA-referred"
           />
         </Field>
       </div>

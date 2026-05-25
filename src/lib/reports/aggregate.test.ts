@@ -34,6 +34,7 @@ function session(
     useType: "hitting",
     note: null,
     isTeamRental: false,
+    pfaReferred: false,
     ...overrides,
   };
 }

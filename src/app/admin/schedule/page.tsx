@@ -60,6 +60,7 @@ export default async function AdminSchedulePage({
         useType: sessionsBilling.useType,
         note: sessionsBilling.note,
         isTeamRental: sessionsBilling.isTeamRental,
+        pfaReferred: sessionsBilling.pfaReferred,
       })
       .from(sessionsBilling)
       .innerJoin(users, eq(sessionsBilling.coachId, users.id))
@@ -96,6 +97,7 @@ export default async function AdminSchedulePage({
     useType: r.useType,
     note: r.note,
     isTeamRental: r.isTeamRental,
+    pfaReferred: r.pfaReferred,
   }));
 
   const blocks = blockRows.map((b) => ({

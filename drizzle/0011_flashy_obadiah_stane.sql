@@ -1,0 +1,1 @@
+ALTER TABLE "sessions_billing" ADD COLUMN "pfa_referred" boolean DEFAULT false NOT NULL;

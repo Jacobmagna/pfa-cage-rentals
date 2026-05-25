@@ -33,6 +33,7 @@ export type SlotInput = {
   endAt: Date;
   note: string;
   isTeamRental: boolean;
+  pfaReferred: boolean;
 };
 
 type Props = {
@@ -72,11 +73,15 @@ export function SessionSlotsList({
     // range tweak that produces overlapping slot signatures keeps
     // typed notes. Reading props during render is fine; reading a
     // ref isn't.
-    const priorByKey = new Map<string, { note: string; isTeamRental: boolean }>();
+    const priorByKey = new Map<
+      string,
+      { note: string; isTeamRental: boolean; pfaReferred: boolean }
+    >();
     for (const s of slots) {
       priorByKey.set(slotKey(s.startAt, s.endAt), {
         note: s.note,
         isTeamRental: s.isTeamRental,
+        pfaReferred: s.pfaReferred,
       });
     }
 
@@ -90,6 +95,7 @@ export function SessionSlotsList({
         endAt,
         note: prior?.note ?? "",
         isTeamRental: prior?.isTeamRental ?? false,
+        pfaReferred: prior?.pfaReferred ?? false,
       });
     }
     return out;
@@ -101,10 +107,16 @@ export function SessionSlotsList({
   const lastEmittedRef = useRef<string>("");
   useEffect(() => {
     const sig = computed
-      .map((s) => `${s.startAt.toISOString()}|${s.note}|${s.isTeamRental ? 1 : 0}`)
+      .map(
+        (s) =>
+          `${s.startAt.toISOString()}|${s.note}|${s.isTeamRental ? 1 : 0}|${s.pfaReferred ? 1 : 0}`,
+      )
       .join("·");
     const current = slots
-      .map((s) => `${s.startAt.toISOString()}|${s.note}|${s.isTeamRental ? 1 : 0}`)
+      .map(
+        (s) =>
+          `${s.startAt.toISOString()}|${s.note}|${s.isTeamRental ? 1 : 0}|${s.pfaReferred ? 1 : 0}`,
+      )
       .join("·");
     if (sig !== current && sig !== lastEmittedRef.current) {
       lastEmittedRef.current = sig;
@@ -121,6 +133,12 @@ export function SessionSlotsList({
   const updateTeam = (i: number, isTeamRental: boolean) => {
     const next = slots.map((s, idx) =>
       idx === i ? { ...s, isTeamRental } : s,
+    );
+    onChange(next);
+  };
+  const updatePfaReferred = (i: number, pfaReferred: boolean) => {
+    const next = slots.map((s, idx) =>
+      idx === i ? { ...s, pfaReferred } : s,
     );
     onChange(next);
   };
@@ -141,15 +159,26 @@ export function SessionSlotsList({
               <p className="text-sm font-mono tabular-nums text-fg">
                 {formatRangeShort(slot.startAt, slot.endAt)}
               </p>
-              <label className="inline-flex items-center gap-2 cursor-pointer text-xs text-fg-muted select-none">
-                <input
-                  type="checkbox"
-                  checked={slot.isTeamRental}
-                  onChange={(e) => updateTeam(i, e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-line bg-page text-gold focus-visible:ring-2 focus-visible:ring-gold/40 accent-gold"
-                />
-                <span>Team rental</span>
-              </label>
+              <div className="flex items-center gap-3 flex-wrap">
+                <label className="inline-flex items-center gap-2 cursor-pointer text-xs text-fg-muted select-none">
+                  <input
+                    type="checkbox"
+                    checked={slot.isTeamRental}
+                    onChange={(e) => updateTeam(i, e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-line bg-page text-gold focus-visible:ring-2 focus-visible:ring-gold/40 accent-gold"
+                  />
+                  <span>Team rental</span>
+                </label>
+                <label className="inline-flex items-center gap-2 cursor-pointer text-xs text-fg-muted select-none">
+                  <input
+                    type="checkbox"
+                    checked={slot.pfaReferred}
+                    onChange={(e) => updatePfaReferred(i, e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-line bg-page text-gold focus-visible:ring-2 focus-visible:ring-gold/40 accent-gold"
+                  />
+                  <span>PFA-referred</span>
+                </label>
+              </div>
             </div>
             <input
               type="text"

@@ -99,6 +99,22 @@ export class RateOverrideNotFoundError extends Error {
   }
 }
 
+export class PaymentNotFoundError extends Error {
+  readonly code = "PAYMENT_NOT_FOUND" as const;
+  constructor(public readonly paymentId: string) {
+    super(`Payment ${paymentId} not found`);
+    this.name = "PaymentNotFoundError";
+  }
+}
+
+export class PaymentAlreadyConfirmedError extends Error {
+  readonly code = "PAYMENT_ALREADY_CONFIRMED" as const;
+  constructor(public readonly paymentId: string) {
+    super(`Payment ${paymentId} is already confirmed`);
+    this.name = "PaymentAlreadyConfirmedError";
+  }
+}
+
 export class CoachNotFoundError extends Error {
   readonly code = "COACH_NOT_FOUND" as const;
   constructor(public readonly coachId: string) {

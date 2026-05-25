@@ -37,6 +37,7 @@ export type AggregateSessionInput = {
   useType: "hitting" | "pitching" | null;
   note: string | null;
   isTeamRental: boolean;
+  pfaReferred: boolean;
 };
 
 export type DetailRow = {
@@ -58,6 +59,7 @@ export type DetailRow = {
   totalCents: number;
   note: string | null;
   isTeamRental: boolean;
+  pfaReferred: boolean;
 };
 
 export type SummaryRow = {
@@ -123,6 +125,7 @@ export function aggregateReport(
       totalCents: charge.totalCents,
       note: s.note,
       isTeamRental: s.isTeamRental,
+      pfaReferred: s.pfaReferred,
     };
   });
 

@@ -1,0 +1,2 @@
+ALTER TABLE "sessions_billing" ADD COLUMN "is_online" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "sessions_billing" ADD COLUMN "rate_per_30_min_cents" integer DEFAULT 0 NOT NULL;

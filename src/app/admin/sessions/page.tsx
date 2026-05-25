@@ -91,6 +91,8 @@ export default async function AdminSessionsPage({
         note: sessionsBilling.note,
         isTeamRental: sessionsBilling.isTeamRental,
         pfaReferred: sessionsBilling.pfaReferred,
+        isOnline: sessionsBilling.isOnline,
+        ratePer30MinCents: sessionsBilling.ratePer30MinCents,
       })
       .from(sessionsBilling)
       .innerJoin(users, eq(sessionsBilling.coachId, users.id))

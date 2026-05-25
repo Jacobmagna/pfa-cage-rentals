@@ -8,7 +8,6 @@ import { updateOrgSettings } from "./actions";
 
 export type OrgSettingsFormValues = {
   pfaDisplayName: string;
-  pfaVenmoHandle: string;
   pfaZelleContact: string;
 };
 
@@ -23,7 +22,6 @@ export type OrgSettingsActionResult =
 function snapshot(formData: FormData): OrgSettingsFormValues {
   return {
     pfaDisplayName: formData.get("pfaDisplayName")?.toString() ?? "",
-    pfaVenmoHandle: formData.get("pfaVenmoHandle")?.toString() ?? "",
     pfaZelleContact: formData.get("pfaZelleContact")?.toString() ?? "",
   };
 }
@@ -54,7 +52,6 @@ export async function updateOrgSettingsFormAction(
   try {
     await updateOrgSettings({
       pfaDisplayName: values.pfaDisplayName,
-      pfaVenmoHandle: values.pfaVenmoHandle,
       pfaZelleContact: values.pfaZelleContact,
     });
     return { ok: true };

@@ -6,11 +6,11 @@ import { OrgSettingsCard } from "./_components/org-settings-card";
 
 // /admin/settings — org-wide configuration.
 //
-// Today: PFA payment handles + display name (Phase P3). The
-// pfaVenmoHandle / pfaZelleContact are the values P4's coach
-// payments page will deep-link to when a coach taps "Pay PFA."
-// pfaDisplayName is the label rendered on those buttons ("Pay
-// PFA Sports via Venmo").
+// Today: PFA Zelle contact + display name. Venmo support was removed
+// 2026-05-25 because the business Venmo account charges fees on
+// incoming payments. The column stays in the schema (dormant) in case
+// we ever reintroduce a non-fee payment rail. pfaDisplayName is the
+// label rendered on the coach-side pay button ("Pay PFA Sports").
 //
 // Future surfaces likely live here: default rates, theme, slack
 // webhook, etc. Each gets its own card so the page stays scannable.
@@ -35,14 +35,13 @@ export default async function AdminSettingsPage() {
         </p>
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
         <p className="text-sm text-fg-muted">
-          Org-wide configuration. Today: payment handles coaches use to
-          pay PFA.
+          Org-wide configuration. Today: the Zelle contact coaches use
+          to pay PFA.
         </p>
       </div>
 
       <OrgSettingsCard
         initialPfaDisplayName={settings.pfaDisplayName}
-        initialPfaVenmoHandle={settings.pfaVenmoHandle}
         initialPfaZelleContact={settings.pfaZelleContact}
       />
     </>

@@ -1,26 +1,15 @@
 import Link from "next/link";
-import { and, eq, gte, isNull, lt, sql as drizzleSql } from "drizzle-orm";
+import { and, eq, gte, lt, sql as drizzleSql } from "drizzle-orm";
 import {
   ArrowUpRight,
   CalendarDays,
   CalendarPlus,
   ClipboardList,
   Clock,
-  Wallet,
 } from "lucide-react";
 import { db } from "@/db";
-import {
-  coachPayments,
-  coachRateOverrides,
-  resources,
-  sessionsBilling,
-} from "@/db/schema";
+import { sessionsBilling } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
-import {
-  chargeForSession,
-  type RateOverride,
-  type ResourceType,
-} from "@/lib/billing";
 import {
   formatPfaDateLong,
   formatPfaMonthYear,
@@ -29,15 +18,14 @@ import {
 } from "@/lib/timezone";
 import { EditableName } from "../_components/editable-name";
 
-// /coach landing. Two stat tiles + three actions (log a new session,
-// review history, payments). The Payments card surfaces the coach's
-// own balance — flips the original "no dollar amounts" rule, which
-// only ever held until the V2 invoice surface shipped. See
-// project_coach_rate_visibility memory for the rule update.
-//
-// Coach can only see their OWN data here. The WHERE clause on
-// coachId enforces it server-side; URL-guessing another coach's
-// numbers is moot.
+// /coach landing. Two stat tiles + the two actions a coach actually
+// does (log a new session, review history). Dollar amounts are
+// admin-only — coach rates are variable per-coach and per-resource,
+// and Dad handles invoicing manually outside the app. The /coach/payments
+// surface was built then removed 2026-05-25 — Dad decided he doesn't
+// want coaches paying through the app at all. Backend (coach_payments
+// table, computeBalances helper, admin /admin/payments + /admin/settings
+// surfaces) stays in place for the admin-side ledger view.
 
 export default async function CoachHome() {
   const session = await requireSession();
@@ -49,13 +37,7 @@ export default async function CoachHome() {
   const monthStart = pfaMonthStart(now);
   const monthEndExclusive = pfaMonthEnd(now);
 
-  const [
-    monthSessionRows,
-    [{ count: totalEver }],
-    allRentalRows,
-    overrideRows,
-    confirmedPaymentRows,
-  ] = await Promise.all([
+  const [monthSessionRows, [{ count: totalEver }]] = await Promise.all([
     db
       .select({
         startAt: sessionsBilling.startAt,
@@ -73,31 +55,6 @@ export default async function CoachHome() {
       .select({ count: drizzleSql<number>`count(*)::int` })
       .from(sessionsBilling)
       .where(eq(sessionsBilling.coachId, coachId)),
-    // Balance feed for the Payments card: all of this coach's
-    // sessions, joined to resources for the rate calculation.
-    db
-      .select({
-        resourceType: resources.type,
-        startAt: sessionsBilling.startAt,
-        endAt: sessionsBilling.endAt,
-      })
-      .from(sessionsBilling)
-      .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
-      .where(eq(sessionsBilling.coachId, coachId)),
-    db
-      .select()
-      .from(coachRateOverrides)
-      .where(eq(coachRateOverrides.coachId, coachId)),
-    db
-      .select({ amountCents: coachPayments.amountCents })
-      .from(coachPayments)
-      .where(
-        and(
-          eq(coachPayments.coachId, coachId),
-          eq(coachPayments.status, "confirmed"),
-          isNull(coachPayments.deletedAt),
-        ),
-      ),
   ]);
 
   const monthCount = monthSessionRows.length;
@@ -105,33 +62,6 @@ export default async function CoachHome() {
     (sum, s) => sum + (s.endAt.getTime() - s.startAt.getTime()) / 60_000,
     0,
   );
-
-  // Coach's own balance for the Payments card. Same math as
-  // /coach/payments — every rental minus confirmed payments. Pending
-  // entries don't reduce here (Dad has to confirm first).
-  const overrides: RateOverride[] = overrideRows.map((o) => ({
-    coachId: o.coachId,
-    resourceType: o.resourceType,
-    ratePer30MinCents: o.ratePer30MinCents,
-  }));
-  let owedCents = 0;
-  for (const r of allRentalRows) {
-    const charge = chargeForSession(
-      {
-        coachId,
-        resourceType: r.resourceType as ResourceType,
-        startAt: r.startAt,
-        endAt: r.endAt,
-      },
-      overrides,
-    );
-    owedCents += charge.totalCents;
-  }
-  const paidCents = confirmedPaymentRows.reduce(
-    (sum, p) => sum + p.amountCents,
-    0,
-  );
-  const balanceCents = owedCents - paidCents;
 
   return (
     <div className="max-w-2xl">
@@ -171,7 +101,7 @@ export default async function CoachHome() {
         />
       </section>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <NavCard
           href="/coach/sessions/new"
           icon={<CalendarPlus className="h-4 w-4" />}
@@ -184,27 +114,9 @@ export default async function CoachHome() {
           title="My sessions"
           body="Review history, fix a slot."
         />
-        <NavCard
-          href="/coach/payments"
-          icon={<Wallet className="h-4 w-4" />}
-          title="Payments"
-          body={
-            balanceCents <= 0
-              ? "All settled."
-              : `You owe ${formatDollars(balanceCents)}.`
-          }
-        />
       </div>
     </div>
   );
-}
-
-function formatDollars(cents: number): string {
-  const dollars = (cents / 100).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return `$${dollars}`;
 }
 
 function Stat({

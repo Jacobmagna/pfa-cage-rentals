@@ -17,6 +17,13 @@ import type { CoachOption } from "./payments-client";
 import { formatPfaDate } from "@/lib/timezone";
 import { PAYMENT_METHODS, type PaymentMethod } from "@/lib/schemas/payment";
 
+// Methods shown in the dropdown for NEW payments. Venmo dropped 2026-05-25
+// (business Venmo charges incoming-payment fees) but kept in the enum so
+// any historical "venmo" rows still render. If editing a legacy venmo row,
+// the value displays via the existing initial.method path even though it
+// isn't in this list.
+const SELECTABLE_METHODS = PAYMENT_METHODS.filter((m) => m !== "venmo");
+
 // Native <dialog> form for recording or editing a coach payment.
 // Mirrors the pattern in src/app/admin/sessions/_components/session-form-dialog.tsx:
 //   - useActionState wrapping the form-action returns a discriminated
@@ -102,7 +109,7 @@ export function PaymentDialog({
     return {
       coachId: prefillCoachId ?? "",
       amountDollars: "",
-      method: "venmo" as string,
+      method: "zelle" as string,
       paidAtDate: formatPfaDate(new Date()),
       reference: "",
       note: "",
@@ -223,18 +230,22 @@ export function PaymentDialog({
               onChange={(e) => setMethod(e.target.value)}
               className={selectStyles}
             >
-              {PAYMENT_METHODS.map((m) => (
+              {SELECTABLE_METHODS.map((m) => (
                 <option key={m} value={m}>
                   {m.charAt(0).toUpperCase() + m.slice(1)}
                 </option>
               ))}
+              {/* Preserve a legacy venmo selection when editing an old row */}
+              {method === "venmo" ? (
+                <option value="venmo">Venmo (legacy)</option>
+              ) : null}
             </select>
           </Field>
 
           <Field
             label="Reference"
             optional
-            hint="Venmo txn id, check #, etc."
+            hint="Zelle confirmation #, check #, etc."
           >
             <input
               type="text"

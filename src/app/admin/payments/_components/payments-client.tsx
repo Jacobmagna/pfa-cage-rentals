@@ -25,7 +25,6 @@ export type BalanceRow = {
   coachId: string;
   coachName: string;
   coachEmail: string;
-  venmoHandle: string | null;
   zelleContact: string | null;
   owedCents: number;
   paidCents: number;
@@ -229,20 +228,12 @@ function BalancesTable({
                 <td className="px-4 py-3 text-sm">
                   <div className="flex flex-col gap-1">
                     <span>{row.coachName}</span>
-                    {row.venmoHandle || row.zelleContact ? (
+                    {row.zelleContact ? (
                       <div className="flex flex-wrap items-center gap-1">
-                        {row.venmoHandle ? (
-                          <HandleChip
-                            label="Venmo"
-                            value={`@${row.venmoHandle}`}
-                          />
-                        ) : null}
-                        {row.zelleContact ? (
-                          <HandleChip
-                            label="Zelle"
-                            value={row.zelleContact}
-                          />
-                        ) : null}
+                        <HandleChip
+                          label="Zelle"
+                          value={row.zelleContact}
+                        />
                       </div>
                     ) : null}
                   </div>

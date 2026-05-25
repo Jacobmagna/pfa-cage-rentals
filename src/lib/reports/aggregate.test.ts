@@ -103,7 +103,7 @@ describe("aggregateReport — summary roll-up", () => {
         resourceType: "weight_room",
         resourceName: "Weight Room 1",
         useType: null,
-      }), // 2 slots × 500 = 1000
+      }), // 2 slots × 700 = 1400
     ];
     const { summary, grandTotalCents } = aggregateReport(sessions, []);
     expect(summary).toHaveLength(1);
@@ -113,10 +113,10 @@ describe("aggregateReport — summary roll-up", () => {
     expect(row.bullpenSlots).toBe(2);
     expect(row.bullpenTotalCents).toBe(4400);
     expect(row.weightRoomSlots).toBe(2);
-    expect(row.weightRoomTotalCents).toBe(1000);
-    expect(row.totalCents).toBe(9800);
+    expect(row.weightRoomTotalCents).toBe(1400);
+    expect(row.totalCents).toBe(10200);
     expect(row.appliedOverride).toBe(false);
-    expect(grandTotalCents).toBe(9800);
+    expect(grandTotalCents).toBe(10200);
   });
 
   it("sorts summary by coach name and creates a row per coach", () => {

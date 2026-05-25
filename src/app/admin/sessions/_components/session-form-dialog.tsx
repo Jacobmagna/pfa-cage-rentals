@@ -18,8 +18,7 @@ import {
 import { createSessionsBatch } from "../actions";
 import type { CoachOption, ResourceOption } from "./sessions-client";
 import { TimeSelect } from "@/app/_components/time-select";
-import { TeamRentalCheckbox } from "@/app/_components/team-rental-checkbox";
-import { PfaReferredCheckbox } from "@/app/_components/pfa-referred-checkbox";
+import { SessionFlagsRow } from "@/app/_components/session-flags-row";
 import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
 import {
   SessionSlotsList,
@@ -41,6 +40,7 @@ export type SessionFormInitialValues = {
   note: string | null;
   isTeamRental: boolean;
   pfaReferred: boolean;
+  isOnline: boolean;
 };
 
 // Modal form for creating or editing a session.
@@ -126,6 +126,7 @@ export function SessionFormDialog({
         note: initial.note ?? "",
         isTeamRental: initial.isTeamRental,
         pfaReferred: initial.pfaReferred,
+        isOnline: initial.isOnline,
       };
     }
     const now = new Date();
@@ -139,6 +140,7 @@ export function SessionFormDialog({
       note: "",
       isTeamRental: false,
       pfaReferred: false,
+      isOnline: false,
     };
   }, [initial, state]);
 
@@ -250,6 +252,7 @@ export function SessionFormDialog({
             note: s.note.trim() || null,
             isTeamRental: s.isTeamRental,
             pfaReferred: s.pfaReferred,
+            isOnline: s.isOnline,
           })),
         });
         setSlots([]);
@@ -452,15 +455,18 @@ export function SessionFormDialog({
                   name="note"
                   defaultValue={defaults.note}
                   maxLength={500}
-                  placeholder="Optional context (e.g. JP De La Cruz, online)"
+                  placeholder="Optional context (e.g. JP De La Cruz)"
                   className={inputStyles}
                 />
               </Field>
 
-              <div className="space-y-2">
-                <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
-                <PfaReferredCheckbox defaultChecked={defaults.pfaReferred} />
-              </div>
+              <SessionFlagsRow
+                defaults={{
+                  isTeamRental: defaults.isTeamRental,
+                  pfaReferred: defaults.pfaReferred,
+                  isOnline: defaults.isOnline,
+                }}
+              />
             </>
           ) : (
             <SessionSlotsList

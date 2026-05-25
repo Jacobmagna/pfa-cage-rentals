@@ -15,8 +15,7 @@ import {
 import { logOwnSessionsBatch } from "../../actions";
 import type { ResourceOption } from "../../_components/types";
 import { TimeSelect } from "@/app/_components/time-select";
-import { TeamRentalCheckbox } from "@/app/_components/team-rental-checkbox";
-import { PfaReferredCheckbox } from "@/app/_components/pfa-referred-checkbox";
+import { SessionFlagsRow } from "@/app/_components/session-flags-row";
 import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
 import {
   SessionSlotsList,
@@ -91,6 +90,7 @@ export function LogSessionForm({
       note: "",
       isTeamRental: false,
       pfaReferred: false,
+      isOnline: false,
     };
   }, [state]);
 
@@ -225,6 +225,7 @@ export function LogSessionForm({
             note: s.note.trim() || null,
             isTeamRental: s.isTeamRental,
             pfaReferred: s.pfaReferred,
+            isOnline: s.isOnline,
           })),
         });
         setBatchResult({
@@ -435,10 +436,13 @@ export function LogSessionForm({
               />
             </Field>
 
-            <div className="space-y-2">
-              <TeamRentalCheckbox defaultChecked={defaults.isTeamRental} />
-              <PfaReferredCheckbox defaultChecked={defaults.pfaReferred} />
-            </div>
+            <SessionFlagsRow
+              showTeamRental={false}
+              defaults={{
+                pfaReferred: defaults.pfaReferred,
+                isOnline: defaults.isOnline,
+              }}
+            />
           </>
         ) : (
           <SessionSlotsList
@@ -447,6 +451,7 @@ export function LogSessionForm({
             slotLengthMinutes={slotLengthMinutes}
             slots={slots}
             onChange={setSlots}
+            showTeamRental={false}
           />
         )}
 

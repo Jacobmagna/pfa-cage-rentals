@@ -51,7 +51,6 @@ export default async function AdminCoachDetailPage({
           email: users.email,
           role: users.role,
           createdAt: users.createdAt,
-          venmoHandle: users.venmoHandle,
           zelleContact: users.zelleContact,
         })
         .from(users)
@@ -173,7 +172,6 @@ export default async function AdminCoachDetailPage({
 
       <CoachHandlesCard
         coachId={coach.id}
-        initialVenmoHandle={coach.venmoHandle}
         initialZelleContact={coach.zelleContact}
       />
 

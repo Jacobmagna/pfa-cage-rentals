@@ -7,6 +7,7 @@ import { deleteSessionAction } from "../form-actions";
 import { PFA_TIMEZONE } from "@/lib/timezone";
 import { TeamRentalBadge } from "@/app/_components/team-rental-badge";
 import { PfaReferredBadge } from "@/app/_components/pfa-referred-badge";
+import { OnlineBadge } from "@/app/_components/online-badge";
 
 // Top-level client island for the admin sessions page. Owns the
 // dialog open/close state (create vs edit), the row delete pending
@@ -32,6 +33,8 @@ export type SessionRow = {
   note: string | null;
   isTeamRental: boolean;
   pfaReferred: boolean;
+  isOnline: boolean;
+  ratePer30MinCents: number;
 };
 
 export type CoachOption = {
@@ -102,6 +105,7 @@ export function SessionsClient({
           note: dialogState.row.note,
           isTeamRental: dialogState.row.isTeamRental,
           pfaReferred: dialogState.row.pfaReferred,
+          isOnline: dialogState.row.isOnline,
         }
       : undefined;
 
@@ -168,6 +172,7 @@ export function SessionsClient({
                         </span>
                         {row.isTeamRental ? <TeamRentalBadge /> : null}
                         {row.pfaReferred ? <PfaReferredBadge /> : null}
+                        {row.isOnline ? <OnlineBadge /> : null}
                       </span>
                       {row.note ? (
                         <span className="block text-xs text-fg-subtle mt-0.5">

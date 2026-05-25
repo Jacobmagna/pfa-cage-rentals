@@ -39,6 +39,7 @@ export type SubmittedFormValues = {
   note: string;
   isTeamRental: boolean;
   pfaReferred: boolean;
+  isOnline: boolean;
 };
 
 export type ActionResult =
@@ -63,6 +64,7 @@ function snapshotFormValues(formData: FormData): SubmittedFormValues {
     note: formData.get("note")?.toString() ?? "",
     isTeamRental: formData.get("isTeamRental") === "on",
     pfaReferred: formData.get("pfaReferred") === "on",
+    isOnline: formData.get("isOnline") === "on",
   };
 }
 
@@ -97,6 +99,7 @@ function buildSessionInput(formData: FormData) {
     note: formData.get("note")?.toString().trim() || null,
     isTeamRental: formData.get("isTeamRental") === "on",
     pfaReferred: formData.get("pfaReferred") === "on",
+    isOnline: formData.get("isOnline") === "on",
   };
 }
 

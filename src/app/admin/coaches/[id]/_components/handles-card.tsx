@@ -20,11 +20,9 @@ const INITIAL_STATE: HandlesActionResult = { ok: true };
 
 export function CoachHandlesCard({
   coachId,
-  initialVenmoHandle,
   initialZelleContact,
 }: {
   coachId: string;
-  initialVenmoHandle: string | null;
   initialZelleContact: string | null;
 }) {
   const [state, action, pending] = useActionState(
@@ -35,26 +33,22 @@ export function CoachHandlesCard({
   // After a successful save, re-key the form against the values the
   // server echoed back via revalidatePath — without this the inputs
   // keep their stale defaultValue from the first render.
-  const venmoDefault =
-    !state.ok && state.values
-      ? state.values.venmoHandle
-      : (initialVenmoHandle ?? "");
   const zelleDefault =
     !state.ok && state.values
       ? state.values.zelleContact
       : (initialZelleContact ?? "");
   const formKey = state.ok
-    ? `ok-${initialVenmoHandle ?? ""}-${initialZelleContact ?? ""}`
+    ? `ok-${initialZelleContact ?? ""}`
     : `err-${state.error.code}-${state.error.message}`;
 
   return (
     <section className="my-8 rounded-xl border border-line bg-surface overflow-hidden">
       <header className="px-5 py-4 border-b border-line">
-        <h3 className="text-base font-semibold text-fg">Payment handles</h3>
+        <h3 className="text-base font-semibold text-fg">Zelle contact</h3>
         <p className="mt-1 text-xs text-fg-muted leading-relaxed">
-          Where this coach receives Venmo / Zelle. Reference only — used
-          on the Payments page to help you reconcile a payment, never
-          shown to other coaches.
+          Where this coach receives Zelle. Reference only — used on the
+          Payments page to help you reconcile a payment, never shown to
+          other coaches.
         </p>
       </header>
 
@@ -70,50 +64,24 @@ export function CoachHandlesCard({
           </div>
         ) : null}
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field
-            label="Venmo handle"
-            hint="No @ — just the username."
-            chip={
-              initialVenmoHandle ? (
-                <CopyChip value={`@${initialVenmoHandle}`} label="Copy" />
-              ) : null
-            }
-          >
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle text-sm">
-                @
-              </span>
-              <input
-                type="text"
-                name="venmoHandle"
-                defaultValue={venmoDefault}
-                maxLength={30}
-                placeholder="coach-name"
-                className={`${inputStyles} pl-7`}
-              />
-            </div>
-          </Field>
-
-          <Field
-            label="Zelle contact"
-            hint="Email or phone number — whatever's registered with their bank."
-            chip={
-              initialZelleContact ? (
-                <CopyChip value={initialZelleContact} label="Copy" />
-              ) : null
-            }
-          >
-            <input
-              type="text"
-              name="zelleContact"
-              defaultValue={zelleDefault}
-              maxLength={200}
-              placeholder="email or phone"
-              className={inputStyles}
-            />
-          </Field>
-        </div>
+        <Field
+          label="Zelle contact"
+          hint="Email or phone number — whatever's registered with their bank."
+          chip={
+            initialZelleContact ? (
+              <CopyChip value={initialZelleContact} label="Copy" />
+            ) : null
+          }
+        >
+          <input
+            type="text"
+            name="zelleContact"
+            defaultValue={zelleDefault}
+            maxLength={200}
+            placeholder="email or phone"
+            className={inputStyles}
+          />
+        </Field>
 
         <div className="flex items-center justify-end gap-2">
           <button
@@ -122,7 +90,7 @@ export function CoachHandlesCard({
             className="inline-flex items-center gap-1.5 rounded-md bg-gold text-gold-ink hover:bg-gold-hover h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
           >
             <Check className="h-4 w-4" strokeWidth={2.5} />
-            {pending ? "Saving…" : "Save handles"}
+            {pending ? "Saving…" : "Save Zelle contact"}
           </button>
         </div>
       </form>

@@ -34,6 +34,7 @@ export type SlotInput = {
   note: string;
   isTeamRental: boolean;
   pfaReferred: boolean;
+  isOnline: boolean;
 };
 
 type Props = {
@@ -47,6 +48,8 @@ type Props = {
   slots: SlotInput[];
   /** Emit a new slots array when the user edits a note or toggle. */
   onChange: (slots: SlotInput[]) => void;
+  /** Hide the "Team rental" toggle on coach surfaces. */
+  showTeamRental?: boolean;
 };
 
 export function SessionSlotsList({
@@ -55,6 +58,7 @@ export function SessionSlotsList({
   slotLengthMinutes,
   slots,
   onChange,
+  showTeamRental = true,
 }: Props) {
   // Recompute the canonical slot list from the range + length. Each
   // slot keeps its existing note/teamRental ONLY if its (startAt,
@@ -75,13 +79,19 @@ export function SessionSlotsList({
     // ref isn't.
     const priorByKey = new Map<
       string,
-      { note: string; isTeamRental: boolean; pfaReferred: boolean }
+      {
+        note: string;
+        isTeamRental: boolean;
+        pfaReferred: boolean;
+        isOnline: boolean;
+      }
     >();
     for (const s of slots) {
       priorByKey.set(slotKey(s.startAt, s.endAt), {
         note: s.note,
         isTeamRental: s.isTeamRental,
         pfaReferred: s.pfaReferred,
+        isOnline: s.isOnline,
       });
     }
 
@@ -96,6 +106,7 @@ export function SessionSlotsList({
         note: prior?.note ?? "",
         isTeamRental: prior?.isTeamRental ?? false,
         pfaReferred: prior?.pfaReferred ?? false,
+        isOnline: prior?.isOnline ?? false,
       });
     }
     return out;
@@ -109,13 +120,13 @@ export function SessionSlotsList({
     const sig = computed
       .map(
         (s) =>
-          `${s.startAt.toISOString()}|${s.note}|${s.isTeamRental ? 1 : 0}|${s.pfaReferred ? 1 : 0}`,
+          `${s.startAt.toISOString()}|${s.note}|${s.isTeamRental ? 1 : 0}|${s.pfaReferred ? 1 : 0}|${s.isOnline ? 1 : 0}`,
       )
       .join("·");
     const current = slots
       .map(
         (s) =>
-          `${s.startAt.toISOString()}|${s.note}|${s.isTeamRental ? 1 : 0}|${s.pfaReferred ? 1 : 0}`,
+          `${s.startAt.toISOString()}|${s.note}|${s.isTeamRental ? 1 : 0}|${s.pfaReferred ? 1 : 0}|${s.isOnline ? 1 : 0}`,
       )
       .join("·");
     if (sig !== current && sig !== lastEmittedRef.current) {
@@ -142,6 +153,10 @@ export function SessionSlotsList({
     );
     onChange(next);
   };
+  const updateOnline = (i: number, isOnline: boolean) => {
+    const next = slots.map((s, idx) => (idx === i ? { ...s, isOnline } : s));
+    onChange(next);
+  };
 
   return (
     <div className="space-y-2">
@@ -159,25 +174,24 @@ export function SessionSlotsList({
               <p className="text-sm font-mono tabular-nums text-fg">
                 {formatRangeShort(slot.startAt, slot.endAt)}
               </p>
-              <div className="flex items-center gap-3 flex-wrap">
-                <label className="inline-flex items-center gap-2 cursor-pointer text-xs text-fg-muted select-none">
-                  <input
-                    type="checkbox"
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {showTeamRental ? (
+                  <SlotPill
                     checked={slot.isTeamRental}
-                    onChange={(e) => updateTeam(i, e.target.checked)}
-                    className="h-3.5 w-3.5 rounded border-line bg-page text-gold focus-visible:ring-2 focus-visible:ring-gold/40 accent-gold"
+                    onChange={(v) => updateTeam(i, v)}
+                    label="Team"
                   />
-                  <span>Team rental</span>
-                </label>
-                <label className="inline-flex items-center gap-2 cursor-pointer text-xs text-fg-muted select-none">
-                  <input
-                    type="checkbox"
-                    checked={slot.pfaReferred}
-                    onChange={(e) => updatePfaReferred(i, e.target.checked)}
-                    className="h-3.5 w-3.5 rounded border-line bg-page text-gold focus-visible:ring-2 focus-visible:ring-gold/40 accent-gold"
-                  />
-                  <span>PFA-referred</span>
-                </label>
+                ) : null}
+                <SlotPill
+                  checked={slot.isOnline}
+                  onChange={(v) => updateOnline(i, v)}
+                  label="Online"
+                />
+                <SlotPill
+                  checked={slot.pfaReferred}
+                  onChange={(v) => updatePfaReferred(i, v)}
+                  label="PFA"
+                />
               </div>
             </div>
             <input
@@ -197,6 +211,34 @@ export function SessionSlotsList({
 
 function slotKey(start: Date, end: Date): string {
   return `${start.toISOString()}|${end.toISOString()}`;
+}
+
+function SlotPill({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+}) {
+  return (
+    <label
+      className={`inline-flex items-center gap-1 cursor-pointer select-none rounded-full border px-2.5 h-6 text-[11px] font-medium transition-colors ${
+        checked
+          ? "border-gold/60 bg-gold/15 text-gold"
+          : "border-line bg-surface text-fg-muted hover:border-line-strong hover:text-fg"
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="sr-only"
+      />
+      <span>{label}</span>
+    </label>
+  );
 }
 
 // Compact label like "10:00 AM – 10:30 AM" (date is implied by the

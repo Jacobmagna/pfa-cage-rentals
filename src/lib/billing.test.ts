@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_RATES_PER_SLOT_CENTS,
   chargeForSession,
+  computeRate,
   rateForSlot,
   slotsBetween,
+  totalFromSnapshot,
   type RateOverride,
+  type ResourceType,
   type SessionInput,
 } from "./billing";
 
@@ -16,7 +19,6 @@ const d = (iso: string) => new Date(iso);
 
 describe("slotsBetween", () => {
   it("counts exact slot-aligned windows", () => {
-    // 9:00 → 10:30 = 3 slots (9:00, 9:30, 10:00)
     expect(slotsBetween(d("2026-05-24T09:00:00Z"), d("2026-05-24T10:30:00Z"))).toBe(3);
   });
 
@@ -25,27 +27,22 @@ describe("slotsBetween", () => {
   });
 
   it("counts a long session spanning hours", () => {
-    // 9:00 → 14:30 = 11 slots
     expect(slotsBetween(d("2026-05-24T09:00:00Z"), d("2026-05-24T14:30:00Z"))).toBe(11);
   });
 
   it("rounds an off-boundary start DOWN to the prior slot", () => {
-    // 9:14 → 10:00 = floor(9:14)=9:00, ceil(10:00)=10:00 → 2 slots
     expect(slotsBetween(d("2026-05-24T09:14:00Z"), d("2026-05-24T10:00:00Z"))).toBe(2);
   });
 
   it("rounds an off-boundary end UP to the next slot", () => {
-    // 9:00 → 10:01 = floor(9:00)=9:00, ceil(10:01)=10:30 → 3 slots
     expect(slotsBetween(d("2026-05-24T09:00:00Z"), d("2026-05-24T10:01:00Z"))).toBe(3);
   });
 
   it("rounds both ends outward (customer-favorable)", () => {
-    // 9:14 → 10:01 = floor 9:00, ceil 10:30 → 3 slots
     expect(slotsBetween(d("2026-05-24T09:14:00Z"), d("2026-05-24T10:01:00Z"))).toBe(3);
   });
 
   it("crosses midnight (overnight session — rare but supported)", () => {
-    // 23:00 → 01:00 next day = 4 slots
     expect(
       slotsBetween(d("2026-05-24T23:00:00Z"), d("2026-05-25T01:00:00Z")),
     ).toBe(4);
@@ -76,7 +73,7 @@ describe("rateForSlot", () => {
   });
 
   it("returns the default weight_room rate when no override matches", () => {
-    expect(rateForSlot("weight_room", coachId, [])).toBe(500);
+    expect(rateForSlot("weight_room", coachId, [])).toBe(700);
   });
 
   it("applies an override when (coachId, resourceType) matches", () => {
@@ -107,6 +104,85 @@ describe("rateForSlot", () => {
     ];
     expect(rateForSlot("cage", coachId, overrides)).toBe(1800);
   });
+
+  it("uses caller-supplied defaults when provided", () => {
+    const customDefaults: Record<ResourceType, number> = {
+      cage: 2400,
+      bullpen: 2400,
+      weight_room: 800,
+    };
+    expect(rateForSlot("cage", coachId, [], customDefaults)).toBe(2400);
+  });
+});
+
+describe("computeRate", () => {
+  const coachId = "coach-1";
+
+  it("returns 0 for an online session regardless of overrides", () => {
+    const overrides: RateOverride[] = [
+      { coachId, resourceType: "cage", ratePer30MinCents: 1500 },
+    ];
+    expect(
+      computeRate({
+        coachId,
+        resourceType: "cage",
+        isOnline: true,
+        overrides,
+      }),
+    ).toBe(0);
+  });
+
+  it("returns the per-coach override when not online", () => {
+    const overrides: RateOverride[] = [
+      { coachId, resourceType: "cage", ratePer30MinCents: 1700 },
+    ];
+    expect(
+      computeRate({
+        coachId,
+        resourceType: "cage",
+        isOnline: false,
+        overrides,
+      }),
+    ).toBe(1700);
+  });
+
+  it("falls back to default when no override matches", () => {
+    expect(
+      computeRate({
+        coachId,
+        resourceType: "weight_room",
+        isOnline: false,
+        overrides: [],
+      }),
+    ).toBe(700);
+  });
+
+  it("uses caller-supplied defaults map", () => {
+    expect(
+      computeRate({
+        coachId,
+        resourceType: "cage",
+        isOnline: false,
+        overrides: [],
+        defaults: { cage: 2400, bullpen: 2400, weight_room: 800 },
+      }),
+    ).toBe(2400);
+  });
+
+  it("online flag wins over both override and custom defaults", () => {
+    const overrides: RateOverride[] = [
+      { coachId, resourceType: "cage", ratePer30MinCents: 1700 },
+    ];
+    expect(
+      computeRate({
+        coachId,
+        resourceType: "cage",
+        isOnline: true,
+        overrides,
+        defaults: { cage: 9999, bullpen: 9999, weight_room: 9999 },
+      }),
+    ).toBe(0);
+  });
 });
 
 describe("chargeForSession", () => {
@@ -136,20 +212,16 @@ describe("chargeForSession", () => {
     });
   });
 
-  it("computes weight_room total at $5/slot default", () => {
-    const session: SessionInput = {
-      ...baseSession,
-      resourceType: "weight_room",
-    };
+  it("computes weight_room total at $7/slot default", () => {
+    const session: SessionInput = { ...baseSession, resourceType: "weight_room" };
     expect(chargeForSession(session, [])).toEqual({
       slots: 3,
-      ratePer30MinCents: 500,
-      totalCents: 1500,
+      ratePer30MinCents: 700,
+      totalCents: 2100,
     });
   });
 
   it("propagates the slot-boundary rounding from slotsBetween", () => {
-    // 9:14 → 10:01 = 3 slots × $22 = $66
     const session: SessionInput = {
       ...baseSession,
       startAt: new Date("2026-05-24T09:14:00Z"),
@@ -157,17 +229,72 @@ describe("chargeForSession", () => {
     };
     expect(chargeForSession(session, []).totalCents).toBe(6600);
   });
+
+  it("zeroes the total when online flag is set", () => {
+    const overrides: RateOverride[] = [
+      { coachId: "coach-1", resourceType: "cage", ratePer30MinCents: 1800 },
+    ];
+    expect(chargeForSession(baseSession, overrides, { isOnline: true })).toEqual({
+      slots: 3,
+      ratePer30MinCents: 0,
+      totalCents: 0,
+    });
+  });
+
+  it("respects caller-supplied defaults", () => {
+    expect(
+      chargeForSession(baseSession, [], {
+        defaults: { cage: 2400, bullpen: 2400, weight_room: 800 },
+      }),
+    ).toEqual({ slots: 3, ratePer30MinCents: 2400, totalCents: 7200 });
+  });
+});
+
+describe("totalFromSnapshot", () => {
+  it("multiplies snapshot rate by slot count", () => {
+    expect(
+      totalFromSnapshot(
+        new Date("2026-05-24T09:00:00Z"),
+        new Date("2026-05-24T10:30:00Z"),
+        1700,
+      ),
+    ).toBe(5100);
+  });
+
+  it("returns 0 when the snapshot rate is 0 (online session)", () => {
+    expect(
+      totalFromSnapshot(
+        new Date("2026-05-24T09:00:00Z"),
+        new Date("2026-05-24T10:30:00Z"),
+        0,
+      ),
+    ).toBe(0);
+  });
+
+  it("preserves the original rate even if a default has since drifted", () => {
+    // Regression test for the snapshot guarantee: if rate_defaults
+    // changes after a session is created, the historical session
+    // must still report at its stamped rate.
+    const historicalRate = 1700;
+    expect(
+      totalFromSnapshot(
+        new Date("2026-05-24T09:00:00Z"),
+        new Date("2026-05-24T10:30:00Z"),
+        historicalRate,
+      ),
+    ).toBe(5100);
+  });
 });
 
 describe("DEFAULT_RATES_PER_SLOT_CENTS", () => {
-  // Surface the constant in a test so a future "let's round to the
-  // nearest dollar" edit gets caught loudly. The numbers match
-  // BRAINSTORM.md and Dad's 2026-05-23 answer.
+  // Surface the constant so a future "let's round to the nearest
+  // dollar" edit gets caught loudly. Matches Dad's Excel + rate_defaults
+  // seed values (verified 2026-05-25).
   it("matches the agreed pricing", () => {
     expect(DEFAULT_RATES_PER_SLOT_CENTS).toEqual({
       cage: 2200,
       bullpen: 2200,
-      weight_room: 500,
+      weight_room: 700,
     });
   });
 });

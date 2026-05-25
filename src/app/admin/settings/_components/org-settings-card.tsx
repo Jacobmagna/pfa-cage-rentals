@@ -15,11 +15,9 @@ const INITIAL_STATE: OrgSettingsActionResult = { ok: true };
 
 export function OrgSettingsCard({
   initialPfaDisplayName,
-  initialPfaVenmoHandle,
   initialPfaZelleContact,
 }: {
   initialPfaDisplayName: string;
-  initialPfaVenmoHandle: string | null;
   initialPfaZelleContact: string | null;
 }) {
   const [state, action, pending] = useActionState(
@@ -31,26 +29,22 @@ export function OrgSettingsCard({
     !state.ok && state.values
       ? state.values.pfaDisplayName
       : initialPfaDisplayName;
-  const venmoDefault =
-    !state.ok && state.values
-      ? state.values.pfaVenmoHandle
-      : (initialPfaVenmoHandle ?? "");
   const zelleDefault =
     !state.ok && state.values
       ? state.values.pfaZelleContact
       : (initialPfaZelleContact ?? "");
 
   const formKey = state.ok
-    ? `ok-${initialPfaDisplayName}-${initialPfaVenmoHandle ?? ""}-${initialPfaZelleContact ?? ""}`
+    ? `ok-${initialPfaDisplayName}-${initialPfaZelleContact ?? ""}`
     : `err-${state.error.code}-${state.error.message}`;
 
   return (
     <section className="rounded-xl border border-line bg-surface overflow-hidden">
       <header className="px-5 py-4 border-b border-line">
-        <h2 className="text-base font-semibold text-fg">PFA payment handles</h2>
+        <h2 className="text-base font-semibold text-fg">PFA Zelle contact</h2>
         <p className="mt-1 text-xs text-fg-muted leading-relaxed">
-          Where coaches will pay PFA from inside the app. These appear on
-          coach-facing surfaces only — never shown to other coaches.
+          The Zelle contact coaches will pay PFA from inside the app.
+          Coach-facing only — never shown to other coaches.
         </p>
       </header>
 
@@ -66,7 +60,7 @@ export function OrgSettingsCard({
 
         <Field
           label="Display name"
-          hint='Shown on the pay button — e.g. "Pay PFA Sports via Venmo".'
+          hint='Shown on the pay button — e.g. "Pay PFA Sports".'
         >
           <input
             type="text"
@@ -79,50 +73,24 @@ export function OrgSettingsCard({
           />
         </Field>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field
-            label="Venmo handle"
-            hint="No @ — just the username."
-            chip={
-              initialPfaVenmoHandle ? (
-                <CopyChip value={`@${initialPfaVenmoHandle}`} />
-              ) : null
-            }
-          >
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle text-sm">
-                @
-              </span>
-              <input
-                type="text"
-                name="pfaVenmoHandle"
-                defaultValue={venmoDefault}
-                maxLength={30}
-                placeholder="pfa-sports"
-                className={`${inputStyles} pl-7`}
-              />
-            </div>
-          </Field>
-
-          <Field
-            label="Zelle contact"
-            hint="Email or phone registered with the bank."
-            chip={
-              initialPfaZelleContact ? (
-                <CopyChip value={initialPfaZelleContact} />
-              ) : null
-            }
-          >
-            <input
-              type="text"
-              name="pfaZelleContact"
-              defaultValue={zelleDefault}
-              maxLength={200}
-              placeholder="email or phone"
-              className={inputStyles}
-            />
-          </Field>
-        </div>
+        <Field
+          label="Zelle contact"
+          hint="Email or phone registered with PFA's bank."
+          chip={
+            initialPfaZelleContact ? (
+              <CopyChip value={initialPfaZelleContact} />
+            ) : null
+          }
+        >
+          <input
+            type="text"
+            name="pfaZelleContact"
+            defaultValue={zelleDefault}
+            maxLength={200}
+            placeholder="email or phone"
+            className={inputStyles}
+          />
+        </Field>
 
         <div className="flex items-center justify-end gap-2">
           <button

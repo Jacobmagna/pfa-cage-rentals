@@ -1,7 +1,7 @@
 // Pure billing helpers. No DB access, no React, no Date.now() — every
-// function is deterministic given its inputs so unit tests in B6 can
-// cover the whole branch space without mocks. Cents discipline:
-// everything is integers, dollars never enter this module.
+// function is deterministic given its inputs so unit tests can cover
+// the whole branch space without mocks. Cents discipline: everything
+// is integers, dollars never enter this module.
 //
 // Slot model: Dad bills in 30-minute increments per Excel grid. A
 // session of any length reserves whole slots ("cage is taken for the
@@ -13,19 +13,25 @@
 // the math stays correct. If PFA ever opens in India (UTC+5:30) or
 // Newfoundland (UTC-3:30), revisit with local-time rounding.
 //
-// Types here will be superseded by Zod-derived types in Stage C once
-// the DB schema for sessions / rate overrides lands (C2–C4). Keeping
-// them inline for now so B6's tests can land before that schema work.
+// Snapshot rule: every sessions_billing row carries its own
+// rate_per_30_min_cents stamped at creation. Reports + admin tables
+// + Excel export read THAT, never recompute from current overrides.
+// The functions in this file are used at WRITE time (compute the
+// rate to stamp), and at TEST time. Display reads use the snapshot.
 
 const SLOT_MINUTES = 30;
 const SLOT_MS = SLOT_MINUTES * 60 * 1000;
 
 export type ResourceType = "cage" | "bullpen" | "weight_room";
 
+// Fallback defaults for code paths that don't pass an explicit
+// `defaults` argument. These mirror the seed values in the
+// `rate_defaults` table — the live values are read from the DB
+// in production. Keep aligned with Dad's Excel (verified 2026-05-25).
 export const DEFAULT_RATES_PER_SLOT_CENTS: Record<ResourceType, number> = {
   cage: 2200,
   bullpen: 2200,
-  weight_room: 500,
+  weight_room: 700,
 };
 
 export type RateOverride = {
@@ -67,43 +73,88 @@ export function slotsBetween(startAt: Date, endAt: Date): number {
 
 /**
  * Returns the cents-per-30-min-slot rate for a (coach, resource type)
- * pair. Falls back to DEFAULT_RATES_PER_SLOT_CENTS when no override
- * matches.
+ * pair. Falls back to the supplied `defaults` map (or the module-level
+ * DEFAULT_RATES_PER_SLOT_CENTS when omitted).
  *
- * Linear scan is intentional: the overrides list is small (one row
- * per coach per resource type they have a special rate for, capped
- * by the coach roster size — dozens, not thousands).
+ * Linear scan is intentional: the overrides list is small.
  */
 export function rateForSlot(
   resourceType: ResourceType,
   coachId: string,
   overrides: RateOverride[],
+  defaults: Record<ResourceType, number> = DEFAULT_RATES_PER_SLOT_CENTS,
 ): number {
   const override = overrides.find(
     (o) => o.coachId === coachId && o.resourceType === resourceType,
   );
-  return override?.ratePer30MinCents ?? DEFAULT_RATES_PER_SLOT_CENTS[resourceType];
+  return override?.ratePer30MinCents ?? defaults[resourceType];
 }
 
 /**
- * Computes the full billing breakdown for one session. Returned shape
- * is what report rows render directly — slot count, the rate that was
- * applied (so the report can flag default vs override), and total in
- * cents.
+ * Computes the cents-per-30-min-slot rate to STAMP onto a new
+ * sessions_billing row. Online sessions always bill at $0 — PFA
+ * collects from the client directly and nets the rental against the
+ * coach's payout, which happens off-app.
+ *
+ * Otherwise: per-coach override → resource-type default.
+ */
+export function computeRate(args: {
+  coachId: string;
+  resourceType: ResourceType;
+  isOnline: boolean;
+  overrides: RateOverride[];
+  defaults?: Record<ResourceType, number>;
+}): number {
+  if (args.isOnline) return 0;
+  return rateForSlot(
+    args.resourceType,
+    args.coachId,
+    args.overrides,
+    args.defaults ?? DEFAULT_RATES_PER_SLOT_CENTS,
+  );
+}
+
+/**
+ * Computes the billing breakdown for a session at WRITE time (i.e.
+ * picks the rate from overrides + defaults). Caller stamps the
+ * resulting ratePer30MinCents onto the row.
+ *
+ * For READ-time totals (reports, admin tables, Excel export), use
+ * totalFromSnapshot instead — never recompute from current overrides.
  */
 export function chargeForSession(
   session: SessionInput,
   overrides: RateOverride[],
+  options: {
+    isOnline?: boolean;
+    defaults?: Record<ResourceType, number>;
+  } = {},
 ): ChargeBreakdown {
   const slots = slotsBetween(session.startAt, session.endAt);
-  const ratePer30MinCents = rateForSlot(
-    session.resourceType,
-    session.coachId,
+  const ratePer30MinCents = computeRate({
+    coachId: session.coachId,
+    resourceType: session.resourceType,
+    isOnline: options.isOnline ?? false,
     overrides,
-  );
+    defaults: options.defaults,
+  });
   return {
     slots,
     ratePer30MinCents,
     totalCents: slots * ratePer30MinCents,
   };
+}
+
+/**
+ * Read-path total: multiply a session's snapshotted rate by its slot
+ * count. This is what every report + display surface should call —
+ * it can NEVER drift from the historical rate, regardless of later
+ * override or default changes.
+ */
+export function totalFromSnapshot(
+  startAt: Date,
+  endAt: Date,
+  ratePer30MinCents: number,
+): number {
+  return slotsBetween(startAt, endAt) * ratePer30MinCents;
 }

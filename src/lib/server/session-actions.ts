@@ -33,12 +33,15 @@ import * as Sentry from "@sentry/nextjs";
 import { db } from "@/db";
 import {
   blockedTimes,
+  coachRateOverrides,
+  rateDefaults,
   resources,
   sessionsBilling,
   users,
 } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import type { AuthedSession } from "@/lib/authz";
+import { computeRate, type ResourceType } from "@/lib/billing";
 import {
   BlockedTimeError,
   ResourceNotFoundError,
@@ -51,6 +54,48 @@ import {
   createSessionSchema,
   updateSessionSchema,
 } from "@/lib/schemas/session";
+
+// Resolves the per-30-min cents rate to stamp on a new (or edited)
+// session row. Reads the coach's override + the resource-type default
+// from the DB, then delegates to billing.computeRate. Online sessions
+// always come back as 0 — PFA collects from the client directly.
+async function resolveRateCents(args: {
+  coachId: string;
+  resourceType: ResourceType;
+  isOnline: boolean;
+}): Promise<number> {
+  const [override] = await db
+    .select()
+    .from(coachRateOverrides)
+    .where(
+      and(
+        eq(coachRateOverrides.coachId, args.coachId),
+        eq(coachRateOverrides.resourceType, args.resourceType),
+      ),
+    );
+  const defaults = await db.select().from(rateDefaults);
+  const defaultsMap: Record<ResourceType, number> = {
+    cage: defaults.find((d) => d.type === "cage")?.ratePer30MinCents ?? 2200,
+    bullpen: defaults.find((d) => d.type === "bullpen")?.ratePer30MinCents ?? 2200,
+    weight_room:
+      defaults.find((d) => d.type === "weight_room")?.ratePer30MinCents ?? 700,
+  };
+  return computeRate({
+    coachId: args.coachId,
+    resourceType: args.resourceType,
+    isOnline: args.isOnline,
+    overrides: override
+      ? [
+          {
+            coachId: override.coachId,
+            resourceType: override.resourceType,
+            ratePer30MinCents: override.ratePer30MinCents,
+          },
+        ]
+      : [],
+    defaults: defaultsMap,
+  });
+}
 
 // Postgres SQLSTATE 23P01 — exclusion constraint violation. Neon's
 // HTTP driver wraps errors; we walk the cause chain so a wrapped
@@ -181,6 +226,13 @@ export async function createSessionInternal(
   );
   if (block) throw new BlockedTimeError(resource.name, block.reason);
 
+  const isOnline = parsed.isOnline ?? false;
+  const ratePer30MinCents = await resolveRateCents({
+    coachId: parsed.coachId,
+    resourceType: resource.type,
+    isOnline,
+  });
+
   let inserted;
   try {
     [inserted] = await db
@@ -194,6 +246,8 @@ export async function createSessionInternal(
         note: parsed.note,
         isTeamRental: parsed.isTeamRental ?? false,
         pfaReferred: parsed.pfaReferred ?? false,
+        isOnline,
+        ratePer30MinCents,
         createdBy: actor.id,
       })
       .returning();
@@ -248,6 +302,9 @@ export async function updateSessionInternal(
   const finalEndAt = parsed.endAt ?? existing.endAt;
   const finalUseType =
     parsed.useType !== undefined ? parsed.useType : existing.useType;
+  const finalCoachId = parsed.coachId ?? existing.coachId;
+  const finalIsOnline =
+    parsed.isOnline !== undefined ? parsed.isOnline : existing.isOnline;
 
   const resource = await getResourceOrThrow(finalResourceId);
   validateUseType(resource.name, resource.type, finalUseType);
@@ -258,6 +315,23 @@ export async function updateSessionInternal(
     finalEndAt,
   );
   if (block) throw new BlockedTimeError(resource.name, block.reason);
+
+  // Re-stamp ratePer30MinCents only when one of its inputs changed.
+  // Editing time/note/teamRental/useType leaves the historical rate
+  // alone — this honors the snapshot guarantee: a coach renegotiating
+  // their rate doesn't retroactively rewrite past sessions even if an
+  // admin later edits one of those sessions.
+  const inputsChanged =
+    finalCoachId !== existing.coachId ||
+    finalResourceId !== existing.resourceId ||
+    finalIsOnline !== existing.isOnline;
+  const nextRate = inputsChanged
+    ? await resolveRateCents({
+        coachId: finalCoachId,
+        resourceType: resource.type,
+        isOnline: finalIsOnline,
+      })
+    : existing.ratePer30MinCents;
 
   let updated;
   try {
@@ -278,6 +352,8 @@ export async function updateSessionInternal(
         ...(parsed.pfaReferred !== undefined && {
           pfaReferred: parsed.pfaReferred,
         }),
+        ...(parsed.isOnline !== undefined && { isOnline: parsed.isOnline }),
+        ratePer30MinCents: nextRate,
       })
       .where(eq(sessionsBilling.id, id))
       .returning();
@@ -409,6 +485,14 @@ export async function createSessionsBatchInternal(
     }
   }
 
+  // Resolve the non-online rate once — coach + resource type are
+  // shared across the batch. Online sessions resolve to 0 directly.
+  const nonOnlineRate = await resolveRateCents({
+    coachId: parsed.coachId,
+    resourceType: resource.type,
+    isOnline: false,
+  });
+
   // Bulk insert in a single statement. drizzle accepts an array on
   // .values() and emits one multi-row INSERT, which Postgres treats
   // atomically — either all rows commit or the statement fails.
@@ -417,17 +501,22 @@ export async function createSessionsBatchInternal(
     inserted = await db
       .insert(sessionsBilling)
       .values(
-        parsed.slots.map((s) => ({
-          coachId: parsed.coachId,
-          resourceId: parsed.resourceId,
-          startAt: s.startAt,
-          endAt: s.endAt,
-          useType: parsed.useType ?? null,
-          note: s.note ?? null,
-          isTeamRental: s.isTeamRental ?? false,
-          pfaReferred: s.pfaReferred ?? false,
-          createdBy: actor.id,
-        })),
+        parsed.slots.map((s) => {
+          const slotIsOnline = s.isOnline ?? false;
+          return {
+            coachId: parsed.coachId,
+            resourceId: parsed.resourceId,
+            startAt: s.startAt,
+            endAt: s.endAt,
+            useType: parsed.useType ?? null,
+            note: s.note ?? null,
+            isTeamRental: s.isTeamRental ?? false,
+            pfaReferred: s.pfaReferred ?? false,
+            isOnline: slotIsOnline,
+            ratePer30MinCents: slotIsOnline ? 0 : nonOnlineRate,
+            createdBy: actor.id,
+          };
+        }),
       )
       .returning();
   } catch (err) {

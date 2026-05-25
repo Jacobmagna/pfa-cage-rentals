@@ -30,6 +30,10 @@ export const createSessionSchema = z.object({
   // PFA-referred flag. Same semantics as isTeamRental — Dad's
   // bookkeeping marker, no billing impact.
   pfaReferred: z.boolean().optional(),
+  // Prepaid online lesson: PFA collected from the client directly.
+  // Forces the snapshot rate to $0 (PFA nets the rental against the
+  // payout to the coach, off-app).
+  isOnline: z.boolean().optional(),
 });
 
 export const updateSessionSchema = createSessionSchema.partial();
@@ -55,6 +59,7 @@ export const createSessionBatchSchema = z.object({
         note: z.string().max(500).nullish(),
         isTeamRental: z.boolean().optional(),
         pfaReferred: z.boolean().optional(),
+        isOnline: z.boolean().optional(),
       }),
     )
     .min(1, "at least one slot is required")

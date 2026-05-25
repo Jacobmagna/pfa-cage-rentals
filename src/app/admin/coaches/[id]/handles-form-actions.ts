@@ -10,7 +10,6 @@ import { updateCoachHandles } from "./actions";
 import { CoachNotFoundError } from "@/lib/errors";
 
 export type HandlesFormValues = {
-  venmoHandle: string;
   zelleContact: string;
 };
 
@@ -24,7 +23,6 @@ export type HandlesActionResult =
 
 function snapshot(formData: FormData): HandlesFormValues {
   return {
-    venmoHandle: formData.get("venmoHandle")?.toString() ?? "",
     zelleContact: formData.get("zelleContact")?.toString() ?? "",
   };
 }
@@ -69,7 +67,6 @@ export async function updateCoachHandlesFormAction(
       userId,
       // Send empty strings as "clear this column" rather than "leave
       // unchanged" — the schema coerces "" → null after Zod's transform.
-      venmoHandle: values.venmoHandle,
       zelleContact: values.zelleContact,
     });
     return { ok: true };

@@ -52,7 +52,6 @@ export default async function AdminPaymentsPage() {
         id: users.id,
         name: users.name,
         email: users.email,
-        venmoHandle: users.venmoHandle,
         zelleContact: users.zelleContact,
       })
       .from(users)
@@ -150,7 +149,6 @@ export default async function AdminPaymentsPage() {
         coachId: c.id,
         coachName: c.name ?? c.email,
         coachEmail: c.email,
-        venmoHandle: c.venmoHandle,
         zelleContact: c.zelleContact,
         owedCents: b?.owedCents ?? 0,
         paidCents: b?.paidCents ?? 0,

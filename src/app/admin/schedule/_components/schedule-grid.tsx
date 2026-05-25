@@ -64,6 +64,7 @@ export type ScheduleSession = {
   note: string | null;
   isTeamRental: boolean;
   pfaReferred: boolean;
+  isOnline: boolean;
 };
 
 export type ScheduleBlock = {
@@ -456,6 +457,7 @@ export function ScheduleGrid({
           note: dialog.session.note,
           isTeamRental: dialog.session.isTeamRental,
           pfaReferred: dialog.session.pfaReferred,
+          isOnline: dialog.session.isOnline,
         }
       : undefined;
 

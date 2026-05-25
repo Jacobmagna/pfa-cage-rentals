@@ -38,10 +38,14 @@ export const users = pgTable("users", {
   emailVerified: timestamp("email_verified", { mode: "date" }),
   image: text("image"),
   role: roleEnum("role").notNull().default("coach"),
-  // Payment handles. Coach-facing surfaces never expose these to other
-  // coaches; admin sees them on /admin/coaches/[id] and /admin/payments
-  // as reconciliation hints. NULL = not set. Stored without the @
-  // prefix (Venmo) — the UI prepends it on display.
+  // Payment handles. Admin sees Zelle on /admin/coaches/[id] and
+  // /admin/payments as a reconciliation hint. Coach-facing surfaces
+  // never expose them. NULL = not set.
+  //
+  // venmoHandle is DORMANT (no UI consumer) — the business Venmo
+  // account charges fees on incoming payments so Dad doesn't accept
+  // Venmo. Column kept on the off chance Venmo Business changes their
+  // pricing, to avoid a destructive migration.
   venmoHandle: text("venmo_handle"),
   zelleContact: text("zelle_contact"),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
@@ -49,11 +53,15 @@ export const users = pgTable("users", {
 });
 
 // Org-wide settings singleton. One row with id='default' (seeded in
-// the migration). Holds the handles coaches will deep-link to when
-// paying PFA — separate from any one admin's personal handles so Dad
-// can change the receiver without touching his user record. The
-// `pfaDisplayName` ("Pay PFA Sports") is what the coach UI shows on
-// the Pay button label.
+// the migration). Holds PFA's Zelle contact that admin tracks as
+// the canonical "pay PFA here" reference. Separate from any one
+// admin's personal handles so Dad can change the receiver without
+// touching his user record. The `pfaDisplayName` ("PFA Sports") is
+// the label used on admin surfaces that reference the org.
+//
+// pfaVenmoHandle is DORMANT (no UI consumer) — same Venmo-fees
+// reason as users.venmoHandle. Coach-facing /coach/payments surface
+// was removed 2026-05-25; values here are admin-only reference data.
 export const orgSettings = pgTable("org_settings", {
   id: text("id").primaryKey(),
   pfaVenmoHandle: text("pfa_venmo_handle"),
@@ -248,6 +256,17 @@ export const sessionsBilling = pgTable(
     // coach happen outside the app. Doesn't affect what the coach owes
     // PFA. Filterable on /admin/sessions and exported in the report.
     pfaReferred: boolean("pfa_referred").notNull().default(false),
+    // Prepaid online lesson: client paid PFA directly in full, PFA nets
+    // the rental fee against the payout owed to the coach. On the web
+    // app these sessions always bill at $0 — the actual money flow
+    // happens off-app. Resource still gets blocked normally.
+    isOnline: boolean("is_online").notNull().default(false),
+    // Cents-per-30-min rate stamped at row creation. Decouples the
+    // session's billing rate from later changes to coach_rate_overrides
+    // or rate_defaults — a renegotiation today never re-bills past
+    // sessions. Reports + Excel + /admin/sessions read THIS, never
+    // recompute from current overrides. Online sessions get 0.
+    ratePer30MinCents: integer("rate_per_30_min_cents").notNull().default(0),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),

@@ -29,81 +29,85 @@ export default async function Home({
   const errorMessage = error ? ERROR_COPY[error] : undefined;
 
   return (
-    <main className="flex flex-1 items-center justify-center px-6 py-12">
-      <div className="w-full max-w-sm">
-        <div className="rounded-lg border border-line bg-surface px-8 py-10 shadow-[0_1px_0_0_rgba(255,255,255,0.04)_inset]">
-          <div className="text-center mb-8">
-            <Image
-              src="/pfa-logo.png"
-              alt="PFA Sports"
-              width={813}
-              height={813}
-              priority
-              className="mx-auto h-20 w-auto"
-            />
-            <h1 className="mt-3 text-sm uppercase tracking-[0.28em] text-gold font-semibold">
-              Cage Rentals
-            </h1>
-          </div>
+    <main className="relative flex flex-1 flex-col items-center justify-center px-6 py-16">
+      {/* Ambient gold radial glow behind the card so the centered layout
+          anchors visually instead of floating in pure black. Decorative,
+          pointer-events: none so it doesn't intercept anything. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 flex items-center justify-center"
+      >
+        <div className="h-[640px] w-[640px] max-w-full rounded-full bg-gold/[0.06] blur-3xl" />
+      </div>
 
-          <div className="space-y-4">
-            <GoogleSignInButton />
-
-            <div className="flex items-center gap-3 text-xs text-fg-subtle">
-              <div className="h-px flex-1 bg-line" />
-              <span className="uppercase tracking-wider">or</span>
-              <div className="h-px flex-1 bg-line" />
-            </div>
-
-            <form action={requestMagicLink} className="space-y-3">
-              <label className="block">
-                <span className="block text-xs uppercase tracking-wider text-fg-muted mb-1.5">
-                  Email
-                </span>
-                <input
-                  type="email"
-                  name="email"
-                  required
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                  className="w-full rounded-md bg-page border border-line text-fg placeholder:text-fg-subtle px-3 py-2 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
-                />
-              </label>
-              {errorMessage ? (
-                <p
-                  role="alert"
-                  className="text-xs text-red-400 leading-relaxed"
-                >
-                  {errorMessage}
-                </p>
-              ) : null}
-              <button
-                type="submit"
-                className="w-full rounded-md border border-line bg-surface-2 text-fg h-10 px-4 text-sm font-medium hover:bg-surface transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
-              >
-                Email me a sign-in link
-              </button>
-            </form>
-          </div>
+      <div className="relative w-full max-w-sm">
+        <div className="mb-10 text-center">
+          <Image
+            src="/pfa-logo.png"
+            alt="PFA Sports"
+            width={813}
+            height={813}
+            priority
+            className="mx-auto h-24 w-auto"
+          />
+          <h1 className="mt-5 text-base font-semibold tracking-[0.32em] text-gold uppercase">
+            Cage Rentals
+          </h1>
+          <p className="mt-3 text-sm text-fg-muted">
+            Schedule and bill your time at the PFA facility.
+          </p>
         </div>
 
-        <p className="mt-6 text-center text-xs text-fg-subtle">
-          Part of{" "}
+        <div className="rounded-xl border border-line bg-surface/80 p-6 shadow-[0_1px_0_0_rgba(255,255,255,0.04)_inset,0_20px_60px_-20px_rgba(0,0,0,0.5)] backdrop-blur-sm">
+          <GoogleSignInButton />
+
+          <div className="my-5 flex items-center gap-3">
+            <div className="h-px flex-1 bg-line" />
+            <span className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
+              or with email
+            </span>
+            <div className="h-px flex-1 bg-line" />
+          </div>
+
+          <form action={requestMagicLink} className="space-y-3">
+            <input
+              type="email"
+              name="email"
+              required
+              autoComplete="email"
+              aria-label="Email address"
+              placeholder="you@example.com"
+              className="w-full rounded-md border border-line bg-page px-3 h-10 text-sm text-fg placeholder:text-fg-subtle transition-colors focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+            />
+            {errorMessage ? (
+              <p role="alert" className="text-xs text-danger leading-relaxed">
+                {errorMessage}
+              </p>
+            ) : null}
+            <button
+              type="submit"
+              className="w-full rounded-md border border-line bg-surface-2 text-fg h-10 px-4 text-sm font-medium transition-colors hover:bg-surface hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+            >
+              Send me a sign-in link
+            </button>
+          </form>
+        </div>
+
+        <p className="mt-8 flex items-center justify-center gap-3 text-[11px] text-fg-subtle">
           <Link
             href="https://pfasports.com"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-fg-muted hover:text-gold transition-colors"
+            className="transition-colors hover:text-fg-muted"
           >
             PFA Sports
           </Link>
-        </p>
-        <p className="mt-2 text-center text-xs text-fg-subtle flex gap-3 justify-center">
-          <Link href="/privacy" className="hover:text-fg-muted transition-colors">
+          <span aria-hidden className="text-fg-disabled">·</span>
+          <Link href="/privacy" className="transition-colors hover:text-fg-muted">
             Privacy
           </Link>
-          <span>·</span>
-          <Link href="/terms" className="hover:text-fg-muted transition-colors">
+          <span aria-hidden className="text-fg-disabled">·</span>
+          <Link href="/terms" className="transition-colors hover:text-fg-muted">
             Terms
           </Link>
         </p>

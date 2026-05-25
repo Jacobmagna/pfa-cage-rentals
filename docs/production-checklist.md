@@ -523,12 +523,9 @@ is a second Resend account for PFA, free tier covers the volume.
 - Est: 6–10 h depending on depth.
 - Priority: P1 — pre-launch finish.
 
-### J4c. Drag-self-overlap snap-back UX — `[ ]`
-- **Problem (caught in E+F+G deep sweep, 2026-05-24):** in the schedule grid, cells underneath a dragged session are marked `disabled` droppables (so the visible drop target wins). But that means moving a 10:00–11:00 session by a half-slot to 10:30 doesn't work — the 10:30 cell is "occupied" by the session itself and rejects the drop. Admin has to drag fully out of the session's footprint and back.
-- **Fix sketch:** exclude the actively-dragged session's own footprint when computing `occupiedSlots`. The `draggingSessionId` is already tracked in state.
-- **Acceptance:** drag a 60-min session up or down by 30 minutes within the same resource row.
-- Est: 30 min.
-- Priority: P2 — minor UX, not blocking.
+### J4c. Drag-self-overlap snap-back UX — `[x]`
+- **Fix:** `src/app/admin/schedule/_components/schedule-grid.tsx` — added `if (s.id === draggingSessionId) continue;` to the loop that builds `occupiedSlots`. With this skip, the cells under the actively-dragged session are no longer marked occupied, so dropping at a half-slot inside the source footprint works.
+- **Verification:** static reasoning (3-line change, typecheck + lint + tests all pass; pre-drag DOM state confirmed unchanged — same 2 disabled cells for a 60-min session). Live drag couldn't be cleanly exercised via synthetic PointerEvents because dnd-kit's PointerSensor uses native listeners that don't fully trust dispatched events — the next live use by Dad will be the real verification.
 
 ### J5. Loading skeletons on async pages — `[x]`
 - Extracted `AppShell` out of every page and into route-segment layouts at `src/app/admin/layout.tsx` and `src/app/coach/layout.tsx`. The shell now renders before the page suspends, so `loading.tsx` files render inside the nav + footer rather than replacing them — the chrome stays visible during route transitions.

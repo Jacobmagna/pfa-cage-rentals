@@ -411,8 +411,17 @@ export function ScheduleGrid({
 
   // Sessions/blocks claim multi-slot rectangles; the cells under them
   // get pointer-events disabled so the overlay's drop target wins.
+  //
+  // J4c: skip the actively-dragged session's own footprint when
+  // building this set. Otherwise dragging a 10:00–11:00 session to
+  // 10:30 fails because every cell inside the source rectangle is
+  // marked "occupied by itself" and rejects the drop. The session
+  // dragged out cleanly when the cursor crossed into a neighbor
+  // resource row, but a half-slot shift within the same row was
+  // impossible without dragging fully out + back.
   const occupiedSlots = new Set<string>();
   for (const s of visibleSessions) {
+    if (s.id === draggingSessionId) continue;
     const placement = placeOnGrid(s.startAt, s.endAt);
     if (!placement) continue;
     for (let i = 0; i < placement.span; i++) {

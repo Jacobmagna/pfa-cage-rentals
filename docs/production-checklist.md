@@ -589,23 +589,13 @@ is a second Resend account for PFA, free tier covers the volume.
 
 # STAGE K — Launch readiness
 
-### K1. README.md — `[ ]`
-- 1-page project intro: what it is, stack overview, local dev setup (`cp .env.example .env.local`, `npm install`, `npm run db:migrate`, `npm run dev`), deploy procedure (push to main).
-- Link to BRAINSTORM, design-spec, runbook.
-- Acceptance: a contractor could clone, run, and deploy without asking you a question.
-- Est: 1 h.
+### K1. README.md — `[x]`
+- Replaced the stock create-next-app boilerplate with a real intro: what the app is, full stack list, `cp .env.example`/install/migrate/seed/dev quickstart, script table, deploy procedure (direct-to-main + the pre-prod-migration step), and links to BRAINSTORM / design-spec / production-checklist / runbook.
+- Also added the missing `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` entries to `.env.example` (they were referenced in code but not in the example file).
 
-### K2. docs/runbook.md — `[ ]`
-- Sections:
-  - **Site down — diagnostic order:** Vercel status → Neon status → DNS at GoDaddy → CSP block in Sentry → magic-link rate limit triggered.
-  - **Restore from PITR:** exact Neon dashboard procedure.
-  - **Rotate a leaked secret:** procedure for rotating `AUTH_SECRET`, `AUTH_GOOGLE_SECRET`, `AWS_SES_*`, `UPSTASH_*`, `SENTRY_*`, `DATABASE_URL`.
-  - **Add a new coach manually:** psql snippet to insert with role + audit.
-  - **Trigger redeploy:** Vercel UI + git empty-commit fallback.
-  - **Customer (coach) reports billing dispute:** how to query audit_log + session history.
-  - **Onboard a new admin:** add email to `ADMIN_EMAILS`, deploy, ask them to sign in.
-- Acceptance: a contractor could resolve each scenario using only this doc.
-- Est: 3 h.
+### K2. docs/runbook.md — `[x]`
+- New file with every required section: site-down diagnostic order (Vercel → Neon → DNS at GoDaddy → CSP → rate-limit), PITR restore from Neon, secret rotation for `AUTH_SECRET` / Google OAuth / `AUTH_RESEND_KEY` / `UPSTASH_*` / `DATABASE_URL` / Sentry, manual coach insert, redeploy via empty commit or Vercel UI, billing-dispute audit-log queries, and admin onboarding (which is hardcoded in `src/lib/admin-emails.ts`, not env-var — clarified that in the doc).
+- Added a "delete a coach (account deletion request)" section that points at the J9 UI as the canonical path, with SQL-only fallback for emergencies.
 
 ### K3. docs/architecture.md — `[ ]`
 - One-page request-flow diagram (textual ASCII or Mermaid): Browser → Vercel Edge → Next.js server function → Auth.js or business action → Drizzle → Neon Postgres. Side branches: Sentry, Resend/SES, Upstash.

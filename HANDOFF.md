@@ -79,7 +79,7 @@ K10  Historical import committed      [x]   345 sessions in prod
 
 ## Workflow conventions (active)
 
-- **Push direct to main.** No PR ceremony. Pre-commit hook runs lint-staged eslint + `tsc --noEmit`; CI runs lint, typecheck, build, `npm run test:coverage` (100% threshold on billing.ts).
+- **Push direct to main.** No PR ceremony. Pre-commit hook runs lint-staged eslint + `tsc --noEmit`; CI runs lint, typecheck, build, `npm run test:coverage` (100% threshold on billing.ts) AND `npm run test:integration` (60 tests against the integration Neon branch). The E2E job is temporarily disabled in `.github/workflows/ci.yml` (`if: false`) — its single spec is stale relative to the multi-slot session form. Re-enable when updating the spec. `INTEGRATION_DATABASE_URL` is set in repo secrets (2026-05-26) pointing at a Neon branch off prod; `setup.ts` refuses to run if it equals `DATABASE_URL`.
 - **Deep-sweep verification every ~3–4 items.** Recent sweeps already landed in batched commits.
 - **For product items**, give a pre-scope rundown before executing so Jacob can correct scope. Use `AskUserQuestion` for real design calls; otherwise pick sensible defaults and call them out.
 - **Browser-verify every UI change** via the preview tool (`.claude/launch.json` has `autoPort: true` so dev preview falls back to a free port when 3000 is held by another project). Dev session cookie pattern: write a small `*.mts` script that loads `.env.local` via dotenv, inserts an Auth.js sessions row, then `document.cookie = "authjs.session-token=..."`. **Always cleanup the dev session + any fixture data + delete the `.mts` script before commit.**

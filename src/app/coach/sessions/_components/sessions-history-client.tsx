@@ -13,6 +13,7 @@ import type { ResourceOption } from "./types";
 import { TeamRentalBadge } from "@/app/_components/team-rental-badge";
 import { PfaReferredBadge } from "@/app/_components/pfa-referred-badge";
 import { OnlineBadge } from "@/app/_components/online-badge";
+import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 
 // Renders the history list, owns the edit-dialog open/close + the
 // row delete pending state. Pagination links are server-side
@@ -48,19 +49,21 @@ export function SessionsHistoryClient({
 }) {
   const [editingRow, setEditingRow] = useState<HistoryRow | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
+  const [confirmRow, setConfirmRow] = useState<HistoryRow | null>(null);
+  const [isDeleting, startTransition] = useTransition();
 
   const onDelete = (row: HistoryRow) => {
-    const when = formatWhen(row.startAt, row.endAt);
-    if (
-      !confirm(`Delete ${row.resourceName} session (${when})?\nThis can't be undone.`)
-    ) {
-      return;
-    }
+    setConfirmRow(row);
+  };
+
+  const handleConfirmDelete = () => {
+    const row = confirmRow;
+    if (!row) return;
     setPendingDeleteId(row.id);
     startTransition(async () => {
       try {
         await deleteOwnSessionAction(row.id);
+        setConfirmRow(null);
       } finally {
         setPendingDeleteId(null);
       }
@@ -210,6 +213,22 @@ export function SessionsHistoryClient({
         onClose={() => setEditingRow(null)}
         resources={resources}
         initial={initialForDialog}
+      />
+
+      <ConfirmDialog
+        open={confirmRow !== null}
+        onOpenChange={(next) => {
+          if (!next) setConfirmRow(null);
+        }}
+        title="Delete this session?"
+        description={
+          confirmRow
+            ? `${confirmRow.resourceName} · ${formatWhen(confirmRow.startAt, confirmRow.endAt)}. This can't be undone.`
+            : undefined
+        }
+        confirmLabel={isDeleting ? "Deleting…" : "Delete session"}
+        onConfirm={handleConfirmDelete}
+        isPending={isDeleting}
       />
     </>
   );

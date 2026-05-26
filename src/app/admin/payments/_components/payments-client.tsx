@@ -5,6 +5,7 @@ import { Check, ClipboardCopy, Pencil, Plus, Trash2 } from "lucide-react";
 import { confirmPayment, deletePayment } from "../actions";
 import { PaymentDialog, type PaymentInitialValues } from "./payment-dialog";
 import { PFA_TIMEZONE } from "@/lib/timezone";
+import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 
 // Top-level client island for /admin/payments. Owns:
 //   - record/edit dialog open state
@@ -76,7 +77,8 @@ export function PaymentsClient({
 }) {
   const [dialog, setDialog] = useState<DialogState>({ mode: "closed" });
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
+  const [confirmRow, setConfirmRow] = useState<RecentPaymentRow | null>(null);
+  const [isDeleting, startTransition] = useTransition();
 
   const openCreate = (coachId?: string) =>
     setDialog({ mode: "create", coachId });
@@ -96,17 +98,17 @@ export function PaymentsClient({
   };
 
   const onDelete = (row: RecentPaymentRow) => {
-    if (
-      !confirm(
-        `Delete ${formatDollars(row.amountCents)} ${row.method} payment from ${row.coachName} (${formatDate(row.paidAt)})?\nThis can't be undone.`,
-      )
-    ) {
-      return;
-    }
+    setConfirmRow(row);
+  };
+
+  const handleConfirmDelete = () => {
+    const row = confirmRow;
+    if (!row) return;
     setPendingActionId(row.id);
     startTransition(async () => {
       try {
         await deletePayment(row.id);
+        setConfirmRow(null);
       } finally {
         setPendingActionId(null);
       }
@@ -167,6 +169,22 @@ export function PaymentsClient({
         prefillCoachId={
           dialog.mode === "create" ? dialog.coachId ?? null : null
         }
+      />
+
+      <ConfirmDialog
+        open={confirmRow !== null}
+        onOpenChange={(next) => {
+          if (!next) setConfirmRow(null);
+        }}
+        title="Delete this payment?"
+        description={
+          confirmRow
+            ? `${formatDollars(confirmRow.amountCents)} ${confirmRow.method} from ${confirmRow.coachName} on ${formatDate(confirmRow.paidAt)}. This can't be undone.`
+            : undefined
+        }
+        confirmLabel={isDeleting ? "Deleting…" : "Delete payment"}
+        onConfirm={handleConfirmDelete}
+        isPending={isDeleting}
       />
     </>
   );

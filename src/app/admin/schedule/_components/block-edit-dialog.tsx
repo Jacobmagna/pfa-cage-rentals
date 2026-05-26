@@ -17,7 +17,8 @@ import {
 } from "../form-actions";
 import type { ResourceOption } from "@/app/admin/sessions/_components/sessions-client";
 import { TimeSelect } from "@/app/_components/time-select";
-import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
+import { formatPfaDate, formatPfaDateMedium, formatPfaTime } from "@/lib/timezone";
+import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 
 export type BlockEditInitialValues = {
   id: string;
@@ -46,6 +47,7 @@ export function BlockEditDialog({
     INITIAL_STATE,
   );
   const [deleting, setDeleting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -94,18 +96,17 @@ export function BlockEditDialog({
     };
   }, [initial, state]);
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (!initial) return;
-    if (
-      !confirm(
-        `Delete block "${initial.reason}" on this resource?\nThis can't be undone.`,
-      )
-    ) {
-      return;
-    }
+    setConfirmOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!initial) return;
     setDeleting(true);
     try {
       await deleteBlockAction(initial.id);
+      setConfirmOpen(false);
       onClose();
     } finally {
       setDeleting(false);
@@ -253,6 +254,22 @@ export function BlockEditDialog({
           </div>
         </div>
       </form>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={(next) => {
+          if (!deleting) setConfirmOpen(next);
+        }}
+        title="Delete this block?"
+        description={
+          initial
+            ? `"${initial.reason}" · ${formatPfaDateMedium(initial.startAt)} · ${formatPfaTime(initial.startAt)} – ${formatPfaTime(initial.endAt)}. This can't be undone.`
+            : undefined
+        }
+        confirmLabel={deleting ? "Deleting…" : "Delete block"}
+        onConfirm={handleConfirmDelete}
+        isPending={deleting}
+      />
     </dialog>
   );
 }

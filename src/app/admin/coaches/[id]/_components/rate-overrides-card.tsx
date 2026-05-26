@@ -19,6 +19,7 @@ import {
   type RateOverrideActionResult,
 } from "../form-actions";
 import { formatPfaDateMedium } from "@/lib/timezone";
+import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 
 const INITIAL_STATE: RateOverrideActionResult = { ok: true };
 
@@ -79,6 +80,7 @@ function Row({
   );
   const [removing, startRemove] = useTransition();
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const hasOverride = row.override !== null;
   const defaultDollars = formatDollars(row.defaultCents);
@@ -95,23 +97,22 @@ function Row({
 
   const handleRemove = () => {
     if (!hasOverride) return;
-    if (
-      !confirm(
-        `Remove the override for ${RESOURCE_LABEL[row.resourceType]}? Future sessions will bill at the default of $${defaultDollars} per 30 min.`,
-      )
-    ) {
-      return;
-    }
     setRemoveError(null);
+    setConfirmOpen(true);
+  };
+
+  const handleConfirmRemove = () => {
     startRemove(async () => {
       try {
         await deleteRateOverride(coachId, row.resourceType);
+        setConfirmOpen(false);
       } catch (err) {
         setRemoveError(
           err instanceof Error
             ? err.message
             : "Couldn't remove the override.",
         );
+        setConfirmOpen(false);
       }
     });
   };
@@ -210,6 +211,24 @@ function Row({
           </button>
         ) : null}
       </div>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={(next) => {
+          if (!removing) setConfirmOpen(next);
+        }}
+        title="Remove this rate override?"
+        description={
+          <>
+            Future sessions for {RESOURCE_LABEL[row.resourceType]} will bill
+            at the default of ${defaultDollars} per 30 min. Past sessions
+            keep the rate they were billed at.
+          </>
+        }
+        confirmLabel={removing ? "Removing…" : "Remove override"}
+        onConfirm={handleConfirmRemove}
+        isPending={removing}
+      />
     </form>
   );
 }

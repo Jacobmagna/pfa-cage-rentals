@@ -8,6 +8,7 @@ import { PFA_TIMEZONE } from "@/lib/timezone";
 import { TeamRentalBadge } from "@/app/_components/team-rental-badge";
 import { PfaReferredBadge } from "@/app/_components/pfa-referred-badge";
 import { OnlineBadge } from "@/app/_components/online-badge";
+import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 
 // Top-level client island for the admin sessions page. Owns the
 // dialog open/close state (create vs edit), the row delete pending
@@ -67,26 +68,25 @@ export function SessionsClient({
     { mode: "closed" } | { mode: "create" } | { mode: "edit"; row: SessionRow }
   >({ mode: "closed" });
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
+  const [confirmRow, setConfirmRow] = useState<SessionRow | null>(null);
+  const [isDeleting, startTransition] = useTransition();
 
   const openCreate = () => setDialogState({ mode: "create" });
   const openEdit = (row: SessionRow) => setDialogState({ mode: "edit", row });
   const close = () => setDialogState({ mode: "closed" });
 
   const onDelete = (row: SessionRow) => {
-    const coachLabel = row.coachName ?? row.coachEmail;
-    const when = formatWhen(row.startAt, row.endAt);
-    if (
-      !confirm(
-        `Delete ${row.resourceName} session for ${coachLabel} (${when})?\nThis can't be undone.`,
-      )
-    ) {
-      return;
-    }
+    setConfirmRow(row);
+  };
+
+  const handleConfirmDelete = () => {
+    const row = confirmRow;
+    if (!row) return;
     setPendingDeleteId(row.id);
     startTransition(async () => {
       try {
         await deleteSessionAction(row.id);
+        setConfirmRow(null);
       } finally {
         setPendingDeleteId(null);
       }
@@ -234,6 +234,22 @@ export function SessionsClient({
         coachOptions={coachOptions}
         resourceOptions={resourceOptions}
         initial={initialValues}
+      />
+
+      <ConfirmDialog
+        open={confirmRow !== null}
+        onOpenChange={(next) => {
+          if (!next) setConfirmRow(null);
+        }}
+        title="Delete this session?"
+        description={
+          confirmRow
+            ? `${confirmRow.coachName ?? confirmRow.coachEmail} · ${confirmRow.resourceName} · ${formatWhen(confirmRow.startAt, confirmRow.endAt)}. This can't be undone.`
+            : undefined
+        }
+        confirmLabel={isDeleting ? "Deleting…" : "Delete session"}
+        onConfirm={handleConfirmDelete}
+        isPending={isDeleting}
       />
     </>
   );

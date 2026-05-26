@@ -17,6 +17,7 @@ import {
   accounts,
   auditLog,
   sessions as authSessions,
+  coachRateOverrides,
   sessionsBilling,
   users,
   verificationTokens,
@@ -25,12 +26,16 @@ import {
   anonymizedEmailFor,
   deleteCoachInternal,
   FORMER_COACH_NAME,
+  mergeSyntheticCoachInternal,
 } from "@/lib/server/user-actions";
 import { createSessionInternal } from "@/lib/server/session-actions";
+import { upsertRateOverrideInternal } from "@/lib/server/rate-override-actions";
 import {
   CannotDeleteAdminError,
   CoachAlreadyDeletedError,
   CoachNotFoundError,
+  MergeSourceNotSyntheticError,
+  MergeTargetSameAsSourceError,
 } from "@/lib/errors";
 import {
   ensureFixtureUsers,
@@ -212,5 +217,283 @@ describe("deleteCoachInternal", () => {
     await expect(
       deleteCoachInternal(fixtures.admin, { coachId: coach.id }),
     ).rejects.toBeInstanceOf(CoachAlreadyDeletedError);
+  });
+});
+
+// ---- mergeSyntheticCoachInternal ---------------------------------------
+//
+// Synthetic = imported via historical-import flow (email
+// "historical-<slug>@imported.local"). Merge re-points every
+// sessions_billing.coach_id source→target, drops any source rate
+// overrides, hard-deletes the source user. No transaction (neon-http);
+// re-running on partial failure is the recovery path.
+
+async function createSyntheticCoach(canonicalName = "imported-coach") {
+  // syntheticEmailFor lives in src/lib/import/commit.ts but inlining
+  // the literal pattern here keeps this test independent of that
+  // module's signature.
+  const slug = `${canonicalName}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const [row] = await db
+    .insert(users)
+    .values({
+      email: `historical-${slug}@imported.local`,
+      name: canonicalName,
+      role: "coach",
+    })
+    .returning();
+  return row;
+}
+
+describe("mergeSyntheticCoachInternal", () => {
+  it("re-points sessions, drops source overrides, hard-deletes source, audits", async () => {
+    const source = await createSyntheticCoach("Imported David");
+    const target = await createThrowawayCoach("Real David");
+
+    // Two sessions on the synthetic.
+    const s1 = await createSessionInternal(fixtures.admin, {
+      coachId: source.id,
+      resourceId: seeded.cage1.id,
+      startAt: tomorrowAt(10),
+      endAt: tomorrowAt(11),
+      useType: "hitting",
+    });
+    const s2 = await createSessionInternal(fixtures.admin, {
+      coachId: source.id,
+      resourceId: seeded.cage1.id,
+      startAt: tomorrowAt(13),
+      endAt: tomorrowAt(14),
+      useType: "hitting",
+    });
+
+    // A rate override on the synthetic — should be dropped.
+    await upsertRateOverrideInternal(fixtures.admin, {
+      coachId: source.id,
+      resourceType: "cage",
+      ratePer30MinCents: 1500,
+    });
+
+    const result = await mergeSyntheticCoachInternal(
+      fixtures.admin,
+      source.id,
+      target.id,
+    );
+    expect(result.movedSessions).toBe(2);
+
+    // Sessions re-pointed.
+    const sourceSessions = await db
+      .select()
+      .from(sessionsBilling)
+      .where(eq(sessionsBilling.coachId, source.id));
+    expect(sourceSessions).toHaveLength(0);
+
+    const targetSessions = await db
+      .select()
+      .from(sessionsBilling)
+      .where(eq(sessionsBilling.coachId, target.id));
+    const targetIds = targetSessions.map((s) => s.id).sort();
+    expect(targetIds).toEqual([s1.id, s2.id].sort());
+
+    // Source overrides dropped.
+    const remainingOverrides = await db
+      .select()
+      .from(coachRateOverrides)
+      .where(eq(coachRateOverrides.coachId, source.id));
+    expect(remainingOverrides).toHaveLength(0);
+
+    // Source user hard-deleted (not soft).
+    const sourceUser = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, source.id));
+    expect(sourceUser).toHaveLength(0);
+
+    // Audit entry captured.
+    const [audit] = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.entityType, "user"),
+          eq(auditLog.entityId, source.id),
+          eq(auditLog.action, "delete"),
+        ),
+      );
+    expect(audit).toBeDefined();
+    expect(audit.actorUserId).toBe(fixtures.admin.id);
+    const diff = audit.diff as {
+      before: Record<string, unknown>;
+      after: Record<string, unknown>;
+    };
+    expect(diff.before.email).toBe(source.email);
+    expect(diff.after.mergedInto).toBe(target.id);
+    expect(diff.after.sessionsMoved).toBe(2);
+  });
+
+  it("snapshotted ratePer30MinCents on moved sessions is preserved", async () => {
+    // Re-pointing the coach_id doesn't recompute rate from the target's
+    // overrides; the source's snapshot wins because it was stamped at
+    // write time. Belt-and-suspenders against any future refactor that
+    // tries to be "helpful" mid-merge.
+    const source = await createSyntheticCoach("imported-rate");
+    const target = await createThrowawayCoach("Real Rate");
+
+    await upsertRateOverrideInternal(fixtures.admin, {
+      coachId: source.id,
+      resourceType: "cage",
+      ratePer30MinCents: 1500,
+    });
+    const session = await createSessionInternal(fixtures.admin, {
+      coachId: source.id,
+      resourceId: seeded.cage1.id,
+      startAt: tomorrowAt(10),
+      endAt: tomorrowAt(11),
+      useType: "hitting",
+    });
+    expect(session.ratePer30MinCents).toBe(1500);
+
+    // Target has a different override at 2500.
+    await upsertRateOverrideInternal(fixtures.admin, {
+      coachId: target.id,
+      resourceType: "cage",
+      ratePer30MinCents: 2500,
+    });
+
+    await mergeSyntheticCoachInternal(fixtures.admin, source.id, target.id);
+
+    const [moved] = await db
+      .select()
+      .from(sessionsBilling)
+      .where(eq(sessionsBilling.id, session.id));
+    expect(moved.coachId).toBe(target.id);
+    expect(moved.ratePer30MinCents).toBe(1500);
+  });
+
+  it("succeeds with zero sessions and zero overrides on the synthetic", async () => {
+    const source = await createSyntheticCoach("empty-synthetic");
+    const target = await createThrowawayCoach("Real Target");
+
+    const result = await mergeSyntheticCoachInternal(
+      fixtures.admin,
+      source.id,
+      target.id,
+    );
+    expect(result.movedSessions).toBe(0);
+
+    const sourceUser = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, source.id));
+    expect(sourceUser).toHaveLength(0);
+  });
+
+  it("rejects merge when source is not synthetic", async () => {
+    const source = await createThrowawayCoach("Real Coach (not synthetic)");
+    const target = await createThrowawayCoach("Other Real Coach");
+
+    await expect(
+      mergeSyntheticCoachInternal(fixtures.admin, source.id, target.id),
+    ).rejects.toBeInstanceOf(MergeSourceNotSyntheticError);
+
+    // Source row is untouched.
+    const [stillThere] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, source.id));
+    expect(stillThere).toBeDefined();
+  });
+
+  it("rejects merge when source === target", async () => {
+    const source = await createSyntheticCoach("self-merge");
+    await expect(
+      mergeSyntheticCoachInternal(fixtures.admin, source.id, source.id),
+    ).rejects.toBeInstanceOf(MergeTargetSameAsSourceError);
+  });
+
+  it("rejects merge when source id does not exist", async () => {
+    const target = await createThrowawayCoach();
+    await expect(
+      mergeSyntheticCoachInternal(
+        fixtures.admin,
+        "00000000-0000-0000-0000-000000000000",
+        target.id,
+      ),
+    ).rejects.toBeInstanceOf(CoachNotFoundError);
+  });
+
+  it("rejects merge when target id does not exist", async () => {
+    const source = await createSyntheticCoach("orphan-target");
+    await expect(
+      mergeSyntheticCoachInternal(
+        fixtures.admin,
+        source.id,
+        "00000000-0000-0000-0000-000000000000",
+      ),
+    ).rejects.toBeInstanceOf(CoachNotFoundError);
+  });
+
+  it("is idempotent when re-run after a successful merge", async () => {
+    // Mid-merge partial failure (no transactions on neon-http) is the
+    // recovery scenario documented in user-actions.ts. After a clean
+    // run, the source user no longer exists; re-running surfaces
+    // CoachNotFoundError, which is the expected admin signal that the
+    // merge is already done.
+    const source = await createSyntheticCoach("idempotent");
+    const target = await createThrowawayCoach();
+    await createSessionInternal(fixtures.admin, {
+      coachId: source.id,
+      resourceId: seeded.cage1.id,
+      startAt: tomorrowAt(10),
+      endAt: tomorrowAt(11),
+      useType: "hitting",
+    });
+
+    await mergeSyntheticCoachInternal(fixtures.admin, source.id, target.id);
+
+    await expect(
+      mergeSyntheticCoachInternal(fixtures.admin, source.id, target.id),
+    ).rejects.toBeInstanceOf(CoachNotFoundError);
+  });
+
+  it("recovers from simulated partial failure: sessions already moved, source still present", async () => {
+    // Simulate a crash AFTER step 1 (sessions moved) but BEFORE step 3
+    // (source user delete). Manually replay step 1, then run merge
+    // again — it should pick up steps 2/3 cleanly.
+    const source = await createSyntheticCoach("partial-failure");
+    const target = await createThrowawayCoach();
+    const session = await createSessionInternal(fixtures.admin, {
+      coachId: source.id,
+      resourceId: seeded.cage1.id,
+      startAt: tomorrowAt(10),
+      endAt: tomorrowAt(11),
+      useType: "hitting",
+    });
+
+    // Step 1 done manually (no audit).
+    await db
+      .update(sessionsBilling)
+      .set({ coachId: target.id })
+      .where(eq(sessionsBilling.coachId, source.id));
+
+    // Run merge → step 1 is a no-op (0 sessions left to move),
+    // steps 2/3 clean up the orphan synthetic. Reports 0 moved this
+    // run, which is the truth.
+    const result = await mergeSyntheticCoachInternal(
+      fixtures.admin,
+      source.id,
+      target.id,
+    );
+    expect(result.movedSessions).toBe(0);
+
+    const [moved] = await db
+      .select()
+      .from(sessionsBilling)
+      .where(eq(sessionsBilling.id, session.id));
+    expect(moved.coachId).toBe(target.id);
+
+    const sourceUser = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, source.id));
+    expect(sourceUser).toHaveLength(0);
   });
 });

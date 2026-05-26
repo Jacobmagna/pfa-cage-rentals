@@ -84,13 +84,19 @@ export async function getSeededResources() {
   return { cage1, cage2, bullpen1 };
 }
 
-// Per-test cleanup. TRUNCATE all three mutable tables in one
+// Per-test cleanup. TRUNCATE every mutable test-relevant table in one
 // statement; CASCADE handles audit_log rows that reference deleted
 // session ids (not strictly needed since audit_log isn't an FK to
 // sessions_billing, but harmless and future-proof if we ever add
 // the FK back).
+//
+// `coach_payments` and `coach_rate_overrides` are included because the
+// payment-actions and rate-override-actions test suites need a clean
+// slate per test. `rate_defaults` is NOT truncated — it's seeded once
+// per branch and the rate-defaults test suite snapshots/restores it
+// inline (see rate-defaults-actions.test.ts).
 export async function truncateMutables(): Promise<void> {
   await db.execute(
-    sql`TRUNCATE TABLE sessions_billing, blocked_times, audit_log RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE sessions_billing, blocked_times, audit_log, coach_payments, coach_rate_overrides RESTART IDENTITY CASCADE`,
   );
 }

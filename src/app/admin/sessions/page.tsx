@@ -147,6 +147,10 @@ export default async function AdminSessionsPage({
           Filter and edit individual bookings. Defaults to the last{" "}
           {DEFAULT_LOOKBACK_DAYS} days.
         </p>
+        <p className="text-xs italic text-fg-subtle md:hidden">
+          This page is designed for desktop. Rotate your device or use a
+          laptop for the full experience.
+        </p>
       </div>
 
       <FiltersForm

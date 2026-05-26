@@ -73,6 +73,10 @@ export default async function AdminReportsPage({
             Per-coach billing breakdown by resource type. Defaults to the
             current month.
           </p>
+          <p className="text-xs italic text-fg-subtle md:hidden">
+            This page is designed for desktop. Rotate your device or use a
+            laptop for the full experience.
+          </p>
         </div>
 
         {hasResults ? (

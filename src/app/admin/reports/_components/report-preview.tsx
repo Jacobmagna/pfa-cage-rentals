@@ -42,16 +42,13 @@ export function ReportPreview({
           }
         />
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="w-full min-w-[560px] text-sm">
             <thead className="text-[11px] uppercase tracking-[0.14em] text-fg-subtle border-b border-line">
               <tr>
                 <th scope="col" className="px-4 py-3 text-left font-medium">Coach</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium">Cage slots</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium">Cage $</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium">Bullpen slots</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium">Bullpen $</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium">Weight Room slots</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium">Weight Room $</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">Cage</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">Bullpen</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">Weight Room</th>
                 <th scope="col" className="px-4 py-3 text-right font-medium">Total</th>
                 <th scope="col" className="px-4 py-3 text-center font-medium">Online</th>
               </tr>
@@ -67,12 +64,18 @@ export function ReportPreview({
                       </span>
                     ) : null}
                   </td>
-                  <NumCell value={row.cageSlots} />
-                  <CashCell cents={row.cageTotalCents} />
-                  <NumCell value={row.bullpenSlots} />
-                  <CashCell cents={row.bullpenTotalCents} />
-                  <NumCell value={row.weightRoomSlots} />
-                  <CashCell cents={row.weightRoomTotalCents} />
+                  <SlotsAndCashCell
+                    slots={row.cageSlots}
+                    cents={row.cageTotalCents}
+                  />
+                  <SlotsAndCashCell
+                    slots={row.bullpenSlots}
+                    cents={row.bullpenTotalCents}
+                  />
+                  <SlotsAndCashCell
+                    slots={row.weightRoomSlots}
+                    cents={row.weightRoomTotalCents}
+                  />
                   <td className="px-4 py-3 text-right font-mono tabular-nums font-semibold text-fg">
                     {formatCents(row.totalCents)}
                   </td>
@@ -204,6 +207,32 @@ function NumCell({ value }: { value: number }) {
   return (
     <td className="px-4 py-3 text-right font-mono tabular-nums text-fg-muted">
       {value === 0 ? <span className="text-fg-subtle">—</span> : value}
+    </td>
+  );
+}
+
+function SlotsAndCashCell({
+  slots,
+  cents,
+}: {
+  slots: number;
+  cents: number;
+}) {
+  if (slots === 0 && cents === 0) {
+    return (
+      <td className="px-4 py-3 text-right font-mono tabular-nums text-fg-subtle">
+        —
+      </td>
+    );
+  }
+  return (
+    <td className="px-4 py-3 text-right font-mono tabular-nums leading-tight">
+      <span className="block text-fg">
+        {slots} {slots === 1 ? "slot" : "slots"}
+      </span>
+      <span className="block text-[11px] text-fg-subtle">
+        {formatCents(cents)}
+      </span>
     </td>
   );
 }

@@ -211,6 +211,10 @@ export default async function AdminPaymentsPage() {
           What each coach owes PFA, and the payment history. Only confirmed
           payments reduce the balance — pending entries wait in the inbox.
         </p>
+        <p className="text-xs italic text-fg-subtle md:hidden">
+          This page is designed for desktop. Rotate your device or use a
+          laptop for the full experience.
+        </p>
       </div>
 
       <PaymentsClient

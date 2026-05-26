@@ -7,7 +7,7 @@ import {
   useTransition,
   type FormEvent,
 } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, ChevronDown } from "lucide-react";
 import {
   logOwnSessionFormAction,
   type CoachActionResult,
@@ -301,46 +301,48 @@ export function LogSessionForm({
         className="space-y-5"
       >
         <Field label="Resource">
-          <select
-            name="resourceId"
-            required
-            value={live.resourceId}
-            onChange={(e) =>
-              setLive((p) => ({ ...p, resourceId: e.target.value }))
-            }
-            className={selectStyles}
-          >
-            <option value="" disabled>
-              Choose a resource…
-            </option>
-            {cages.length > 0 ? (
-              <optgroup label="Cages">
-                {cages.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </optgroup>
-            ) : null}
-            {bullpens.length > 0 ? (
-              <optgroup label="Bullpens">
-                {bullpens.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </optgroup>
-            ) : null}
-            {weightRooms.length > 0 ? (
-              <optgroup label="Weight Room">
-                {weightRooms.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </optgroup>
-            ) : null}
-          </select>
+          <SelectWrapper>
+            <select
+              name="resourceId"
+              required
+              value={live.resourceId}
+              onChange={(e) =>
+                setLive((p) => ({ ...p, resourceId: e.target.value }))
+              }
+              className={selectStyles}
+            >
+              <option value="" disabled>
+                Choose a resource…
+              </option>
+              {cages.length > 0 ? (
+                <optgroup label="Cages">
+                  {cages.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              {bullpens.length > 0 ? (
+                <optgroup label="Bullpens">
+                  {bullpens.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              {weightRooms.length > 0 ? (
+                <optgroup label="Weight Room">
+                  {weightRooms.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+            </select>
+          </SelectWrapper>
         </Field>
 
         <Field label="Date">
@@ -358,24 +360,28 @@ export function LogSessionForm({
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Start">
-            <TimeSelect
-              name="startTime"
-              variant="start"
-              required
-              value={live.startTime}
-              onChange={(v) => setLive((p) => ({ ...p, startTime: v }))}
-              className={selectStyles}
-            />
+            <SelectWrapper>
+              <TimeSelect
+                name="startTime"
+                variant="start"
+                required
+                value={live.startTime}
+                onChange={(v) => setLive((p) => ({ ...p, startTime: v }))}
+                className={selectStyles}
+              />
+            </SelectWrapper>
           </Field>
           <Field label="End">
-            <TimeSelect
-              name="endTime"
-              variant="end"
-              required
-              value={live.endTime}
-              onChange={(v) => setLive((p) => ({ ...p, endTime: v }))}
-              className={selectStyles}
-            />
+            <SelectWrapper>
+              <TimeSelect
+                name="endTime"
+                variant="end"
+                required
+                value={live.endTime}
+                onChange={(v) => setLive((p) => ({ ...p, endTime: v }))}
+                className={selectStyles}
+              />
+            </SelectWrapper>
           </Field>
         </div>
 
@@ -411,16 +417,18 @@ export function LogSessionForm({
           label="Use type"
           hint="Required for cages (hitting or pitching). Leave blank for bullpens and weight rooms."
         >
-          <select
-            name="useType"
-            value={useTypeValue}
-            onChange={(e) => setUseTypeValue(e.target.value)}
-            className={selectStyles}
-          >
-            <option value="">— None (bullpen / weight room)</option>
-            <option value="hitting">Hitting</option>
-            <option value="pitching">Pitching</option>
-          </select>
+          <SelectWrapper>
+            <select
+              name="useType"
+              value={useTypeValue}
+              onChange={(e) => setUseTypeValue(e.target.value)}
+              className={selectStyles}
+            >
+              <option value="">— None (bullpen / weight room)</option>
+              <option value="hitting">Hitting</option>
+              <option value="pitching">Pitching</option>
+            </select>
+          </SelectWrapper>
         </Field>
 
         {!isMultiSlot ? (
@@ -477,6 +485,22 @@ export function LogSessionForm({
         }
         startTime={live.startTime}
         endTime={live.endTime}
+      />
+    </div>
+  );
+}
+
+// Wraps a <select> so a custom chevron overlays the input. `selectStyles`
+// uses `appearance-none` for cross-browser styling consistency, but iOS
+// Safari still rendered the native chevron at very low contrast against
+// the dark background. This positioned icon replaces it.
+function SelectWrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative">
+      {children}
+      <ChevronDown
+        aria-hidden
+        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-fg-subtle"
       />
     </div>
   );

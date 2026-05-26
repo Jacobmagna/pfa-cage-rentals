@@ -135,6 +135,10 @@ export default async function AdminSchedulePage({
               ? ` · ${blocks.length} ${blocks.length === 1 ? "block" : "blocks"}`
               : ""}
           </p>
+          <p className="text-xs italic text-fg-subtle md:hidden">
+            This page is designed for desktop. Rotate your device or use a
+            laptop for the full experience.
+          </p>
         </div>
       </div>
 

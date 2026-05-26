@@ -119,6 +119,10 @@ export default async function AdminCoachesPage() {
           Month-to-date activity for {monthLabel}. Click a coach to view
           their detail page.
         </p>
+        <p className="text-xs italic text-fg-subtle md:hidden">
+          This page is designed for desktop. Rotate your device or use a
+          laptop for the full experience.
+        </p>
       </div>
 
       <CoachesTable rows={rows} mergeTargets={mergeTargets} />

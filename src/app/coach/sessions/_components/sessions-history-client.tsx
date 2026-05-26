@@ -163,7 +163,7 @@ export function SessionsHistoryClient({
                   type="button"
                   onClick={() => setEditingRow(row)}
                   disabled={isPendingDelete}
-                  className="inline-flex items-center justify-center h-8 w-8 rounded-md text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
+                  className="inline-flex items-center justify-center h-10 w-10 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
                   aria-label="Edit session"
                   title="Edit"
                 >
@@ -173,7 +173,7 @@ export function SessionsHistoryClient({
                   type="button"
                   onClick={() => onDelete(row)}
                   disabled={isPendingDelete}
-                  className="inline-flex items-center justify-center h-8 w-8 rounded-md text-fg-muted hover:text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors disabled:opacity-40"
+                  className="inline-flex items-center justify-center h-10 w-10 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors disabled:opacity-40"
                   aria-label="Delete session"
                   title="Delete"
                 >

@@ -91,6 +91,10 @@ export default async function AdminAuditPage({
           Every create / update / delete to sessions, blocks, and rate
           overrides. Filtered range defaults to the last 7 days.
         </p>
+        <p className="text-xs italic text-fg-subtle md:hidden">
+          This page is designed for desktop. Rotate your device or use a
+          laptop for the full experience.
+        </p>
       </div>
 
       <FiltersForm

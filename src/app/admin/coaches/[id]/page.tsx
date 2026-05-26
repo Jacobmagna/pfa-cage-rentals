@@ -6,15 +6,13 @@ import { db } from "@/db";
 import {
   coachPayments,
   coachRateOverrides,
-  resources,
   sessionsBilling,
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import {
-  chargeForSession,
   DEFAULT_RATES_PER_SLOT_CENTS,
-  type RateOverride,
+  totalFromSnapshot,
   type ResourceType,
 } from "@/lib/billing";
 import { formatPfaDateMedium } from "@/lib/timezone";
@@ -60,16 +58,16 @@ export default async function AdminCoachDetailPage({
         .select()
         .from(coachRateOverrides)
         .where(eq(coachRateOverrides.coachId, id)),
-      // Sessions feed for the balance: this coach's lifetime rentals
-      // joined to resources for the resource type → charge math.
+      // Sessions feed for the balance: this coach's lifetime rentals.
+      // Reads the snapshotted ratePer30MinCents per row so past sessions
+      // hold their historical rate even if the override has since changed.
       db
         .select({
-          resourceType: resources.type,
           startAt: sessionsBilling.startAt,
           endAt: sessionsBilling.endAt,
+          ratePer30MinCents: sessionsBilling.ratePer30MinCents,
         })
         .from(sessionsBilling)
-        .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
         .where(eq(sessionsBilling.coachId, id)),
       // Payment history (confirmed + pending) for the per-coach
       // ledger card. Soft-deleted rows are excluded.
@@ -109,23 +107,10 @@ export default async function AdminCoachDetailPage({
   );
   // Per-coach balance math: same rules as /admin/payments —
   // confirmed payments reduce the owed total, pending stays separate.
-  const overrideMap: RateOverride[] = overrideRows.map((o) => ({
-    coachId: o.coachId,
-    resourceType: o.resourceType,
-    ratePer30MinCents: o.ratePer30MinCents,
-  }));
+  // Reads each session's snapshotted rate directly.
   let owedCents = 0;
   for (const s of sessionRows) {
-    const charge = chargeForSession(
-      {
-        coachId: id,
-        resourceType: s.resourceType as ResourceType,
-        startAt: s.startAt,
-        endAt: s.endAt,
-      },
-      overrideMap,
-    );
-    owedCents += charge.totalCents;
+    owedCents += totalFromSnapshot(s.startAt, s.endAt, s.ratePer30MinCents);
   }
   const confirmedPaidCents = paymentRows
     .filter((p) => p.status === "confirmed")

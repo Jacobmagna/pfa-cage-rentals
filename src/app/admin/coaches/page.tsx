@@ -2,25 +2,24 @@ import Link from "next/link";
 import { and, asc, eq, gte, isNull, lt } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
-import {
-  coachRateOverrides,
-  resources,
-  sessionsBilling,
-  users,
-} from "@/db/schema";
+import { sessionsBilling, users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
+import { totalFromSnapshot } from "@/lib/billing";
 import {
-  chargeForSession,
-  type RateOverride,
-  type ResourceType,
-} from "@/lib/billing";
-import { formatPfaMonthYear } from "@/lib/timezone";
+  formatPfaMonthYear,
+  pfaMonthEnd,
+  pfaMonthStart,
+} from "@/lib/timezone";
 import { isSyntheticUserEmail } from "@/lib/server/user-actions";
 import { CoachesTable, type CoachRow } from "./_components/coaches-table";
 
 // /admin/coaches — list of every user with role=coach plus their
-// month-to-date activity. "This month" = first-of-month (local TZ)
-// through start-of-tomorrow, matching the report page default range.
+// month-to-date activity. "This month" uses pfaMonthStart/End so the
+// boundary lines up with PFA-TZ midnight rather than server-UTC.
+//
+// Snapshot rule: per-coach owed reads sessionsBilling.ratePer30MinCents
+// straight off the row. Renegotiating a coach's override changes
+// FUTURE bookings only.
 //
 // Server-rendered; the client island handles sorting on top of the
 // already-aggregated rows. For a roster of <100 coaches the round-trip
@@ -30,14 +29,10 @@ export default async function AdminCoachesPage() {
   await requireRole("admin");
 
   const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const monthEndExclusive = new Date(
-    now.getFullYear(),
-    now.getMonth() + 1,
-    1,
-  );
+  const monthStart = pfaMonthStart(now);
+  const monthEndExclusive = pfaMonthEnd(now);
 
-  const [coachRows, sessionRows, overrideRows] = await Promise.all([
+  const [coachRows, sessionRows] = await Promise.all([
     db
       .select({
         id: users.id,
@@ -51,44 +46,28 @@ export default async function AdminCoachesPage() {
     db
       .select({
         coachId: sessionsBilling.coachId,
-        resourceType: resources.type,
         startAt: sessionsBilling.startAt,
         endAt: sessionsBilling.endAt,
+        ratePer30MinCents: sessionsBilling.ratePer30MinCents,
       })
       .from(sessionsBilling)
-      .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
       .where(
         and(
           gte(sessionsBilling.startAt, monthStart),
           lt(sessionsBilling.startAt, monthEndExclusive),
         ),
       ),
-    db.select().from(coachRateOverrides),
   ]);
-
-  const overrides: RateOverride[] = overrideRows.map((o) => ({
-    coachId: o.coachId,
-    resourceType: o.resourceType,
-    ratePer30MinCents: o.ratePer30MinCents,
-  }));
 
   // Pre-aggregate per coach. Doing it server-side means the client
   // island doesn't carry the full session list; it gets one row per
   // coach.
   const totals = new Map<string, { count: number; cents: number }>();
   for (const s of sessionRows) {
-    const charge = chargeForSession(
-      {
-        coachId: s.coachId,
-        resourceType: s.resourceType as ResourceType,
-        startAt: s.startAt,
-        endAt: s.endAt,
-      },
-      overrides,
-    );
+    const total = totalFromSnapshot(s.startAt, s.endAt, s.ratePer30MinCents);
     const entry = totals.get(s.coachId) ?? { count: 0, cents: 0 };
     entry.count += 1;
-    entry.cents += charge.totalCents;
+    entry.cents += total;
     totals.set(s.coachId, entry);
   }
 

@@ -4,18 +4,11 @@ import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import {
   coachPayments,
-  coachRateOverrides,
-  resources,
   sessionsBilling,
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
-import {
-  computeBalances,
-  type BalancePaymentInput,
-  type BalanceSessionInput,
-} from "@/lib/payments/balances";
-import type { RateOverride, ResourceType } from "@/lib/billing";
+import { totalFromSnapshot } from "@/lib/billing";
 import { PaymentsClient, type CoachOption, type RecentPaymentRow } from "./_components/payments-client";
 
 // /admin/payments — coach-to-PFA ledger. Three stacked sections:
@@ -26,6 +19,10 @@ import { PaymentsClient, type CoachOption, type RecentPaymentRow } from "./_comp
 //      typically renders an empty state.
 //   3. Recent payments: last 100 confirmed + pending entries with
 //      inline edit / delete / confirm actions.
+//
+// Snapshot rule: per-coach owed sums sessionsBilling.ratePer30MinCents
+// straight off each session row × its slot count. Renegotiating an
+// override only affects future bookings — past balances never drift.
 //
 // All-time scope: imported historical data means lifetime-owed can be
 // large at launch. Dad's workflow for backfilling historical
@@ -42,7 +39,6 @@ export default async function AdminPaymentsPage() {
   const [
     activeCoaches,
     sessionRows,
-    overrideRows,
     confirmedPaymentRows,
     pendingPaymentRows,
     recentRows,
@@ -60,13 +56,11 @@ export default async function AdminPaymentsPage() {
     db
       .select({
         coachId: sessionsBilling.coachId,
-        resourceType: resources.type,
         startAt: sessionsBilling.startAt,
         endAt: sessionsBilling.endAt,
+        ratePer30MinCents: sessionsBilling.ratePer30MinCents,
       })
-      .from(sessionsBilling)
-      .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id)),
-    db.select().from(coachRateOverrides),
+      .from(sessionsBilling),
     db
       .select({
         coachId: coachPayments.coachId,
@@ -122,37 +116,36 @@ export default async function AdminPaymentsPage() {
       .limit(RECENT_LIMIT),
   ]);
 
-  // Build the balance map.
-  const coachIds = activeCoaches.map((c) => c.id);
-  const overrides: RateOverride[] = overrideRows.map((o) => ({
-    coachId: o.coachId,
-    resourceType: o.resourceType,
-    ratePer30MinCents: o.ratePer30MinCents,
-  }));
-  const sessions: BalanceSessionInput[] = sessionRows.map((s) => ({
-    coachId: s.coachId,
-    resourceType: s.resourceType as ResourceType,
-    startAt: s.startAt,
-    endAt: s.endAt,
-  }));
-  const payments: BalancePaymentInput[] = confirmedPaymentRows.map((p) => ({
-    coachId: p.coachId,
-    amountCents: p.amountCents,
-  }));
-  const balances = computeBalances(coachIds, sessions, overrides, payments);
+  // Per-coach owed = sum of session snapshot totals. Reading
+  // sessionsBilling.ratePer30MinCents directly preserves the historical
+  // rate at booking time — renegotiating an override never rewrites
+  // past balances.
+  const owedByCoach = new Map<string, number>();
+  for (const s of sessionRows) {
+    const total = totalFromSnapshot(s.startAt, s.endAt, s.ratePer30MinCents);
+    owedByCoach.set(s.coachId, (owedByCoach.get(s.coachId) ?? 0) + total);
+  }
+  const paidByCoach = new Map<string, number>();
+  for (const p of confirmedPaymentRows) {
+    paidByCoach.set(
+      p.coachId,
+      (paidByCoach.get(p.coachId) ?? 0) + p.amountCents,
+    );
+  }
 
   // Roster rows + sort by balance descending (biggest debtors first).
   const balanceRows = activeCoaches
     .map((c) => {
-      const b = balances.get(c.id);
+      const owed = owedByCoach.get(c.id) ?? 0;
+      const paid = paidByCoach.get(c.id) ?? 0;
       return {
         coachId: c.id,
         coachName: c.name ?? c.email,
         coachEmail: c.email,
         zelleContact: c.zelleContact,
-        owedCents: b?.owedCents ?? 0,
-        paidCents: b?.paidCents ?? 0,
-        balanceCents: b?.balanceCents ?? 0,
+        owedCents: owed,
+        paidCents: paid,
+        balanceCents: owed - paid,
       };
     })
     .sort((a, b) => b.balanceCents - a.balanceCents);

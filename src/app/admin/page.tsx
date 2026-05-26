@@ -17,18 +17,12 @@ import {
   auditLog,
   blockedTimes,
   coachPayments,
-  coachRateOverrides,
-  resources,
   sessionsBilling,
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import { EditableName } from "../_components/editable-name";
-import {
-  chargeForSession,
-  type RateOverride,
-  type ResourceType,
-} from "@/lib/billing";
+import { totalFromSnapshot } from "@/lib/billing";
 import {
   formatPfaDateLong,
   formatPfaMonthYear,
@@ -47,10 +41,8 @@ import {
 // cache: 'force-dynamic' needed — these are inside a server component
 // that already opts out of static caching via the auth check).
 //
-// Why the cents-on-load: the report page already does the same join,
-// and at ~12 coaches × <50 sessions/month the work is trivial. If the
-// roster grows past ~100 active coaches, move to a materialized
-// summary table.
+// Snapshot rule: month + lifetime owed totals read sessionsBilling.ratePer30MinCents
+// directly. Renegotiating an override changes future bookings only.
 
 const ACTIVE_COACH_FILTER = and(
   eq(users.role, "coach"),
@@ -70,7 +62,6 @@ export default async function AdminHome() {
     [{ count: sessionsToday }],
     monthSessionRows,
     [{ count: blocksToday }],
-    overrideRows,
     [{ count: activeCoaches }],
     [{ ts: lastAuditTs }],
     allSessionsForBalance,
@@ -88,13 +79,11 @@ export default async function AdminHome() {
       ),
     db
       .select({
-        coachId: sessionsBilling.coachId,
-        resourceType: resources.type,
         startAt: sessionsBilling.startAt,
         endAt: sessionsBilling.endAt,
+        ratePer30MinCents: sessionsBilling.ratePer30MinCents,
       })
       .from(sessionsBilling)
-      .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
       .where(
         and(
           gte(sessionsBilling.startAt, monthStart),
@@ -110,7 +99,6 @@ export default async function AdminHome() {
           lt(blockedTimes.startAt, dayEnd),
         ),
       ),
-    db.select().from(coachRateOverrides),
     db
       .select({ count: drizzleSql<number>`count(*)::int` })
       .from(users)
@@ -126,13 +114,11 @@ export default async function AdminHome() {
     // what Dad sees on the detail page.
     db
       .select({
-        coachId: sessionsBilling.coachId,
-        resourceType: resources.type,
         startAt: sessionsBilling.startAt,
         endAt: sessionsBilling.endAt,
+        ratePer30MinCents: sessionsBilling.ratePer30MinCents,
       })
-      .from(sessionsBilling)
-      .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id)),
+      .from(sessionsBilling),
     db
       .select({
         amountCents: coachPayments.amountCents,
@@ -155,42 +141,21 @@ export default async function AdminHome() {
       ),
   ]);
 
-  // Aggregate the month's billing total using the same charge logic as
-  // /admin/reports so the number on the hero matches the report exactly.
-  const overrides: RateOverride[] = overrideRows.map((o) => ({
-    coachId: o.coachId,
-    resourceType: o.resourceType,
-    ratePer30MinCents: o.ratePer30MinCents,
-  }));
+  // Month + lifetime totals read the snapshotted rate from each session
+  // row directly. Same shape as /admin/reports — never recompute from
+  // current overrides.
   let monthCents = 0;
   for (const s of monthSessionRows) {
-    const charge = chargeForSession(
-      {
-        coachId: s.coachId,
-        resourceType: s.resourceType as ResourceType,
-        startAt: s.startAt,
-        endAt: s.endAt,
-      },
-      overrides,
-    );
-    monthCents += charge.totalCents;
+    monthCents += totalFromSnapshot(s.startAt, s.endAt, s.ratePer30MinCents);
   }
 
-  // Lifetime balance for the Payments tile: same overrides feed,
-  // every session ever, minus confirmed payments. Pending payments
-  // are NOT netted — they wait in the inbox until Dad confirms.
   let lifetimeOwedCents = 0;
   for (const s of allSessionsForBalance) {
-    const charge = chargeForSession(
-      {
-        coachId: s.coachId,
-        resourceType: s.resourceType as ResourceType,
-        startAt: s.startAt,
-        endAt: s.endAt,
-      },
-      overrides,
+    lifetimeOwedCents += totalFromSnapshot(
+      s.startAt,
+      s.endAt,
+      s.ratePer30MinCents,
     );
-    lifetimeOwedCents += charge.totalCents;
   }
   const lifetimePaidCents = confirmedPaymentRows.reduce(
     (sum, p) => sum + p.amountCents,

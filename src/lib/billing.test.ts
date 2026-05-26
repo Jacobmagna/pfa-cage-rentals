@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_RATES_PER_SLOT_CENTS,
-  chargeForSession,
   computeRate,
   rateForSlot,
   slotsBetween,
   totalFromSnapshot,
   type RateOverride,
   type ResourceType,
-  type SessionInput,
 } from "./billing";
 
 // Helpers to keep the test bodies focused on the assertion, not on
@@ -182,71 +180,6 @@ describe("computeRate", () => {
         defaults: { cage: 9999, bullpen: 9999, weight_room: 9999 },
       }),
     ).toBe(0);
-  });
-});
-
-describe("chargeForSession", () => {
-  const baseSession: SessionInput = {
-    coachId: "coach-1",
-    resourceType: "cage",
-    startAt: new Date("2026-05-24T09:00:00Z"),
-    endAt: new Date("2026-05-24T10:30:00Z"),
-  };
-
-  it("computes total at default rate", () => {
-    expect(chargeForSession(baseSession, [])).toEqual({
-      slots: 3,
-      ratePer30MinCents: 2200,
-      totalCents: 6600,
-    });
-  });
-
-  it("applies a matching override", () => {
-    const overrides: RateOverride[] = [
-      { coachId: "coach-1", resourceType: "cage", ratePer30MinCents: 1800 },
-    ];
-    expect(chargeForSession(baseSession, overrides)).toEqual({
-      slots: 3,
-      ratePer30MinCents: 1800,
-      totalCents: 5400,
-    });
-  });
-
-  it("computes weight_room total at $7/slot default", () => {
-    const session: SessionInput = { ...baseSession, resourceType: "weight_room" };
-    expect(chargeForSession(session, [])).toEqual({
-      slots: 3,
-      ratePer30MinCents: 700,
-      totalCents: 2100,
-    });
-  });
-
-  it("propagates the slot-boundary rounding from slotsBetween", () => {
-    const session: SessionInput = {
-      ...baseSession,
-      startAt: new Date("2026-05-24T09:14:00Z"),
-      endAt: new Date("2026-05-24T10:01:00Z"),
-    };
-    expect(chargeForSession(session, []).totalCents).toBe(6600);
-  });
-
-  it("zeroes the total when online flag is set", () => {
-    const overrides: RateOverride[] = [
-      { coachId: "coach-1", resourceType: "cage", ratePer30MinCents: 1800 },
-    ];
-    expect(chargeForSession(baseSession, overrides, { isOnline: true })).toEqual({
-      slots: 3,
-      ratePer30MinCents: 0,
-      totalCents: 0,
-    });
-  });
-
-  it("respects caller-supplied defaults", () => {
-    expect(
-      chargeForSession(baseSession, [], {
-        defaults: { cage: 2400, bullpen: 2400, weight_room: 800 },
-      }),
-    ).toEqual({ slots: 3, ratePer30MinCents: 2400, totalCents: 7200 });
   });
 });
 

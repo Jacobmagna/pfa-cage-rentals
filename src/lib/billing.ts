@@ -40,19 +40,6 @@ export type RateOverride = {
   ratePer30MinCents: number;
 };
 
-export type SessionInput = {
-  coachId: string;
-  resourceType: ResourceType;
-  startAt: Date;
-  endAt: Date;
-};
-
-export type ChargeBreakdown = {
-  slots: number;
-  ratePer30MinCents: number;
-  totalCents: number;
-};
-
 /**
  * Counts billable 30-minute slots between two timestamps. startAt
  * floors to its slot boundary, endAt ceils — a 9:14–10:01 session
@@ -112,37 +99,6 @@ export function computeRate(args: {
     args.overrides,
     args.defaults ?? DEFAULT_RATES_PER_SLOT_CENTS,
   );
-}
-
-/**
- * Computes the billing breakdown for a session at WRITE time (i.e.
- * picks the rate from overrides + defaults). Caller stamps the
- * resulting ratePer30MinCents onto the row.
- *
- * For READ-time totals (reports, admin tables, Excel export), use
- * totalFromSnapshot instead — never recompute from current overrides.
- */
-export function chargeForSession(
-  session: SessionInput,
-  overrides: RateOverride[],
-  options: {
-    isOnline?: boolean;
-    defaults?: Record<ResourceType, number>;
-  } = {},
-): ChargeBreakdown {
-  const slots = slotsBetween(session.startAt, session.endAt);
-  const ratePer30MinCents = computeRate({
-    coachId: session.coachId,
-    resourceType: session.resourceType,
-    isOnline: options.isOnline ?? false,
-    overrides,
-    defaults: options.defaults,
-  });
-  return {
-    slots,
-    ratePer30MinCents,
-    totalCents: slots * ratePer30MinCents,
-  };
 }
 
 /**

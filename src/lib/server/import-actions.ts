@@ -18,6 +18,7 @@ import {
 } from "@/lib/import/commit";
 import { normalizeSessions, type NormalizedSession } from "@/lib/import/normalize";
 import { parseWorkbook } from "@/lib/import/parse";
+import { resolveRateCents } from "@/lib/server/session-actions";
 import { pfaWallClockToUtc } from "@/lib/timezone";
 
 export type PreviewResult = {
@@ -100,11 +101,16 @@ export async function executeCommitPlan(
     }
   }
 
-  // Resolve resourceName → resourceId once.
+  // Resolve resourceName → (id, type) once. Type is needed per-row so
+  // we can stamp the snapshotted ratePer30MinCents via resolveRateCents
+  // (cage/bullpen/weight_room have different default rates AND distinct
+  // per-coach overrides).
   const allResources = await db
-    .select({ id: resources.id, name: resources.name })
+    .select({ id: resources.id, name: resources.name, type: resources.type })
     .from(resources);
-  const resourceIdByName = new Map(allResources.map((r) => [r.name, r.id]));
+  const resourceMetaByName = new Map(
+    allResources.map((r) => [r.name, { id: r.id, type: r.type }]),
+  );
 
   // I4 dedupe: pre-fetch every existing historical-import row whose
   // start_at sits inside the date range of this workbook, build a
@@ -130,14 +136,15 @@ export async function executeCommitPlan(
       continue;
     }
 
-    const resourceId = resourceIdByName.get(planned.source.resourceName);
-    if (!resourceId) {
+    const resourceMeta = resourceMetaByName.get(planned.source.resourceName);
+    if (!resourceMeta) {
       errored.push({
         sessionDescription: describeSession(planned.source),
         message: `resource not found: ${planned.source.resourceName}`,
       });
       continue;
     }
+    const { id: resourceId, type: resourceType } = resourceMeta;
 
     const startAt = pfaWallClockToUtc(planned.source.date, planned.source.startTime);
     const endAt = pfaWallClockToUtc(planned.source.date, planned.source.endTime);
@@ -147,6 +154,19 @@ export async function executeCommitPlan(
       skippedDuplicates += 1;
       continue;
     }
+
+    // Snapshot the per-row rate exactly the same way the live session
+    // path does (src/lib/server/session-actions.ts:resolveRateCents).
+    // Historical imports don't track isOnline — the Excel never had a
+    // column for it — so assume false and let admin flip individual
+    // rows later if needed. Without this call the schema default of 0
+    // would land on every row and the snapshot rule would silently
+    // break for the entire imported batch (audit E9).
+    const ratePer30MinCents = await resolveRateCents({
+      coachId,
+      resourceType,
+      isOnline: false,
+    });
 
     try {
       const [row] = await db
@@ -159,6 +179,7 @@ export async function executeCommitPlan(
           useType: planned.source.useTypeHint,
           note: planned.note,
           source: IMPORT_SOURCE,
+          ratePer30MinCents,
           createdBy: actor.id,
         })
         .returning({ id: sessionsBilling.id });
@@ -181,6 +202,7 @@ export async function executeCommitPlan(
           source: IMPORT_SOURCE,
           sourceTab: planned.source.sourceTab,
           rawName: planned.source.rawName,
+          ratePer30MinCents,
         },
       });
     } catch (err) {

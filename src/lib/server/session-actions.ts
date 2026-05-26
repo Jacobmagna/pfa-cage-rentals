@@ -59,7 +59,11 @@ import {
 // session row. Reads the coach's override + the resource-type default
 // from the DB, then delegates to billing.computeRate. Online sessions
 // always come back as 0 — PFA collects from the client directly.
-async function resolveRateCents(args: {
+//
+// Exported so the historical-import path (src/lib/server/import-actions.ts)
+// can stamp rows with the correct snapshotted rate instead of falling
+// through the schema default of 0.
+export async function resolveRateCents(args: {
   coachId: string;
   resourceType: ResourceType;
   isOnline: boolean;

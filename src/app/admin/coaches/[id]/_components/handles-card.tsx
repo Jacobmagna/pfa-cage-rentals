@@ -42,7 +42,7 @@ export function CoachHandlesCard({
     : `err-${state.error.code}-${state.error.message}`;
 
   return (
-    <section className="my-8 rounded-xl border border-line bg-surface overflow-hidden">
+    <section className="my-8 rounded-lg border border-line bg-surface overflow-hidden">
       <header className="px-5 py-4 border-b border-line">
         <h3 className="text-base font-semibold text-fg">Zelle contact</h3>
         <p className="mt-1 text-xs text-fg-muted leading-relaxed">

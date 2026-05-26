@@ -45,7 +45,7 @@ export function RateOverridesCard({
   rows: RateOverrideRow[];
 }) {
   return (
-    <section className="rounded-xl border border-line bg-surface overflow-hidden">
+    <section className="rounded-lg border border-line bg-surface overflow-hidden">
       <header className="px-5 py-4 border-b border-line">
         <h3 className="text-base font-semibold text-fg">
           Rate overrides

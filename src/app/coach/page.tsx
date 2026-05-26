@@ -76,7 +76,7 @@ export default async function CoachHome() {
 
       <section
         aria-label="This month"
-        className="mb-10 grid gap-px rounded-xl border border-line bg-line overflow-hidden sm:grid-cols-2"
+        className="mb-10 grid gap-px rounded-lg border border-line bg-line overflow-hidden sm:grid-cols-2"
       >
         <Stat
           icon={<CalendarDays className="h-4 w-4" />}

@@ -16,7 +16,7 @@ export function PfaReferredBadge({
       <span
         title="PFA-referred"
         aria-label="PFA-referred"
-        className="inline-flex items-center justify-center h-3.5 w-3.5 rounded-full bg-emerald-500/15 text-emerald-300 ring-1 ring-inset ring-emerald-500/30 shrink-0"
+        className="inline-flex items-center justify-center h-3.5 w-3.5 rounded-full bg-gold/15 text-gold ring-1 ring-inset ring-gold/30 shrink-0"
       >
         <Sparkles className="h-2 w-2" strokeWidth={3} />
       </span>
@@ -26,7 +26,7 @@ export function PfaReferredBadge({
   return (
     <span
       aria-label="PFA-referred"
-      className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-px text-[10px] font-medium uppercase tracking-wider text-emerald-300 ring-1 ring-inset ring-emerald-500/30"
+      className="inline-flex items-center gap-1 rounded-full bg-gold/10 px-1.5 py-px text-[10px] font-medium uppercase tracking-wider text-gold ring-1 ring-inset ring-gold/30"
     >
       <Sparkles className="h-2.5 w-2.5" strokeWidth={2.5} />
       PFA

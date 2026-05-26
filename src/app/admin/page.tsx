@@ -177,7 +177,7 @@ export default async function AdminHome() {
 
       <section
         aria-label="Today and this month at a glance"
-        className="mb-12 grid gap-px rounded-xl border border-line bg-line overflow-hidden sm:grid-cols-3"
+        className="mb-12 grid gap-px rounded-lg border border-line bg-line overflow-hidden sm:grid-cols-3"
       >
         <Stat
           icon={<CalendarDays className="h-4 w-4" />}

@@ -350,7 +350,7 @@ function PendingInbox({
                         type="button"
                         onClick={() => onConfirm(row)}
                         disabled={isPending}
-                        className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 ring-1 ring-inset ring-emerald-500/30 h-8 px-3 text-xs font-medium transition-colors disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 rounded-md bg-success/15 text-success hover:bg-success/25 ring-1 ring-inset ring-success/30 h-8 px-3 text-xs font-medium transition-colors disabled:opacity-50"
                       >
                         <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
                         Confirm
@@ -499,7 +499,7 @@ function HandleChip({ label, value }: { label: string; value: string }) {
       <span className="uppercase tracking-wider text-fg-subtle">{label}</span>
       <span className="font-mono">{value}</span>
       {copied ? (
-        <Check className="h-2.5 w-2.5 text-emerald-300" strokeWidth={2.5} />
+        <Check className="h-2.5 w-2.5 text-success" strokeWidth={2.5} />
       ) : (
         <ClipboardCopy className="h-2.5 w-2.5" strokeWidth={2.5} />
       )}
@@ -519,13 +519,13 @@ function MethodBadge({ method }: { method: RecentPaymentRow["method"] }) {
 function StatusBadge({ status }: { status: "pending" | "confirmed" }) {
   if (status === "confirmed") {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-300 ring-1 ring-inset ring-emerald-500/30 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider">
+      <span className="inline-flex items-center gap-1 rounded-full bg-success/15 text-success ring-1 ring-inset ring-success/30 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider">
         Confirmed
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 text-amber-300 ring-1 ring-inset ring-amber-500/30 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider">
+    <span className="inline-flex items-center gap-1 rounded-full bg-warning/15 text-warning ring-1 ring-inset ring-warning/30 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider">
       Pending
     </span>
   );
@@ -533,7 +533,7 @@ function StatusBadge({ status }: { status: "pending" | "confirmed" }) {
 
 function balanceColor(cents: number): string {
   if (cents > 0) return "text-fg";
-  if (cents < 0) return "text-amber-300";
+  if (cents < 0) return "text-warning";
   return "text-fg-subtle";
 }
 

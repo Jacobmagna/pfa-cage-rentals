@@ -77,7 +77,7 @@ export default async function Home({
           </p>
         </div>
 
-        <div className="rounded-xl border border-line bg-surface/80 p-6 shadow-[0_1px_0_0_rgba(255,255,255,0.04)_inset,0_20px_60px_-20px_rgba(0,0,0,0.5)] backdrop-blur-sm">
+        <div className="rounded-lg border border-line bg-surface/80 p-6 shadow-[0_1px_0_0_rgba(255,255,255,0.04)_inset,0_20px_60px_-20px_rgba(0,0,0,0.5)] backdrop-blur-sm">
           <GoogleSignInButton />
 
           <div className="my-5 flex items-center gap-3">

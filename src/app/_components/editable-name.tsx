@@ -113,7 +113,7 @@ export function EditableName({ initialName }: { initialName: string }) {
         </button>
       </span>
       {error ? (
-        <span className="text-xs text-red-400" role="alert">
+        <span className="text-xs text-danger" role="alert">
           {error}
         </span>
       ) : null}

@@ -78,7 +78,7 @@ export function ReportPreview({
                   </td>
                   <td className="px-4 py-3 text-center">
                     {row.onlineSessions > 0 ? (
-                      <span className="inline-block rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-sky-300 ring-1 ring-inset ring-sky-500/30">
+                      <span className="inline-block rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-success ring-1 ring-inset ring-success/30">
                         {row.onlineSessions}
                       </span>
                     ) : (

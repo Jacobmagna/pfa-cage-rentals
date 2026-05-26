@@ -255,7 +255,7 @@ export function LogSessionForm({
       {showSingleSuccess && !showBatchSuccess ? (
         <div
           role="status"
-          className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-300 flex items-center gap-2"
+          className="rounded-md border border-success/30 bg-success/10 px-3 py-2.5 text-sm text-success flex items-center gap-2"
         >
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           <span>Session logged. Ready for the next one.</span>
@@ -265,7 +265,7 @@ export function LogSessionForm({
       {showBatchSuccess ? (
         <div
           role="status"
-          className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-300 flex items-center gap-2"
+          className="rounded-md border border-success/30 bg-success/10 px-3 py-2.5 text-sm text-success flex items-center gap-2"
         >
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           <span>

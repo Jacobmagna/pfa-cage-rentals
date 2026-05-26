@@ -39,7 +39,7 @@ export function OrgSettingsCard({
     : `err-${state.error.code}-${state.error.message}`;
 
   return (
-    <section className="rounded-xl border border-line bg-surface overflow-hidden">
+    <section className="rounded-lg border border-line bg-surface overflow-hidden">
       <header className="px-5 py-4 border-b border-line">
         <h2 className="text-base font-semibold text-fg">PFA Zelle contact</h2>
         <p className="mt-1 text-xs text-fg-muted leading-relaxed">

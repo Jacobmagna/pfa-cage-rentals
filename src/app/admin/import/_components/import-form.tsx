@@ -54,7 +54,7 @@ export function ImportForm({ coaches }: { coaches: CoachOption[] }) {
       <FileInputRow disabled={isPending} />
 
       {state.stage === "error" && (
-        <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-200">
+        <div className="rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
           {state.message}
         </div>
       )}
@@ -271,11 +271,11 @@ function CommitSummary({ result }: { result: NonNullable<Extract<ImportFormState
         </p>
       </div>
       {result.errored.length > 0 && (
-        <details className="rounded border border-red-500/40 bg-red-500/5 p-3 text-xs">
-          <summary className="cursor-pointer text-red-200">
+        <details className="rounded border border-danger/40 bg-danger/5 p-3 text-xs">
+          <summary className="cursor-pointer text-danger">
             Errored rows ({result.errored.length})
           </summary>
-          <ul className="mt-2 space-y-1 text-red-200/90">
+          <ul className="mt-2 space-y-1 text-danger/90">
             {result.errored.map((e, i) => (
               <li key={i}>
                 <span className="font-mono">{e.sessionDescription}</span> — {e.message}
@@ -307,10 +307,10 @@ function Stat({ label, value, accent }: { label: string; value: number; accent?:
 
 function ConfidenceBadge({ confidence }: { confidence: GroupSummary["confidence"] }) {
   const map = {
-    alias: { label: "alias", className: "border-emerald-500/40 text-emerald-300 bg-emerald-500/5" },
-    fuzzy: { label: "fuzzy", className: "border-amber-500/40 text-amber-300 bg-amber-500/5" },
-    cleaned: { label: "cleaned", className: "border-sky-500/40 text-sky-300 bg-sky-500/5" },
-    unmatched: { label: "unmatched", className: "border-red-500/40 text-red-300 bg-red-500/5" },
+    alias: { label: "alias", className: "border-success/40 text-success bg-success/5" },
+    fuzzy: { label: "fuzzy", className: "border-warning/40 text-warning bg-warning/5" },
+    cleaned: { label: "cleaned", className: "border-gold/40 text-gold bg-gold/5" },
+    unmatched: { label: "unmatched", className: "border-danger/40 text-danger bg-danger/5" },
   } as const;
   const m = map[confidence];
   return (

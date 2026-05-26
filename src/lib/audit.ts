@@ -53,11 +53,32 @@ export type LogAuditInput = {
 };
 
 /**
+ * Value-equality check that handles the cases shallowDiff cares about:
+ *   - primitives + same-reference objects: Object.is (handles NaN, +0/-0)
+ *   - Date instances: compared by .getTime() (two `new Date(x)` are not
+ *     reference-equal but should not count as changed when their epoch
+ *     matches). This is critical for the audit log: Drizzle returns a
+ *     fresh Date instance for every row read, so a row that was just
+ *     UPDATEd will hand back distinct Date objects for unchanged
+ *     timestamps — without this branch, every Date column shows up in
+ *     every update's diff and the audit log becomes noise.
+ *
+ * Returns true when the two values are equal under the above rules.
+ */
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (a instanceof Date && b instanceof Date) {
+    return Object.is(a.getTime(), b.getTime());
+  }
+  return false;
+}
+
+/**
  * Computes the shallow diff between two snapshots. Returns an object
  * with `before` and `after` each restricted to keys whose values
- * differ (via Object.is — handles NaN, +0/-0 correctly; deep object
- * equality is deliberately not attempted, since changed nested values
- * still register as "this key changed" which is what we want).
+ * differ (via valuesEqual — see above). Deep object equality is
+ * deliberately not attempted, since changed nested values still
+ * register as "this key changed" which is what we want.
  *
  * Exported so tests can hit it directly; also useful if a caller
  * wants to peek at a diff before deciding whether to log.
@@ -70,7 +91,7 @@ export function shallowDiff(
   const beforeChanged: Record<string, unknown> = {};
   const afterChanged: Record<string, unknown> = {};
   for (const key of keys) {
-    if (!Object.is(before[key], after[key])) {
+    if (!valuesEqual(before[key], after[key])) {
       beforeChanged[key] = before[key];
       afterChanged[key] = after[key];
     }
@@ -83,7 +104,17 @@ function buildDiff(input: LogAuditInput): unknown {
     case "create":
       return { after: input.after ?? null };
     case "delete":
-      return { before: input.before ?? null };
+      // Most deletes only have a `before` snapshot. But mergeSyntheticCoach
+      // (and the soft-delete in user-actions) pass meaningful `after`
+      // payloads — the merge target id, sessions-moved count,
+      // anonymization shape. Carry them through when present so the
+      // audit page can show "deleted X → merged into Y / moved N sessions"
+      // instead of just "deleted X".
+      return {
+        before: input.before ?? null,
+        ...(input.after !== undefined &&
+          input.after !== null && { after: input.after }),
+      };
     case "update": {
       if (!input.before || !input.after) {
         // An update without both snapshots is almost certainly a caller

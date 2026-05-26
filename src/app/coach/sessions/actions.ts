@@ -13,7 +13,15 @@
 // Admins always pass requireSessionOwnership so they can use these
 // to manage their own sessions if they happen to coach too — but
 // for cross-coach admin work they should use /admin/sessions.
+//
+// Each mutation calls revalidatePath at the end so any direct RPC
+// caller (not just our form-action wrappers) gets fresh data on
+// /coach and /coach/sessions. The form-action wrappers also call
+// revalidatePath — the duplication is cheap and the invariant
+// ("every public server action that mutates revalidates") is the
+// thing that matters.
 
+import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { sessionsBilling } from "@/db/schema";
@@ -26,6 +34,11 @@ import {
   updateSessionInternal,
 } from "@/lib/server/session-actions";
 
+function revalidateCoachSurfaces() {
+  revalidatePath("/coach");
+  revalidatePath("/coach/sessions");
+}
+
 export async function logOwnSession(input: unknown) {
   const session = await requireSession();
   const base =
@@ -34,7 +47,9 @@ export async function logOwnSession(input: unknown) {
       : {};
   // Force coachId server-side — client-supplied coachId is discarded.
   const safeInput = { ...base, coachId: session.user.id };
-  return createSessionInternal(session.user, safeInput);
+  const result = await createSessionInternal(session.user, safeInput);
+  revalidateCoachSurfaces();
+  return result;
 }
 
 export async function logOwnSessionsBatch(input: unknown) {
@@ -45,7 +60,9 @@ export async function logOwnSessionsBatch(input: unknown) {
       : {};
   // Same coachId-forcing as logOwnSession — client can't impersonate.
   const safeInput = { ...base, coachId: session.user.id };
-  return createSessionsBatchInternal(session.user, safeInput);
+  const result = await createSessionsBatchInternal(session.user, safeInput);
+  revalidateCoachSurfaces();
+  return result;
 }
 
 export async function updateOwnSession(id: string, input: unknown) {
@@ -64,7 +81,9 @@ export async function updateOwnSession(id: string, input: unknown) {
       : {};
   // Force coachId — coach can't reassign a session to another coach.
   const safeInput = { ...base, coachId: session.user.id };
-  return updateSessionInternal(session.user, id, safeInput);
+  const result = await updateSessionInternal(session.user, id, safeInput);
+  revalidateCoachSurfaces();
+  return result;
 }
 
 export async function deleteOwnSession(id: string) {
@@ -76,5 +95,7 @@ export async function deleteOwnSession(id: string) {
     .limit(1);
   if (!existing) throw new SessionNotFoundError(id);
   requireSessionOwnership(existing, session.user);
-  return deleteSessionInternal(session.user, id);
+  const result = await deleteSessionInternal(session.user, id);
+  revalidateCoachSurfaces();
+  return result;
 }

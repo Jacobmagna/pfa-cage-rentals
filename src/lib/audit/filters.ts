@@ -3,6 +3,8 @@
 // against URL searchParams so the page is shareable + back-button
 // friendly.
 
+import { formatPfaDate, parsePfaInput, pfaDayEnd } from "@/lib/timezone";
+
 const VALID_ENTITY_TYPES = new Set([
   "session",
   "block",
@@ -26,9 +28,9 @@ export type RawAuditFilterInput = {
 export type NormalizedAuditFilters = {
   from: string;
   to: string;
-  /** Local-midnight Date for SQL `gte`. */
+  /** UTC instant at PFA-midnight on `from` — SQL `gte` lower bound. */
   fromDate: Date;
-  /** One day past `to`, exclusive. */
+  /** UTC instant at PFA-midnight on the day AFTER `to` — SQL `lt` upper bound. */
   toDateExclusive: Date;
   /** Empty means "all actors". */
   actorId: string | null;
@@ -45,14 +47,15 @@ export const AUDIT_PAGE_SIZE = 50;
 export function normalizeAuditFilters(
   input: RawAuditFilterInput,
 ): NormalizedAuditFilters {
-  // Default range: last 7 days (matches "what changed this week"
-  // mental model). Reports defaults to month; audit log is more
-  // about recent activity.
-  const today = new Date();
-  const defaultTo = formatDateInput(today);
-  const sevenDaysAgo = new Date(today);
-  sevenDaysAgo.setDate(today.getDate() - 6);
-  const defaultFrom = formatDateInput(sevenDaysAgo);
+  // Default range: last 7 PFA days, ending today (matches "what
+  // changed this week" mental model). Server UTC clock would otherwise
+  // misbucket the boundary day between PFA midnight and UTC midnight.
+  const now = new Date();
+  const defaultTo = formatPfaDate(now);
+  // Walk back 6 PFA-days. Using setDate on a date constructed from
+  // PFA parts so DST doesn't drift the boundary.
+  const sixDaysBackInstant = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
+  const defaultFrom = formatPfaDate(sixDaysBackInstant);
 
   const fromCandidate = pickFirst(input.from);
   const toCandidate = pickFirst(input.to);
@@ -72,9 +75,10 @@ export function normalizeAuditFilters(
   const page =
     Number.isFinite(pageParsed) && pageParsed >= 1 ? Math.floor(pageParsed) : 1;
 
-  const fromDate = parseDateInput(from);
-  const toDateExclusive = parseDateInput(to);
-  toDateExclusive.setDate(toDateExclusive.getDate() + 1);
+  const fromDate = parsePfaInput(from, "00:00");
+  // `to` is inclusive — exclusive upper bound is PFA midnight of the
+  // following day.
+  const toDateExclusive = pfaDayEnd(parsePfaInput(to, "00:00"));
 
   return {
     from,
@@ -119,16 +123,4 @@ function toArray(v: string | string[] | undefined): string[] {
 
 function isDateInput(v: string | undefined): v is string {
   return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
-}
-
-function parseDateInput(s: string): Date {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
-
-function formatDateInput(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
 }

@@ -405,10 +405,9 @@ export function LogSessionForm({
           </div>
         ) : null}
 
-        {slotCount > 0 && !divisibilityError ? (
+        {slotCount > 1 && !divisibilityError ? (
           <p className="text-xs text-fg-subtle">
-            Will create <span className="text-fg">{slotCount}</span>{" "}
-            {slotCount === 1 ? "session" : "sessions"} of{" "}
+            Will create <span className="text-fg">{slotCount}</span> sessions of{" "}
             {slotLengthMinutes} min each.
           </p>
         ) : null}

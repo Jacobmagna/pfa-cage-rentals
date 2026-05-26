@@ -641,19 +641,21 @@ export function ScheduleGrid({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] text-fg-muted">
-          <LegendDot className="border-l-4 border-l-gold" label="Cage" />
-          <LegendDot className="border-l-4 border-l-success" label="Bullpen" />
-          <LegendDot className="border-l-4 border-l-warning" label="Weight Room" />
-          <LegendDot
-            className="border border-dashed border-danger/60 bg-danger/10"
-            label="Blocked"
-          />
-          <span className="text-fg-subtle">
-            · Click an empty cell to create. Drag across empty cells to
-            block a range. Click a session or block to edit. Drag a session
-            to move it.
-          </span>
+        <div className="space-y-2 text-[11px] text-fg-muted">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <LegendDot className="border-l-4 border-l-gold" label="Cage" />
+            <LegendDot className="border-l-4 border-l-success" label="Bullpen" />
+            <LegendDot className="border-l-4 border-l-warning" label="Weight Room" />
+            <LegendDot
+              className="border border-dashed border-danger/60 bg-danger/10"
+              label="Blocked"
+            />
+          </div>
+          <p className="text-fg-subtle">
+            Click an empty cell to create. Drag across empty cells to block
+            a range. Click a session or block to edit. Drag a session to
+            move it.
+          </p>
         </div>
 
         <ScheduleCreateDialog

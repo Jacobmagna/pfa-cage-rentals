@@ -8,13 +8,30 @@ import { requestMagicLink } from "./actions";
 
 type SearchParams = Promise<{ error?: string }>;
 
+// Explicit copy for the codes we redirect to ourselves
+// (requestMagicLink in src/app/actions.ts) plus a couple of Auth.js
+// error codes that have a clear user action. Anything else falls back
+// to a generic message so the user never sees an empty-banner
+// "?error=Foo" state.
 const ERROR_COPY: Record<string, string> = {
   "missing-email": "Please enter your email address.",
   "email-limit":
     "Too many sign-in attempts for this email. Try again in an hour.",
   "ip-limit":
     "Too many sign-in attempts from your network. Try again in an hour.",
+  // Auth.js: the email already exists under a different provider link
+  // path. Because allowDangerousEmailAccountLinking is enabled on the
+  // Google provider, this code is rare — but Resend can still surface
+  // it on edge cases.
+  OAuthAccountNotLinked:
+    "This email is already linked to another sign-in method. Try the other option above.",
+  // Auth.js: verification token expired or already consumed.
+  Verification:
+    "That sign-in link expired or was already used. Request a new one.",
 };
+
+const ERROR_FALLBACK =
+  "Something went wrong signing in. Try again, or use the other method above.";
 
 export default async function Home({
   searchParams,
@@ -27,7 +44,9 @@ export default async function Home({
   }
 
   const { error } = await searchParams;
-  const errorMessage = error ? ERROR_COPY[error] : undefined;
+  const errorMessage = error
+    ? (ERROR_COPY[error] ?? ERROR_FALLBACK)
+    : undefined;
 
   return (
     <main className="relative flex flex-1 flex-col items-center justify-center px-6 py-16">

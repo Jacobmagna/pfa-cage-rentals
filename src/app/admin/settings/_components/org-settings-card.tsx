@@ -43,8 +43,8 @@ export function OrgSettingsCard({
       <header className="px-5 py-4 border-b border-line">
         <h2 className="text-base font-semibold text-fg">PFA Zelle contact</h2>
         <p className="mt-1 text-xs text-fg-muted leading-relaxed">
-          The Zelle contact coaches will pay PFA from inside the app.
-          Coach-facing only — never shown to other coaches.
+          Where coaches send payments via Zelle outside the app. Kept here
+          so admin can copy/paste when reminding a coach.
         </p>
       </header>
 

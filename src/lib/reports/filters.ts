@@ -11,6 +11,13 @@
 //     Use `filtersFromURLSearchParams` which normalizes the shape.
 
 import type { ResourceType } from "@/lib/billing";
+import {
+  formatPfaDate,
+  parsePfaInput,
+  pfaDayEnd,
+  pfaMonthEnd,
+  pfaMonthStart,
+} from "@/lib/timezone";
 
 export type RawFilterInput = {
   from?: string | string[];
@@ -24,9 +31,9 @@ export type NormalizedFilters = {
   from: string;
   /** YYYY-MM-DD end of the inclusive range. */
   to: string;
-  /** Local-midnight Date for SQL `gte`. */
+  /** UTC instant at PFA-midnight on `from` — SQL `gte` lower bound. */
   fromDate: Date;
-  /** Local-midnight Date for SQL `lt` — one day past `to` (exclusive upper). */
+  /** UTC instant at PFA-midnight on the day AFTER `to` — SQL `lt` upper bound. */
   toDateExclusive: Date;
   /** Empty array means "no coach filter" — include everyone. */
   coachIds: string[];
@@ -41,13 +48,16 @@ const VALID_RESOURCE_TYPES = new Set<ResourceType>([
 ]);
 
 export function normalizeFilters(input: RawFilterInput): NormalizedFilters {
-  const today = new Date();
-  const defaultFrom = formatDateInput(
-    new Date(today.getFullYear(), today.getMonth(), 1),
-  );
-  const defaultTo = formatDateInput(
-    new Date(today.getFullYear(), today.getMonth() + 1, 0),
-  );
+  // Default range: the current PFA-calendar month. Server UTC clock
+  // would otherwise misbucket the first/last day near month boundaries
+  // (between PFA-TZ midnight and UTC midnight).
+  const now = new Date();
+  const defaultFrom = formatPfaDate(pfaMonthStart(now));
+  // pfaMonthEnd is the exclusive upper bound (first instant of next
+  // month); back up one PFA-day so we render the last day of THIS month
+  // as the inclusive `to`.
+  const lastDayOfMonth = new Date(pfaMonthEnd(now).getTime() - 1);
+  const defaultTo = formatPfaDate(lastDayOfMonth);
 
   const fromCandidate = pickFirst(input.from);
   const toCandidate = pickFirst(input.to);
@@ -59,9 +69,10 @@ export function normalizeFilters(input: RawFilterInput): NormalizedFilters {
     (t): t is ResourceType => VALID_RESOURCE_TYPES.has(t as ResourceType),
   );
 
-  const fromDate = parseDateInput(from);
-  const toDateExclusive = parseDateInput(to);
-  toDateExclusive.setDate(toDateExclusive.getDate() + 1);
+  const fromDate = parsePfaInput(from, "00:00");
+  // `to` is inclusive — exclusive upper bound is PFA midnight of the
+  // following day.
+  const toDateExclusive = pfaDayEnd(parsePfaInput(to, "00:00"));
 
   return { from, to, fromDate, toDateExclusive, coachIds, resourceTypes };
 }
@@ -102,16 +113,4 @@ function toArray(v: string | string[] | undefined): string[] {
 
 function isDateInput(v: string | undefined): v is string {
   return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
-}
-
-function parseDateInput(s: string): Date {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
-
-function formatDateInput(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
 }

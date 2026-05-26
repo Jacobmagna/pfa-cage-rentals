@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
@@ -6,11 +7,19 @@ import { parseWorkbook, type RawSession } from "./parse";
 
 const FIXTURE = path.resolve(__dirname, "../../../source_data.xlsx");
 
+// `source_data.xlsx` contains the real workbook (PII) and is gitignored.
+// It's present on Jacob's laptop and on any branch with the file restored
+// from R2, but absent on fresh clones + CI runners. Skip the fixture-
+// dependent suites cleanly in that case rather than blowing up the whole
+// `npm test` run with ENOENTs.
+const HAS_FIXTURE = existsSync(FIXTURE);
+const describeWithFixture = HAS_FIXTURE ? describe : describe.skip;
+
 async function loadFixture(): Promise<RawSession[]> {
   return parseWorkbook(await readFile(FIXTURE));
 }
 
-describe("parseWorkbook (real source_data.xlsx)", () => {
+describeWithFixture("parseWorkbook (real source_data.xlsx)", () => {
   it("emits a stable total count of historical sessions", async () => {
     const sessions = await loadFixture();
     expect(sessions).toHaveLength(347);

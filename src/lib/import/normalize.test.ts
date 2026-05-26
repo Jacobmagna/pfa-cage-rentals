@@ -1,10 +1,17 @@
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseWorkbook } from "./parse";
 import { normalizeRawName, normalizeSessions } from "./normalize";
 
 const FIXTURE = path.resolve(__dirname, "../../../source_data.xlsx");
+
+// source_data.xlsx is gitignored (PII). Skip the workbook-dependent suite
+// when the file is absent (fresh clones + CI). See parse.test.ts for the
+// canonical comment.
+const HAS_FIXTURE = existsSync(FIXTURE);
+const describeWithFixture = HAS_FIXTURE ? describe : describe.skip;
 
 describe("normalizeRawName (acceptance + BRAINSTORM table)", () => {
   it("maps D. Lusk, Lusk, and David Lusk to the same canonical entry", () => {
@@ -112,7 +119,7 @@ describe("normalizeRawName (fuzzy match)", () => {
   });
 });
 
-describe("normalizeSessions over the real workbook", () => {
+describeWithFixture("normalizeSessions over the real workbook", () => {
   it("preserves session count and aggregates by canonical name with low unmatched rate", async () => {
     const sessions = await parseWorkbook(await readFile(FIXTURE));
     const normalized = normalizeSessions(sessions);

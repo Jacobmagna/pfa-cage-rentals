@@ -1,16 +1,16 @@
 # PFA Cage Rentals — Design Spec
 
-Locked 2026-05-23. Source of truth for visual decisions. Re-read before any non-trivial UI work.
+Locked 2026-05-23. Light rebrand (FEAT-04) 2026-05-31. Source of truth for visual decisions. Re-read before any non-trivial UI work.
 
 ## North star
 
-**Premium dark dashboard with warm gold accents, echoing pfasports.com.** Production-grade polish (think Vercel / Linear / Railway), not Wix-template generic. Internal tool density beats marketing flourish — every pixel earns its place.
+**Premium light dashboard: white base, black text and primary controls, warm PFA gold as the signature accent.** Production-grade polish (think Vercel / Linear / Railway), not Wix-template generic. Internal tool density beats marketing flourish — every pixel earns its place. Same premium feel as the original dark system, just lighter.
 
 ## Brand alignment
 
 Parent brand: **PFA Sports — The Hub** (`pfasports.com`).
-- Black backgrounds dominate.
-- Warm gold (~`#e9b13c`) is the singular brand accent.
+- White / near-white surfaces dominate; near-black (`#0a0a0a`) text and primary controls.
+- Warm gold (~`#e9b13c`) is the singular brand accent — used for highlights, CTAs, focus, and active states, NOT as a dominant fill.
 - Bold geometric all-caps for headers.
 - Vibe: athletic, masculine, premium, slightly aggressive.
 
@@ -22,33 +22,48 @@ We don't replicate the PFA Sports shield logo or the parent site's display font 
 
 Declared as CSS variables in `src/app/globals.css`. Use these — don't inline hex values in components.
 
+Token names are stable across the rebrand — only values flipped dark→light. Tailwind utility names: `bg-page/surface/surface-2`, `border-line/line-strong`, `text-fg/fg-muted/fg-subtle/fg-disabled`, `bg-gold/text-gold/border-gold/text-gold-ink/text-gold-strong`, `text-success/warning/danger`.
+
 ### Surfaces
-- `--bg`             `#0a0a0a`   page background (near-black, easier on eyes than pure black for long sessions)
-- `--surface`        `#171717`   cards, panels, raised UI
-- `--surface-2`      `#1f1f1f`   nested or hovered surfaces
-- `--border`         `#262626`   1px dividers and card outlines
-- `--border-strong`  `#404040`   focused inputs, table headers
+- `--color-page`         `#ffffff`   page background (white)
+- `--color-surface`      `#f7f7f7`   cards, panels, raised UI (near-white elevation)
+- `--color-surface-2`    `#ededed`   nested or hovered surfaces
+- `--color-line`         `#e5e5e5`   1px dividers and card outlines
+- `--color-line-strong`  `#d4d4d4`   focused inputs, table headers
 
 ### Ink (text + icons)
-- `--text`           `#fafafa`   primary text
-- `--text-muted`     `#a3a3a3`   secondary text, labels
-- `--text-subtle`    `#737373`   placeholder, captions
-- `--text-disabled`  `#525252`   disabled controls
+- `--color-fg`           `#0a0a0a`   primary text (near-black)
+- `--color-fg-muted`     `#595959`   secondary text, labels
+- `--color-fg-subtle`    `#646464`   placeholder, captions
+- `--color-fg-disabled`  `#a3a3a3`   disabled controls (WCAG-exempt)
+
+WCAG AA 4.5:1 verified on all three surfaces (page / surface / surface-2):
+| Ink | page | surface | surface-2 |
+|---|---|---|---|
+| `fg` | 19.80 | 18.48 | 16.91 |
+| `fg-muted` | 7.00 | 6.60 | 5.93 |
+| `fg-subtle` | 5.92 | 5.52 | 5.05 |
 
 ### Brand
-- `--gold`           `#e9b13c`   primary accent — CTAs, links, focus rings, active states, logo
-- `--gold-hover`    `#f0bf52`   hover state on gold elements
-- `--gold-ink`       `#0a0a0a`   text color on gold backgrounds (always near-black for contrast)
+- `--color-gold`         `#e9b13c`   primary accent — CTA fills, focus rings, active states, logo, large/bold accents
+- `--color-gold-hover`   `#f0bf52`   hover state on gold elements
+- `--color-gold-ink`     `#0a0a0a`   text on gold backgrounds (10.20:1 on gold — AA/AAA)
+- `--color-gold-strong`  `#8a6206`   AA-legible gold for gold-COLORED *text* (5.18 page / 4.84 surface). Use only where gold text is required — prefer gold-ink-on-gold fills.
 
-### Status
-- `--success`        `#22c55e`   paid invoices, confirmed sessions
-- `--warning`        `#f59e0b`   pending, due-soon
-- `--danger`         `#dc2626`   delete confirmations, overdue invoices (use sparingly)
+Note: plain `--color-gold` is ~1.94:1 on white — it is a fill/accent color, never small body text. Use `text-gold-strong` for gold-tinted text.
+
+### Status (darkened to read on white; AA 4.5:1 on all surfaces)
+- `--color-success`      `#166534`   paid invoices, confirmed sessions (7.13 / 6.66 / 6.09)
+- `--color-warning`      `#9a5208`   pending, due-soon (5.86 / 5.47 / 5.00)
+- `--color-danger`       `#b01818`   delete confirmations, overdue invoices, use sparingly (7.02 / 6.56 / 6.00)
+
+Status pills (`bg-success/10 text-success` etc.) stay legible: the `/10` tint over white is far lighter than surface-2, so the text ratio in pills exceeds the surface-2 numbers above.
 
 ### Anti-rules
-- Never use raw white (`#ffffff`) for text — `--text` (`#fafafa`) is the cap.
-- Never use pure black for surfaces other than `--bg` — surfaces are always lifted with `--surface` or higher.
+- Don't hardcode hex in components — use the semantic tokens (the `next/og` image routes `icon.tsx` / `opengraph-image.tsx` are the only exception, since `next/og` can't read CSS vars).
+- Surfaces are always white or a near-white elevation grey — don't invent surface colors outside the `surface` / `surface-2` ladder.
 - Don't introduce new accent colors. Gold is the only brand color. Status colors are status, not decoration.
+- Gold is an accent, not a dominant fill — reserve large gold areas for CTAs and signature moments.
 
 ---
 
@@ -168,8 +183,8 @@ Overdue:  bg-danger/10 text-danger border border-danger/30
 
 ### Sign-in page (the only "marketing-leaning" page)
 
-- Full-page black background.
-- Centered card (`max-w-sm`) on `bg-surface` with `border border-border`.
+- Full-page white background (`bg-page`).
+- Centered card (`max-w-sm`) on `bg-surface` with `border border-line`.
 - Gold wordmark above the form (slightly larger than nav: `text-2xl font-bold`).
 - Tagline below in muted: "Cage, bullpen, and weight-room rental tracking."
 - Two clear sign-in options: gold primary button "Continue with Google", muted divider "or", email input + gold-bordered "Email me a sign-in link" button.
@@ -178,7 +193,7 @@ Overdue:  bg-danger/10 text-danger border border-danger/30
 ### Admin / Coach dashboards
 
 - Top nav (above).
-- `bg-bg` page background.
+- `bg-page` page background (white).
 - Pages render their own cards/tables within `max-w-7xl mx-auto px-6 lg:px-8 py-8` container.
 - Page H1 at top, optional muted subtitle.
 - No sidebar in Phase 1 — top nav is the only chrome. Sidebar lands in Phase 5 (Schedule grid view) if needed.
@@ -227,7 +242,7 @@ Common iconography:
 - ❌ Photography in app shell (sign-in is the only exception, and even there we'd use solid color)
 - ❌ Illustrations or decorative SVG art
 - ❌ Multi-color status systems beyond the four (`success`, `warning`, `danger`, default muted)
-- ❌ Light mode (we are dark-by-default — no `prefers-color-scheme` toggle in Phase 1)
+- ❌ Dark mode / theme toggle — we are light-by-default (FEAT-04). No `prefers-color-scheme` switch.
 - ❌ Custom scrollbars
 - ❌ Sound effects, page-load animations, hover sparkles
 - ❌ Replicating the PFA Sports shield logo or custom wordmark letterforms

@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { auth, signOut } from "@/auth";
 import { DiamondMark } from "./diamond-mark";
@@ -31,6 +32,14 @@ export async function AppShell({
             href={role === "admin" ? "/admin" : "/coach"}
             className="flex items-center gap-2.5 group"
           >
+            <Image
+              src="/pfa-logo.png"
+              alt="PFA"
+              width={24}
+              height={24}
+              priority
+              className="h-6 w-6 object-contain"
+            />
             <DiamondMark
               className="h-2.5 w-2.5 text-gold/70 transition-colors group-hover:text-gold"
               filled

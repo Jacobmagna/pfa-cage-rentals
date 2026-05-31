@@ -26,7 +26,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0a0a0a",
+  // FEAT-04 light rebrand: browser/PWA chrome color matches the white
+  // page background (--color-page). Kept as a literal because <meta
+  // name="theme-color"> can't read CSS custom properties.
+  themeColor: "#ffffff",
 };
 
 export default function RootLayout({

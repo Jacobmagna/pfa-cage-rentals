@@ -12,8 +12,10 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Cage, bullpen, and weight-room rental tracking for PFA Baseball.",
     start_url: "/",
     display: "standalone",
-    background_color: "#0a0a0a",
-    theme_color: "#0a0a0a",
+    // FEAT-04 light rebrand: PWA splash + chrome match the white app
+    // (--color-page). Literals because the manifest can't read CSS vars.
+    background_color: "#ffffff",
+    theme_color: "#ffffff",
     icons: [
       { src: "/icon", sizes: "192x192", type: "image/png" },
       { src: "/apple-icon", sizes: "180x180", type: "image/png" },

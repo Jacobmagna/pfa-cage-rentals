@@ -1,0 +1,16 @@
+import { CalendarCheck } from "lucide-react";
+import { requireRole } from "@/lib/authz";
+
+export default async function AdminAttendancePage() {
+  await requireRole("admin");
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-semibold tracking-tight">Attendance</h1>
+      <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-line bg-surface py-16 text-center">
+        <CalendarCheck className="h-8 w-8 text-gold" aria-hidden="true" />
+        <p className="text-fg-muted">Coming soon</p>
+      </div>
+    </div>
+  );
+}

@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { auth, signOut } from "@/auth";
 import { DiamondMark } from "./diamond-mark";
+import { TabNav } from "./tab-nav";
 
 /**
  * App shell with top nav.
@@ -72,6 +73,8 @@ export async function AppShell({
           </div>
         </div>
       </header>
+
+      <TabNav role={role} />
 
       <main className="flex-1 mx-auto w-full max-w-7xl px-6 lg:px-8 py-10">
         {children}

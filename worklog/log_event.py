@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 LOG_PATH = Path(__file__).resolve().parent / "sessions.jsonl"
-PROJECT_MARKER = "coaches-cage-ai"
+PROJECT_MARKER = "/cage-rentals"  # leading slash prevents false-positive substring matches
 
 event_type = sys.argv[1] if len(sys.argv) > 1 else "unknown"
 

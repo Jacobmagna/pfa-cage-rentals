@@ -15,7 +15,10 @@
 
 import { redirect } from "next/navigation";
 import type { Session } from "next-auth";
+import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
+import { db } from "@/db";
+import { coachPrograms } from "@/db/schema";
 
 export type AuthedSession = Session & {
   user: NonNullable<Session["user"]>;
@@ -67,4 +70,42 @@ export function requireSessionOwnership(
   if (user.role === "admin") return;
   if (row.coachId === user.id) return;
   redirect("/coach");
+}
+
+/**
+ * Program IDs assigned to a user via coach_programs. Empty array when the
+ * user has no assignments. Used to scope a coach's program-facing surfaces
+ * to exactly what they may access.
+ */
+export async function coachProgramIds(userId: string): Promise<string[]> {
+  const rows = await db
+    .select({ programId: coachPrograms.programId })
+    .from(coachPrograms)
+    .where(eq(coachPrograms.coachId, userId));
+  return rows.map((r) => r.programId);
+}
+
+/**
+ * Authorizes access to a program. Admins always pass. A coach passes only
+ * when the program is in their coach_programs assignments; otherwise
+ * redirects to /coach — same redirect-on-violation shape as
+ * requireSessionOwnership, appropriate for URL-guessing (coach A loading
+ * a program they aren't assigned to).
+ */
+export async function assertCoachCanAccessProgram(
+  user: AuthedSession["user"],
+  programId: string,
+): Promise<void> {
+  if (user.role === "admin") return;
+  const [row] = await db
+    .select({ programId: coachPrograms.programId })
+    .from(coachPrograms)
+    .where(
+      and(
+        eq(coachPrograms.coachId, user.id),
+        eq(coachPrograms.programId, programId),
+      ),
+    )
+    .limit(1);
+  if (!row) redirect("/coach");
 }

@@ -196,6 +196,78 @@ function pad2(n: number): string {
 }
 
 /**
+ * UTC instant range [startUtc, endUtc) for the Sunday→Saturday PFA-local
+ * week containing the calendar date `dateStr` ("YYYY-MM-DD").
+ *
+ * The week starts at PFA-local midnight on the Sunday at or before
+ * `dateStr` and ends at PFA-local midnight on the following Sunday. The
+ * range is half-open: startUtc inclusive, endUtc exclusive — matching
+ * pfaMonthStart/End so callers can use the same `>= start AND < end`
+ * query shape.
+ *
+ * DST-safe: we anchor on noon (never inside the 02:00–03:00 spring-
+ * forward gap) and snap each boundary to PFA midnight via
+ * pfaWallClockToUtc, so the spring-forward (23h) and fall-back (25h)
+ * weeks both land on the correct calendar Sundays.
+ */
+export function pfaWeekRange(dateStr: string): {
+  startUtc: Date;
+  endUtc: Date;
+} {
+  // PFA-local weekday (0=Sun..6=Sat) of the noon anchor on `dateStr`,
+  // derived from the long name so it's unambiguous across locales.
+  const noon = pfaWallClockToUtc(dateStr, "12:00");
+  const longName = new Intl.DateTimeFormat("en-US", {
+    timeZone: PFA_TIMEZONE,
+    weekday: "long",
+  }).format(noon);
+  const WEEKDAYS = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ];
+  const dow = WEEKDAYS.indexOf(longName);
+
+  // Walk the noon anchor back to this week's Sunday and forward to the
+  // next Sunday, then read off the PFA calendar dates and snap to PFA
+  // midnight. ±25h-per-day stepping keeps us off DST boundaries.
+  const sundayNoon = new Date(noon.getTime() - dow * 24 * 60 * 60 * 1000);
+  const nextSundayNoon = new Date(
+    noon.getTime() + (7 - dow) * 24 * 60 * 60 * 1000,
+  );
+  const sP = pfaParts(sundayNoon);
+  const nP = pfaParts(nextSundayNoon);
+  const startUtc = pfaWallClockToUtc(
+    `${sP.year}-${pad2(sP.month)}-${pad2(sP.day)}`,
+    "00:00",
+  );
+  const endUtc = pfaWallClockToUtc(
+    `${nP.year}-${pad2(nP.month)}-${pad2(nP.day)}`,
+    "00:00",
+  );
+  return { startUtc, endUtc };
+}
+
+/**
+ * UTC instant range [startUtc, endUtc) for the PFA-local calendar month
+ * containing the calendar date `dateStr` ("YYYY-MM-DD"). Half-open:
+ * startUtc inclusive (1st at PFA midnight), endUtc exclusive (1st of the
+ * next month at PFA midnight). Thin wrapper over pfaMonthStart /
+ * pfaMonthEnd that accepts a date string instead of a Date.
+ */
+export function pfaMonthRange(dateStr: string): {
+  startUtc: Date;
+  endUtc: Date;
+} {
+  const anchor = pfaWallClockToUtc(dateStr, "12:00");
+  return { startUtc: pfaMonthStart(anchor), endUtc: pfaMonthEnd(anchor) };
+}
+
+/**
  * Returns the wall-clock parts (year, month, day, hour, minute) at
  * `d` in PFA TZ. Useful for "what is the current PFA day" without
  * relying on the runtime's local TZ.

@@ -1,16 +1,166 @@
 import { CalendarCheck } from "lucide-react";
-import { requireSession } from "@/lib/authz";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import { db } from "@/db";
+import {
+  athletePrograms,
+  athletes,
+  attendanceRecords,
+  attendanceSessions,
+  programs,
+} from "@/db/schema";
+import {
+  assertCoachCanAccessProgram,
+  coachProgramIds,
+  requireSession,
+} from "@/lib/authz";
+import { formatPfaDate } from "@/lib/timezone";
+import {
+  ProgramDatePicker,
+  type ProgramOption,
+} from "./_components/program-date-picker";
+import {
+  AttendanceForm,
+  type RosterAthlete,
+} from "./_components/attendance-form";
 
-export default async function CoachAttendancePage() {
-  await requireSession();
+// Coach attendance page (DEC-24). searchParams-driven (?programId=&date=),
+// server-rendered. The picker is a GET <form>; selecting a program + date
+// re-renders this page with that program's roster, prefilled from any
+// existing attendance session for the day so re-submit edits the same
+// session (DEC-05).
+//
+// Program scoping mirrors /coach/hour-log: admins see all active
+// programs, coaches see their assigned + active programs.
+
+type RawSearchParams = Promise<{
+  programId?: string | string[];
+  date?: string | string[];
+}>;
+
+function firstParam(v: string | string[] | undefined): string {
+  return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
+}
+
+export default async function CoachAttendancePage({
+  searchParams,
+}: {
+  searchParams: RawSearchParams;
+}) {
+  const session = await requireSession();
+  const { user } = session;
+  const params = await searchParams;
+
+  // Allowed program options (admins → all active; coaches → assigned + active).
+  let programOptions: ProgramOption[] = [];
+  if (user.role === "admin") {
+    programOptions = await db
+      .select({ id: programs.id, name: programs.name })
+      .from(programs)
+      .where(eq(programs.active, true))
+      .orderBy(asc(programs.name));
+  } else {
+    const ids = await coachProgramIds(user.id);
+    if (ids.length > 0) {
+      programOptions = await db
+        .select({ id: programs.id, name: programs.name })
+        .from(programs)
+        .where(and(inArray(programs.id, ids), eq(programs.active, true)))
+        .orderBy(asc(programs.name));
+    }
+  }
+
+  const date = firstParam(params.date) || formatPfaDate(new Date());
+  const requestedProgramId = firstParam(params.programId);
+  const allowedIds = new Set(programOptions.map((p) => p.id));
+  const selectedProgramId =
+    requestedProgramId && allowedIds.has(requestedProgramId)
+      ? requestedProgramId
+      : "";
+
+  // Load the roster + prefill marks for the selected program/date.
+  let roster: RosterAthlete[] | null = null;
+  if (selectedProgramId) {
+    await assertCoachCanAccessProgram(user, selectedProgramId);
+
+    const rosterRows = await db
+      .select({
+        id: athletes.id,
+        firstName: athletes.firstName,
+        lastName: athletes.lastName,
+      })
+      .from(athletePrograms)
+      .innerJoin(athletes, eq(athletePrograms.athleteId, athletes.id))
+      .where(eq(athletePrograms.programId, selectedProgramId))
+      .orderBy(asc(athletes.lastName), asc(athletes.firstName));
+
+    // Existing session for (program, date) → present marks for prefill.
+    const presentMap = new Map<string, boolean>();
+    const [existingSession] = await db
+      .select({ id: attendanceSessions.id })
+      .from(attendanceSessions)
+      .where(
+        and(
+          eq(attendanceSessions.programId, selectedProgramId),
+          eq(attendanceSessions.sessionDate, date),
+        ),
+      )
+      .limit(1);
+    if (existingSession) {
+      const records = await db
+        .select({
+          athleteId: attendanceRecords.athleteId,
+          present: attendanceRecords.present,
+        })
+        .from(attendanceRecords)
+        .where(eq(attendanceRecords.sessionId, existingSession.id));
+      for (const r of records) presentMap.set(r.athleteId, r.present);
+    }
+
+    roster = rosterRows.map((a) => ({
+      id: a.id,
+      firstName: a.firstName,
+      lastName: a.lastName,
+      present: presentMap.get(a.id) ?? false,
+    }));
+  }
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold tracking-tight">Attendance</h1>
-      <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-line bg-surface py-16 text-center">
-        <CalendarCheck className="h-8 w-8 text-gold" aria-hidden="true" />
-        <p className="text-fg-muted">Coming soon</p>
-      </div>
+
+      {programOptions.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-line bg-surface py-16 text-center">
+          <CalendarCheck className="h-8 w-8 text-gold" aria-hidden="true" />
+          <p className="text-fg-muted">
+            No programs assigned yet — ask an admin to add you to a program.
+          </p>
+        </div>
+      ) : (
+        <div className="max-w-2xl space-y-6">
+          <ProgramDatePicker
+            programs={programOptions}
+            selectedProgramId={selectedProgramId}
+            date={date}
+          />
+
+          {!selectedProgramId ? (
+            <p className="text-sm text-fg-muted">
+              Pick a program to take attendance.
+            </p>
+          ) : roster && roster.length > 0 ? (
+            <AttendanceForm
+              key={`${selectedProgramId}:${date}`}
+              programId={selectedProgramId}
+              sessionDate={date}
+              roster={roster}
+            />
+          ) : (
+            <p className="text-sm text-fg-muted">
+              No athletes assigned to this program yet.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

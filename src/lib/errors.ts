@@ -236,6 +236,18 @@ export class AthleteHasRecordsError extends Error {
   }
 }
 
+// Attendance submit hit a program with no athletes on its roster.
+// Taking attendance for an empty roster is meaningless (and the
+// submit schema requires at least one record), so we refuse and tell
+// the coach to enroll athletes first.
+export class AttendanceEmptyRosterError extends Error {
+  readonly code = "ATTENDANCE_EMPTY_ROSTER" as const;
+  constructor(public readonly programId: string) {
+    super(`No athletes are assigned to this program yet`);
+    this.name = "AttendanceEmptyRosterError";
+  }
+}
+
 export class BlockConflictsWithSessionError extends Error {
   readonly code = "BLOCK_CONFLICTS_WITH_SESSION" as const;
   constructor(

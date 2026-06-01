@@ -175,6 +175,17 @@ export class ProgramNotFoundError extends Error {
   }
 }
 
+// Program create/update hit the `programs_name_unique` constraint —
+// another program already owns that name. The submitted name rides
+// along so the UI can echo it in the banner.
+export class ProgramNameTakenError extends Error {
+  readonly code = "PROGRAM_NAME_TAKEN" as const;
+  constructor(public readonly name: string) {
+    super(`A program named "${name}" already exists`);
+    this.name = "ProgramNameTakenError";
+  }
+}
+
 // Hour-log create targeted a retired (soft-deleted) program. Programs
 // are never hard-deleted — they're flipped to active = false — so a
 // stale form option could still point at one.

@@ -13,6 +13,7 @@ import {
   buildAttendanceGrid,
   type GridAthlete,
 } from "@/lib/server/attendance-grid";
+import { computeOverCapFlags } from "@/lib/server/attendance-flags";
 import { ProgramPicker, type ProgramOption } from "./_components/program-picker";
 import { AttendanceGrid } from "./_components/attendance-grid";
 
@@ -84,6 +85,17 @@ export default async function AttendanceByProgramPage({
     );
   }
 
+  // The selected program's participation cap (FEAT-11). cap + capPeriod
+  // are co-required (both NULL = uncapped). A tiny single-row lookup —
+  // the picker fetch stays id/name only so its option type is unchanged.
+  const [selectedProgram] = await db
+    .select({ cap: programs.cap, capPeriod: programs.capPeriod })
+    .from(programs)
+    .where(eq(programs.id, selectedProgramId))
+    .limit(1);
+  const cap = selectedProgram?.cap ?? null;
+  const capPeriod = selectedProgram?.capPeriod ?? null;
+
   // Set-based reads for the selected program.
   // (a) current roster athletes.
   const rosterAthletes = await db
@@ -143,6 +155,16 @@ export default async function AttendanceByProgramPage({
     records,
   });
 
+  // Over-cap red flags (FEAT-11). Pure logic on the already-built grid;
+  // uncapped programs → {} → grid renders exactly as FEAT-10.
+  const flags = computeOverCapFlags({
+    athletes: grid.athletes,
+    sessions: grid.sessions,
+    present: grid.present,
+    cap,
+    capPeriod,
+  });
+
   const empty = grid.sessions.length === 0 || grid.athletes.length === 0;
 
   return (
@@ -160,7 +182,7 @@ export default async function AttendanceByProgramPage({
           </p>
         </div>
       ) : (
-        <AttendanceGrid grid={grid} />
+        <AttendanceGrid grid={grid} flags={flags} />
       )}
     </div>
   );

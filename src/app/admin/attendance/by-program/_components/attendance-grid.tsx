@@ -1,24 +1,39 @@
-// Read-only attendance grid (FEAT-10). Presentational — no client
-// state needed yet, so it stays a server component. Kept deliberately
-// dumb so FEAT-11 can later swap it to a client component and layer a
-// per-cell over-cap popover on top without reshaping the data.
-//
-// Layout mirrors the schedule grid's scroll shell: an
-// `overflow-x-auto` container with a border, and a sticky-left first
-// column so the athlete-name column stays pinned while the date columns
-// scroll horizontally. A vanilla <table> is simpler than CSS grid here
-// and gives us real <th scope> semantics for free.
-//
-// Cells: P (present) in text-success, A (absent) in text-fg-muted,
-// blank (no record) renders an em-dash in text-fg-subtle. Tokens only —
-// no hardcoded colors.
+"use client";
 
+// Read-only attendance grid (FEAT-10, with the FEAT-11 over-cap layer).
+// Converted to a client component so over-cap present cells can render
+// red and toggle a small explainer popover. The data shape is unchanged
+// — the page still hands in the pure buildAttendanceGrid output plus a
+// computeOverCapFlags result (athleteId → sessionId → OverCapInfo).
+//
+// Layout mirrors the schedule grid's scroll shell: an `overflow-x-auto`
+// container with a border, and a sticky-left first column so the
+// athlete-name column stays pinned while the date columns scroll
+// horizontally. A vanilla <table> gives us real <th scope> semantics.
+//
+// Cells: P (present) in text-success; an OVER-cap present cell is a red
+// <button> (text-danger) that toggles the over-cap popover; A (absent) in
+// text-fg-muted; blank (no record) renders an em-dash in text-fg-subtle.
+// Tokens only — no hardcoded colors. One popover open at a time.
+
+import { useRef, useState } from "react";
 import {
   formatGridDate,
   type AttendanceGrid as AttendanceGridData,
 } from "@/lib/server/attendance-grid";
+import type { OverCapFlags } from "@/lib/server/attendance-flags";
+import { OverCapPopover } from "./over-cap-popover";
 
-export function AttendanceGrid({ grid }: { grid: AttendanceGridData }) {
+export function AttendanceGrid({
+  grid,
+  flags = {},
+}: {
+  grid: AttendanceGridData;
+  flags?: OverCapFlags;
+}) {
+  // The single open red cell, keyed "athleteId|sessionId" (one at a time).
+  const [openKey, setOpenKey] = useState<string | null>(null);
+
   return (
     <div className="overflow-x-auto rounded-lg border border-line">
       <table className="border-collapse text-sm">
@@ -45,6 +60,7 @@ export function AttendanceGrid({ grid }: { grid: AttendanceGridData }) {
         <tbody>
           {grid.athletes.map((a) => {
             const marks = grid.present[a.id];
+            const athleteFlags = flags[a.id];
             return (
               <tr
                 key={a.id}
@@ -58,13 +74,26 @@ export function AttendanceGrid({ grid }: { grid: AttendanceGridData }) {
                 </th>
                 {grid.sessions.map((s) => {
                   const present = marks?.[s.id];
+                  const over = athleteFlags?.[s.id];
                   return (
                     <td
                       key={s.id}
-                      className="px-3 py-3 text-center font-mono tabular-nums"
+                      className="relative px-3 py-3 text-center font-mono tabular-nums"
                     >
                       {present === true ? (
-                        <span className="font-semibold text-success">P</span>
+                        over ? (
+                          <OverCapCell
+                            cellKey={`${a.id}|${s.id}`}
+                            info={over}
+                            open={openKey === `${a.id}|${s.id}`}
+                            onToggle={(k) =>
+                              setOpenKey((cur) => (cur === k ? null : k))
+                            }
+                            onClose={() => setOpenKey(null)}
+                          />
+                        ) : (
+                          <span className="font-semibold text-success">P</span>
+                        )
                       ) : present === false ? (
                         <span className="font-semibold text-fg-muted">A</span>
                       ) : (
@@ -81,5 +110,41 @@ export function AttendanceGrid({ grid }: { grid: AttendanceGridData }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+// A single over-cap present cell: a red P button that toggles its
+// popover. Holds the trigger ref so the popover can return focus on close.
+function OverCapCell({
+  cellKey,
+  info,
+  open,
+  onToggle,
+  onClose,
+}: {
+  cellKey: string;
+  info: import("@/lib/server/attendance-flags").OverCapInfo;
+  open: boolean;
+  onToggle: (key: string) => void;
+  onClose: () => void;
+}) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => onToggle(cellKey)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={`Over cap — ${info.periodLabel}`}
+        className="font-semibold text-danger underline decoration-dotted underline-offset-4 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 rounded"
+      >
+        P
+      </button>
+      {open ? (
+        <OverCapPopover info={info} onClose={onClose} returnFocusTo={btnRef} />
+      ) : null}
+    </>
   );
 }

@@ -199,6 +199,32 @@ export class HourLogNotFoundError extends Error {
   }
 }
 
+// Athlete edit/delete/assign referenced an athletes id that doesn't
+// exist (stale client row, or a direct RPC call with a bogus id).
+export class AthleteNotFoundError extends Error {
+  readonly code = "ATHLETE_NOT_FOUND" as const;
+  constructor(public readonly athleteId: string) {
+    super(`Athlete ${athleteId} not found`);
+    this.name = "AthleteNotFoundError";
+  }
+}
+
+// Refused to hard-delete an athlete that still has attendance_records.
+// athletes has no soft-delete column, so deleting would cascade away
+// the attendance history — we guard instead (DEC-20) and surface this.
+export class AthleteHasRecordsError extends Error {
+  readonly code = "ATHLETE_HAS_RECORDS" as const;
+  constructor(
+    public readonly athleteId: string,
+    public readonly recordCount: number,
+  ) {
+    super(
+      `Athlete ${athleteId} has ${recordCount} attendance record(s) and can't be deleted`,
+    );
+    this.name = "AthleteHasRecordsError";
+  }
+}
+
 export class BlockConflictsWithSessionError extends Error {
   readonly code = "BLOCK_CONFLICTS_WITH_SESSION" as const;
   constructor(

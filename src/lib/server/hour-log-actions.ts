@@ -21,10 +21,8 @@
 // hour). Same shape as the session create path.
 
 import { eq } from "drizzle-orm";
-import * as Sentry from "@sentry/nextjs";
 import { db } from "@/db";
 import { hourLogs, programs } from "@/db/schema";
-import { logAudit } from "@/lib/audit";
 import { assertCoachCanAccessProgram, type AuthedSession } from "@/lib/authz";
 import {
   HourLogNotFoundError,
@@ -35,24 +33,7 @@ import {
   createHourLogSchema,
   editHourLogSchema,
 } from "@/lib/schemas/hour-log";
-
-// Audit-log insert wrapper that swallows failures rather than letting
-// an audit hiccup lose a successful insert (which we couldn't roll
-// back anyway under neon-http). Sentry captures so we know. Mirrors
-// session-actions.ts.
-async function safeLogAudit(
-  ...args: Parameters<typeof logAudit>
-): Promise<void> {
-  try {
-    await logAudit(...args);
-  } catch (auditErr) {
-    Sentry.captureException(auditErr, {
-      tags: { component: "audit", entityType: args[1].entityType },
-      extra: { input: args[1] },
-    });
-    console.error("[audit] insert failed:", auditErr);
-  }
-}
+import { safeLogAudit } from "./audit-helpers";
 
 export async function logHourInternal(
   actor: AuthedSession["user"],

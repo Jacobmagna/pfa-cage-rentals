@@ -23,9 +23,14 @@ export const updateAthleteSchema = z.object({
 });
 
 // Assign one or more athletes to a single program.
+//   - "add"  — insert (athleteId, programId) idempotently; keeps any
+//     existing assignments the athlete already has.
+//   - "move" — clear ALL the athlete's program assignments, then insert
+//     the one; net effect is the athlete belongs to exactly this program.
 export const assignAthletesToProgramSchema = z.object({
   athleteIds: z.array(z.string().min(1)).min(1, "at least one athlete"),
   programId: z.string().min(1, "programId is required"),
+  mode: z.enum(["add", "move"]).default("add"),
 });
 
 export type CreateAthleteInput = z.infer<typeof createAthleteSchema>;

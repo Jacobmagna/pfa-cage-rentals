@@ -1,16 +1,10 @@
-import { CalendarCheck } from "lucide-react";
+import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/authz";
 
+// The Attendance section is a route-based sub-tab shell (DEC-22). The
+// section root redirects to the first sub-tab; the sub-nav itself lives
+// in layout.tsx so it renders around every attendance sub-route.
 export default async function AdminAttendancePage() {
   await requireRole("admin");
-
-  return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Attendance</h1>
-      <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-line bg-surface py-16 text-center">
-        <CalendarCheck className="h-8 w-8 text-gold" aria-hidden="true" />
-        <p className="text-fg-muted">Coming soon</p>
-      </div>
-    </div>
-  );
+  redirect("/admin/attendance/roster");
 }

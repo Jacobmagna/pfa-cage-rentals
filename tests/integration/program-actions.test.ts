@@ -1,5 +1,5 @@
-// Integration tests for the internal program + coach↔program mutation
-// logic (src/lib/server/program-actions.ts). These hit a real Neon dev
+// Integration tests for the internal program mutation logic
+// (src/lib/server/program-actions.ts). These hit a real Neon dev
 // branch — see vitest.integration.config.ts and tests/integration/
 // setup.ts for env wiring.
 //
@@ -9,19 +9,17 @@
 // requireRole("admin") — covered separately via mocked auth(); calling
 // internals here lets the test run without mocking framework internals.
 //
-// truncateMutables() does NOT touch `programs` or `coach_programs`, so
-// every test creates its own program(s) with a unique name suffix and
-// scopes assertions to the created program/row ids. audit_log IS
-// truncated between tests.
+// truncateMutables() does NOT touch `programs`, so every test creates
+// its own program(s) with a unique name suffix and scopes assertions to
+// the created program/row ids. audit_log IS truncated between tests.
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { auditLog, coachPrograms, programs } from "@/db/schema";
+import { auditLog, programs } from "@/db/schema";
 import {
   createProgramInternal,
   deactivateProgramInternal,
-  setProgramCoachesInternal,
   updateProgramInternal,
 } from "@/lib/server/program-actions";
 import { ProgramNameTakenError, ProgramNotFoundError } from "@/lib/errors";
@@ -223,81 +221,6 @@ describe("deactivateProgramInternal", () => {
   it("throws ProgramNotFoundError for a missing id", async () => {
     await expect(
       deactivateProgramInternal(fixtures.admin, "does-not-exist"),
-    ).rejects.toBeInstanceOf(ProgramNotFoundError);
-  });
-});
-
-describe("setProgramCoachesInternal", () => {
-  it("assigns then clears a coach (replace-set) with create/delete audits", async () => {
-    const program = await createProgramInternal(fixtures.admin, {
-      name: programName(),
-    });
-
-    // Assign one coach.
-    const assigned = await setProgramCoachesInternal(
-      fixtures.admin,
-      program.id,
-      [fixtures.coach.id],
-    );
-    expect(assigned).toEqual({ programId: program.id, added: 1, removed: 0 });
-
-    const rowsAfterAssign = await db
-      .select()
-      .from(coachPrograms)
-      .where(eq(coachPrograms.programId, program.id));
-    expect(rowsAfterAssign).toHaveLength(1);
-    expect(rowsAfterAssign[0].coachId).toBe(fixtures.coach.id);
-
-    const createAudit = await db
-      .select()
-      .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.entityId, `${fixtures.coach.id}:${program.id}`),
-          eq(auditLog.action, "create"),
-        ),
-      );
-    expect(createAudit).toHaveLength(1);
-    expect(createAudit[0].entityType).toBe("coach_program");
-
-    // Re-submitting the same set is a no-op (idempotent replace-set).
-    const noop = await setProgramCoachesInternal(fixtures.admin, program.id, [
-      fixtures.coach.id,
-    ]);
-    expect(noop).toEqual({ programId: program.id, added: 0, removed: 0 });
-
-    // Submit the empty set → removes the coach.
-    const cleared = await setProgramCoachesInternal(
-      fixtures.admin,
-      program.id,
-      [],
-    );
-    expect(cleared).toEqual({ programId: program.id, added: 0, removed: 1 });
-
-    const rowsAfterClear = await db
-      .select()
-      .from(coachPrograms)
-      .where(eq(coachPrograms.programId, program.id));
-    expect(rowsAfterClear).toHaveLength(0);
-
-    const deleteAudit = await db
-      .select()
-      .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.entityId, `${fixtures.coach.id}:${program.id}`),
-          eq(auditLog.action, "delete"),
-        ),
-      );
-    expect(deleteAudit).toHaveLength(1);
-    expect(deleteAudit[0].entityType).toBe("coach_program");
-  });
-
-  it("throws ProgramNotFoundError for a non-existent program", async () => {
-    await expect(
-      setProgramCoachesInternal(fixtures.admin, "does-not-exist", [
-        fixtures.coach.id,
-      ]),
     ).rejects.toBeInstanceOf(ProgramNotFoundError);
   });
 });

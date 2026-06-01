@@ -1,9 +1,9 @@
-// Internal program + coach↔program mutation logic. Lives outside any
-// "use server" file because Next.js exposes every async export from a
-// "use server" file as a public RPC endpoint — and these functions take
-// the actor as a parameter, so exposing them directly would let anyone
-// forge an admin identity. The public, requireRole("admin")-gated
-// wrappers live in src/app/admin/programs/actions.ts.
+// Internal program mutation logic. Lives outside any "use server" file
+// because Next.js exposes every async export from a "use server" file
+// as a public RPC endpoint — and these functions take the actor as a
+// parameter, so exposing them directly would let anyone forge an admin
+// identity. The public, requireRole("admin")-gated wrappers live in
+// src/app/admin/programs/actions.ts.
 //
 // Mirrors src/lib/server/athlete-actions.ts + hour-log-actions.ts:
 //   *Internal(actor, input) — Zod-parse → business checks → db mutate →
@@ -12,13 +12,11 @@
 // Programs are soft-deleted (DEC-10): "delete" flips active=false so the
 // no-cascade FKs on hour_logs / attendance_sessions keep their target.
 // cap + capPeriod are co-required (DEC-03; enforced by the Zod refine +
-// the DB CHECK). coach_programs is the M:N coach-assignment table (DEC-04
-// / DEC-23) written with replace-set semantics below.
+// the DB CHECK).
 
-import { and, eq } from "drizzle-orm";
-import { z } from "zod";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { coachPrograms, programs } from "@/db/schema";
+import { programs } from "@/db/schema";
 import { type AuthedSession } from "@/lib/authz";
 import { ProgramNameTakenError, ProgramNotFoundError } from "@/lib/errors";
 import {
@@ -176,90 +174,4 @@ export async function deactivateProgramInternal(
     after: updated as unknown as Record<string, unknown>,
   });
   return updated;
-}
-
-// Validate the submitted coach-id set. Strings only; dedupe so a repeated
-// id can't double-insert. The program-existence + role checks happen in
-// setProgramCoachesInternal.
-const coachIdsSchema = z.array(z.string().min(1));
-
-export type SetProgramCoachesSummary = {
-  programId: string;
-  added: number;
-  removed: number;
-};
-
-// Replace-set coach assignment (DEC-04 / DEC-23). The submitted set
-// becomes the program's exact coach set: we diff against the current
-// coach_programs rows and write only the delta. The program must exist
-// (else ProgramNotFoundError). Neon-http has no transactions, so we issue
-// sequential statements (repo convention) and audit each *effective*
-// change as a "coach_program" row keyed `${coachId}:${programId}`.
-export async function setProgramCoachesInternal(
-  actor: AuthedSession["user"],
-  programId: string,
-  coachIds: unknown,
-): Promise<SetProgramCoachesSummary> {
-  const submitted = new Set(coachIdsSchema.parse(coachIds));
-
-  const [program] = await db
-    .select()
-    .from(programs)
-    .where(eq(programs.id, programId))
-    .limit(1);
-  if (!program) throw new ProgramNotFoundError(programId);
-
-  const currentRows = await db
-    .select({ coachId: coachPrograms.coachId })
-    .from(coachPrograms)
-    .where(eq(coachPrograms.programId, programId));
-  const current = new Set(currentRows.map((r) => r.coachId));
-
-  const toAdd = [...submitted].filter((id) => !current.has(id));
-  const toRemove = [...current].filter((id) => !submitted.has(id));
-
-  let added = 0;
-  let removed = 0;
-
-  for (const coachId of toAdd) {
-    const inserted = await db
-      .insert(coachPrograms)
-      .values({ coachId, programId })
-      .onConflictDoNothing()
-      .returning();
-    if (inserted.length > 0) {
-      added += 1;
-      await safeLogAudit(db, {
-        actorUserId: actor.id,
-        entityType: "coach_program",
-        entityId: `${coachId}:${programId}`,
-        action: "create",
-        after: inserted[0] as unknown as Record<string, unknown>,
-      });
-    }
-  }
-
-  for (const coachId of toRemove) {
-    const deleted = await db
-      .delete(coachPrograms)
-      .where(
-        and(
-          eq(coachPrograms.coachId, coachId),
-          eq(coachPrograms.programId, programId),
-        ),
-      )
-      .returning();
-    if (deleted.length > 0) {
-      removed += 1;
-      await safeLogAudit(db, {
-        actorUserId: actor.id,
-        entityType: "coach_program",
-        entityId: `${coachId}:${programId}`,
-        action: "delete",
-        before: deleted[0] as unknown as Record<string, unknown>,
-      });
-    }
-  }
-
-  return { programId, added, removed };
 }

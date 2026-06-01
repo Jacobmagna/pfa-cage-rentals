@@ -6,11 +6,10 @@
 // directly with a synthetic actor instead of going through the public
 // "use server" wrapper. The wrapper adds requireSession() (covered via
 // mocked auth elsewhere); calling the internal here lets the test run
-// without mocking framework internals — and lets the real
-// assertCoachCanAccessProgram run its DB query + redirect.
+// without mocking framework internals.
 //
-// truncateMutables() does NOT touch programs / coach_programs / athletes
-// / athlete_programs / attendance_*, so every test creates its own
+// truncateMutables() does NOT touch programs / athletes /
+// athlete_programs / attendance_*, so every test creates its own
 // program + athletes with unique ids and scopes assertions to the
 // created session/program ids. audit_log IS truncated between tests.
 
@@ -23,7 +22,6 @@ import {
   attendanceRecords,
   attendanceSessions,
   auditLog,
-  coachPrograms,
   programs,
 } from "@/db/schema";
 import { submitAttendanceInternal } from "@/lib/server/attendance-actions";
@@ -39,8 +37,8 @@ import {
 
 // submitAttendanceInternal → @/lib/authz → @/auth → next-auth, which
 // fails to resolve in the vitest node environment. We never exercise
-// the real auth() here, so stubbing @/auth is purely to break the
-// import chain.
+// the real auth() here (synthetic actor), so stubbing @/auth is purely
+// to break the import chain.
 vi.mock("@/auth", () => ({
   auth: vi.fn(),
 }));
@@ -89,13 +87,6 @@ async function assignAthleteToProgram(
   await db
     .insert(athletePrograms)
     .values({ athleteId, programId })
-    .onConflictDoNothing();
-}
-
-async function assignCoach(coachId: string, programId: string): Promise<void> {
-  await db
-    .insert(coachPrograms)
-    .values({ coachId, programId })
     .onConflictDoNothing();
 }
 
@@ -236,11 +227,13 @@ describe("submitAttendanceInternal", () => {
     expect(byAthlete.has(foreign.id)).toBe(false);
   });
 
-  it("authz: assigned coach can submit", async () => {
+  it("authz: any coach can submit for any active program — no assignment needed (DEC-29)", async () => {
+    // The coach has NO coach_programs assignment (the feature was
+    // removed). DEC-29: any coach may take attendance for any active
+    // program, so this writes a session + records.
     const program = await createProgram(true);
     const a1 = await createAthlete();
     await assignAthleteToProgram(a1.id, program.id);
-    await assignCoach(fixtures.coach.id, program.id);
 
     const result = await submitAttendanceInternal(fixtures.coach, {
       programId: program.id,
@@ -251,27 +244,6 @@ describe("submitAttendanceInternal", () => {
     expect(result.total).toBe(1);
     const records = await recordsForSession(result.sessionId);
     expect(records[0].recordedBy).toBe(fixtures.coach.id);
-  });
-
-  it("authz: unassigned coach is blocked (no session written)", async () => {
-    const program = await createProgram(true);
-    const a1 = await createAthlete();
-    await assignAthleteToProgram(a1.id, program.id);
-    // coach NOT assigned → assertCoachCanAccessProgram redirects (throws).
-
-    await expect(
-      submitAttendanceInternal(fixtures.coach, {
-        programId: program.id,
-        sessionDate: DATE,
-        records: [{ athleteId: a1.id, present: true }],
-      }),
-    ).rejects.toBeTruthy();
-
-    const sessions = await db
-      .select()
-      .from(attendanceSessions)
-      .where(eq(attendanceSessions.programId, program.id));
-    expect(sessions).toHaveLength(0);
   });
 
   it("authz: admin can submit for any active program", async () => {

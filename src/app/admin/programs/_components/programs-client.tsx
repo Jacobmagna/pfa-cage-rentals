@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Pencil, RotateCcw, Users } from "lucide-react";
+import { Pencil, RotateCcw } from "lucide-react";
 import {
   deactivateProgramAction,
   reactivateProgramAction,
@@ -10,10 +10,6 @@ import {
   ProgramFormDialog,
   type ProgramEditInitialValues,
 } from "./program-form-dialog";
-import {
-  ProgramCoachesDialog,
-  type CoachOption,
-} from "./program-coaches-dialog";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 
 export type ProgramRow = {
@@ -22,23 +18,15 @@ export type ProgramRow = {
   cap: number | null;
   capPeriod: "week" | "month" | null;
   active: boolean;
-  coaches: { id: string; name: string }[];
 };
 
-// Top-level client island for the programs page. Owns the edit-dialog,
-// coaches-dialog, and deactivate-confirm open state, plus per-row pending
-// state for the direct (reactivate) and confirmed (deactivate) actions.
-// Renders a vanilla <table>. Mirrors admin/hour-log's HoursClient +
-// roster's RosterClient.
-export function ProgramsClient({
-  programs,
-  coachOptions,
-}: {
-  programs: ProgramRow[];
-  coachOptions: CoachOption[];
-}) {
+// Top-level client island for the programs page. Owns the edit-dialog
+// and deactivate-confirm open state, plus per-row pending state for the
+// direct (reactivate) and confirmed (deactivate) actions. Renders a
+// vanilla <table>. Mirrors admin/hour-log's HoursClient + roster's
+// RosterClient.
+export function ProgramsClient({ programs }: { programs: ProgramRow[] }) {
   const [editRow, setEditRow] = useState<ProgramRow | null>(null);
-  const [coachesRow, setCoachesRow] = useState<ProgramRow | null>(null);
   const [confirmRow, setConfirmRow] = useState<ProgramRow | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -97,9 +85,6 @@ export function ProgramsClient({
                   Cap
                 </th>
                 <th scope="col" className="px-4 py-3 text-left font-medium">
-                  Coaches
-                </th>
-                <th scope="col" className="px-4 py-3 text-left font-medium">
                   Status
                 </th>
                 <th
@@ -128,22 +113,6 @@ export function ProgramsClient({
                         ? `${row.cap} / ${row.capPeriod}`
                         : "No cap"}
                     </td>
-                    <td className="px-4 py-3 text-sm">
-                      {row.coaches.length === 0 ? (
-                        <span className="text-fg-subtle">—</span>
-                      ) : (
-                        <div className="flex flex-wrap gap-1">
-                          {row.coaches.map((c) => (
-                            <span
-                              key={c.id}
-                              className="inline-flex items-center rounded-full border border-line bg-surface-2 px-2 py-0.5 text-xs text-fg-muted"
-                            >
-                              {c.name}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </td>
                     <td className="px-4 py-3 text-sm whitespace-nowrap">
                       {row.active ? (
                         <span className="inline-flex items-center gap-1.5 text-xs text-gold">
@@ -168,16 +137,6 @@ export function ProgramsClient({
                           title="Edit"
                         >
                           <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setCoachesRow(row)}
-                          disabled={rowPending}
-                          className="inline-flex items-center justify-center h-10 w-10 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-fg hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
-                          aria-label={`Assign coaches for ${row.name}`}
-                          title="Coaches"
-                        >
-                          <Users className="h-4 w-4" />
                         </button>
                         {row.active ? (
                           <button
@@ -215,15 +174,6 @@ export function ProgramsClient({
         open={editRow !== null}
         onClose={() => setEditRow(null)}
         initial={editInitial}
-      />
-
-      <ProgramCoachesDialog
-        open={coachesRow !== null}
-        onClose={() => setCoachesRow(null)}
-        programId={coachesRow?.id ?? null}
-        programName={coachesRow?.name ?? null}
-        coachOptions={coachOptions}
-        currentCoachIds={coachesRow?.coaches.map((c) => c.id) ?? []}
       />
 
       <ConfirmDialog

@@ -1,7 +1,7 @@
 "use server";
 
-// Form-action wrappers for the programs create / edit / coaches
-// surfaces. The raw actions throw typed errors (ProgramNameTakenError,
+// Form-action wrappers for the programs create / edit surfaces. The
+// raw actions throw typed errors (ProgramNameTakenError,
 // ProgramNotFoundError, ZodError); useActionState wants a stable return
 // shape so the client can render error banners without try/catch.
 // Mirrors admin/attendance/roster/form-actions.ts + admin/hour-log.
@@ -10,12 +10,7 @@
 // to key the form's remount → fresh, empty fields for the next program.
 
 import { ZodError } from "zod";
-import {
-  createProgram,
-  deactivateProgram,
-  setProgramCoaches,
-  updateProgram,
-} from "./actions";
+import { createProgram, deactivateProgram, updateProgram } from "./actions";
 import { ProgramNameTakenError, ProgramNotFoundError } from "@/lib/errors";
 
 export type ProgramFormValues = {
@@ -40,10 +35,6 @@ export type EditProgramResult =
       error: { code: string; message: string };
       values: ProgramFormValues;
     };
-
-export type SetCoachesResult =
-  | { ok: true; savedAt: number }
-  | { ok: false; error: { code: string; message: string } };
 
 function snapshotProgram(formData: FormData): ProgramFormValues {
   return {
@@ -145,29 +136,6 @@ export async function updateProgramFormAction(
         ok: false,
         error: { code: "VALIDATION", message: zodMessage(err) },
         values,
-      };
-    }
-    throw err;
-  }
-}
-
-export async function setProgramCoachesFormAction(
-  _prev: SetCoachesResult,
-  formData: FormData,
-): Promise<SetCoachesResult> {
-  const programId = formData.get("programId")?.toString() ?? "";
-  const coachIds = formData.getAll("coachId").map((v) => v.toString());
-  try {
-    await setProgramCoaches(programId, coachIds);
-    return { ok: true, savedAt: Date.now() };
-  } catch (err) {
-    if (err instanceof ProgramNotFoundError) {
-      return { ok: false, error: { code: err.code, message: err.message } };
-    }
-    if (err instanceof ZodError) {
-      return {
-        ok: false,
-        error: { code: "VALIDATION", message: zodMessage(err) },
       };
     }
     throw err;

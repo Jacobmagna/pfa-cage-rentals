@@ -9,20 +9,14 @@
 // calling the internal here lets the test run without mocking
 // framework internals.
 //
-// truncateMutables() does NOT touch `programs` or `coach_programs`, so
-// every test creates its own program(s) with a unique name suffix and
-// scopes assertions to the created program/coach ids. audit_log IS
-// truncated between tests.
+// truncateMutables() does NOT touch `programs`, so every test creates
+// its own program(s) with a unique name suffix and scopes assertions to
+// the created program/coach ids. audit_log IS truncated between tests.
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import {
-  auditLog,
-  coachPrograms,
-  hourLogs,
-  programs,
-} from "@/db/schema";
+import { auditLog, hourLogs, programs } from "@/db/schema";
 import { ZodError } from "zod";
 import { logHourInternal } from "@/lib/server/hour-log-actions";
 import { ProgramInactiveError } from "@/lib/errors";
@@ -34,9 +28,8 @@ import {
 
 // logHourInternal → @/lib/authz → @/auth → next-auth, which fails to
 // resolve in the vitest node environment. We never exercise the real
-// auth() here (we call the internal fn with a synthetic actor and let
-// the real assertCoachCanAccessProgram run its DB query + redirect),
-// so stubbing @/auth is purely to break that import chain.
+// auth() here (we call the internal fn with a synthetic actor), so
+// stubbing @/auth is purely to break that import chain.
 vi.mock("@/auth", () => ({
   auth: vi.fn(),
 }));
@@ -77,13 +70,6 @@ async function createProgram(active: boolean): Promise<{
     .values({ name, active })
     .returning({ id: programs.id, name: programs.name });
   return row;
-}
-
-async function assignCoach(coachId: string, programId: string): Promise<void> {
-  await db
-    .insert(coachPrograms)
-    .values({ coachId, programId })
-    .onConflictDoNothing();
 }
 
 describe("logHourInternal", () => {
@@ -169,42 +155,37 @@ describe("logHourInternal", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("blocks a coach not assigned to the program (no insert)", async () => {
-    // Active program, but the coach is NOT in coach_programs for it.
+  it("allows a coach to log against any active program — no assignment needed (DEC-29)", async () => {
+    // Active program; the coach has NO coach_programs assignment (the
+    // feature was removed). DEC-29: any coach may log against any active
+    // program, so this writes a row + audit.
     const program = await createProgram(true);
-
-    // assertCoachCanAccessProgram calls redirect() for an unassigned
-    // coach; redirect() throws in this (non-request) test context, so
-    // logHourInternal rejects and never inserts.
-    await expect(
-      logHourInternal(fixtures.coach, {
-        programId: program.id,
-        startAt: tomorrowAt(10),
-        endAt: tomorrowAt(11),
-        note: null,
-      }),
-    ).rejects.toBeTruthy();
-
-    const rows = await db
-      .select()
-      .from(hourLogs)
-      .where(eq(hourLogs.programId, program.id));
-    expect(rows).toHaveLength(0);
-  });
-
-  it("allows an assigned coach to log against an active program", async () => {
-    const program = await createProgram(true);
-    await assignCoach(fixtures.coach.id, program.id);
 
     const created = await logHourInternal(fixtures.coach, {
       programId: program.id,
       startAt: tomorrowAt(13),
       endAt: tomorrowAt(14),
-      note: null,
+      note: "any-program",
     });
 
     expect(created.coachId).toBe(fixtures.coach.id);
     expect(created.createdBy).toBe(fixtures.coach.id);
     expect(created.programId).toBe(program.id);
+
+    const rows = await db
+      .select()
+      .from(hourLogs)
+      .where(eq(hourLogs.programId, program.id));
+    expect(rows).toHaveLength(1);
+
+    const audit = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(eq(auditLog.entityId, created.id), eq(auditLog.action, "create")),
+      );
+    expect(audit).toHaveLength(1);
+    expect(audit[0].actorUserId).toBe(fixtures.coach.id);
+    expect(audit[0].entityType).toBe("hour_log");
   });
 });

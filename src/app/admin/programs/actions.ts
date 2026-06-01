@@ -13,7 +13,6 @@ import { requireRole } from "@/lib/authz";
 import {
   createProgramInternal,
   deactivateProgramInternal,
-  setProgramCoachesInternal,
   updateProgramInternal,
 } from "@/lib/server/program-actions";
 
@@ -34,17 +33,6 @@ export async function updateProgram(id: string, input: unknown) {
 export async function deactivateProgram(id: string) {
   const session = await requireRole("admin");
   const result = await deactivateProgramInternal(session.user, id);
-  revalidatePath("/admin/programs");
-  return result;
-}
-
-export async function setProgramCoaches(programId: string, coachIds: unknown) {
-  const session = await requireRole("admin");
-  const result = await setProgramCoachesInternal(
-    session.user,
-    programId,
-    coachIds,
-  );
   revalidatePath("/admin/programs");
   return result;
 }

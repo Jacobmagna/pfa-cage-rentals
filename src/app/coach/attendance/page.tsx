@@ -1,5 +1,5 @@
 import { CalendarCheck } from "lucide-react";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
   athletePrograms,
@@ -8,11 +8,7 @@ import {
   attendanceSessions,
   programs,
 } from "@/db/schema";
-import {
-  assertCoachCanAccessProgram,
-  coachProgramIds,
-  requireSession,
-} from "@/lib/authz";
+import { requireSession } from "@/lib/authz";
 import { formatPfaDate } from "@/lib/timezone";
 import {
   ProgramDatePicker,
@@ -29,8 +25,9 @@ import {
 // existing attendance session for the day so re-submit edits the same
 // session (DEC-05).
 //
-// Program scoping mirrors /coach/hour-log: admins see all active
-// programs, coaches see their assigned + active programs.
+// Program scoping mirrors /coach/hour-log: every signed-in user sees
+// all active programs (DEC-29 — any coach may take attendance for any
+// active program).
 
 type RawSearchParams = Promise<{
   programId?: string | string[];
@@ -46,28 +43,15 @@ export default async function CoachAttendancePage({
 }: {
   searchParams: RawSearchParams;
 }) {
-  const session = await requireSession();
-  const { user } = session;
+  await requireSession();
   const params = await searchParams;
 
-  // Allowed program options (admins → all active; coaches → assigned + active).
-  let programOptions: ProgramOption[] = [];
-  if (user.role === "admin") {
-    programOptions = await db
-      .select({ id: programs.id, name: programs.name })
-      .from(programs)
-      .where(eq(programs.active, true))
-      .orderBy(asc(programs.name));
-  } else {
-    const ids = await coachProgramIds(user.id);
-    if (ids.length > 0) {
-      programOptions = await db
-        .select({ id: programs.id, name: programs.name })
-        .from(programs)
-        .where(and(inArray(programs.id, ids), eq(programs.active, true)))
-        .orderBy(asc(programs.name));
-    }
-  }
+  // Every signed-in user gets all active programs (DEC-29).
+  const programOptions: ProgramOption[] = await db
+    .select({ id: programs.id, name: programs.name })
+    .from(programs)
+    .where(eq(programs.active, true))
+    .orderBy(asc(programs.name));
 
   const date = firstParam(params.date) || formatPfaDate(new Date());
   const requestedProgramId = firstParam(params.programId);
@@ -80,8 +64,6 @@ export default async function CoachAttendancePage({
   // Load the roster + prefill marks for the selected program/date.
   let roster: RosterAthlete[] | null = null;
   if (selectedProgramId) {
-    await assertCoachCanAccessProgram(user, selectedProgramId);
-
     const rosterRows = await db
       .select({
         id: athletes.id,
@@ -132,7 +114,7 @@ export default async function CoachAttendancePage({
         <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-line bg-surface py-16 text-center">
           <CalendarCheck className="h-8 w-8 text-gold" aria-hidden="true" />
           <p className="text-fg-muted">
-            No programs assigned yet — ask an admin to add you to a program.
+            No active programs yet — ask an admin to add one.
           </p>
         </div>
       ) : (

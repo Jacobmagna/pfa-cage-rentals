@@ -9,10 +9,10 @@
 //
 // Pipeline (mirrors createSessionInternal):
 //   1. Zod-parse                        — createHourLogSchema
-//   2. assertCoachCanAccessProgram      — admins pass; unassigned
-//      coaches get redirect()'d (throws) before any write
-//   3. Program lookup + active check    — business invariant
-//   4. Insert, then audit (sequential)  — see "Atomicity" below
+//   2. Program lookup + active check    — business invariant. Any coach
+//      may log against any active program (DEC-29), so there's no
+//      per-coach program-access gate here.
+//   3. Insert, then audit (sequential)  — see "Atomicity" below
 //
 // Atomicity: neon-http is stateless HTTP and does NOT support
 // transactions. We insert first, then log the audit row as a
@@ -23,7 +23,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { hourLogs, programs } from "@/db/schema";
-import { assertCoachCanAccessProgram, type AuthedSession } from "@/lib/authz";
+import { type AuthedSession } from "@/lib/authz";
 import {
   HourLogNotFoundError,
   ProgramInactiveError,
@@ -40,10 +40,6 @@ export async function logHourInternal(
   input: unknown,
 ) {
   const parsed = createHourLogSchema.parse(input);
-
-  // Admins pass; a coach not assigned to the program gets redirect()'d
-  // (which throws) before any write happens.
-  await assertCoachCanAccessProgram(actor, parsed.programId);
 
   const [program] = await db
     .select()
@@ -82,11 +78,10 @@ export async function logHourInternal(
 // state, persist, then audit a changed-keys-only diff (before/after).
 //
 // The admin edit surface only changes times/note (the row stays bound
-// to its original program), so we do NOT re-run
-// assertCoachCanAccessProgram / the active-program check here — those
-// guard the CREATE path where a coach picks a program. editHourLogSchema
-// still validates endAt > startAt (DB CHECK is canonical; this gives a
-// friendly error).
+// to its original program), so we do NOT re-run the active-program
+// check here — that guards the CREATE path where a coach picks a
+// program. editHourLogSchema still validates endAt > startAt (DB CHECK
+// is canonical; this gives a friendly error).
 export async function updateHourInternal(
   actor: AuthedSession["user"],
   id: string,

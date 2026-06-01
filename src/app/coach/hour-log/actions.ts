@@ -8,8 +8,8 @@
 // RPC endpoint. This entry point is gated by requireSession(), and
 // logHourInternal stamps coachId/createdBy from the authed actor — a
 // client-supplied coachId is never read, so a coach cannot log hours
-// for another coach. assertCoachCanAccessProgram (inside the internal
-// fn) blocks programs the coach isn't assigned to.
+// for another coach. Any coach may log against any active program
+// (DEC-29); the internal fn only enforces program-exists + active.
 //
 // revalidatePath at the end so any direct RPC caller (not just the
 // form-action wrapper) gets fresh data on /coach/hour-log and /coach.

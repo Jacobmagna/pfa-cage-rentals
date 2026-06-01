@@ -34,8 +34,8 @@ import {
 
 // logHourInternal → @/lib/authz → @/auth → next-auth, which fails to
 // resolve in the vitest node environment. We never exercise real
-// auth() here (synthetic actor + real assertCoachCanAccessProgram), so
-// stubbing @/auth is purely to break that import chain.
+// auth() here (synthetic actor), so stubbing @/auth is purely to break
+// that import chain.
 vi.mock("@/auth", () => ({
   auth: vi.fn(),
 }));

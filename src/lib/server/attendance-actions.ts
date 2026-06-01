@@ -9,17 +9,17 @@
 //
 // Pipeline (mirrors logHourInternal + the rate-override upsert):
 //   1. Zod-parse                        — submitAttendanceSchema
-//   2. Program lookup + active check    — business invariant
-//   3. assertCoachCanAccessProgram      — admins pass; unassigned
-//      coaches get redirect()'d (throws) before any write
-//   4. Load current roster (athlete_programs) → reconcile submitted
+//   2. Program lookup + active check    — business invariant. Any coach
+//      may take attendance for any active program (DEC-29), so there's
+//      no per-coach program-access gate here.
+//   3. Load current roster (athlete_programs) → reconcile submitted
 //      marks against it (DEC-24): ignore foreign athleteIds; default
 //      omitted roster athletes to absent. Empty roster → throw.
-//   5. Pre-SELECT existing session → decides create-vs-update audit.
-//   6. Upsert ONE session per (program, date) (DEC-05) then upsert one
+//   4. Pre-SELECT existing session → decides create-vs-update audit.
+//   5. Upsert ONE session per (program, date) (DEC-05) then upsert one
 //      record per current-roster athlete. Sequential (neon-http has no
 //      transactions).
-//   7. ONE audit row per submit — compact summary, never per-record.
+//   6. ONE audit row per submit — compact summary, never per-record.
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
@@ -29,7 +29,7 @@ import {
   attendanceSessions,
   programs,
 } from "@/db/schema";
-import { assertCoachCanAccessProgram, type AuthedSession } from "@/lib/authz";
+import { type AuthedSession } from "@/lib/authz";
 import {
   AttendanceEmptyRosterError,
   ProgramInactiveError,
@@ -61,10 +61,6 @@ export async function submitAttendanceInternal(
   if (!program.active) {
     throw new ProgramInactiveError(program.id, program.name);
   }
-
-  // Admins pass; a coach not assigned to the program gets redirect()'d
-  // (which throws) before any write happens.
-  await assertCoachCanAccessProgram(actor, parsed.programId);
 
   // Current roster for this program. We reconcile the submitted marks
   // against this set so client drift / tampering can't write records

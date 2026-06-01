@@ -26,8 +26,15 @@ import { db } from "@/db";
 import { hourLogs, programs } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import { assertCoachCanAccessProgram, type AuthedSession } from "@/lib/authz";
-import { ProgramInactiveError, ProgramNotFoundError } from "@/lib/errors";
-import { createHourLogSchema } from "@/lib/schemas/hour-log";
+import {
+  HourLogNotFoundError,
+  ProgramInactiveError,
+  ProgramNotFoundError,
+} from "@/lib/errors";
+import {
+  createHourLogSchema,
+  editHourLogSchema,
+} from "@/lib/schemas/hour-log";
 
 // Audit-log insert wrapper that swallows failures rather than letting
 // an audit hiccup lose a successful insert (which we couldn't roll
@@ -87,4 +94,75 @@ export async function logHourInternal(
     after: inserted as unknown as Record<string, unknown>,
   });
   return inserted;
+}
+
+// Admin-only edit of an existing hour-log row. Mirrors
+// updateSessionInternal: fetch the existing row, Zod-parse the desired
+// state, persist, then audit a changed-keys-only diff (before/after).
+//
+// The admin edit surface only changes times/note (the row stays bound
+// to its original program), so we do NOT re-run
+// assertCoachCanAccessProgram / the active-program check here — those
+// guard the CREATE path where a coach picks a program. editHourLogSchema
+// still validates endAt > startAt (DB CHECK is canonical; this gives a
+// friendly error).
+export async function updateHourInternal(
+  actor: AuthedSession["user"],
+  id: string,
+  input: unknown,
+) {
+  const [existing] = await db
+    .select()
+    .from(hourLogs)
+    .where(eq(hourLogs.id, id))
+    .limit(1);
+  if (!existing) throw new HourLogNotFoundError(id);
+
+  const parsed = editHourLogSchema.parse(input);
+
+  const [updated] = await db
+    .update(hourLogs)
+    .set({
+      programId: parsed.programId,
+      startAt: parsed.startAt,
+      endAt: parsed.endAt,
+      note: parsed.note ?? null,
+    })
+    .where(eq(hourLogs.id, id))
+    .returning();
+
+  await safeLogAudit(db, {
+    actorUserId: actor.id,
+    entityType: "hour_log",
+    entityId: id,
+    action: "update",
+    before: existing as unknown as Record<string, unknown>,
+    after: updated as unknown as Record<string, unknown>,
+  });
+  return updated;
+}
+
+// Admin-only hard delete of an hour-log row. hour_logs has no
+// soft-delete column — it's a simple log entry — so we DELETE outright
+// and capture the full `before` snapshot in the audit row. Mirrors
+// deleteSessionInternal.
+export async function deleteHourInternal(
+  actor: AuthedSession["user"],
+  id: string,
+) {
+  const [existing] = await db
+    .select()
+    .from(hourLogs)
+    .where(eq(hourLogs.id, id))
+    .limit(1);
+  if (!existing) throw new HourLogNotFoundError(id);
+
+  await db.delete(hourLogs).where(eq(hourLogs.id, id));
+  await safeLogAudit(db, {
+    actorUserId: actor.id,
+    entityType: "hour_log",
+    entityId: id,
+    action: "delete",
+    before: existing as unknown as Record<string, unknown>,
+  });
 }

@@ -189,6 +189,16 @@ export class ProgramInactiveError extends Error {
   }
 }
 
+// Admin hour-log edit/delete referenced an hour_logs id that doesn't
+// exist (stale client row, or a direct RPC call with a bogus id).
+export class HourLogNotFoundError extends Error {
+  readonly code = "HOUR_LOG_NOT_FOUND" as const;
+  constructor(public readonly hourLogId: string) {
+    super(`Hour log ${hourLogId} not found`);
+    this.name = "HourLogNotFoundError";
+  }
+}
+
 export class BlockConflictsWithSessionError extends Error {
   readonly code = "BLOCK_CONFLICTS_WITH_SESSION" as const;
   constructor(

@@ -1,5 +1,5 @@
 import { CalendarCheck } from "lucide-react";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   athletePrograms,
@@ -72,7 +72,13 @@ export default async function CoachAttendancePage({
       })
       .from(athletePrograms)
       .innerJoin(athletes, eq(athletePrograms.athleteId, athletes.id))
-      .where(eq(athletePrograms.programId, selectedProgramId))
+      .where(
+        and(
+          eq(athletePrograms.programId, selectedProgramId),
+          // Archived athletes drop off active rosters (DEC-28).
+          isNull(athletes.archivedAt),
+        ),
+      )
       .orderBy(asc(athletes.lastName), asc(athletes.firstName));
 
     // Existing session for (program, date) → present marks for prefill.

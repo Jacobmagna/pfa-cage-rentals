@@ -120,6 +120,13 @@
       "when": 1780287300378,
       "tag": "0016_cheerful_major_mapleleaf",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1780356938649,
+      "tag": "0017_eager_vindicator",
+      "breakpoints": true
     }
   ]
 }

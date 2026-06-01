@@ -16,6 +16,7 @@ type SubTab = {
 const SUB_TABS: SubTab[] = [
   { href: "/admin/attendance/roster", label: "Roster" },
   { href: "/admin/attendance/by-program", label: "Attendance by Program" },
+  { href: "/admin/attendance/archive", label: "Archive" },
 ];
 
 export function AttendanceSubnav() {

@@ -11,6 +11,7 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/authz";
 import {
+  archiveAthletesInternal,
   assignAthletesToProgramInternal,
   createAthleteInternal,
   deleteAthleteInternal,
@@ -42,5 +43,15 @@ export async function assignAthletes(input: unknown) {
   const session = await requireRole("admin");
   const result = await assignAthletesToProgramInternal(session.user, input);
   revalidatePath("/admin/attendance/roster");
+  return result;
+}
+
+// Bulk-archive the selected athletes (DEC-28). Revalidates both the
+// roster (they drop off) and the archive tab (they appear there).
+export async function archiveAthletes(ids: string[]) {
+  const session = await requireRole("admin");
+  const result = await archiveAthletesInternal(session.user, ids);
+  revalidatePath("/admin/attendance/roster");
+  revalidatePath("/admin/attendance/archive");
   return result;
 }

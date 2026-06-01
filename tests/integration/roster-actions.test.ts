@@ -25,9 +25,11 @@ import {
   programs,
 } from "@/db/schema";
 import {
+  archiveAthletesInternal,
   assignAthletesToProgramInternal,
   createAthleteInternal,
   deleteAthleteInternal,
+  restoreAthletesInternal,
   updateAthleteInternal,
 } from "@/lib/server/athlete-actions";
 import {
@@ -353,6 +355,129 @@ describe("assignAthletesToProgramInternal", () => {
         mode: "add",
       }),
     ).rejects.toBeInstanceOf(ProgramInactiveError);
+    await db.delete(athletes).where(eq(athletes.id, athlete.id));
+  });
+});
+
+describe("athlete term (create/update)", () => {
+  it("createAthleteInternal persists a term", async () => {
+    const created = await createAthleteInternal(fixtures.admin, {
+      firstName: "Term",
+      lastName: `Create-${uniqueSuffix()}`,
+      term: "Summer 2026",
+    });
+    expect(created.term).toBe("Summer 2026");
+
+    const [row] = await db
+      .select()
+      .from(athletes)
+      .where(eq(athletes.id, created.id));
+    expect(row.term).toBe("Summer 2026");
+
+    await db.delete(athletes).where(eq(athletes.id, created.id));
+  });
+
+  it("updateAthleteInternal can change and clear a term", async () => {
+    const created = await createAthleteInternal(fixtures.admin, {
+      firstName: "Term",
+      lastName: `Update-${uniqueSuffix()}`,
+      term: "Spring 2026",
+    });
+
+    const changed = await updateAthleteInternal(fixtures.admin, created.id, {
+      firstName: created.firstName,
+      lastName: created.lastName,
+      term: "Fall 2026",
+    });
+    expect(changed.term).toBe("Fall 2026");
+
+    const cleared = await updateAthleteInternal(fixtures.admin, created.id, {
+      firstName: created.firstName,
+      lastName: created.lastName,
+      term: null,
+    });
+    expect(cleared.term).toBeNull();
+
+    await db.delete(athletes).where(eq(athletes.id, created.id));
+  });
+});
+
+describe("archiveAthletesInternal / restoreAthletesInternal", () => {
+  it("archives a non-archived athlete (sets archivedAt + one update audit) and is a no-op on re-run", async () => {
+    const athlete = await createAthleteInternal(fixtures.admin, {
+      firstName: "Arch",
+      lastName: `Ive-${uniqueSuffix()}`,
+    });
+    expect(athlete.archivedAt).toBeNull();
+
+    const first = await archiveAthletesInternal(fixtures.admin, [athlete.id]);
+    expect(first.changed).toBe(1);
+
+    const [archived] = await db
+      .select()
+      .from(athletes)
+      .where(eq(athletes.id, athlete.id));
+    expect(archived.archivedAt).not.toBeNull();
+
+    let audit = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(eq(auditLog.entityId, athlete.id), eq(auditLog.action, "update")),
+      );
+    expect(audit).toHaveLength(1);
+    expect(audit[0].entityType).toBe("athlete");
+
+    // Second archive is a no-op: no change, no new audit row.
+    const second = await archiveAthletesInternal(fixtures.admin, [athlete.id]);
+    expect(second.changed).toBe(0);
+
+    audit = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(eq(auditLog.entityId, athlete.id), eq(auditLog.action, "update")),
+      );
+    expect(audit).toHaveLength(1);
+
+    await db.delete(athletes).where(eq(athletes.id, athlete.id));
+  });
+
+  it("restores an archived athlete (clears archivedAt + audits) and is a no-op on a non-archived athlete", async () => {
+    const athlete = await createAthleteInternal(fixtures.admin, {
+      firstName: "Rest",
+      lastName: `Ore-${uniqueSuffix()}`,
+    });
+
+    // Restore on a non-archived athlete is a no-op.
+    const noop = await restoreAthletesInternal(fixtures.admin, [athlete.id]);
+    expect(noop.changed).toBe(0);
+
+    await archiveAthletesInternal(fixtures.admin, [athlete.id]);
+    // audit_log is NOT truncated here mid-test; clear so we assert only
+    // the restore's audit row.
+    await db.delete(auditLog).where(eq(auditLog.entityId, athlete.id));
+
+    const restored = await restoreAthletesInternal(fixtures.admin, [
+      athlete.id,
+    ]);
+    expect(restored.changed).toBe(1);
+
+    const [row] = await db
+      .select()
+      .from(athletes)
+      .where(eq(athletes.id, athlete.id));
+    expect(row.archivedAt).toBeNull();
+
+    const audit = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(eq(auditLog.entityId, athlete.id), eq(auditLog.action, "update")),
+      );
+    expect(audit).toHaveLength(1);
+    expect(audit[0].entityType).toBe("athlete");
+
     await db.delete(athletes).where(eq(athletes.id, athlete.id));
   });
 });

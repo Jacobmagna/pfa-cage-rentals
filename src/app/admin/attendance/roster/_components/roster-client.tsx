@@ -1,13 +1,13 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Pencil, Trash2, Users } from "lucide-react";
+import { Archive, Pencil, Trash2, Users } from "lucide-react";
 import {
   AthleteEditDialog,
   type AthleteEditInitialValues,
 } from "./athlete-edit-dialog";
 import { AssignSidebar } from "./assign-sidebar";
-import { deleteAthleteAction } from "../form-actions";
+import { archiveAthletesAction, deleteAthleteAction } from "../form-actions";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 
 export type ProgramOption = {
@@ -20,6 +20,7 @@ export type AthleteRow = {
   firstName: string;
   lastName: string;
   birthday: string | null;
+  term: string | null;
   programs: ProgramOption[];
 };
 
@@ -42,6 +43,9 @@ export function RosterClient({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isDeleting, startTransition] = useTransition();
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [isArchiving, startArchiveTransition] = useTransition();
 
   // Drop any selected ids that no longer exist after a revalidation
   // (e.g. an athlete was deleted). Keeps the bulk bar honest.
@@ -91,12 +95,27 @@ export function RosterClient({
     });
   };
 
+  const handleConfirmArchive = () => {
+    if (selectedIds.length === 0) return;
+    setArchiveError(null);
+    startArchiveTransition(async () => {
+      const result = await archiveAthletesAction(selectedIds);
+      if (result.ok) {
+        setArchiveOpen(false);
+        clearSelection();
+      } else {
+        setArchiveError(result.error.message);
+      }
+    });
+  };
+
   const editInitial: AthleteEditInitialValues | undefined = editRow
     ? {
         id: editRow.id,
         firstName: editRow.firstName,
         lastName: editRow.lastName,
         birthday: editRow.birthday,
+        term: editRow.term,
       }
     : undefined;
 
@@ -132,6 +151,17 @@ export function RosterClient({
             </button>
             <button
               type="button"
+              onClick={() => {
+                setArchiveError(null);
+                setArchiveOpen(true);
+              }}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-surface-2 px-3 text-sm font-medium text-fg-muted transition-colors hover:border-line-strong hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+            >
+              <Archive className="h-3.5 w-3.5" />
+              Archive
+            </button>
+            <button
+              type="button"
               onClick={() => setSidebarOpen(true)}
               className="h-8 rounded-md bg-gold px-3 text-sm font-semibold text-gold-ink transition-colors hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
             >
@@ -162,6 +192,9 @@ export function RosterClient({
               </th>
               <th scope="col" className="px-4 py-3 text-left font-medium">
                 Birthday
+              </th>
+              <th scope="col" className="px-4 py-3 text-left font-medium">
+                Term
               </th>
               <th scope="col" className="px-4 py-3 text-left font-medium">
                 Programs
@@ -198,6 +231,9 @@ export function RosterClient({
                   <td className="px-4 py-3 text-fg">{row.lastName}</td>
                   <td className="px-4 py-3 font-mono tabular-nums text-xs text-fg-muted whitespace-nowrap">
                     {row.birthday ? formatBirthday(row.birthday) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-fg-muted whitespace-nowrap">
+                    {row.term ?? "—"}
                   </td>
                   <td className="px-4 py-3">
                     {row.programs.length === 0 ? (
@@ -288,6 +324,34 @@ export function RosterClient({
         confirmLabel={isDeleting ? "Deleting…" : "Delete athlete"}
         onConfirm={handleConfirmDelete}
         isPending={isDeleting}
+      />
+
+      <ConfirmDialog
+        open={archiveOpen}
+        onOpenChange={(next) => {
+          if (!next && !isArchiving) {
+            setArchiveOpen(false);
+            setArchiveError(null);
+          }
+        }}
+        variant="default"
+        title={`Archive ${selectedIds.length} athlete${
+          selectedIds.length === 1 ? "" : "s"
+        }?`}
+        description={
+          <>
+            They move to the Archive tab and drop off the active roster. You
+            can restore them anytime.
+            {archiveError ? (
+              <span className="mt-2 block font-medium text-danger">
+                {archiveError}
+              </span>
+            ) : null}
+          </>
+        }
+        confirmLabel={isArchiving ? "Archiving…" : "Archive"}
+        onConfirm={handleConfirmArchive}
+        isPending={isArchiving}
       />
     </>
   );

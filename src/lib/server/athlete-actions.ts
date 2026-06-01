@@ -44,6 +44,7 @@ export async function createAthleteInternal(
       firstName: parsed.firstName,
       lastName: parsed.lastName,
       birthday: parsed.birthday ?? null,
+      term: parsed.term ?? null,
     })
     .returning();
 
@@ -80,6 +81,7 @@ export async function updateAthleteInternal(
       firstName: parsed.firstName,
       lastName: parsed.lastName,
       birthday: parsed.birthday ?? null,
+      term: parsed.term ?? null,
     })
     .where(eq(athletes.id, id))
     .returning();
@@ -211,4 +213,82 @@ export async function assignAthletesToProgramInternal(
   }
 
   return { mode: parsed.mode, programId: parsed.programId, added, removed };
+}
+
+export type ArchiveAthletesSummary = { changed: number };
+
+// Bulk-archive athletes (DEC-28). Archive is a pure visibility flag —
+// it sets athletes.archivedAt (mirroring users.deletedAt) so the
+// athlete drops off active rosters/pickers, but NEVER deletes the
+// athlete or its athlete_programs / attendance history. Idempotent:
+// only athletes currently NOT archived are flipped (already-archived
+// and unknown/foreign ids are silently skipped, no audit). Neon-http
+// has no transactions, so we issue sequential statements + audit each
+// effective change as an "athlete"/"update" before/after diff.
+export async function archiveAthletesInternal(
+  actor: AuthedSession["user"],
+  athleteIds: string[],
+): Promise<ArchiveAthletesSummary> {
+  let changed = 0;
+  for (const id of athleteIds) {
+    const [existing] = await db
+      .select()
+      .from(athletes)
+      .where(eq(athletes.id, id))
+      .limit(1);
+    if (!existing) continue;
+    if (existing.archivedAt != null) continue; // already archived — skip.
+
+    const [updated] = await db
+      .update(athletes)
+      .set({ archivedAt: new Date() })
+      .where(eq(athletes.id, id))
+      .returning();
+    changed += 1;
+    await safeLogAudit(db, {
+      actorUserId: actor.id,
+      entityType: "athlete",
+      entityId: id,
+      action: "update",
+      before: existing as unknown as Record<string, unknown>,
+      after: updated as unknown as Record<string, unknown>,
+    });
+  }
+  return { changed };
+}
+
+// Bulk-restore archived athletes back to the active roster (DEC-28).
+// Mirror of archiveAthletesInternal: only athletes currently archived
+// are flipped (archivedAt → null); non-archived and unknown ids are
+// silently skipped. Audits each effective change as "athlete"/"update".
+export async function restoreAthletesInternal(
+  actor: AuthedSession["user"],
+  athleteIds: string[],
+): Promise<ArchiveAthletesSummary> {
+  let changed = 0;
+  for (const id of athleteIds) {
+    const [existing] = await db
+      .select()
+      .from(athletes)
+      .where(eq(athletes.id, id))
+      .limit(1);
+    if (!existing) continue;
+    if (existing.archivedAt == null) continue; // not archived — skip.
+
+    const [updated] = await db
+      .update(athletes)
+      .set({ archivedAt: null })
+      .where(eq(athletes.id, id))
+      .returning();
+    changed += 1;
+    await safeLogAudit(db, {
+      actorUserId: actor.id,
+      entityType: "athlete",
+      entityId: id,
+      action: "update",
+      before: existing as unknown as Record<string, unknown>,
+      after: updated as unknown as Record<string, unknown>,
+    });
+  }
+  return { changed };
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createProgramSchema, updateProgramSchema } from "./program";
-import { createAthleteSchema } from "./athlete";
+import { createAthleteSchema, updateAthleteSchema } from "./athlete";
 import { createHourLogSchema } from "./hour-log";
 import { submitAttendanceSchema } from "./attendance";
 
@@ -147,6 +147,63 @@ describe("createAthleteSchema", () => {
       lastName: "Lovelace",
       birthday: "2010-12-10",
     });
+    expect(r.success).toBe(false);
+  });
+
+  it("accepts a valid term string", () => {
+    const r = createAthleteSchema.safeParse({
+      firstName: "Ada",
+      lastName: "Lovelace",
+      term: "Summer 2026",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts a null term", () => {
+    const r = createAthleteSchema.safeParse({
+      firstName: "Ada",
+      lastName: "Lovelace",
+      term: null,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts an omitted term", () => {
+    const r = createAthleteSchema.safeParse({
+      firstName: "Ada",
+      lastName: "Lovelace",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects a term longer than 50 chars", () => {
+    const r = createAthleteSchema.safeParse({
+      firstName: "Ada",
+      lastName: "Lovelace",
+      term: "x".repeat(51),
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("updateAthleteSchema", () => {
+  it("accepts a valid term string", () => {
+    const r = updateAthleteSchema.safeParse({ term: "Fall 2025" });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts a null term (clears it)", () => {
+    const r = updateAthleteSchema.safeParse({ term: null });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts an omitted term", () => {
+    const r = updateAthleteSchema.safeParse({ firstName: "Grace" });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects a term longer than 50 chars", () => {
+    const r = updateAthleteSchema.safeParse({ term: "x".repeat(51) });
     expect(r.success).toBe(false);
   });
 });

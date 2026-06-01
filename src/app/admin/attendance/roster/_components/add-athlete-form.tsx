@@ -6,6 +6,7 @@ import {
   addAthleteFormAction,
   type AddAthleteResult,
 } from "../form-actions";
+import { TermPicker } from "./term-picker";
 
 const INITIAL_STATE: AddAthleteResult = { ok: true, addedAt: 0 };
 
@@ -21,7 +22,7 @@ export function AddAthleteForm() {
 
   const defaults = useMemo(() => {
     if (!state.ok) return state.values;
-    return { firstName: "", lastName: "", birthday: "" };
+    return { firstName: "", lastName: "", birthday: "", season: "", year: "" };
   }, [state]);
 
   const showSuccess = state.ok && state.addedAt > 0;
@@ -62,7 +63,7 @@ export function AddAthleteForm() {
       <form
         action={formAction}
         key={formKey}
-        className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end"
+        className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_1fr_1fr_auto] sm:items-end"
       >
         <Field label="First name">
           <input
@@ -92,6 +93,10 @@ export function AddAthleteForm() {
             className={inputStyles}
           />
         </Field>
+        <TermPicker
+          defaultSeason={defaults.season}
+          defaultYear={defaults.year}
+        />
         <button
           type="submit"
           disabled={pending}

@@ -462,6 +462,12 @@ export const athletes = pgTable("athletes", {
   firstName: text("first_name").notNull(),
   lastName: text("last_name").notNull(),
   birthday: date("birthday", { mode: "string" }),
+  // term = normalized "Season YYYY" (e.g. "Summer 2026"), NULL when
+  // unset (seed/import may omit it). archivedAt = visibility flag
+  // mirroring users.deletedAt — archive is a soft hide, not a delete,
+  // so attendance history is preserved (DEC-28).
+  term: text("term"),
+  archivedAt: timestamp("archived_at", { mode: "date" }),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "date" })
     .notNull()

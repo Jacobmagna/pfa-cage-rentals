@@ -6,12 +6,14 @@ import {
   updateAthleteFormAction,
   type EditAthleteResult,
 } from "../form-actions";
+import { TermPicker, parseTerm } from "./term-picker";
 
 export type AthleteEditInitialValues = {
   id: string;
   firstName: string;
   lastName: string;
   birthday: string | null;
+  term: string | null;
 };
 
 // Native <dialog> edit form for a single athlete (first / last /
@@ -69,13 +71,16 @@ export function AthleteEditDialog({
       return state.values;
     }
     if (initial) {
+      const { season, year } = parseTerm(initial.term);
       return {
         firstName: initial.firstName,
         lastName: initial.lastName,
         birthday: initial.birthday ?? "",
+        season,
+        year,
       };
     }
-    return { firstName: "", lastName: "", birthday: "" };
+    return { firstName: "", lastName: "", birthday: "", season: "", year: "" };
   }, [initial, state]);
 
   return (
@@ -153,6 +158,10 @@ export function AthleteEditDialog({
               className={inputStyles}
             />
           </Field>
+          <TermPicker
+            defaultSeason={defaults.season}
+            defaultYear={defaults.year}
+          />
         </div>
 
         <div className="flex items-center justify-end gap-2 pt-2">

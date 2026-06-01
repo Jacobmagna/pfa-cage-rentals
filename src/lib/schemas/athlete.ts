@@ -14,12 +14,17 @@ export const createAthleteSchema = z.object({
   // birthday. When supplied it must still be a valid "YYYY-MM-DD" date.
   // A form that wants to require it enforces that at the form layer.
   birthday: isoDateString.nullish(),
+  // Optional normalized term string ("Season YYYY", e.g. "Summer 2026").
+  // Nullish so seed/import can omit it; the add/edit form composes the
+  // value from its season + year pickers (DEC-28).
+  term: z.string().trim().min(1).max(50).nullish(),
 });
 
 export const updateAthleteSchema = z.object({
   firstName: z.string().min(1, "firstName is required").max(100).optional(),
   lastName: z.string().min(1, "lastName is required").max(100).optional(),
   birthday: isoDateString.nullish(),
+  term: z.string().trim().min(1).max(50).nullish(),
 });
 
 // Assign one or more athletes to a single program.

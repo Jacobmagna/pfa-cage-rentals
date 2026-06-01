@@ -165,6 +165,30 @@ export class MergeTargetSameAsSourceError extends Error {
   }
 }
 
+// Hour-log create referenced a program id that doesn't exist (stale
+// client option, or a direct RPC call with a bogus id).
+export class ProgramNotFoundError extends Error {
+  readonly code = "PROGRAM_NOT_FOUND" as const;
+  constructor(public readonly programId: string) {
+    super(`Program ${programId} not found`);
+    this.name = "ProgramNotFoundError";
+  }
+}
+
+// Hour-log create targeted a retired (soft-deleted) program. Programs
+// are never hard-deleted — they're flipped to active = false — so a
+// stale form option could still point at one.
+export class ProgramInactiveError extends Error {
+  readonly code = "PROGRAM_INACTIVE" as const;
+  constructor(
+    public readonly programId: string,
+    public readonly programName: string,
+  ) {
+    super(`${programName} is no longer active`);
+    this.name = "ProgramInactiveError";
+  }
+}
+
 export class BlockConflictsWithSessionError extends Error {
   readonly code = "BLOCK_CONFLICTS_WITH_SESSION" as const;
   constructor(

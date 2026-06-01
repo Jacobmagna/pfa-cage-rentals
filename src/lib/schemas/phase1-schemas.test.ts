@@ -11,6 +11,16 @@ describe("createProgramSchema", () => {
     );
   });
 
+  it("accepts null cap and null period (uncapped create via form)", () => {
+    expect(
+      createProgramSchema.safeParse({
+        name: "Open Gym",
+        cap: null,
+        capPeriod: null,
+      }).success,
+    ).toBe(true);
+  });
+
   it("accepts both cap and period", () => {
     const r = createProgramSchema.safeParse({
       name: "Elite",

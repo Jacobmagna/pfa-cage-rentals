@@ -28,8 +28,8 @@ const capCoRequiredError = {
 export const createProgramSchema = z
   .object({
     name: z.string().min(1, "name is required").max(200),
-    cap: z.number().int().positive().optional(),
-    capPeriod: capPeriodSchema.optional(),
+    cap: z.number().int().positive().nullish(),
+    capPeriod: capPeriodSchema.nullish(),
     active: z.boolean().optional(),
   })
   .refine(capCoRequired, capCoRequiredError);

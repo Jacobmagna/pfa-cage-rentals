@@ -80,6 +80,14 @@ describeIf("Phase-1 foundation (integration)", () => {
     expect(record.present).toBe(true);
   });
 
+  it("inserts an athlete without a birthday (column is nullable)", async () => {
+    const [athlete] = await db
+      .insert(athletes)
+      .values({ firstName: "NoBday", lastName: suffix })
+      .returning();
+    expect(athlete.birthday).toBeNull();
+  });
+
   it("enforces UNIQUE(program_id, session_date) on attendance_sessions", async () => {
     await expect(
       db.insert(attendanceSessions).values({

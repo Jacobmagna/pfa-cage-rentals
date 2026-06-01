@@ -10,13 +10,16 @@ export const isoDateString = z.iso.date();
 export const createAthleteSchema = z.object({
   firstName: z.string().min(1, "firstName is required").max(100),
   lastName: z.string().min(1, "lastName is required").max(100),
-  birthday: isoDateString,
+  // Optional: the DB column is nullable so seed/import can omit a
+  // birthday. When supplied it must still be a valid "YYYY-MM-DD" date.
+  // A form that wants to require it enforces that at the form layer.
+  birthday: isoDateString.nullish(),
 });
 
 export const updateAthleteSchema = z.object({
   firstName: z.string().min(1, "firstName is required").max(100).optional(),
   lastName: z.string().min(1, "lastName is required").max(100).optional(),
-  birthday: isoDateString.optional(),
+  birthday: isoDateString.nullish(),
 });
 
 // Assign one or more athletes to a single program.

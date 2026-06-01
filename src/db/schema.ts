@@ -451,16 +451,17 @@ export const programs = pgTable("programs", {
     .$onUpdate(() => new Date()),
 });
 
-// Athletes (players). Minimal Phase-1 record. `birthday` is a calendar
-// date with no timezone, stored as Postgres `date` and surfaced as a
-// "YYYY-MM-DD" string (mode: "string").
+// Athletes (players). Minimal Phase-1 record. `birthday` is an optional
+// calendar date with no timezone, stored as Postgres `date` and surfaced
+// as a "YYYY-MM-DD" string (mode: "string"). NULL = unknown (e.g. a Sling
+// starter-roster import row that lacks a birthday).
 export const athletes = pgTable("athletes", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
   firstName: text("first_name").notNull(),
   lastName: text("last_name").notNull(),
-  birthday: date("birthday", { mode: "string" }).notNull(),
+  birthday: date("birthday", { mode: "string" }),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "date" })
     .notNull()

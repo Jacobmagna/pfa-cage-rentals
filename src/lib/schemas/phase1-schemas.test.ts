@@ -96,6 +96,23 @@ describe("createAthleteSchema", () => {
     expect(r.success).toBe(true);
   });
 
+  it("accepts an omitted birthday", () => {
+    const r = createAthleteSchema.safeParse({
+      firstName: "Ada",
+      lastName: "Lovelace",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts a null birthday", () => {
+    const r = createAthleteSchema.safeParse({
+      firstName: "Ada",
+      lastName: "Lovelace",
+      birthday: null,
+    });
+    expect(r.success).toBe(true);
+  });
+
   it("rejects a non-ISO birthday", () => {
     const r = createAthleteSchema.safeParse({
       firstName: "Ada",

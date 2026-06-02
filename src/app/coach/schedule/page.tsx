@@ -135,7 +135,7 @@ export default async function CoachSchedulePage({
                     {parts.month}/{parts.day}
                   </p>
                   {isToday ? (
-                    <span className="text-[10px] uppercase tracking-[0.14em] text-gold">
+                    <span className="text-[10px] uppercase tracking-[0.14em] text-gold-strong">
                       Today
                     </span>
                   ) : null}

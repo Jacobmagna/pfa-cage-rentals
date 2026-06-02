@@ -554,6 +554,7 @@ export const hourLogs = pgTable(
   (table) => [
     index("hour_logs_coach_start_idx").on(table.coachId, table.startAt),
     index("hour_logs_program_start_idx").on(table.programId, table.startAt),
+    index("hour_logs_start_idx").on(table.startAt),
   ],
 );
 
@@ -636,6 +637,7 @@ export const programScheduleBlocks = pgTable(
       table.scheduledCoachId,
       table.startAt,
     ),
+    index("program_schedule_blocks_start_idx").on(table.startAt),
   ],
 );
 

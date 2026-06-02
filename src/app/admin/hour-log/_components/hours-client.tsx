@@ -16,10 +16,12 @@ export type HourRow = {
   coachId: string;
   coachName: string | null;
   coachEmail: string;
+  programId: string;
   programName: string;
   startAt: Date;
   endAt: Date;
   note: string | null;
+  scheduleNote: string | null;
 };
 
 export type ProgramOption = {
@@ -94,7 +96,7 @@ export function HoursClient({
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px]">
+          <table className="w-full min-w-[760px]">
             <thead className="text-[11px] uppercase tracking-[0.14em] text-fg-subtle border-b border-line">
               <tr>
                 <th scope="col" className="px-4 py-3 text-left font-medium">Coach</th>
@@ -104,6 +106,7 @@ export function HoursClient({
                 <th scope="col" className="px-4 py-3 text-left font-medium">End</th>
                 <th scope="col" className="px-4 py-3 text-right font-medium">Hours</th>
                 <th scope="col" className="px-4 py-3 text-left font-medium">Note</th>
+                <th scope="col" className="px-4 py-3 text-left font-medium">Schedule</th>
                 <th scope="col" className="px-4 py-3 text-right font-medium sr-only">
                   Actions
                 </th>
@@ -139,6 +142,13 @@ export function HoursClient({
                     </td>
                     <td className="px-4 py-3 text-sm text-fg-subtle">
                       {row.note ?? "—"}
+                    </td>
+                    <td
+                      className={`px-4 py-3 text-sm ${
+                        row.scheduleNote ? "text-danger" : "text-fg-subtle"
+                      }`}
+                    >
+                      {row.scheduleNote ?? "—"}
                     </td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
                       <div className="inline-flex items-center gap-1">

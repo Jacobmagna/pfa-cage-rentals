@@ -1,10 +1,21 @@
 import Link from "next/link";
-import { and, asc, eq, gte, isNull, lt } from "drizzle-orm";
+import { and, asc, eq, gt, gte, isNull, lt } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
-import { programs, programScheduleBlocks, users } from "@/db/schema";
+import { hourLogs, programs, programScheduleBlocks, users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
-import { formatPfaDateLong, parsePfaInput, pfaDayEnd, pfaDayStart } from "@/lib/timezone";
+import {
+  reconcileBlocks,
+  type ReconBlock,
+  type ReconLog,
+} from "@/lib/server/reconciliation";
+import {
+  formatPfaDateLong,
+  formatPfaTime,
+  parsePfaInput,
+  pfaDayEnd,
+  pfaDayStart,
+} from "@/lib/timezone";
 import { AutoRefresh } from "../_components/auto-refresh";
 import { WeekNav } from "../_components/week-nav";
 import { ProgramScheduleGrid } from "./_components/program-schedule-grid";
@@ -34,7 +45,7 @@ export default async function ProgramsSchedulePage({
   const dayStart = pfaDayStart(selectedDate);
   const dayEnd = pfaDayEnd(selectedDate);
 
-  const [activePrograms, blockRows, coachRows] = await Promise.all([
+  const [activePrograms, blockRows, coachRows, logRows] = await Promise.all([
     db
       .select({ id: programs.id, name: programs.name })
       .from(programs)
@@ -65,6 +76,21 @@ export default async function ProgramsSchedulePage({
       .from(users)
       .where(and(eq(users.role, "coach"), isNull(users.deletedAt)))
       .orderBy(asc(users.name), asc(users.email)),
+    // Hour-logs that overlap the selected day, for reconciliation
+    // (FEAT-16). Overlap = log starts before the day ends AND ends after
+    // the day starts.
+    db
+      .select({
+        coachId: hourLogs.coachId,
+        coachName: users.name,
+        coachEmail: users.email,
+        programId: hourLogs.programId,
+        startAt: hourLogs.startAt,
+        endAt: hourLogs.endAt,
+      })
+      .from(hourLogs)
+      .innerJoin(users, eq(hourLogs.coachId, users.id))
+      .where(and(lt(hourLogs.startAt, dayEnd), gt(hourLogs.endAt, dayStart))),
   ]);
 
   const blocks = blockRows.map((b) => ({
@@ -76,6 +102,29 @@ export default async function ProgramsSchedulePage({
     endAt: b.endAt,
     note: b.note,
   }));
+
+  // Reconcile the day's scheduled blocks against the coach hour-logs
+  // (FEAT-16). The engine is pure — we inject `now` + the PFA time
+  // formatter here.
+  const reconBlocks: ReconBlock[] = blocks.map((b) => ({
+    id: b.id,
+    programId: b.programId,
+    scheduledCoachId: b.scheduledCoachId,
+    scheduledCoachName: b.coachName,
+    startAt: b.startAt,
+    endAt: b.endAt,
+  }));
+  const reconLogs: ReconLog[] = logRows.map((l) => ({
+    coachId: l.coachId,
+    coachName: l.coachName ?? l.coachEmail,
+    programId: l.programId,
+    startAt: l.startAt,
+    endAt: l.endAt,
+  }));
+  const reconciliation = reconcileBlocks(
+    { blocks: reconBlocks, logs: reconLogs, now: new Date() },
+    formatPfaTime,
+  );
 
   const dateLabel = formatPfaDateLong(selectedDate);
   const blockCount = blocks.length;
@@ -113,6 +162,7 @@ export default async function ProgramsSchedulePage({
         coaches={coachRows}
         blocks={blocks}
         selectedDate={selectedDate}
+        statuses={reconciliation}
       />
 
       <AutoRefresh />

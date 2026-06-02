@@ -18,6 +18,10 @@ import {
   pfaWallClockAt,
   formatPfaTime,
 } from "@/lib/timezone";
+import type {
+  BlockReconciliation,
+  BlockStatus,
+} from "@/lib/server/reconciliation";
 import {
   ProgramBlockDialog,
   type CoachOption,
@@ -49,16 +53,55 @@ type DialogState =
   | { kind: "create"; prefill: CreatePrefill }
   | { kind: "edit"; block: ProgramScheduleBlockView };
 
+// Maps a reconciliation status → the bar's left-accent + bg-tint classes
+// and the tiny status-label text. `pending`/missing keep the neutral gold
+// accent. All token colors are AA-safe per globals.css.
+const STATUS_LABELS: Record<BlockStatus, string> = {
+  logged: "On schedule",
+  wrong_coach: "Wrong coach",
+  wrong_time: "Wrong time",
+  no_show: "No-show",
+  pending: "Pending",
+};
+
+function statusAccent(status: BlockStatus | undefined): string {
+  switch (status) {
+    case "logged":
+      return "border-l-success bg-success/10";
+    case "wrong_coach":
+    case "wrong_time":
+    case "no_show":
+      return "border-l-danger bg-danger/10";
+    default:
+      return "border-l-gold bg-surface-2";
+  }
+}
+
+function statusTextColor(status: BlockStatus | undefined): string {
+  switch (status) {
+    case "logged":
+      return "text-success";
+    case "wrong_coach":
+    case "wrong_time":
+    case "no_show":
+      return "text-danger";
+    default:
+      return "text-fg-subtle";
+  }
+}
+
 export function ProgramScheduleGrid({
   programs,
   coaches,
   blocks,
   selectedDate,
+  statuses,
 }: {
   programs: ProgramOption[];
   coaches: CoachOption[];
   blocks: ProgramScheduleBlockView[];
   selectedDate: Date;
+  statuses: Record<string, BlockReconciliation>;
 }) {
   const [dialog, setDialog] = useState<DialogState>({ kind: "closed" });
 
@@ -221,10 +264,12 @@ export function ProgramScheduleGrid({
               if (!row) return null;
               const placement = placeOnGrid(b.startAt, b.endAt);
               if (!placement) return null;
+              const recon = statuses[b.id];
+              const status = recon?.status;
               const timeLabel = `${formatPfaTime(b.startAt)}–${formatPfaTime(
                 b.endAt,
               )}`;
-              const tooltip = [b.coachName, timeLabel, b.note]
+              const tooltip = [b.coachName, timeLabel, b.note, recon?.detail]
                 .filter(Boolean)
                 .join(" · ");
               return (
@@ -233,8 +278,9 @@ export function ProgramScheduleGrid({
                   type="button"
                   onClick={() => openEdit(b)}
                   className={[
-                    "m-0.5 rounded border border-line bg-surface-2 px-2 py-1 text-[11px] text-fg",
-                    "flex flex-col justify-center min-w-0 text-left border-l-4 border-l-gold",
+                    "m-0.5 rounded border border-line px-2 py-1 text-[11px] text-fg",
+                    "flex flex-col justify-center min-w-0 text-left border-l-4",
+                    statusAccent(status),
                     "hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors",
                   ].join(" ")}
                   style={{
@@ -248,6 +294,15 @@ export function ProgramScheduleGrid({
                   <span className="truncate text-[9px] uppercase tracking-wider text-fg-subtle">
                     {timeLabel}
                   </span>
+                  {status ? (
+                    <span
+                      className={`truncate text-[9px] uppercase tracking-wider font-medium ${statusTextColor(
+                        status,
+                      )}`}
+                    >
+                      {STATUS_LABELS[status]}
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
@@ -256,9 +311,17 @@ export function ProgramScheduleGrid({
       )}
 
       <div className="space-y-2 text-[11px] text-fg-muted">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          <LegendDot className="bg-success" label="On schedule" />
+          <LegendDot className="bg-danger" label="Wrong coach" />
+          <LegendDot className="bg-danger" label="Wrong time" />
+          <LegendDot className="bg-danger" label="No-show" />
+          <LegendDot className="bg-gold" label="Pending" />
+        </div>
         <p className="text-fg-subtle">
           Click an empty cell to schedule a program block. Click a block to
-          edit or delete it. The bar label shows the scheduled coach and time.
+          edit or delete it. The bar label shows the scheduled coach, time, and
+          reconciliation status (how the logged hours compare to the schedule).
         </p>
       </div>
 
@@ -270,6 +333,9 @@ export function ProgramScheduleGrid({
         programs={programs}
         coaches={coaches}
         createPrefill={dialog.kind === "create" ? dialog.prefill : null}
+        reconciliation={
+          dialog.kind === "edit" ? (statuses[dialog.block.id] ?? null) : null
+        }
         editInitial={
           dialog.kind === "edit"
             ? {
@@ -284,6 +350,18 @@ export function ProgramScheduleGrid({
         }
       />
     </div>
+  );
+}
+
+function LegendDot({ className, label }: { className: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        aria-hidden
+        className={`h-2.5 w-2.5 rounded-full ${className}`}
+      />
+      <span>{label}</span>
+    </span>
   );
 }
 

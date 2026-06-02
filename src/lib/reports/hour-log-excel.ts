@@ -16,10 +16,15 @@ export type HourLogWorkbookRow = {
   coachId: string;
   coachName: string | null;
   coachEmail: string;
+  programId: string;
   programName: string;
   startAt: Date;
   endAt: Date;
   note: string | null;
+  // FEAT-16 schedule reconciliation note — null when the log matches the
+  // schedule (or was unscheduled). Filled by
+  // fetchHourLogRowsWithScheduleNotes; null on the base fetch.
+  scheduleNote: string | null;
 };
 
 export type HourLogWorkbookMeta = {
@@ -143,6 +148,7 @@ function addDetailSheet(
     { header: "End", key: "end", width: 10 },
     { header: "Hours", key: "hours", width: 10 },
     { header: "Note", key: "note", width: 40 },
+    { header: "Schedule", key: "scheduleNote", width: 32 },
   ];
 
   // rows arrive pre-sorted by coach then date — grouped by coach.
@@ -155,6 +161,7 @@ function addDetailSheet(
       end: formatTime12(row.endAt),
       hours: hoursBetween(row.startAt, row.endAt),
       note: row.note ?? "",
+      scheduleNote: row.scheduleNote ?? "",
     });
   }
 

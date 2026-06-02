@@ -8,7 +8,7 @@ import {
   hourLogFiltersToQueryString,
   normalizeHourLogFilters,
 } from "@/lib/reports/hour-log-filters";
-import { fetchHourLogRows } from "@/lib/reports/hour-log-fetch";
+import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
 import { FiltersForm } from "./_components/filters-form";
 import { HoursClient } from "./_components/hours-client";
 
@@ -43,7 +43,7 @@ export default async function AdminHourLogPage({
   const filters = normalizeHourLogFilters(params);
 
   const [rows, coachOptions, programOptions] = await Promise.all([
-    fetchHourLogRows(filters),
+    fetchHourLogRowsWithScheduleNotes(filters),
     // Filter dropdown — coaches role only, active only.
     db
       .select({ id: users.id, name: users.name, email: users.email })

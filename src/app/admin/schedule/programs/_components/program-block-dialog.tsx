@@ -23,6 +23,7 @@ import {
 } from "../form-actions";
 import { TimeSelect } from "@/app/_components/time-select";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
+import type { BlockReconciliation } from "@/lib/server/reconciliation";
 import {
   formatPfaDate,
   formatPfaDateMedium,
@@ -47,6 +48,29 @@ export type ProgramBlockEditInitial = {
 
 const INITIAL_STATE: ProgramScheduleActionResult = { ok: true };
 
+// Status banner labels + colors for the edit-mode reconciliation note
+// (FEAT-16). logged → success, mismatches → danger, pending → neutral.
+const RECON_STATUS_LABELS: Record<BlockReconciliation["status"], string> = {
+  logged: "On schedule",
+  wrong_coach: "Wrong coach",
+  wrong_time: "Wrong time",
+  no_show: "No-show",
+  pending: "Pending",
+};
+
+function reconBannerStyles(status: BlockReconciliation["status"]): string {
+  switch (status) {
+    case "logged":
+      return "border-success/30 bg-success/10 text-success";
+    case "wrong_coach":
+    case "wrong_time":
+    case "no_show":
+      return "border-danger/30 bg-danger/10 text-danger";
+    default:
+      return "border-line bg-surface-2 text-fg-muted";
+  }
+}
+
 export function ProgramBlockDialog({
   open,
   mode,
@@ -56,6 +80,7 @@ export function ProgramBlockDialog({
   coaches,
   createPrefill,
   editInitial,
+  reconciliation,
 }: {
   open: boolean;
   mode: "create" | "edit";
@@ -65,6 +90,7 @@ export function ProgramBlockDialog({
   coaches: CoachOption[];
   createPrefill: { programId: string; startTime: string; endTime: string } | null;
   editInitial: ProgramBlockEditInitial | null;
+  reconciliation?: BlockReconciliation | null;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const isEdit = mode === "edit";
@@ -218,6 +244,20 @@ export function ProgramBlockDialog({
             className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
           >
             {deleteError}
+          </div>
+        ) : null}
+
+        {isEdit && reconciliation ? (
+          <div
+            role="status"
+            className={`rounded-md border px-3 py-2 text-xs ${reconBannerStyles(
+              reconciliation.status,
+            )}`}
+          >
+            <span className="font-medium uppercase tracking-wider">
+              {RECON_STATUS_LABELS[reconciliation.status]}
+            </span>
+            <span className="block mt-0.5">{reconciliation.detail}</span>
           </div>
         ) : null}
 

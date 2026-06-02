@@ -9,14 +9,14 @@
 import { requireRole } from "@/lib/authz";
 import { hourLogFiltersFromURLSearchParams } from "@/lib/reports/hour-log-filters";
 import { buildHourLogWorkbook } from "@/lib/reports/hour-log-excel";
-import { fetchHourLogRows } from "@/lib/reports/hour-log-fetch";
+import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
 
 export async function GET(request: Request) {
   await requireRole("admin");
 
   const url = new URL(request.url);
   const filters = hourLogFiltersFromURLSearchParams(url.searchParams);
-  const rows = await fetchHourLogRows(filters);
+  const rows = await fetchHourLogRowsWithScheduleNotes(filters);
 
   const buffer = await buildHourLogWorkbook(rows, {
     from: filters.from,

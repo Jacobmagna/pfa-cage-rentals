@@ -29,13 +29,13 @@ export async function PublicShell({ children }: { children: React.ReactNode }) {
               className="h-2.5 w-2.5 text-gold/70 transition-colors group-hover:text-gold"
               filled
             />
-            <span className="text-base font-bold tracking-tight text-gold group-hover:text-gold-hover transition-colors">
-              PFA Cage Rentals
+            <span className="text-base font-semibold tracking-tight text-fg transition-colors">
+              PFA <span className="text-gold-strong group-hover:text-gold-hover transition-colors">Engine</span>
             </span>
           </Link>
           <Link
             href={ctaHref}
-            className="rounded-md border border-line bg-surface-2 text-fg-muted hover:text-fg hover:border-line-strong h-8 inline-flex items-center px-3 text-xs font-medium transition-colors"
+            className="rounded-lg border border-line-strong bg-surface text-fg-muted hover:text-fg hover:-translate-y-px shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] h-8 inline-flex items-center px-3 text-xs font-medium transition"
           >
             {ctaLabel}
           </Link>

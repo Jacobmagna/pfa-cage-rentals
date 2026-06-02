@@ -63,7 +63,7 @@ export default async function Home({
       <div className="relative w-full max-w-sm">
         {/* Brand lockup. Three-tier vertical hierarchy:
              1. PFA Sports logo (parent brand)
-             2. "Cage Rentals" — the product wordmark, promoted from
+             2. "PFA Engine" — the product wordmark, promoted from
                 eyebrow label to a proper Geist-bold gold wordmark
              3. Hairline-rule-with-diamond divider, signalling that
                 anything beneath is descriptive copy and not part of
@@ -80,7 +80,7 @@ export default async function Home({
             className="mx-auto h-24 w-auto"
           />
           <h1 className="mt-7 text-3xl font-bold tracking-tight text-gold">
-            Cage Rentals
+            PFA Engine
           </h1>
           <div
             aria-hidden
@@ -96,7 +96,7 @@ export default async function Home({
           </p>
         </div>
 
-        <div className="rounded-lg border border-line bg-surface/80 p-6 shadow-[0_1px_0_0_rgba(255,255,255,0.04)_inset,0_20px_60px_-20px_rgba(0,0,0,0.5)] backdrop-blur-sm">
+        <div className="rounded-2xl border border-line bg-surface p-6 shadow-[var(--shadow-md)]">
           <GoogleSignInButton />
 
           <div className="my-5 flex items-center gap-3">
@@ -115,7 +115,7 @@ export default async function Home({
               autoComplete="email"
               aria-label="Email address"
               placeholder="you@example.com"
-              className="w-full rounded-md border border-line bg-page px-3 h-10 text-sm text-fg placeholder:text-fg-subtle transition-colors focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+              className="w-full rounded-lg border border-line bg-surface-2 px-3 h-10 text-sm text-fg placeholder:text-fg-subtle transition-colors focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
             />
             {errorMessage ? (
               <p role="alert" className="text-xs text-danger leading-relaxed">
@@ -124,7 +124,7 @@ export default async function Home({
             ) : null}
             <button
               type="submit"
-              className="w-full rounded-md border border-line bg-surface-2 text-fg h-10 px-4 text-sm font-medium transition-colors hover:bg-surface hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+              className="w-full rounded-lg border border-line-strong bg-surface text-fg-muted h-10 px-4 text-sm font-medium shadow-[var(--shadow-sm)] transition hover:text-fg hover:-translate-y-px hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
             >
               Send me a sign-in link
             </button>

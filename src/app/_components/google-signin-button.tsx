@@ -22,7 +22,7 @@ export function GoogleSignInButton() {
         setPending(true);
         signIn("google", { callbackUrl: "/" });
       }}
-      className="w-full rounded-md bg-gold text-gold-ink h-10 px-4 text-sm font-semibold transition-colors hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 disabled:opacity-50 disabled:cursor-not-allowed"
+      className="w-full rounded-lg bg-gold text-gold-ink h-10 px-4 text-sm font-medium shadow-[var(--shadow-sm)] transition-colors hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 disabled:opacity-50 disabled:cursor-not-allowed"
     >
       {pending ? "Redirecting…" : "Continue with Google"}
     </button>

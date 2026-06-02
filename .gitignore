@@ -64,3 +64,9 @@ source_data.xlsx
 
 # excel lock files
 ~$*.xlsx
+
+# Magna internal build orchestration (not a customer deliverable)
+/build/
+
+# worklog rotation backups
+worklog/*.bak.*

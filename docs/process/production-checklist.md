@@ -46,7 +46,7 @@ Rationale: install error visibility, CI, and migration safety **before** any new
 ### A4. Security headers in `next.config.ts` — `[x]`
 - Add `headers()` returning: `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://vercel.live; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.resend.com https://*.sentry.io; frame-ancestors 'none'`.
 - Test with https://securityheaders.com — target A+ grade.
-- Acceptance: securityheaders.com scan of `www.pfacagerentals.com` returns A or A+.
+- Acceptance: securityheaders.com scan of `www.pfaengine.com` returns A or A+.
 - Est: 45 min (iterating CSP).
 - **Done in A3 PR** (bundled because both touch next.config.ts). All 6 headers live and verified via curl.
 
@@ -74,7 +74,7 @@ Rationale: install error visibility, CI, and migration safety **before** any new
 
 ### A7. Uptime monitoring — `[x]`
 - Sign up Better Stack (https://betterstack.com) free tier.
-- Add monitor: GET `https://www.pfacagerentals.com/api/health`, 3-min interval, expect 200 + JSON `{ status: "ok" }`. (`/api/health` lands in A8; if A8 is deferred, fall back to `/api/auth/csrf`.)
+- Add monitor: GET `https://www.pfaengine.com/api/health`, 3-min interval, expect 200 + JSON `{ status: "ok" }`. (`/api/health` lands in A8; if A8 is deferred, fall back to `/api/auth/csrf`.)
 - Alert destination: email + push (install Better Stack mobile app).
 - Acceptance: pause Vercel deploy briefly, get alert within 6 min.
 - Est: 15 min.
@@ -96,7 +96,7 @@ Rationale: install error visibility, CI, and migration safety **before** any new
   ```ts
   experimental: {
     serverActions: {
-      allowedOrigins: ["www.pfacagerentals.com", "pfacagerentals.com"],
+      allowedOrigins: ["www.pfaengine.com", "pfaengine.com"],
     },
   },
   ```
@@ -455,12 +455,12 @@ to switch was never deliverability — it was that the existing
 Resend free-tier slot is held by doc-insured, so PFA had to send
 from `noreply@docinsured.com` (looks like phishing). Cheapest fix
 is a second Resend account for PFA, free tier covers the volume.
-- Code: `src/auth.ts` already points at `noreply@pfacagerentals.com`
+- Code: `src/auth.ts` already points at `noreply@pfaengine.com`
   (commit d72c900-adjacent). No further code change.
 - Manual: PFA Resend account created (jacob+pfa@themagnas.com), domain
   verified, API key rotated into Vercel + `.env.local`.
 - Acceptance: prod end-to-end smoke completed — magic-link from
-  `noreply@pfacagerentals.com` delivered to Jacob's inbox on first
+  `noreply@pfaengine.com` delivered to Jacob's inbox on first
   send, sign-in flow succeeded.
 
 ### J2. SPF + DMARC records — `[x]`
@@ -468,7 +468,7 @@ is a second Resend account for PFA, free tier covers the volume.
   adds `include:_spf.resend.com` via SPF TXT — confirm it's present
   before adding the DMARC record below):
   - DMARC TXT `_dmarc`: `v=DMARC1; p=quarantine; pct=100; sp=quarantine`
-- Dropped `rua=mailto:postmaster@pfacagerentals.com` from the original
+- Dropped `rua=mailto:postmaster@pfaengine.com` from the original
   value — there's no postmaster mailbox set up, and standing one up
   for DMARC aggregate reports is extra scope. Without rua DMARC still
   enforces; we just don't receive the daily XML report.
@@ -608,18 +608,18 @@ Decision (2026-05-25): stay on Neon free tier (24h PITR) + nightly `pg_dump` to 
 
 ### K5. Status page — `[ ]` (parked post-launch)
 Not a launch blocker. Pick this up after Stage K-launch (K8–K10) is comfortable.
-- Better Stack → enable status page → custom subdomain `status.pfacagerentals.com`.
+- Better Stack → enable status page → custom subdomain `status.pfaengine.com`.
 - GoDaddy DNS: CNAME `status` → Better Stack's provided value.
 - Link from sign-in footer.
-- Acceptance: `status.pfacagerentals.com` loads, shows uptime monitor status.
+- Acceptance: `status.pfaengine.com` loads, shows uptime monitor status.
 
 ### K6. Final security pass — `[~]`
 Code-side checks closed; live-site scans + Sentry alert test still on Jacob.
 - **CSP audit (✓):** Verified in `next.config.ts` — prod `script-src` is `'self' 'unsafe-inline' https://vercel.live` with no `unsafe-eval`. No wildcards in `default-src`. `frame-ancestors 'none'`. `form-action` restricted to self + accounts.google.com. `'unsafe-eval'` only present in the dev branch (React error overlay + Turbopack HMR need it).
-- **Live header check (✓):** `curl -sIL https://pfacagerentals.com` returns CSP + HSTS (preload) + X-Frame-Options DENY + X-Content-Type-Options nosniff + Referrer-Policy strict-origin-when-cross-origin + Permissions-Policy (camera/mic/geo/interest-cohort blocked).
+- **Live header check (✓):** `curl -sIL https://pfaengine.com` returns CSP + HSTS (preload) + X-Frame-Options DENY + X-Content-Type-Options nosniff + Referrer-Policy strict-origin-when-cross-origin + Permissions-Policy (camera/mic/geo/interest-cohort blocked).
 - **Secret-in-bundle scan (✓):** `grep -r '<key>' .next/static/` returns 0 hits for `AUTH_SECRET`, `AUTH_RESEND_KEY`, `AUTH_GOOGLE_SECRET`, `SENTRY_AUTH_TOKEN`, `UPSTASH_REDIS_REST_TOKEN`, `INTEGRATION_DATABASE_URL`, `DATABASE_URL`. None of these are `NEXT_PUBLIC_*` so Next.js doesn't inline them.
 - **Pending Jacob-manual:**
-  - Re-run https://securityheaders.com against `https://www.pfacagerentals.com` → expect A+ given the headers above.
+  - Re-run https://securityheaders.com against `https://www.pfaengine.com` → expect A+ given the headers above.
   - Re-run https://observatory.mozilla.org → expect ≥ A.
   - Trigger a Sentry alert (browser console: `Sentry.captureException(new Error("K6 smoke"))` while signed in) and confirm it arrives in Sentry.
 - Flip to `[x]` once the three external checks pass.

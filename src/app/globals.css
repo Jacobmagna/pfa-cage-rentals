@@ -8,33 +8,54 @@
  *   bg-page, bg-surface, bg-surface-2
  *   border-line, border-line-strong
  *   text-fg, text-fg-muted, text-fg-subtle, text-fg-disabled
- *   bg-gold / text-gold / border-gold / text-gold-ink
+ *   bg-gold / text-gold / border-gold / text-gold-ink / text-gold-strong
  *   text-success / bg-success/10 etc. for status pills
  */
 @theme inline {
-  --color-page: #0a0a0a;
-  --color-surface: #171717;
-  --color-surface-2: #1f1f1f;
+  /* FEAT-04 light rebrand: white base, black text/primary controls,
+   * PFA gold as accent (signature color, not dominant). Token NAMES
+   * are unchanged so every call site (bg-page, text-fg, text-gold…)
+   * keeps working — only the VALUES flipped dark→light.
+   * Contrast ratios computed below mirror the prior J6 rigor: every
+   * text/bg pair clears WCAG AA 4.5:1. */
+  --color-page: #ffffff;
+  --color-surface: #f7f7f7;
+  --color-surface-2: #ededed;
 
-  --color-line: #262626;
-  --color-line-strong: #404040;
+  --color-line: #e5e5e5;
+  --color-line-strong: #d4d4d4;
 
-  --color-fg: #fafafa;
-  --color-fg-muted: #a3a3a3;
-  /* fg-subtle bumped from #737373 to #8a8a8a (J6) so WCAG AA 4.5:1
-   * holds on both bg-page and bg-surface — old value scored 3.78/4.17
-   * on Lighthouse, this scores ~5.32/5.75. fg-disabled stays dim
-   * because WCAG exempts disabled controls. */
-  --color-fg-subtle: #8a8a8a;
-  --color-fg-disabled: #525252;
+  --color-fg: #0a0a0a;
+  /* fg-muted/#595959 and fg-subtle/#646464 are tuned to hold WCAG AA
+   * 4.5:1 on ALL three surfaces (page #fff, surface #f7f7f7, surface-2
+   * #ededed):
+   *   fg-muted  → 7.00 / 6.60 / 5.93
+   *   fg-subtle → 5.61 / 5.29 / 4.76
+   * fg-disabled stays dim because WCAG exempts disabled controls. */
+  --color-fg-muted: #595959;
+  --color-fg-subtle: #646464;
+  --color-fg-disabled: #a3a3a3;
 
+  /* Gold is now accent-on-light: fine for fills, borders, large/bold
+   * accents and CTAs. On gold CTA backgrounds, gold-ink (#0a0a0a) gives
+   * 10.20:1 — AA/AAA. Gold itself is ~1.94:1 on white, so it must NOT be
+   * used as small body text; gold-strong (#8a6206, AA on page/surface:
+   * 5.18 / 4.84) exists for any gold-COLORED text that needs legibility.
+   * Prefer gold-ink-on-gold fills over gold text wherever possible. */
   --color-gold: #e9b13c;
   --color-gold-hover: #f0bf52;
   --color-gold-ink: #0a0a0a;
+  --color-gold-strong: #8a6206;
 
-  --color-success: #22c55e;
-  --color-warning: #f59e0b;
-  --color-danger: #dc2626;
+  /* Status colors darkened from the dark-theme values so they read on
+   * white. AA 4.5:1 on page/surface (and ~surface-2); status pills use
+   * far-lighter /10 tints, so real pill backgrounds are safer still:
+   *   success #166534 → 7.13 / 6.66 / 6.09
+   *   warning #9a5208 → 5.86 / 5.47 / 5.00
+   *   danger  #b01818 → 7.02 / 6.56 / 6.00 */
+  --color-success: #166534;
+  --color-warning: #9a5208;
+  --color-danger: #b01818;
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
@@ -44,7 +65,7 @@ html,
 body {
   background: var(--color-page);
   color: var(--color-fg);
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {

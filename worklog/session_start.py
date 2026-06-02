@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 LOG_PATH = Path(__file__).resolve().parent / "sessions.jsonl"
-PROJECT_MARKER = "coaches-cage-ai"
+PROJECT_MARKER = "/cage-rentals"  # leading slash prevents false-positive substring matches
 
 try:
     payload = json.loads(sys.stdin.read() or "{}")
@@ -35,10 +35,10 @@ with open(LOG_PATH, "a") as f:
     f.write(json.dumps(entry) + "\n")
 
 print(
-    "PFA-TRACKING-ACTIVE: "
-    f"This session is being time-tracked for the PFA Cage Rentals build. "
+    "CAGE-RENTALS-TRACKING-ACTIVE: "
+    f"This session is time-tracked for Cage Rentals iteration/maintenance work (billed at $150/hr). "
     f"Session id: {payload.get('session_id', 'unknown')}. "
     f"Logged at {now.strftime('%Y-%m-%d %H:%M:%S')} UTC. "
-    f"Per project memory, surface a visible 'Tracking active' confirmation "
-    f"in your first response so Jacob can see at a glance that hooks fired."
+    f"Surface a visible 'Cage Rentals tracking active' confirmation in your first response so Jacob can see at a glance that hooks fired. "
+    f"If this session is for new Tier 1 product work, stop and switch to the pfa-tier-one folder."
 )

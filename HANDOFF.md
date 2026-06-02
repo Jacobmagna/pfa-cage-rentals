@@ -1,6 +1,16 @@
 # Handoff prompt — paste into next session
 
-Continuing the PFA Cage Rentals build in a fresh context. I'm Jacob — billable engineering for my dad's PFA Baseball training facility (Excel-replacement scheduling/billing app). Hooks log time to `worklog/sessions.jsonl`; surface a visible "Tracking active" line in your first response so I can see hooks fired.
+**This is the entry point for fresh Cage Rentals Maintenance / Iteration chats.** Read this top-to-bottom before doing anything. If context fills in the active chat, a new chat reading this should be able to pick up without losing anything load-bearing.
+
+Continuing the PFA Cage Rentals app in a fresh context. I'm Jacob — engineering for my dad's PFA Baseball training facility (Excel-replacement scheduling/billing app). Hooks log time to `worklog/sessions.jsonl`; surface a visible "Cage Rentals tracking active" line in your first response so I can see hooks fired.
+
+## Commercial framing (as of 2026-05-26)
+
+- **The $700 fixed-price base build is CLOSED** — locked at 2026-05-25 09:30 PDT. The "Cage Rentals Base" worklog tab is frozen.
+- **All work from 2026-05-25 09:30 onward is billed hourly at $150/hr** and tracked in the **"Cage Rentals — Iteration"** worklog tab. This is what your current session is logging into.
+- Tier 1 product work (contact book, tryouts form, team formation, uniform helper) is a **separate engagement at $200/hr** and lives in a different repo (`pfa-tier-one`). If the user starts asking for Tier 1 work in this chat, stop and tell them to switch to the pfa-tier-one folder per the SessionStart hook reminder.
+- See `docs/proposals/cage-rentals-maintenance.md` for the canonical scope/billing doc shared with Dad + Mom.
+- For asks > ~3 hours of work, give a rough estimate before charging in. Below that, just execute and bill.
 
 ## Before doing anything
 
@@ -168,4 +178,15 @@ When in doubt about scope, **ask via AskUserQuestion before charging in** — re
 
 ## Acknowledge + start
 
-Acknowledge with the "Tracking active" line, then ask Jacob what's next. The app is live with real data and real coaches arriving. Most work from here is reactive — feature requests from Dad/Mom + David, polish, sales/branding, V2 invoice surface eventually.
+Acknowledge with the "Cage Rentals tracking active" line + current session id, then ask Jacob what's next. The app is live with real data and real coaches arriving. Most work from here is reactive — feature requests from Dad/Mom + David, polish, V2 invoice surface eventually.
+
+## Updating this file
+
+Jacob will say "update HANDOFF.md" when context is filling and he wants the next fresh chat to pick up cleanly. When that happens:
+1. Re-read this whole file first so you keep the format + voice.
+2. Append newly-shipped work to the "Post-launch features shipped this session" block (newest first).
+3. Refresh the commit list to the last ~9 commits.
+4. Update any quirks / warns you discovered the hard way.
+5. Move anything from "Pending" → "shipped" as appropriate.
+6. Bump the date stamps where they appear inline.
+7. Keep it under ~200 lines if possible — old shipped items can be summarized into one bullet rather than kept verbatim forever.

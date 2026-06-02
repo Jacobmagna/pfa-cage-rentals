@@ -106,6 +106,41 @@
       "when": 1779732653643,
       "tag": "0014_variable_rates_and_online",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1780268703853,
+      "tag": "0015_redundant_scorpion",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1780287300378,
+      "tag": "0016_cheerful_major_mapleleaf",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1780356938649,
+      "tag": "0017_eager_vindicator",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1780359348203,
+      "tag": "0018_fancy_oracle",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1780363805724,
+      "tag": "0019_next_the_spike",
+      "breakpoints": true
     }
   ]
 }

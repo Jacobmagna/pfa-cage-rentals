@@ -1,0 +1,2 @@
+CREATE INDEX "hour_logs_start_idx" ON "hour_logs" USING btree ("start_at");--> statement-breakpoint
+CREATE INDEX "program_schedule_blocks_start_idx" ON "program_schedule_blocks" USING btree ("start_at");

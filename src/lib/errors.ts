@@ -165,6 +165,100 @@ export class MergeTargetSameAsSourceError extends Error {
   }
 }
 
+// Hour-log create referenced a program id that doesn't exist (stale
+// client option, or a direct RPC call with a bogus id).
+export class ProgramNotFoundError extends Error {
+  readonly code = "PROGRAM_NOT_FOUND" as const;
+  constructor(public readonly programId: string) {
+    super(`Program ${programId} not found`);
+    this.name = "ProgramNotFoundError";
+  }
+}
+
+// Program create/update hit the `programs_name_unique` constraint —
+// another program already owns that name. The submitted name rides
+// along so the UI can echo it in the banner.
+export class ProgramNameTakenError extends Error {
+  readonly code = "PROGRAM_NAME_TAKEN" as const;
+  constructor(public readonly name: string) {
+    super(`A program named "${name}" already exists`);
+    this.name = "ProgramNameTakenError";
+  }
+}
+
+// Hour-log create targeted a retired (soft-deleted) program. Programs
+// are never hard-deleted — they're flipped to active = false — so a
+// stale form option could still point at one.
+export class ProgramInactiveError extends Error {
+  readonly code = "PROGRAM_INACTIVE" as const;
+  constructor(
+    public readonly programId: string,
+    public readonly programName: string,
+  ) {
+    super(`${programName} is no longer active`);
+    this.name = "ProgramInactiveError";
+  }
+}
+
+// Admin hour-log edit/delete referenced an hour_logs id that doesn't
+// exist (stale client row, or a direct RPC call with a bogus id).
+export class HourLogNotFoundError extends Error {
+  readonly code = "HOUR_LOG_NOT_FOUND" as const;
+  constructor(public readonly hourLogId: string) {
+    super(`Hour log ${hourLogId} not found`);
+    this.name = "HourLogNotFoundError";
+  }
+}
+
+// Program-schedule-block edit/delete referenced a
+// program_schedule_blocks id that doesn't exist (stale client row, or
+// a direct RPC call with a bogus id). Mirrors BlockNotFoundError.
+export class ProgramScheduleBlockNotFoundError extends Error {
+  readonly code = "PROGRAM_SCHEDULE_BLOCK_NOT_FOUND" as const;
+  constructor(public readonly blockId: string) {
+    super(`Program schedule block ${blockId} not found`);
+    this.name = "ProgramScheduleBlockNotFoundError";
+  }
+}
+
+// Athlete edit/delete/assign referenced an athletes id that doesn't
+// exist (stale client row, or a direct RPC call with a bogus id).
+export class AthleteNotFoundError extends Error {
+  readonly code = "ATHLETE_NOT_FOUND" as const;
+  constructor(public readonly athleteId: string) {
+    super(`Athlete ${athleteId} not found`);
+    this.name = "AthleteNotFoundError";
+  }
+}
+
+// Refused to hard-delete an athlete that still has attendance_records.
+// athletes has no soft-delete column, so deleting would cascade away
+// the attendance history — we guard instead (DEC-20) and surface this.
+export class AthleteHasRecordsError extends Error {
+  readonly code = "ATHLETE_HAS_RECORDS" as const;
+  constructor(
+    public readonly athleteId: string,
+    public readonly recordCount: number,
+  ) {
+    super(
+      `Athlete ${athleteId} has ${recordCount} attendance record(s) and can't be deleted`,
+    );
+    this.name = "AthleteHasRecordsError";
+  }
+}
+
+// Attendance submit hit a program with no athletes on its roster.
+// Taking attendance for an empty roster is meaningless (and the
+// submit schema requires at least one record), so we refuse and tell
+// the coach to enroll athletes first.
+export class AttendanceEmptyRosterError extends Error {
+  readonly code = "ATTENDANCE_EMPTY_ROSTER" as const;
+  constructor(public readonly programId: string) {
+    super(`No athletes are assigned to this program yet`);
+    this.name = "AttendanceEmptyRosterError";
+  }
+}
+
 export class BlockConflictsWithSessionError extends Error {
   readonly code = "BLOCK_CONFLICTS_WITH_SESSION" as const;
   constructor(

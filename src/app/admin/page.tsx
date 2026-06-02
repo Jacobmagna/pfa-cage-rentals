@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Coins,
   FileText,
+  FolderKanban,
   History,
   Settings,
   Upload,
@@ -229,6 +230,12 @@ export default async function AdminHome() {
             icon={<Users className="h-4 w-4" />}
             title="Coaches"
             stat={`${activeCoaches} active`}
+          />
+          <NavCard
+            href="/admin/programs"
+            icon={<FolderKanban className="h-4 w-4" />}
+            title="Programs"
+            stat="Caps + coach assignments"
           />
         </div>
       </section>

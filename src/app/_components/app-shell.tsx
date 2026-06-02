@@ -1,6 +1,8 @@
+import Image from "next/image";
 import Link from "next/link";
 import { auth, signOut } from "@/auth";
 import { DiamondMark } from "./diamond-mark";
+import { TabNav } from "./tab-nav";
 
 /**
  * App shell with top nav.
@@ -31,6 +33,14 @@ export async function AppShell({
             href={role === "admin" ? "/admin" : "/coach"}
             className="flex items-center gap-2.5 group"
           >
+            <Image
+              src="/pfa-logo.png"
+              alt="PFA"
+              width={24}
+              height={24}
+              priority
+              className="h-6 w-6 object-contain"
+            />
             <DiamondMark
               className="h-2.5 w-2.5 text-gold/70 transition-colors group-hover:text-gold"
               filled
@@ -63,6 +73,8 @@ export async function AppShell({
           </div>
         </div>
       </header>
+
+      <TabNav role={role} />
 
       <main className="flex-1 mx-auto w-full max-w-7xl px-6 lg:px-8 py-10">
         {children}

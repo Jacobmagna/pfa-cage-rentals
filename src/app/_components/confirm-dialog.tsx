@@ -149,7 +149,7 @@ export function ConfirmDialog({
 
   const confirmClasses =
     variant === "danger"
-      ? "bg-danger text-fg hover:opacity-90 focus-visible:ring-danger/40"
+      ? "bg-danger text-page hover:opacity-90 focus-visible:ring-danger/40"
       : "bg-gold text-gold-ink hover:bg-gold-hover focus-visible:ring-gold/40";
 
   return (

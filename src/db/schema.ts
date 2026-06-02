@@ -6,8 +6,10 @@ import {
   integer,
   boolean,
   jsonb,
+  date,
   pgEnum,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 
@@ -18,6 +20,11 @@ export const resourceType = pgEnum("resource_type", [
   "weight_room",
 ]);
 export const sessionUseType = pgEnum("use_type", ["hitting", "pitching"]);
+
+// Period over which a program's participation cap is measured. Used by
+// programs.cap_period. Co-required with programs.cap (both NULL or both
+// NOT NULL — enforced by a hand-added CHECK constraint in the migration).
+export const capPeriod = pgEnum("cap_period", ["week", "month"]);
 
 // `deletedAt`: soft-delete timestamp for the J9 GDPR-style account-
 // removal flow. NULL = active. When set, the row is anonymized:
@@ -412,6 +419,254 @@ export const auditLog = pgTable(
   ],
 );
 
+// ============================================================
+// PHASE 1 — Programs, athletes, hours, attendance
+// ============================================================
+
+// Training programs (e.g. "Elite Hitting", "Speed & Agility").
+//
+// Optional participation cap measured per week or per month. `cap` and
+// `capPeriod` are co-required: both NULL (no cap) or both NOT NULL —
+// enforced by a hand-added CHECK constraint in the migration (drizzle-kit
+// does not emit CHECK constraints).
+//
+// `name` is unique so seeds + admin edits can't double-create a program,
+// mirroring resources.name. Programs are never hard-deleted: use the
+// `active` flag to retire one (mirrors resources.active) so historical
+// hour logs + attendance keep their FK target intact. Because of this,
+// the program FKs on hour_logs / attendance_sessions intentionally use
+// NO cascade.
+export const programs = pgTable("programs", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull().unique(),
+  cap: integer("cap"),
+  capPeriod: capPeriod("cap_period"),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "date" })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+// Athletes (players). Minimal Phase-1 record. `birthday` is an optional
+// calendar date with no timezone, stored as Postgres `date` and surfaced
+// as a "YYYY-MM-DD" string (mode: "string"). NULL = unknown (e.g. a Sling
+// starter-roster import row that lacks a birthday).
+export const athletes = pgTable("athletes", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name").notNull(),
+  birthday: date("birthday", { mode: "string" }),
+  // term = normalized "Season YYYY" (e.g. "Summer 2026"), NULL when
+  // unset (seed/import may omit it). archivedAt = visibility flag
+  // mirroring users.deletedAt — archive is a soft hide, not a delete,
+  // so attendance history is preserved (DEC-28).
+  term: text("term"),
+  archivedAt: timestamp("archived_at", { mode: "date" }),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "date" })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+// Many-to-many: which athletes are enrolled in which programs. Composite
+// PK enforces one enrollment per (athlete, program). Both FKs cascade on
+// delete since an enrollment row has no meaning without its parents.
+export const athletePrograms = pgTable(
+  "athlete_programs",
+  {
+    athleteId: text("athlete_id")
+      .notNull()
+      .references(() => athletes.id, { onDelete: "cascade" }),
+    programId: text("program_id")
+      .notNull()
+      .references(() => programs.id, { onDelete: "cascade" }),
+    assignedAt: timestamp("assigned_at", { mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.athleteId, table.programId] }),
+    index("athlete_programs_program_idx").on(table.programId),
+  ],
+);
+
+// Many-to-many: which coaches may access which programs. Composite PK
+// enforces one assignment per (coach, program).
+export const coachPrograms = pgTable(
+  "coach_programs",
+  {
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    programId: text("program_id")
+      .notNull()
+      .references(() => programs.id, { onDelete: "cascade" }),
+    assignedAt: timestamp("assigned_at", { mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.coachId, table.programId] }),
+    index("coach_programs_program_idx").on(table.programId),
+  ],
+);
+
+// Coach hours logged against a program (payroll / utilization).
+//
+// CHECK (start_at < end_at) is hand-added in the migration, mirroring
+// sessions_billing — rejects backwards / zero-duration ranges at the DB
+// layer even on direct SQL writes. The program FK uses NO cascade
+// because programs are soft-deleted (see programs comment).
+//
+// Indexes: (coach_id, start_at) for per-coach payroll windows;
+// (program_id, start_at) for per-program utilization.
+export const hourLogs = pgTable(
+  "hour_logs",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id),
+    programId: text("program_id")
+      .notNull()
+      .references(() => programs.id),
+    startAt: timestamp("start_at", { mode: "date" }).notNull(),
+    endAt: timestamp("end_at", { mode: "date" }).notNull(),
+    note: text("note"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    index("hour_logs_coach_start_idx").on(table.coachId, table.startAt),
+    index("hour_logs_program_start_idx").on(table.programId, table.startAt),
+    index("hour_logs_start_idx").on(table.startAt),
+  ],
+);
+
+// One attendance-taking event: a program on a single PFA-local calendar
+// day. `session_date` is a calendar day (no timezone), so the day a coach
+// picks is the day stored regardless of server TZ. UNIQUE(program_id,
+// session_date) enforces at most one attendance session per program per
+// day. Program FK uses NO cascade (programs are soft-deleted).
+export const attendanceSessions = pgTable(
+  "attendance_sessions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    programId: text("program_id")
+      .notNull()
+      .references(() => programs.id),
+    sessionDate: date("session_date", { mode: "string" }).notNull(),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex("attendance_sessions_program_date_unique").on(
+      table.programId,
+      table.sessionDate,
+    ),
+  ],
+);
+
+// Admin-authored intended program blocks for FEAT-16 reconciliation:
+// which coach is *supposed* to run which program, when. The scheduled
+// coach is who SHOULD run it — coaches may still log any program per
+// DEC-29; FEAT-16 reconciles these against the coach hour-logs.
+//
+// CHECK (start_at < end_at) is hand-added in migration 0018, mirroring
+// hour_logs / sessions_billing. The program FK uses NO cascade because
+// programs are soft-deleted (active = false) — history is preserved,
+// same as blocked_times → resources. No overlap/EXCLUDE constraint:
+// the admin authors these deliberately, overlapping blocks are allowed.
+//
+// Indexes: (program_id, start_at) for per-program reads;
+// (scheduled_coach_id, start_at) for per-coach reconciliation — FEAT-16
+// reads both directions.
+export const programScheduleBlocks = pgTable(
+  "program_schedule_blocks",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    programId: text("program_id")
+      .notNull()
+      .references(() => programs.id),
+    scheduledCoachId: text("scheduled_coach_id")
+      .notNull()
+      .references(() => users.id),
+    startAt: timestamp("start_at", { mode: "date" }).notNull(),
+    endAt: timestamp("end_at", { mode: "date" }).notNull(),
+    note: text("note"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    index("program_schedule_blocks_program_start_idx").on(
+      table.programId,
+      table.startAt,
+    ),
+    index("program_schedule_blocks_coach_start_idx").on(
+      table.scheduledCoachId,
+      table.startAt,
+    ),
+    index("program_schedule_blocks_start_idx").on(table.startAt),
+  ],
+);
+
+// Per-athlete present/absent mark within an attendance session. Composite
+// PK enforces one record per (session, athlete). Both FKs cascade: a
+// record has no meaning without its session or athlete.
+export const attendanceRecords = pgTable(
+  "attendance_records",
+  {
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => attendanceSessions.id, { onDelete: "cascade" }),
+    athleteId: text("athlete_id")
+      .notNull()
+      .references(() => athletes.id, { onDelete: "cascade" }),
+    present: boolean("present").notNull(),
+    recordedBy: text("recorded_by")
+      .notNull()
+      .references(() => users.id),
+    recordedAt: timestamp("recorded_at", { mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sessionId, table.athleteId] }),
+    index("attendance_records_athlete_idx").on(table.athleteId),
+  ],
+);
+
 export type CoachPayment = typeof coachPayments.$inferSelect;
 export type NewCoachPayment = typeof coachPayments.$inferInsert;
 
@@ -436,3 +691,22 @@ export type CoachRateOverride = typeof coachRateOverrides.$inferSelect;
 export type NewCoachRateOverride = typeof coachRateOverrides.$inferInsert;
 export type BlockedTime = typeof blockedTimes.$inferSelect;
 export type NewBlockedTime = typeof blockedTimes.$inferInsert;
+
+export type Program = typeof programs.$inferSelect;
+export type NewProgram = typeof programs.$inferInsert;
+export type CapPeriod = (typeof capPeriod.enumValues)[number];
+export type Athlete = typeof athletes.$inferSelect;
+export type NewAthlete = typeof athletes.$inferInsert;
+export type AthleteProgram = typeof athletePrograms.$inferSelect;
+export type NewAthleteProgram = typeof athletePrograms.$inferInsert;
+export type CoachProgram = typeof coachPrograms.$inferSelect;
+export type NewCoachProgram = typeof coachPrograms.$inferInsert;
+export type HourLog = typeof hourLogs.$inferSelect;
+export type NewHourLog = typeof hourLogs.$inferInsert;
+export type AttendanceSession = typeof attendanceSessions.$inferSelect;
+export type NewAttendanceSession = typeof attendanceSessions.$inferInsert;
+export type AttendanceRecord = typeof attendanceRecords.$inferSelect;
+export type NewAttendanceRecord = typeof attendanceRecords.$inferInsert;
+export type ProgramScheduleBlock = typeof programScheduleBlocks.$inferSelect;
+export type NewProgramScheduleBlock =
+  typeof programScheduleBlocks.$inferInsert;

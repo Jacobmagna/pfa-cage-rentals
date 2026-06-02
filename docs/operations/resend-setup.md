@@ -16,17 +16,17 @@ AUTH_RESEND_KEY="re_<...>"
 2. Sign up with `jacob+pfa@themagnas.com` (Gmail's `+tag` lets it route to your regular inbox while staying a distinct address for Resend).
 3. Verify the signup link in email.
 
-## Step 2 — verify pfacagerentals.com
+## Step 2 — verify pfaengine.com
 
-1. Resend dashboard → **Domains** → **Add Domain** → `pfacagerentals.com`.
+1. Resend dashboard → **Domains** → **Add Domain** → `pfaengine.com`.
 2. Resend shows ~4 DNS records to add (SPF TXT, DKIM CNAMEs, MAIL FROM TXT). Copy each.
-3. Open GoDaddy (https://dcc.godaddy.com/manage/pfacagerentals.com/dns) and add each record exactly as Resend shows it. Host fields are usually `@`, `resend._domainkey`, etc — paste verbatim from Resend, don't append the domain.
+3. Open GoDaddy (https://dcc.godaddy.com/manage/pfaengine.com/dns) and add each record exactly as Resend shows it. Host fields are usually `@`, `resend._domainkey`, etc — paste verbatim from Resend, don't append the domain.
 4. Back in Resend → **Verify**. DNS propagation is typically 5–15 min on GoDaddy; refresh until all rows go green.
 
 ## Step 3 — generate API key
 
 1. Resend dashboard → **API Keys** → **Create API Key**.
-2. Name: `pfa-cage-rentals` · Permission: **Sending access** · Domain: **pfacagerentals.com**.
+2. Name: `pfa-cage-rentals` · Permission: **Sending access** · Domain: **pfaengine.com**.
 3. Copy the `re_...` value (only shown once).
 4. Paste into `.env.local` as `AUTH_RESEND_KEY`.
 
@@ -47,9 +47,9 @@ npm run dev
 1. http://localhost:3000
 2. Enter `mdm@pfasports.com` → **Email me a sign-in link**.
 3. Page redirects to "Check your email".
-4. Email arrives in Dad's inbox from `noreply@pfacagerentals.com` (subject: "Sign in to localhost:3000") → click link → land on `/admin`.
+4. Email arrives in Dad's inbox from `noreply@pfaengine.com` (subject: "Sign in to localhost:3000") → click link → land on `/admin`.
 
-Repeat against `https://pfacagerentals.com` after the Vercel redeploy to verify the prod env var.
+Repeat against `https://pfaengine.com` after the Vercel redeploy to verify the prod env var.
 
 If the email doesn't arrive:
 - Spam folder first.
@@ -64,5 +64,5 @@ Once the new key is verified working in prod, the old doc-insured key is no long
 
 ## Related deliverability work
 
-- **J2** (SPF + DMARC on `pfacagerentals.com`): the SPF Resend asks you to add in Step 2 covers `include:_spf.resend.com`. DMARC is separate and lives in J2 of the production checklist.
+- **J2** (SPF + DMARC on `pfaengine.com`): the SPF Resend asks you to add in Step 2 covers `include:_spf.resend.com`. DMARC is separate and lives in J2 of the production checklist.
 - **J3** (mail-tester.com score): after Steps 1–5, send a magic link to a mail-tester address to verify deliverability. Target ≥ 9/10.

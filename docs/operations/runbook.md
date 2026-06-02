@@ -1,7 +1,7 @@
 # PFA Cage Rentals — runbook
 
 Operational procedures for keeping the production site at
-[pfacagerentals.com](https://pfacagerentals.com) healthy. Each section
+[pfaengine.com](https://pfaengine.com) healthy. Each section
 should be runnable end-to-end without asking the original author a
 question.
 
@@ -25,7 +25,7 @@ Work through these in order. Stop as soon as one is the obvious cause.
 3. **Neon database** — [neonstatus.com](https://neonstatus.com), then
    the Neon console for our project. A Neon outage shows up as 500s on
    every authenticated route (Auth.js can't load the session row).
-4. **DNS at GoDaddy** — `dig pfacagerentals.com +short` should resolve
+4. **DNS at GoDaddy** — `dig pfaengine.com +short` should resolve
    to Vercel's anycast IPs. If DNS is broken, log in to GoDaddy (NOT
    Vercel — the domain lives at GoDaddy, see project memory) and check
    the CNAME for `@` and `www`.
@@ -135,7 +135,7 @@ tokens until you invalidate it upstream.
 1. resend.com → API Keys → revoke the leaked key.
 2. Create a new key, scoped to "Sending access" only.
 3. Update Vercel → redeploy.
-4. Email sender (`noreply@pfacagerentals.com`) and the verified domain
+4. Email sender (`noreply@pfaengine.com`) and the verified domain
    stay configured on Resend's side — only the API key rotates.
 
 ### `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`

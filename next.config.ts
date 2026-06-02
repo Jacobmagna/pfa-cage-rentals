@@ -27,6 +27,8 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: {
       allowedOrigins: [
+        "www.pfaengine.com",
+        "pfaengine.com",
         "www.pfacagerentals.com",
         "pfacagerentals.com",
         "pfa-cage-rentals.vercel.app",

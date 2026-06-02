@@ -17,10 +17,10 @@ export default async function AttendanceLayout({
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
+        <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
           Admin
         </p>
-        <h1 className="text-3xl font-bold tracking-tight">Attendance</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Attendance</h1>
       </div>
 
       <AttendanceSubnav />

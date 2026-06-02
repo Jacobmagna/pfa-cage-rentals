@@ -121,7 +121,7 @@ export function RosterClient({
 
   if (athletes.length === 0) {
     return (
-      <div className="rounded-lg border border-line/60 bg-surface/40 p-12 text-center">
+      <div className="rounded-xl border border-line bg-surface p-12 text-center shadow-[var(--shadow-sm)]">
         <Users
           className="mx-auto mb-3 h-7 w-7 text-fg-subtle"
           aria-hidden="true"
@@ -163,7 +163,7 @@ export function RosterClient({
             <button
               type="button"
               onClick={() => setSidebarOpen(true)}
-              className="h-8 rounded-md bg-gold px-3 text-sm font-semibold text-gold-ink transition-colors hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+              className="h-8 rounded-md bg-gold px-3 text-sm font-semibold text-gold-ink shadow-[var(--shadow-sm)] transition-colors hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
             >
               Assign / move…
             </button>
@@ -171,11 +171,11 @@ export function RosterClient({
         </div>
       ) : null}
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
         <table className="w-full min-w-[640px] text-sm">
-          <thead className="border-b border-line text-[11px] uppercase tracking-[0.14em] text-fg-subtle">
+          <thead className="border-b border-line text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
             <tr>
-              <th scope="col" className="px-4 py-3 text-left font-medium">
+              <th scope="col" className="px-4 py-3 text-left font-semibold">
                 <input
                   type="checkbox"
                   checked={allSelected}
@@ -184,24 +184,24 @@ export function RosterClient({
                   className="h-4 w-4 accent-gold"
                 />
               </th>
-              <th scope="col" className="px-4 py-3 text-left font-medium">
+              <th scope="col" className="px-4 py-3 text-left font-semibold">
                 First
               </th>
-              <th scope="col" className="px-4 py-3 text-left font-medium">
+              <th scope="col" className="px-4 py-3 text-left font-semibold">
                 Last
               </th>
-              <th scope="col" className="px-4 py-3 text-left font-medium">
+              <th scope="col" className="px-4 py-3 text-left font-semibold">
                 Birthday
               </th>
-              <th scope="col" className="px-4 py-3 text-left font-medium">
+              <th scope="col" className="px-4 py-3 text-left font-semibold">
                 Term
               </th>
-              <th scope="col" className="px-4 py-3 text-left font-medium">
+              <th scope="col" className="px-4 py-3 text-left font-semibold">
                 Programs
               </th>
               <th
                 scope="col"
-                className="px-4 py-3 text-right font-medium sr-only"
+                className="px-4 py-3 text-right font-semibold sr-only"
               >
                 Actions
               </th>
@@ -214,7 +214,7 @@ export function RosterClient({
               return (
                 <tr
                   key={row.id}
-                  className={`border-b border-line/50 transition-colors last:border-b-0 hover:bg-surface/60 ${
+                  className={`border-t border-line transition last:border-b-0 hover:bg-surface-2 ${
                     isPendingDelete ? "opacity-50" : ""
                   }`}
                 >
@@ -229,7 +229,7 @@ export function RosterClient({
                   </td>
                   <td className="px-4 py-3 text-fg">{row.firstName}</td>
                   <td className="px-4 py-3 text-fg">{row.lastName}</td>
-                  <td className="px-4 py-3 font-mono tabular-nums text-xs text-fg-muted whitespace-nowrap">
+                  <td className="tnum px-4 py-3 font-mono text-xs text-fg-muted whitespace-nowrap">
                     {row.birthday ? formatBirthday(row.birthday) : "—"}
                   </td>
                   <td className="px-4 py-3 text-fg-muted whitespace-nowrap">
@@ -257,7 +257,7 @@ export function RosterClient({
                         type="button"
                         onClick={() => setEditRow(row)}
                         disabled={isPendingDelete}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-md text-fg-muted transition-colors hover:bg-surface hover:text-fg disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 sm:h-8 sm:w-8"
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-md text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 sm:h-8 sm:w-8"
                         aria-label={`Edit ${row.firstName} ${row.lastName}`}
                         title="Edit"
                       >

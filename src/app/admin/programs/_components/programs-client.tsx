@@ -68,28 +68,28 @@ export function ProgramsClient({ programs }: { programs: ProgramRow[] }) {
   return (
     <>
       {programs.length === 0 ? (
-        <div className="rounded-lg border border-line/60 bg-surface/40 p-12 text-center">
+        <div className="rounded-xl border border-line bg-surface p-12 text-center shadow-[var(--shadow-sm)]">
           <p className="text-sm text-fg-muted">
             No programs yet. Add your first program above.
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
           <table className="w-full min-w-[720px]">
-            <thead className="text-[11px] uppercase tracking-[0.14em] text-fg-subtle border-b border-line">
+            <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line">
               <tr>
-                <th scope="col" className="px-4 py-3 text-left font-medium">
+                <th scope="col" className="px-4 py-3 text-left font-semibold">
                   Program
                 </th>
-                <th scope="col" className="px-4 py-3 text-left font-medium">
+                <th scope="col" className="px-4 py-3 text-left font-semibold">
                   Cap
                 </th>
-                <th scope="col" className="px-4 py-3 text-left font-medium">
+                <th scope="col" className="px-4 py-3 text-left font-semibold">
                   Status
                 </th>
                 <th
                   scope="col"
-                  className="px-4 py-3 text-right font-medium sr-only"
+                  className="px-4 py-3 text-right font-semibold sr-only"
                 >
                   Actions
                 </th>
@@ -101,21 +101,21 @@ export function ProgramsClient({ programs }: { programs: ProgramRow[] }) {
                 return (
                   <tr
                     key={row.id}
-                    className={`border-b border-line/50 last:border-b-0 hover:bg-surface/60 transition-colors ${
+                    className={`border-t border-line last:border-b-0 hover:bg-surface-2 transition ${
                       rowPending ? "opacity-50" : ""
                     } ${row.active ? "" : "text-fg-muted"}`}
                   >
                     <td className="px-4 py-3 text-sm font-medium text-fg">
                       {row.name}
                     </td>
-                    <td className="px-4 py-3 text-sm text-fg-muted whitespace-nowrap">
+                    <td className="tnum px-4 py-3 text-sm text-fg-muted whitespace-nowrap">
                       {row.cap !== null && row.capPeriod !== null
                         ? `${row.cap} / ${row.capPeriod}`
                         : "No cap"}
                     </td>
                     <td className="px-4 py-3 text-sm whitespace-nowrap">
                       {row.active ? (
-                        <span className="inline-flex items-center gap-1.5 text-xs text-gold">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gold-strong">
                           <span className="h-1.5 w-1.5 rounded-full bg-gold" />
                           Active
                         </span>
@@ -132,7 +132,7 @@ export function ProgramsClient({ programs }: { programs: ProgramRow[] }) {
                           type="button"
                           onClick={() => setEditRow(row)}
                           disabled={rowPending}
-                          className="inline-flex items-center justify-center h-10 w-10 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-fg hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
+                          className="inline-flex items-center justify-center h-10 w-10 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
                           aria-label={`Edit ${row.name}`}
                           title="Edit"
                         >
@@ -153,7 +153,7 @@ export function ProgramsClient({ programs }: { programs: ProgramRow[] }) {
                             type="button"
                             onClick={() => handleReactivate(row)}
                             disabled={rowPending}
-                            className="inline-flex items-center gap-1.5 h-10 px-3 sm:h-8 rounded-md text-xs font-medium text-fg-muted hover:text-fg hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
+                            className="inline-flex items-center gap-1.5 h-10 px-3 sm:h-8 rounded-md text-xs font-medium text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
                             title="Reactivate"
                           >
                             <RotateCcw className="h-3.5 w-3.5" />

@@ -45,10 +45,10 @@ export default async function ProgramsPage() {
       </Link>
 
       <div className="mb-6 space-y-1.5">
-        <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
+        <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
           Admin
         </p>
-        <h1 className="text-2xl font-bold tracking-tight">Programs</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Programs</h1>
         <p className="text-sm text-fg-muted">
           Create programs and set session caps. {activeCount}{" "}
           {activeCount === 1 ? "program" : "programs"} active.

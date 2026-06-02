@@ -28,8 +28,8 @@ Estimated time: ~10 min.
    - **App name:** `PFA Cage Rentals`
    - **User support email:** `mdm@pfasports.com`
    - **App logo:** skip
-   - **Application home page:** `https://pfacagerentals.com` (placeholder — fine even before the domain is live)
-   - **Authorized domains:** `pfacagerentals.com` (skip if Google won't accept it pre-launch; we'll add it later)
+   - **Application home page:** `https://pfaengine.com` (placeholder — fine even before the domain is live)
+   - **Authorized domains:** `pfaengine.com` (skip if Google won't accept it pre-launch; we'll add it later)
    - **Developer contact email:** `mdm@pfasports.com`
 4. **Save and continue.**
 5. **Scopes** screen → click **Add or Remove Scopes** → check **`.../auth/userinfo.email`**, **`.../auth/userinfo.profile`**, and **`openid`** → **Update** → **Save and continue**.
@@ -51,11 +51,11 @@ The app stays in **Testing** mode until launch — that's fine. Only listed test
 4. **Name:** `PFA Cage Rentals — Local + Vercel`.
 5. **Authorized JavaScript origins:**
    - `http://localhost:3000`
-   - `https://pfacagerentals.com` (add now or after domain is live)
+   - `https://pfaengine.com` (add now or after domain is live)
    - `https://<your-vercel-preview>.vercel.app` (add the actual preview URL once we deploy)
 6. **Authorized redirect URIs:**
    - `http://localhost:3000/api/auth/callback/google`
-   - `https://pfacagerentals.com/api/auth/callback/google` (after domain is live)
+   - `https://pfaengine.com/api/auth/callback/google` (after domain is live)
    - `https://<your-vercel-preview>.vercel.app/api/auth/callback/google` (after deploy)
 7. **Create.** A modal pops up with **Client ID** and **Client secret**.
 8. Copy both values now (you can also re-download them anytime from the credentials page).

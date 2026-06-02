@@ -79,7 +79,7 @@ so sessions live in Postgres (table: `sessions`, keyed by
    used a magic-link can later sign in with Google and have the
    account auto-linked by matching email.
 2. **Resend magic-link** — fallback for anyone without a Google
-   account. Sender is `noreply@pfacagerentals.com` on PFA's own
+   account. Sender is `noreply@pfaengine.com` on PFA's own
    Resend account (separate from the doc-insured account).
 
 Admins are gated by a hardcoded allowlist in
@@ -120,7 +120,7 @@ type, start/end) tuple.
 ```
 admin/coach types email at /
   → Resend provider validates rate limit (src/lib/ratelimit.ts via Upstash)
-  → if allowed: Resend API sends magic-link from noreply@pfacagerentals.com
+  → if allowed: Resend API sends magic-link from noreply@pfaengine.com
   → recipient clicks link → /api/auth/callback/resend?token=...
   → Auth.js verifies + creates session row + drops the verification token
   → redirect to /admin or /coach based on role
@@ -133,7 +133,7 @@ local dev runs without them (the env validator in `src/lib/env.ts`
 will flag missing vars to `/api/health` regardless).
 
 SPF + DMARC live as TXT records at GoDaddy DNS for
-`pfacagerentals.com`. Resend's domain verification adds SPF; DMARC is
+`pfaengine.com`. Resend's domain verification adds SPF; DMARC is
 `v=DMARC1; p=quarantine; pct=100; sp=quarantine` without a `rua`
 mailbox (we don't process aggregate reports).
 

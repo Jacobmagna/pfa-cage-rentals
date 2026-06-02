@@ -20,7 +20,7 @@ Quick heads-up: we're moving the cage / bullpen / weight-room rental
 tracker off the shared Excel and onto a real web app. You'll log your
 sessions here instead of texting me the times:
 
-**[pfacagerentals.com](https://pfacagerentals.com)**
+**[pfaengine.com](https://pfaengine.com)**
 
 ### What's the same
 - You still rent the same cages, bullpens, and the weight room.
@@ -36,7 +36,7 @@ sessions here instead of texting me the times:
   has it so you can text them directly.
 
 ### How to sign in (first time)
-1. Open **[pfacagerentals.com](https://pfacagerentals.com)** on your
+1. Open **[pfaengine.com](https://pfaengine.com)** on your
    phone or laptop.
 2. Click **Continue with Google** if your PFA address is a Gmail
    account — that's the fastest path. Otherwise enter your email and

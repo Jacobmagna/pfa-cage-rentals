@@ -9,11 +9,15 @@ type Tab = {
   label: string;
 };
 
-const TABS: Tab[] = [
+const BASE_TABS: Tab[] = [
   { key: "cage", label: "Cage Rentals" },
   { key: "hour-log", label: "Hour Log" },
   { key: "attendance", label: "Attendance" },
 ];
+
+// The Schedule tab is coach-only (admin reaches its schedule via
+// /admin/schedule, which keeps lighting Cage Rentals).
+const COACH_SCHEDULE_TAB: Tab = { key: "schedule", label: "Schedule" };
 
 function hrefFor(key: TabKey, base: string): string {
   switch (key) {
@@ -23,13 +27,17 @@ function hrefFor(key: TabKey, base: string): string {
       return `${base}/hour-log`;
     case "attendance":
       return `${base}/attendance`;
+    case "schedule":
+      return `${base}/schedule`;
   }
 }
 
 export function TabNav({ role }: { role: "admin" | "coach" }) {
   const pathname = usePathname() ?? "";
   const base = role === "admin" ? "/admin" : "/coach";
-  const current = activeTab(pathname);
+  const tabs =
+    role === "coach" ? [...BASE_TABS, COACH_SCHEDULE_TAB] : BASE_TABS;
+  const current = activeTab(pathname, role);
 
   return (
     <nav
@@ -38,7 +46,7 @@ export function TabNav({ role }: { role: "admin" | "coach" }) {
     >
       <div className="mx-auto w-full max-w-7xl px-6 lg:px-8">
         <ul className="flex gap-1 overflow-x-auto whitespace-nowrap -mb-px">
-          {TABS.map((tab) => {
+          {tabs.map((tab) => {
             const isActive = tab.key === current;
             return (
               <li key={tab.key}>

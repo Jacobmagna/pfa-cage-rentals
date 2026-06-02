@@ -47,4 +47,24 @@ describe("activeTab", () => {
     expect(activeTab("/admin/")).toBe("cage");
     expect(activeTab("/admin/hour-log/")).toBe("hour-log");
   });
+
+  it("returns schedule for /coach/schedule when role is coach", () => {
+    expect(activeTab("/coach/schedule", "coach")).toBe("schedule");
+  });
+
+  it("returns schedule for nested /coach/schedule/2026 when role is coach", () => {
+    expect(activeTab("/coach/schedule/2026", "coach")).toBe("schedule");
+  });
+
+  it("returns cage for /admin/schedule (admin shell unchanged)", () => {
+    expect(activeTab("/admin/schedule", "admin")).toBe("cage");
+  });
+
+  it("returns cage for /admin/schedule with no role (back-compat)", () => {
+    expect(activeTab("/admin/schedule")).toBe("cage");
+  });
+
+  it("returns cage for /coach/schedule with no role (not schedule)", () => {
+    expect(activeTab("/coach/schedule")).toBe("cage");
+  });
 });

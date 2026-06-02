@@ -18,7 +18,7 @@ export function TeamRentalBadge({
       <span
         title="Team rental"
         aria-label="Team rental"
-        className="inline-flex items-center justify-center h-3.5 w-3.5 rounded-full bg-gold/20 text-gold ring-1 ring-inset ring-gold/30 shrink-0"
+        className="inline-flex items-center justify-center h-3.5 w-3.5 rounded-full bg-gold/10 text-gold-strong ring-1 ring-inset ring-gold/40 shrink-0"
       >
         <Users className="h-2 w-2" strokeWidth={3} />
       </span>
@@ -28,7 +28,7 @@ export function TeamRentalBadge({
   return (
     <span
       aria-label="Team rental"
-      className="inline-flex items-center gap-1 rounded-full bg-gold/15 px-1.5 py-px text-[10px] font-medium uppercase tracking-wider text-gold ring-1 ring-inset ring-gold/30"
+      className="inline-flex items-center gap-1 rounded-full bg-gold/10 px-2 py-0.5 text-xs font-medium text-gold-strong"
     >
       <Users className="h-2.5 w-2.5" strokeWidth={2.5} />
       Team

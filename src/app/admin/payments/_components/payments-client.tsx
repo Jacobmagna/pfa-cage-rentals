@@ -138,7 +138,7 @@ export function PaymentsClient({
         <button
           type="button"
           onClick={() => openCreate()}
-          className="inline-flex items-center gap-1.5 rounded-md bg-gold px-4 h-9 text-sm font-medium text-gold-ink hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-gold px-4 h-9 text-sm font-medium text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
           <Plus className="h-4 w-4" strokeWidth={2.5} />
           Record payment
@@ -212,27 +212,27 @@ function BalancesTable({
     <section className="mb-10" aria-labelledby="balances-heading">
       <h2
         id="balances-heading"
-        className="mb-3 text-xs uppercase tracking-[0.14em] text-fg-muted"
+        className="mb-3 text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted"
       >
         Balances
       </h2>
-      <div className="overflow-x-auto rounded-lg border border-line">
+      <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
         <table className="w-full min-w-[560px]">
-          <thead className="text-[11px] uppercase tracking-[0.14em] text-fg-subtle border-b border-line bg-surface">
+          <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
             <tr>
-              <th scope="col" className="px-4 py-3 text-left font-medium">
+              <th scope="col" className="px-4 py-3 text-left font-semibold">
                 Coach
               </th>
-              <th scope="col" className="px-4 py-3 text-right font-medium">
+              <th scope="col" className="px-4 py-3 text-right font-semibold">
                 Owed
               </th>
-              <th scope="col" className="px-4 py-3 text-right font-medium">
+              <th scope="col" className="px-4 py-3 text-right font-semibold">
                 Paid
               </th>
-              <th scope="col" className="px-4 py-3 text-right font-medium">
+              <th scope="col" className="px-4 py-3 text-right font-semibold">
                 Balance
               </th>
-              <th scope="col" className="px-4 py-3 text-right font-medium sr-only">
+              <th scope="col" className="px-4 py-3 text-right font-semibold sr-only">
                 Actions
               </th>
             </tr>
@@ -241,7 +241,7 @@ function BalancesTable({
             {rows.map((row) => (
               <tr
                 key={row.coachId}
-                className="border-b border-line/50 last:border-b-0 hover:bg-surface/60 transition-colors"
+                className="border-t border-line hover:bg-surface-2 transition-colors"
               >
                 <td className="px-4 py-3 text-sm">
                   <div className="flex flex-col gap-1">
@@ -256,14 +256,14 @@ function BalancesTable({
                     ) : null}
                   </div>
                 </td>
-                <td className="px-4 py-3 text-sm font-mono tabular-nums text-right text-fg-muted whitespace-nowrap">
+                <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right text-fg-muted whitespace-nowrap">
                   {formatDollars(row.owedCents)}
                 </td>
-                <td className="px-4 py-3 text-sm font-mono tabular-nums text-right text-fg-muted whitespace-nowrap">
+                <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right text-fg-muted whitespace-nowrap">
                   {formatDollars(row.paidCents)}
                 </td>
                 <td
-                  className={`px-4 py-3 text-sm font-mono tabular-nums text-right whitespace-nowrap ${balanceColor(row.balanceCents)}`}
+                  className={`px-4 py-3 text-sm font-mono tnum tabular-nums text-right whitespace-nowrap ${balanceColor(row.balanceCents)}`}
                 >
                   {formatDollars(row.balanceCents)}
                 </td>
@@ -271,7 +271,7 @@ function BalancesTable({
                   <button
                     type="button"
                     onClick={() => onRecord(row.coachId)}
-                    className="inline-flex items-center gap-1 rounded-md border border-line bg-surface-2 text-fg-muted hover:text-fg hover:border-line-strong h-8 px-3 text-xs font-medium transition-colors"
+                    className="inline-flex items-center gap-1 rounded-lg border border-line-strong bg-surface text-fg-muted hover:text-fg hover:-translate-y-px shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] h-8 px-3 text-xs font-medium transition"
                   >
                     <Plus className="h-3 w-3" strokeWidth={2.5} />
                     Record
@@ -280,17 +280,17 @@ function BalancesTable({
               </tr>
             ))}
           </tbody>
-          <tfoot className="border-t border-line bg-surface">
+          <tfoot className="border-t border-line bg-surface-2/50">
             <tr className="text-sm font-medium">
               <td className="px-4 py-3 text-fg-muted">Roster total</td>
-              <td className="px-4 py-3 font-mono tabular-nums text-right text-fg">
+              <td className="px-4 py-3 font-mono tnum tabular-nums text-right text-fg">
                 {formatDollars(totals.owed)}
               </td>
-              <td className="px-4 py-3 font-mono tabular-nums text-right text-fg">
+              <td className="px-4 py-3 font-mono tnum tabular-nums text-right text-fg">
                 {formatDollars(totals.paid)}
               </td>
               <td
-                className={`px-4 py-3 font-mono tabular-nums text-right ${balanceColor(totals.balance)}`}
+                className={`px-4 py-3 font-mono tnum tabular-nums text-right ${balanceColor(totals.balance)}`}
               >
                 {formatDollars(totals.balance)}
               </td>
@@ -316,7 +316,7 @@ function PendingInbox({
     <section className="mb-10" aria-labelledby="pending-heading">
       <h2
         id="pending-heading"
-        className="mb-3 text-xs uppercase tracking-[0.14em] text-fg-muted"
+        className="mb-3 text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted"
       >
         Awaiting confirmation
       </h2>
@@ -328,16 +328,16 @@ function PendingInbox({
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line">
+        <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
           <table className="w-full min-w-[640px]">
-            <thead className="text-[11px] uppercase tracking-[0.14em] text-fg-subtle border-b border-line bg-surface">
+            <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
               <tr>
-                <th className="px-4 py-3 text-left font-medium">Date</th>
-                <th className="px-4 py-3 text-left font-medium">Coach</th>
-                <th className="px-4 py-3 text-left font-medium">Method</th>
-                <th className="px-4 py-3 text-right font-medium">Amount</th>
-                <th className="px-4 py-3 text-left font-medium">Reference</th>
-                <th className="px-4 py-3 text-right font-medium sr-only">
+                <th className="px-4 py-3 text-left font-semibold">Date</th>
+                <th className="px-4 py-3 text-left font-semibold">Coach</th>
+                <th className="px-4 py-3 text-left font-semibold">Method</th>
+                <th className="px-4 py-3 text-right font-semibold">Amount</th>
+                <th className="px-4 py-3 text-left font-semibold">Reference</th>
+                <th className="px-4 py-3 text-right font-semibold sr-only">
                   Actions
                 </th>
               </tr>
@@ -348,16 +348,16 @@ function PendingInbox({
                 return (
                   <tr
                     key={row.id}
-                    className={`border-b border-line/50 last:border-b-0 ${isPending ? "opacity-50" : ""}`}
+                    className={`border-t border-line hover:bg-surface-2 transition-colors ${isPending ? "opacity-50" : ""}`}
                   >
-                    <td className="px-4 py-3 text-sm font-mono tabular-nums whitespace-nowrap">
+                    <td className="px-4 py-3 text-sm font-mono tnum tabular-nums whitespace-nowrap">
                       {formatDate(row.paidAt)}
                     </td>
                     <td className="px-4 py-3 text-sm">{row.coachName}</td>
                     <td className="px-4 py-3 text-sm text-fg-muted">
                       <MethodBadge method={row.method} />
                     </td>
-                    <td className="px-4 py-3 text-sm font-mono tabular-nums text-right whitespace-nowrap">
+                    <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right whitespace-nowrap">
                       {formatDollars(row.amountCents)}
                     </td>
                     <td className="px-4 py-3 text-xs text-fg-subtle">
@@ -368,7 +368,7 @@ function PendingInbox({
                         type="button"
                         onClick={() => onConfirm(row)}
                         disabled={isPending}
-                        className="inline-flex items-center gap-1.5 rounded-md bg-success/15 text-success hover:bg-success/25 ring-1 ring-inset ring-success/30 h-8 px-3 text-xs font-medium transition-colors disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-success/10 text-success hover:bg-success/20 ring-1 ring-inset ring-success/30 h-8 px-3 text-xs font-medium transition-colors disabled:opacity-50"
                       >
                         <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
                         Confirm
@@ -400,7 +400,7 @@ function RecentTable({
     <section aria-labelledby="recent-heading">
       <h2
         id="recent-heading"
-        className="mb-3 text-xs uppercase tracking-[0.14em] text-fg-muted"
+        className="mb-3 text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted"
       >
         Recent payments
       </h2>
@@ -412,17 +412,17 @@ function RecentTable({
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line">
+        <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
           <table className="w-full min-w-[720px]">
-            <thead className="text-[11px] uppercase tracking-[0.14em] text-fg-subtle border-b border-line bg-surface">
+            <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
               <tr>
-                <th className="px-4 py-3 text-left font-medium">Date</th>
-                <th className="px-4 py-3 text-left font-medium">Coach</th>
-                <th className="px-4 py-3 text-left font-medium">Method</th>
-                <th className="px-4 py-3 text-right font-medium">Amount</th>
-                <th className="px-4 py-3 text-left font-medium">Reference</th>
-                <th className="px-4 py-3 text-left font-medium">Status</th>
-                <th className="px-4 py-3 text-right font-medium sr-only">
+                <th className="px-4 py-3 text-left font-semibold">Date</th>
+                <th className="px-4 py-3 text-left font-semibold">Coach</th>
+                <th className="px-4 py-3 text-left font-semibold">Method</th>
+                <th className="px-4 py-3 text-right font-semibold">Amount</th>
+                <th className="px-4 py-3 text-left font-semibold">Reference</th>
+                <th className="px-4 py-3 text-left font-semibold">Status</th>
+                <th className="px-4 py-3 text-right font-semibold sr-only">
                   Actions
                 </th>
               </tr>
@@ -433,16 +433,16 @@ function RecentTable({
                 return (
                   <tr
                     key={row.id}
-                    className={`border-b border-line/50 last:border-b-0 hover:bg-surface/60 transition-colors ${isPending ? "opacity-50" : ""}`}
+                    className={`border-t border-line hover:bg-surface-2 transition-colors ${isPending ? "opacity-50" : ""}`}
                   >
-                    <td className="px-4 py-3 text-sm font-mono tabular-nums whitespace-nowrap">
+                    <td className="px-4 py-3 text-sm font-mono tnum tabular-nums whitespace-nowrap">
                       {formatDate(row.paidAt)}
                     </td>
                     <td className="px-4 py-3 text-sm">{row.coachName}</td>
                     <td className="px-4 py-3 text-sm">
                       <MethodBadge method={row.method} />
                     </td>
-                    <td className="px-4 py-3 text-sm font-mono tabular-nums text-right whitespace-nowrap">
+                    <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right whitespace-nowrap">
                       {formatDollars(row.amountCents)}
                     </td>
                     <td className="px-4 py-3 text-xs text-fg-subtle truncate max-w-[180px]">
@@ -537,13 +537,13 @@ function MethodBadge({ method }: { method: RecentPaymentRow["method"] }) {
 function StatusBadge({ status }: { status: "pending" | "confirmed" }) {
   if (status === "confirmed") {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-success/15 text-success ring-1 ring-inset ring-success/30 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider">
+      <span className="inline-flex items-center gap-1 rounded-full bg-success/10 text-success ring-1 ring-inset ring-success/30 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider">
         Confirmed
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-warning/15 text-warning ring-1 ring-inset ring-warning/30 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider">
+    <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 text-warning ring-1 ring-inset ring-warning/30 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider">
       Pending
     </span>
   );

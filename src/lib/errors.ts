@@ -210,6 +210,17 @@ export class HourLogNotFoundError extends Error {
   }
 }
 
+// Program-schedule-block edit/delete referenced a
+// program_schedule_blocks id that doesn't exist (stale client row, or
+// a direct RPC call with a bogus id). Mirrors BlockNotFoundError.
+export class ProgramScheduleBlockNotFoundError extends Error {
+  readonly code = "PROGRAM_SCHEDULE_BLOCK_NOT_FOUND" as const;
+  constructor(public readonly blockId: string) {
+    super(`Program schedule block ${blockId} not found`);
+    this.name = "ProgramScheduleBlockNotFoundError";
+  }
+}
+
 // Athlete edit/delete/assign referenced an athletes id that doesn't
 // exist (stale client row, or a direct RPC call with a bogus id).
 export class AthleteNotFoundError extends Error {

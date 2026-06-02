@@ -3,6 +3,10 @@ import { createProgramSchema, updateProgramSchema } from "./program";
 import { createAthleteSchema, updateAthleteSchema } from "./athlete";
 import { createHourLogSchema } from "./hour-log";
 import { submitAttendanceSchema } from "./attendance";
+import {
+  createProgramScheduleBlockSchema,
+  updateProgramScheduleBlockSchema,
+} from "./program-schedule";
 
 describe("createProgramSchema", () => {
   it("accepts no cap and no period", () => {
@@ -264,6 +268,97 @@ describe("submitAttendanceSchema", () => {
       programId: "p1",
       sessionDate: "May 31 2025",
       records: [{ athleteId: "a1", present: true }],
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("createProgramScheduleBlockSchema", () => {
+  const base = {
+    programId: "prog-1",
+    scheduledCoachId: "coach-1",
+    startAt: "2026-06-01T14:00:00.000Z",
+    endAt: "2026-06-01T15:00:00.000Z",
+  };
+
+  it("accepts a valid block (coerces ISO strings to Dates)", () => {
+    const r = createProgramScheduleBlockSchema.safeParse(base);
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.startAt).toBeInstanceOf(Date);
+      expect(r.data.endAt).toBeInstanceOf(Date);
+    }
+  });
+
+  it("rejects endAt <= startAt (zero-length)", () => {
+    const r = createProgramScheduleBlockSchema.safeParse({
+      ...base,
+      endAt: base.startAt,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects endAt before startAt", () => {
+    const r = createProgramScheduleBlockSchema.safeParse({
+      ...base,
+      startAt: "2026-06-01T15:00:00.000Z",
+      endAt: "2026-06-01T14:00:00.000Z",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("treats note as optional (omitted is fine)", () => {
+    expect(createProgramScheduleBlockSchema.safeParse(base).success).toBe(true);
+  });
+
+  it("accepts a nullish note", () => {
+    expect(
+      createProgramScheduleBlockSchema.safeParse({ ...base, note: null })
+        .success,
+    ).toBe(true);
+  });
+
+  it("rejects a note longer than 200 characters", () => {
+    const r = createProgramScheduleBlockSchema.safeParse({
+      ...base,
+      note: "x".repeat(201),
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects a missing programId", () => {
+    const r = createProgramScheduleBlockSchema.safeParse({
+      ...base,
+      programId: "",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("updateProgramScheduleBlockSchema", () => {
+  it("accepts an empty partial (no fields)", () => {
+    expect(updateProgramScheduleBlockSchema.safeParse({}).success).toBe(true);
+  });
+
+  it("accepts a single-field partial (note only)", () => {
+    expect(
+      updateProgramScheduleBlockSchema.safeParse({ note: "moved indoors" })
+        .success,
+    ).toBe(true);
+  });
+
+  it("accepts a start-only partial (end>start refine is guarded)", () => {
+    expect(
+      updateProgramScheduleBlockSchema.safeParse({
+        startAt: "2026-06-01T14:00:00.000Z",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects when both start + end are present and end <= start", () => {
+    const r = updateProgramScheduleBlockSchema.safeParse({
+      startAt: "2026-06-01T15:00:00.000Z",
+      endAt: "2026-06-01T14:00:00.000Z",
     });
     expect(r.success).toBe(false);
   });

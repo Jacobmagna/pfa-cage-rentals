@@ -127,6 +127,13 @@
       "when": 1780356938649,
       "tag": "0017_eager_vindicator",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1780359348203,
+      "tag": "0018_fancy_oracle",
+      "breakpoints": true
     }
   ]
 }

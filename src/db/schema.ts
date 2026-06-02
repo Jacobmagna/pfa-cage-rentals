@@ -589,6 +589,56 @@ export const attendanceSessions = pgTable(
   ],
 );
 
+// Admin-authored intended program blocks for FEAT-16 reconciliation:
+// which coach is *supposed* to run which program, when. The scheduled
+// coach is who SHOULD run it — coaches may still log any program per
+// DEC-29; FEAT-16 reconciles these against the coach hour-logs.
+//
+// CHECK (start_at < end_at) is hand-added in migration 0018, mirroring
+// hour_logs / sessions_billing. The program FK uses NO cascade because
+// programs are soft-deleted (active = false) — history is preserved,
+// same as blocked_times → resources. No overlap/EXCLUDE constraint:
+// the admin authors these deliberately, overlapping blocks are allowed.
+//
+// Indexes: (program_id, start_at) for per-program reads;
+// (scheduled_coach_id, start_at) for per-coach reconciliation — FEAT-16
+// reads both directions.
+export const programScheduleBlocks = pgTable(
+  "program_schedule_blocks",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    programId: text("program_id")
+      .notNull()
+      .references(() => programs.id),
+    scheduledCoachId: text("scheduled_coach_id")
+      .notNull()
+      .references(() => users.id),
+    startAt: timestamp("start_at", { mode: "date" }).notNull(),
+    endAt: timestamp("end_at", { mode: "date" }).notNull(),
+    note: text("note"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    index("program_schedule_blocks_program_start_idx").on(
+      table.programId,
+      table.startAt,
+    ),
+    index("program_schedule_blocks_coach_start_idx").on(
+      table.scheduledCoachId,
+      table.startAt,
+    ),
+  ],
+);
+
 // Per-athlete present/absent mark within an attendance session. Composite
 // PK enforces one record per (session, athlete). Both FKs cascade: a
 // record has no meaning without its session or athlete.
@@ -655,3 +705,6 @@ export type AttendanceSession = typeof attendanceSessions.$inferSelect;
 export type NewAttendanceSession = typeof attendanceSessions.$inferInsert;
 export type AttendanceRecord = typeof attendanceRecords.$inferSelect;
 export type NewAttendanceRecord = typeof attendanceRecords.$inferInsert;
+export type ProgramScheduleBlock = typeof programScheduleBlocks.$inferSelect;
+export type NewProgramScheduleBlock =
+  typeof programScheduleBlocks.$inferInsert;

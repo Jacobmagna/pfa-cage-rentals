@@ -66,7 +66,7 @@ export function RateDefaultsCard({ rows }: { rows: RateDefaultsRow[] }) {
   const justSaved = state.ok && state.savedAt > 0;
 
   return (
-    <section className="rounded-lg border border-line bg-surface overflow-hidden">
+    <section className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] overflow-hidden">
       <header className="px-5 py-4 border-b border-line">
         <h2 className="text-base font-semibold text-fg">
           Default rental rates
@@ -84,7 +84,7 @@ export function RateDefaultsCard({ rows }: { rows: RateDefaultsRow[] }) {
         {!state.ok ? (
           <div
             role="alert"
-            className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+            className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
           >
             {state.error.message}
           </div>
@@ -93,7 +93,7 @@ export function RateDefaultsCard({ rows }: { rows: RateDefaultsRow[] }) {
         {justSaved ? (
           <div
             role="status"
-            className="flex items-center gap-2 rounded-md border border-success/30 bg-success/10 px-3 py-2 text-xs text-success"
+            className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs text-success"
           >
             <CheckCircle2 className="h-4 w-4 shrink-0" />
             <span>Default rates saved.</span>
@@ -116,7 +116,7 @@ export function RateDefaultsCard({ rows }: { rows: RateDefaultsRow[] }) {
           <button
             type="submit"
             disabled={pending}
-            className="inline-flex items-center gap-1.5 rounded-md bg-gold text-gold-ink hover:bg-gold-hover h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
           >
             <Check className="h-4 w-4" strokeWidth={2.5} />
             {pending ? "Saving…" : "Save defaults"}
@@ -158,7 +158,7 @@ function RateField({
           name={name}
           defaultValue={value}
           aria-label={`Default rate for ${label}`}
-          className="w-full pl-7 pr-3 h-10 rounded-md bg-page border border-line text-fg text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+          className="w-full pl-7 pr-3 h-10 rounded-lg bg-surface border border-line text-fg text-sm tnum tabular-nums focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
         />
       </span>
     </label>

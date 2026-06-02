@@ -28,8 +28,8 @@ export default function Loading() {
       </div>
 
       {/* Sessions table */}
-      <div className="overflow-hidden rounded-lg border border-line">
-        <div className="bg-surface-2 h-10 border-b border-line" />
+      <div className="overflow-hidden rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
+        <div className="bg-surface-2/50 h-10 border-b border-line" />
         {Array.from({ length: 8 }).map((_, i) => (
           <div
             key={i}

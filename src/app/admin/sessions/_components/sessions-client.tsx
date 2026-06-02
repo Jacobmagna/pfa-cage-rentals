@@ -112,8 +112,9 @@ export function SessionsClient({
   return (
     <>
       <div className="mb-4 flex items-center justify-between">
-        <p className="text-xs uppercase tracking-[0.14em] text-fg-subtle">
-          {rows.length} {rows.length === 1 ? "session" : "sessions"}
+        <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
+          <span className="tnum tabular-nums">{rows.length}</span>{" "}
+          {rows.length === 1 ? "session" : "sessions"}
           {truncated && maxRows ? (
             <span className="ml-2 normal-case tracking-normal text-fg-subtle">
               · showing first {maxRows}, narrow filters to see more
@@ -123,7 +124,7 @@ export function SessionsClient({
         <button
           type="button"
           onClick={openCreate}
-          className="inline-flex items-center gap-1.5 rounded-md bg-gold px-4 h-9 text-sm font-medium text-gold-ink hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-gold px-4 h-9 text-sm font-medium text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
           <Plus className="h-4 w-4" strokeWidth={2.5} />
           New session
@@ -131,23 +132,23 @@ export function SessionsClient({
       </div>
 
       {rows.length === 0 ? (
-        <div className="rounded-lg border border-line/60 bg-surface/40 p-12 text-center">
+        <div className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] p-12 text-center">
           <p className="text-sm text-fg-muted">
             No sessions match these filters. Try widening the date range or
             clearing some filters.
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
           <table className="w-full min-w-[640px]">
-            <thead className="text-[11px] uppercase tracking-[0.14em] text-fg-subtle border-b border-line">
+            <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
               <tr>
-                <th scope="col" className="px-4 py-3 text-left font-medium">When</th>
-                <th scope="col" className="px-4 py-3 text-left font-medium">Coach</th>
-                <th scope="col" className="px-4 py-3 text-left font-medium">Resource</th>
-                <th scope="col" className="px-4 py-3 text-left font-medium">Use</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium">Duration</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium sr-only">
+                <th scope="col" className="px-4 py-3 text-left font-semibold">When</th>
+                <th scope="col" className="px-4 py-3 text-left font-semibold">Coach</th>
+                <th scope="col" className="px-4 py-3 text-left font-semibold">Resource</th>
+                <th scope="col" className="px-4 py-3 text-left font-semibold">Use</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Duration</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold sr-only">
                   Actions
                 </th>
               </tr>
@@ -158,11 +159,11 @@ export function SessionsClient({
                 return (
                   <tr
                     key={row.id}
-                    className={`border-b border-line/50 last:border-b-0 hover:bg-surface/60 transition-colors ${
+                    className={`border-t border-line hover:bg-surface-2 transition-colors ${
                       isPendingDelete ? "opacity-50" : ""
                     }`}
                   >
-                    <td className="px-4 py-3 text-sm font-mono tabular-nums whitespace-nowrap">
+                    <td className="px-4 py-3 text-sm font-mono tnum tabular-nums whitespace-nowrap">
                       {formatWhen(row.startAt, row.endAt)}
                     </td>
                     <td className="px-4 py-3 text-sm">
@@ -192,7 +193,7 @@ export function SessionsClient({
                         <span className="text-fg-subtle">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-sm font-mono tabular-nums text-right text-fg-muted whitespace-nowrap">
+                    <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right text-fg-muted whitespace-nowrap">
                       {formatDuration(row.startAt, row.endAt)}
                     </td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
@@ -201,7 +202,7 @@ export function SessionsClient({
                           type="button"
                           onClick={() => openEdit(row)}
                           disabled={isPendingDelete}
-                          className="inline-flex items-center justify-center h-10 w-10 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-fg hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
+                          className="inline-flex items-center justify-center h-10 w-10 sm:h-8 sm:w-8 rounded-lg text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
                           aria-label="Edit session"
                           title="Edit"
                         >
@@ -211,7 +212,7 @@ export function SessionsClient({
                           type="button"
                           onClick={() => onDelete(row)}
                           disabled={isPendingDelete}
-                          className="inline-flex items-center justify-center h-10 w-10 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors disabled:opacity-40"
+                          className="inline-flex items-center justify-center h-10 w-10 sm:h-8 sm:w-8 rounded-lg text-fg-muted hover:text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors disabled:opacity-40"
                           aria-label="Delete session"
                           title="Delete"
                         >

@@ -109,10 +109,10 @@ export default async function AdminCoachesPage() {
       </Link>
 
       <div className="mb-6 space-y-1.5">
-        <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
+        <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
           Coaches
         </p>
-        <h1 className="text-2xl font-bold tracking-tight">
+        <h1 className="text-3xl font-semibold tracking-tight">
           {rows.length} {rows.length === 1 ? "coach" : "coaches"}
         </h1>
         <p className="text-sm text-fg-muted">

@@ -268,7 +268,7 @@ export function SessionFormDialog({
   return (
     <dialog
       ref={dialogRef}
-      className="m-auto w-full max-w-lg rounded-lg border border-line bg-surface text-fg p-0 backdrop:bg-page/70 backdrop:backdrop-blur-sm"
+      className="m-auto w-full max-w-lg rounded-2xl border border-line bg-surface text-fg p-0 shadow-[var(--shadow-lg)] backdrop:bg-page/70 backdrop:backdrop-blur-sm"
     >
       <form
         action={formAction}
@@ -286,7 +286,7 @@ export function SessionFormDialog({
 
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs uppercase tracking-[0.14em] text-fg-muted">
+            <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
               {mode === "edit" ? "Edit" : "New"}
             </p>
             <h2 className="text-xl font-semibold tracking-tight mt-0.5">
@@ -296,7 +296,7 @@ export function SessionFormDialog({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex items-center justify-center h-8 w-8 -mr-1 -mt-1 rounded-md text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            className="inline-flex items-center justify-center h-8 w-8 -mr-1 -mt-1 rounded-lg text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -306,7 +306,7 @@ export function SessionFormDialog({
         {!state.ok ? (
           <div
             role="alert"
-            className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+            className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
           >
             {state.error.message}
           </div>
@@ -315,7 +315,7 @@ export function SessionFormDialog({
         {batchError ? (
           <div
             role="alert"
-            className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+            className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
           >
             {batchError}
           </div>
@@ -414,7 +414,7 @@ export function SessionFormDialog({
           {isCreate && divisibilityError ? (
             <div
               role="alert"
-              className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+              className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
             >
               Range isn&apos;t a clean multiple of {slotLengthMinutes} min — pick
               different start/end times.
@@ -423,7 +423,8 @@ export function SessionFormDialog({
 
           {isCreate && slotCount > 0 && !divisibilityError ? (
             <p className="text-xs text-fg-subtle">
-              Will create <span className="text-fg">{slotCount}</span>{" "}
+              Will create{" "}
+              <span className="text-fg tnum tabular-nums">{slotCount}</span>{" "}
               {slotCount === 1 ? "session" : "sessions"} of{" "}
               {slotLengthMinutes} min each.
             </p>
@@ -483,7 +484,7 @@ export function SessionFormDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-line bg-surface-2 text-fg-muted hover:text-fg hover:border-line-strong h-9 px-4 text-sm font-medium transition-colors"
+            className="rounded-lg border border-line-strong bg-surface text-fg-muted hover:text-fg hover:-translate-y-px shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] h-9 px-4 text-sm font-medium transition"
           >
             Cancel
           </button>
@@ -494,7 +495,7 @@ export function SessionFormDialog({
               batchPending ||
               (isMultiSlot && (slotCount === 0 || divisibilityError))
             }
-            className="rounded-md bg-gold text-gold-ink hover:bg-gold-hover h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            className="rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
           >
             {submitLabel}
           </button>
@@ -536,7 +537,7 @@ function Field({
 }
 
 const inputStyles =
-  "w-full rounded-md bg-page border border-line text-fg placeholder:text-fg-subtle px-3 py-2 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40";
+  "w-full rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle px-3 py-2 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40";
 const selectStyles = `${inputStyles} appearance-none pr-8`;
 
 // Inputs render PFA wall-clock — same value regardless of viewer's browser TZ.

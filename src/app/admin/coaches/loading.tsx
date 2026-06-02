@@ -15,8 +15,8 @@ export default function Loading() {
       </div>
 
       {/* Coaches table: header + 6 rows */}
-      <div className="overflow-hidden rounded-lg border border-line">
-        <div className="grid grid-cols-[1.5fr_1.5fr_1fr_0.5fr_0.7fr] gap-4 bg-surface-2 px-4 py-3 border-b border-line">
+      <div className="overflow-hidden rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
+        <div className="grid grid-cols-[1.5fr_1.5fr_1fr_0.5fr_0.7fr] gap-4 bg-surface-2/50 px-4 py-3 border-b border-line">
           {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-3 w-16" />
           ))}

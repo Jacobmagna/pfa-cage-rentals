@@ -17,13 +17,18 @@
    * are unchanged so every call site (bg-page, text-fg, text-gold…)
    * keeps working — only the VALUES flipped dark→light.
    * Contrast ratios computed below mirror the prior J6 rigor: every
-   * text/bg pair clears WCAG AA 4.5:1. */
-  --color-page: #ffffff;
-  --color-surface: #f7f7f7;
-  --color-surface-2: #ededed;
+   * text/bg pair clears WCAG AA 4.5:1.
+   *
+   * 2026-06 uplift: warmed the light surfaces (page→warm off-white,
+   * cards→white-on-warm for elevation); text tokens unchanged so all
+   * documented AA ratios hold (background luminance is materially
+   * unchanged). */
+  --color-page: #f6f4ef;      /* was #ffffff — warm off-white page */
+  --color-surface: #ffffff;   /* was #f7f7f7 — white cards now LIFT off the warm page */
+  --color-surface-2: #efece3; /* was #ededed — warm recessed (inputs, grid cells, hover wash) */
 
-  --color-line: #e5e5e5;
-  --color-line-strong: #d4d4d4;
+  --color-line: #e8e3d8;        /* was #e5e5e5 — warm hairline */
+  --color-line-strong: #d8d2c4; /* was #d4d4d4 — warm strong hairline */
 
   --color-fg: #0a0a0a;
   /* fg-muted/#595959 and fg-subtle/#646464 are tuned to hold WCAG AA
@@ -57,8 +62,23 @@
   --color-warning: #9a5208;
   --color-danger: #b01818;
 
+  /* 2026-06 uplift: warm-tinted elevation scale, single top light
+   * source. Consumed via shadow-[var(--shadow-md)] arbitrary utilities;
+   * the :root aliases below mirror these so that syntax resolves. */
+  --shadow-sm: 0 1px 2px rgba(60, 48, 28, 0.05), 0 1px 1px rgba(60, 48, 28, 0.04);
+  --shadow-md: 0 2px 4px rgba(60, 48, 28, 0.05), 0 6px 16px -6px rgba(60, 48, 28, 0.1);
+  --shadow-lg: 0 4px 8px rgba(60, 48, 28, 0.06), 0 18px 40px -12px rgba(60, 48, 28, 0.18);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+}
+
+/* Plain :root aliases so shadow-[var(--shadow-*)] arbitrary values
+ * resolve outside the @theme namespace. */
+:root {
+  --shadow-sm: 0 1px 2px rgba(60, 48, 28, 0.05), 0 1px 1px rgba(60, 48, 28, 0.04);
+  --shadow-md: 0 2px 4px rgba(60, 48, 28, 0.05), 0 6px 16px -6px rgba(60, 48, 28, 0.1);
+  --shadow-lg: 0 4px 8px rgba(60, 48, 28, 0.06), 0 18px 40px -12px rgba(60, 48, 28, 0.18);
 }
 
 html,
@@ -78,4 +98,21 @@ body {
 ::selection {
   background: var(--color-gold);
   color: var(--color-gold-ink);
+}
+
+/* uplift: global motion + focus + figures */
+a,
+button,
+[role="button"] {
+  transition: color 0.18s ease, background-color 0.18s ease,
+    border-color 0.18s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }

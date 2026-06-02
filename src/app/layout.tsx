@@ -13,23 +13,23 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PFA Cage Rentals",
+  title: "PFA Engine",
   description:
     "Cage, bullpen, and weight-room rental tracking for PFA Baseball.",
   // iOS standalone PWA — without these, "Add to Home Screen" still works
   // but opens the page in Safari with the URL bar instead of as an app.
   appleWebApp: {
     capable: true,
-    title: "PFA Rentals",
+    title: "PFA Engine",
     statusBarStyle: "black-translucent",
   },
 };
 
 export const viewport: Viewport = {
-  // FEAT-04 light rebrand: browser/PWA chrome color matches the white
-  // page background (--color-page). Kept as a literal because <meta
-  // name="theme-color"> can't read CSS custom properties.
-  themeColor: "#ffffff",
+  // 2026-06 uplift: browser/PWA chrome color matches the new warm
+  // off-white page background (--color-page #f6f4ef). Kept as a literal
+  // because <meta name="theme-color"> can't read CSS custom properties.
+  themeColor: "#f6f4ef",
 };
 
 export default function RootLayout({

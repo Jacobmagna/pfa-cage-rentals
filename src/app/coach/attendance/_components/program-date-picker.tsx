@@ -38,7 +38,7 @@ export function ProgramDatePicker({
       ref={formRef}
       method="GET"
       action="/coach/attendance"
-      className="rounded-lg border border-line bg-surface p-5"
+      className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] p-5"
     >
       <div className="grid gap-4 sm:grid-cols-[1fr_auto_auto] sm:items-end">
         <Field label="Program">
@@ -77,7 +77,7 @@ export function ProgramDatePicker({
 
         <button
           type="submit"
-          className="inline-flex items-center justify-center rounded-md bg-gold px-5 h-10 text-sm font-medium text-gold-ink hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          className="inline-flex items-center justify-center rounded-lg bg-gold shadow-[var(--shadow-sm)] px-5 h-10 text-sm font-medium text-gold-ink hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
           Load
         </button>
@@ -104,4 +104,4 @@ function Field({
 }
 
 const inputStyles =
-  "w-full rounded-md bg-page border border-line text-fg placeholder:text-fg-subtle px-3 h-10 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40";
+  "w-full rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle px-3 h-10 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40";

@@ -42,7 +42,7 @@ export default async function NewSessionPage() {
           <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
             Log a session
           </p>
-          <h1 className="text-2xl font-bold tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
             New session
           </h1>
           <p className="text-sm text-fg-muted">

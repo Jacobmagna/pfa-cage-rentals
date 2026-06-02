@@ -116,7 +116,7 @@ export function EditSessionDialog({
   return (
     <dialog
       ref={dialogRef}
-      className="m-auto w-full max-w-lg rounded-lg border border-line bg-surface text-fg p-0 backdrop:bg-page/70 backdrop:backdrop-blur-sm"
+      className="m-auto w-full max-w-lg rounded-2xl border border-line bg-surface text-fg shadow-[var(--shadow-lg)] p-0 backdrop:bg-page/70 backdrop:backdrop-blur-sm"
     >
       <form
         action={formAction}
@@ -269,14 +269,14 @@ export function EditSessionDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-line bg-surface-2 text-fg-muted hover:text-fg hover:border-line-strong h-9 px-4 text-sm font-medium transition-colors"
+            className="rounded-lg border border-line-strong bg-surface text-fg-muted shadow-[var(--shadow-sm)] hover:text-fg hover:-translate-y-px hover:shadow-[var(--shadow-md)] h-9 px-4 text-sm font-medium transition"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={pending}
-            className="rounded-md bg-gold text-gold-ink hover:bg-gold-hover h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            className="rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
           >
             {pending ? "Saving…" : "Save changes"}
           </button>
@@ -318,7 +318,7 @@ function Field({
 }
 
 const inputStyles =
-  "w-full rounded-md bg-page border border-line text-fg placeholder:text-fg-subtle px-3 py-2 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40";
+  "w-full rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle px-3 py-2 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40";
 const selectStyles = `${inputStyles} appearance-none pr-8`;
 
 // Inputs render PFA wall-clock — same value regardless of viewer's browser TZ.

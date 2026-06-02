@@ -86,9 +86,9 @@ export function AttendanceForm({
         <input type="hidden" name="programId" value={programId} />
         <input type="hidden" name="sessionDate" value={sessionDate} />
 
-        <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
+        <ul className="divide-y divide-line rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] overflow-hidden">
           {roster.map((athlete) => (
-            <li key={athlete.id}>
+            <li key={athlete.id} className="transition hover:bg-surface-2">
               <input type="hidden" name="athleteId" value={athlete.id} />
               <label className="flex items-center gap-3 px-4 py-3 cursor-pointer">
                 <input
@@ -109,7 +109,7 @@ export function AttendanceForm({
         <button
           type="submit"
           disabled={pending}
-          className="w-full sm:w-auto rounded-md bg-gold text-gold-ink hover:bg-gold-hover h-12 px-6 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          className="w-full sm:w-auto rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-12 px-6 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
           {pending ? "Saving…" : "Save attendance"}
         </button>

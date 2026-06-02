@@ -114,10 +114,10 @@ export default async function CoachAttendancePage({
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Attendance</h1>
+      <h1 className="text-3xl font-semibold tracking-tight">Attendance</h1>
 
       {programOptions.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-line bg-surface py-16 text-center">
+        <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] py-16 text-center">
           <CalendarCheck className="h-8 w-8 text-gold" aria-hidden="true" />
           <p className="text-fg-muted">
             No active programs yet — ask an admin to add one.

@@ -25,10 +25,10 @@ export default async function CoachHourLogPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Hour Log</h1>
+      <h1 className="text-3xl font-semibold tracking-tight">Hour Log</h1>
 
       {programOptions.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-line bg-surface py-16 text-center">
+        <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] py-16 text-center">
           <Clock className="h-8 w-8 text-gold" aria-hidden="true" />
           <p className="text-fg-muted">
             No active programs yet — ask an admin to add one.
@@ -37,7 +37,7 @@ export default async function CoachHourLogPage() {
       ) : (
         <div className="max-w-md">
           <div className="space-y-1.5 mb-7">
-            <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
+            <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
               Log your hours
             </p>
             <p className="text-sm text-fg-muted">

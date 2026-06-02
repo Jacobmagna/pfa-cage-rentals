@@ -65,10 +65,10 @@ export default async function AdminReportsPage({
 
       <div className="mb-6 flex items-start justify-between gap-4">
         <div className="space-y-1.5">
-          <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
+          <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
             Billing reports
           </p>
-          <h1 className="text-2xl font-bold tracking-tight">Reports</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">Reports</h1>
           <p className="text-sm text-fg-muted">
             Per-coach billing breakdown by resource type. Defaults to the
             current month.
@@ -82,7 +82,7 @@ export default async function AdminReportsPage({
         {hasResults ? (
           <a
             href={downloadHref}
-            className="inline-flex items-center gap-1.5 rounded-md bg-gold px-4 h-10 text-sm font-medium text-gold-ink hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-gold px-4 h-10 text-sm font-medium text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
           >
             <Download className="h-4 w-4" />
             Download Excel
@@ -90,7 +90,7 @@ export default async function AdminReportsPage({
         ) : (
           <span
             aria-disabled="true"
-            className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-4 h-10 text-sm font-medium text-fg-muted cursor-not-allowed opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-4 h-10 text-sm font-medium text-fg-muted cursor-not-allowed opacity-50"
             title="No sessions to export"
           >
             <Download className="h-4 w-4" />

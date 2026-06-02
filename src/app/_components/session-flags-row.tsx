@@ -104,7 +104,7 @@ function Pill({
       htmlFor={id}
       className={`inline-flex items-center gap-1.5 cursor-pointer select-none rounded-full border px-3 h-8 text-xs font-medium transition-colors ${
         checked
-          ? "border-gold/60 bg-gold/15 text-gold"
+          ? "border-gold/40 bg-gold/10 text-gold-strong"
           : "border-line bg-surface text-fg-muted hover:border-line-strong hover:text-fg"
       }`}
     >

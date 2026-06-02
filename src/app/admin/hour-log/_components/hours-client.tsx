@@ -95,19 +95,19 @@ export function HoursClient({
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
           <table className="w-full min-w-[760px]">
-            <thead className="text-[11px] uppercase tracking-[0.14em] text-fg-subtle border-b border-line">
+            <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
               <tr>
-                <th scope="col" className="px-4 py-3 text-left font-medium">Coach</th>
-                <th scope="col" className="px-4 py-3 text-left font-medium">Program</th>
-                <th scope="col" className="px-4 py-3 text-left font-medium">Date</th>
-                <th scope="col" className="px-4 py-3 text-left font-medium">Start</th>
-                <th scope="col" className="px-4 py-3 text-left font-medium">End</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium">Hours</th>
-                <th scope="col" className="px-4 py-3 text-left font-medium">Note</th>
-                <th scope="col" className="px-4 py-3 text-left font-medium">Schedule</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium sr-only">
+                <th scope="col" className="px-4 py-3 text-left font-semibold">Coach</th>
+                <th scope="col" className="px-4 py-3 text-left font-semibold">Program</th>
+                <th scope="col" className="px-4 py-3 text-left font-semibold">Date</th>
+                <th scope="col" className="px-4 py-3 text-left font-semibold">Start</th>
+                <th scope="col" className="px-4 py-3 text-left font-semibold">End</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Hours</th>
+                <th scope="col" className="px-4 py-3 text-left font-semibold">Note</th>
+                <th scope="col" className="px-4 py-3 text-left font-semibold">Schedule</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold sr-only">
                   Actions
                 </th>
               </tr>
@@ -118,7 +118,7 @@ export function HoursClient({
                 return (
                   <tr
                     key={row.id}
-                    className={`border-b border-line/50 last:border-b-0 hover:bg-surface/60 transition-colors ${
+                    className={`border-t border-line hover:bg-surface-2 transition-colors ${
                       isPendingDelete ? "opacity-50" : ""
                     }`}
                   >
@@ -128,16 +128,16 @@ export function HoursClient({
                     <td className="px-4 py-3 text-sm text-fg-muted">
                       {row.programName}
                     </td>
-                    <td className="px-4 py-3 text-sm font-mono tabular-nums whitespace-nowrap">
+                    <td className="px-4 py-3 text-sm font-mono tnum tabular-nums whitespace-nowrap">
                       {formatDate(row.startAt)}
                     </td>
-                    <td className="px-4 py-3 text-sm font-mono tabular-nums whitespace-nowrap">
+                    <td className="px-4 py-3 text-sm font-mono tnum tabular-nums whitespace-nowrap">
                       {formatTime(row.startAt)}
                     </td>
-                    <td className="px-4 py-3 text-sm font-mono tabular-nums whitespace-nowrap">
+                    <td className="px-4 py-3 text-sm font-mono tnum tabular-nums whitespace-nowrap">
                       {formatTime(row.endAt)}
                     </td>
-                    <td className="px-4 py-3 text-sm font-mono tabular-nums text-right text-fg-muted whitespace-nowrap">
+                    <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right text-fg-muted whitespace-nowrap">
                       {formatHours(row.startAt, row.endAt)}
                     </td>
                     <td className="px-4 py-3 text-sm text-fg-subtle">

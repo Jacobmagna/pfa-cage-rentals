@@ -65,7 +65,7 @@ export default async function AttendanceByProgramPage({
   // No active programs at all → tell the admin to create one first.
   if (programOptions.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-line bg-surface py-16 text-center">
+      <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-line bg-surface py-16 text-center shadow-[var(--shadow-sm)]">
         <CalendarCheck className="h-8 w-8 text-gold" aria-hidden="true" />
         <p className="text-fg-muted">Create a program first.</p>
       </div>
@@ -77,7 +77,7 @@ export default async function AttendanceByProgramPage({
     return (
       <div className="space-y-6">
         <ProgramPicker programs={programOptions} selectedProgramId="" />
-        <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-line bg-surface py-16 text-center">
+        <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-line bg-surface py-16 text-center shadow-[var(--shadow-sm)]">
           <CalendarCheck className="h-8 w-8 text-gold" aria-hidden="true" />
           <p className="text-fg-muted">Pick a program to view attendance.</p>
         </div>
@@ -175,7 +175,7 @@ export default async function AttendanceByProgramPage({
       />
 
       {empty ? (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-line bg-surface py-16 text-center">
+        <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-line bg-surface py-16 text-center shadow-[var(--shadow-sm)]">
           <CalendarCheck className="h-8 w-8 text-gold" aria-hidden="true" />
           <p className="text-fg-muted">
             No attendance recorded for this program yet.

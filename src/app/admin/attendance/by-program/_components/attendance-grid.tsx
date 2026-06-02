@@ -35,13 +35,13 @@ export function AttendanceGrid({
   const [openKey, setOpenKey] = useState<string | null>(null);
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-line">
+    <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
       <table className="border-collapse text-sm">
         <thead>
-          <tr className="border-b border-line text-[11px] uppercase tracking-[0.14em] text-fg-subtle">
+          <tr className="border-b border-line text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
             <th
               scope="col"
-              className="sticky left-0 z-10 bg-surface border-r border-line px-4 py-3 text-left font-medium whitespace-nowrap"
+              className="sticky left-0 z-10 bg-surface border-r border-line px-4 py-3 text-left font-semibold whitespace-nowrap"
             >
               Athlete
             </th>
@@ -49,7 +49,7 @@ export function AttendanceGrid({
               <th
                 scope="col"
                 key={s.id}
-                className="px-3 py-3 text-center font-medium font-mono tabular-nums whitespace-nowrap"
+                className="tnum px-3 py-3 text-center font-semibold font-mono whitespace-nowrap"
                 title={s.sessionDate}
               >
                 {formatGridDate(s.sessionDate)}
@@ -64,11 +64,11 @@ export function AttendanceGrid({
             return (
               <tr
                 key={a.id}
-                className="border-b border-line/50 last:border-b-0 hover:bg-surface/60"
+                className="group border-t border-line last:border-b-0 transition hover:bg-surface-2"
               >
                 <th
                   scope="row"
-                  className="sticky left-0 z-10 bg-surface border-r border-line px-4 py-3 text-left font-medium text-fg whitespace-nowrap"
+                  className="sticky left-0 z-10 bg-surface border-r border-line px-4 py-3 text-left font-medium text-fg whitespace-nowrap transition group-hover:bg-surface-2"
                 >
                   {a.lastName}, {a.firstName}
                 </th>
@@ -78,7 +78,7 @@ export function AttendanceGrid({
                   return (
                     <td
                       key={s.id}
-                      className="relative px-3 py-3 text-center font-mono tabular-nums"
+                      className="tnum relative border-l border-line bg-surface-2/40 px-3 py-3 text-center font-mono"
                     >
                       {present === true ? (
                         over ? (

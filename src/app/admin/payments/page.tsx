@@ -203,10 +203,10 @@ export default async function AdminPaymentsPage() {
       </Link>
 
       <div className="mb-8 space-y-1.5">
-        <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
+        <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
           Admin
         </p>
-        <h1 className="text-3xl font-bold tracking-tight">Payments</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Payments</h1>
         <p className="text-sm text-fg-muted">
           What each coach owes PFA, and the payment history. Only confirmed
           payments reduce the balance — pending entries wait in the inbox.

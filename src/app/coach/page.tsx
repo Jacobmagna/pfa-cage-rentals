@@ -76,7 +76,7 @@ export default async function CoachHome() {
 
       <section
         aria-label="This month"
-        className="mb-10 grid gap-px rounded-lg border border-line bg-line overflow-hidden sm:grid-cols-2"
+        className="mb-10 grid gap-4 sm:grid-cols-2"
       >
         <Stat
           icon={<CalendarDays className="h-4 w-4" />}
@@ -133,20 +133,40 @@ function Stat({
   accent?: boolean;
 }) {
   return (
-    <div className="bg-surface px-5 py-5">
-      <div className="flex items-center gap-2 text-fg-muted">
+    <div
+      className={[
+        "relative overflow-hidden rounded-2xl border px-6 py-5 shadow-[var(--shadow-md)] transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-lg)]",
+        accent
+          ? "border-gold/40 bg-gradient-to-b from-[#fffdf8] to-[#fcf4e2]"
+          : "border-line bg-surface",
+      ].join(" ")}
+    >
+      {accent ? (
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-gold to-gold-strong"
+        />
+      ) : null}
+      <div
+        className={[
+          "flex items-center gap-2",
+          accent ? "text-gold-strong" : "text-fg-muted",
+        ].join(" ")}
+      >
         {icon}
-        <p className="text-[11px] uppercase tracking-[0.14em]">{label}</p>
+        <p className="text-[11px] uppercase tracking-[0.14em] text-fg-muted">
+          {label}
+        </p>
       </div>
       <p
         className={[
-          "mt-3 font-mono tabular-nums tracking-tight text-3xl",
-          accent ? "text-gold" : "text-fg",
+          "tnum mt-4 text-4xl font-semibold tracking-tight",
+          accent ? "text-gold-strong" : "text-fg",
         ].join(" ")}
       >
         {value}
       </p>
-      <p className="mt-1 text-xs text-fg-subtle">{sub}</p>
+      <p className="mt-2 text-xs text-fg-subtle">{sub}</p>
     </div>
   );
 }
@@ -165,16 +185,18 @@ function NavCard({
   return (
     <Link
       href={href}
-      className="group relative flex flex-col rounded-lg border border-line bg-surface px-5 py-4 transition-colors hover:border-line-strong hover:bg-surface-2 focus-visible:outline-none focus-visible:border-line-strong focus-visible:ring-2 focus-visible:ring-gold/40"
+      className="group relative flex items-start gap-3.5 rounded-xl border border-line bg-surface px-5 py-4 shadow-[var(--shadow-sm)] transition hover:-translate-y-0.5 hover:border-gold/40 hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:border-gold/40 focus-visible:ring-2 focus-visible:ring-gold/40"
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-fg-muted transition-colors group-hover:text-gold">
-          {icon}
-          <p className="text-sm font-semibold text-fg">{title}</p>
-        </div>
-        <ArrowUpRight className="h-3.5 w-3.5 text-fg-subtle opacity-0 -translate-x-1 transition-all group-hover:opacity-100 group-hover:translate-x-0 group-hover:text-gold" />
-      </div>
-      <p className="mt-1.5 text-xs text-fg-muted">{body}</p>
+      <span className="grid h-10 w-10 flex-none place-items-center rounded-[10px] border border-line bg-surface-2 text-fg-muted transition group-hover:border-gold/40 group-hover:bg-gold/10 group-hover:text-gold-strong">
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center justify-between">
+          <span className="text-sm font-semibold text-fg">{title}</span>
+          <ArrowUpRight className="h-3.5 w-3.5 -translate-x-1 text-gold-strong opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100" />
+        </span>
+        <span className="mt-0.5 block text-sm text-fg-muted">{body}</span>
+      </span>
     </Link>
   );
 }

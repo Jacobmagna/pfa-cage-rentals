@@ -176,7 +176,7 @@ export function ProgramScheduleGrid({
           No active programs yet. Create a program first to schedule it.
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line">
+        <div className="overflow-x-auto rounded-xl border border-line shadow-[var(--shadow-sm)]">
           <div className="relative grid bg-surface min-w-fit" style={gridStyle}>
             {/* Header corner cell. */}
             <div
@@ -249,8 +249,8 @@ export function ProgramScheduleGrid({
                       "border-b border-line text-left",
                       baseBorders,
                       isOccupied
-                        ? "cursor-default"
-                        : "hover:bg-gold/5 focus-visible:outline-none focus-visible:bg-gold/10 transition-colors",
+                        ? "cursor-default bg-surface-2/40"
+                        : "bg-surface-2/40 transition-colors hover:bg-gold/5 focus-visible:outline-none focus-visible:bg-gold/10",
                     ].join(" ")}
                     style={{ gridRow: i + 2, gridColumn: slotIdx + 2 }}
                   />
@@ -278,10 +278,10 @@ export function ProgramScheduleGrid({
                   type="button"
                   onClick={() => openEdit(b)}
                   className={[
-                    "m-0.5 rounded border border-line px-2 py-1 text-[11px] text-fg",
+                    "m-0.5 rounded-md border border-line px-2 py-1 text-[11px] text-fg shadow-[var(--shadow-sm)]",
                     "flex flex-col justify-center min-w-0 text-left border-l-4",
                     statusAccent(status),
-                    "hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors",
+                    "transition hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40",
                   ].join(" ")}
                   style={{
                     gridRow: row,

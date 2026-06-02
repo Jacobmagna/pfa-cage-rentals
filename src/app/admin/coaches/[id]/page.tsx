@@ -141,14 +141,14 @@ export default async function AdminCoachDetailPage({
       </Link>
 
       <div className="space-y-1.5 mb-6">
-        <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
+        <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
           Coach
         </p>
-        <h1 className="text-2xl font-bold tracking-tight">
+        <h1 className="text-3xl font-semibold tracking-tight">
           {coach.name ?? coach.email}
         </h1>
         <p className="text-sm text-fg-muted">{coach.email}</p>
-        <p className="text-xs text-fg-subtle font-mono tabular-nums">
+        <p className="text-xs text-fg-subtle font-mono tnum tabular-nums">
           Joined {formatPfaDateMedium(coach.createdAt)}
         </p>
       </div>

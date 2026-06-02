@@ -97,7 +97,9 @@ export function TimeSelect({
       value={value}
       onChange={onChange ? (e) => onChange(e.target.value) : undefined}
       aria-label={ariaLabel}
-      className={className}
+      className={
+        className ?? "rounded-lg border border-line bg-surface text-sm"
+      }
     >
       {augmentedOptions.map((o) => (
         <option key={o.value} value={o.value}>

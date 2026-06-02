@@ -70,10 +70,10 @@ export default async function AdminHourLogPage({
       </Link>
 
       <div className="mb-8 space-y-2">
-        <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
+        <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
           Admin
         </p>
-        <h1 className="text-3xl font-bold tracking-tight">Hour Log</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Hour Log</h1>
         <p className="text-sm text-fg-muted">
           Filter and edit logged hours. Defaults to the current month.
         </p>
@@ -99,7 +99,7 @@ export default async function AdminHourLogPage({
         <Link
           href={downloadHref}
           prefetch={false}
-          className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-4 h-9 text-sm font-medium text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-4 h-9 text-sm font-medium text-fg-muted shadow-[var(--shadow-sm)] hover:text-fg hover:-translate-y-px hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition"
         >
           <Download className="h-4 w-4" />
           Download Excel

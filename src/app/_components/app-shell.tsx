@@ -1,16 +1,15 @@
 import Image from "next/image";
 import Link from "next/link";
 import { auth, signOut } from "@/auth";
-import { DiamondMark } from "./diamond-mark";
 import { TabNav } from "./tab-nav";
 
 /**
  * App shell with top nav.
  * Used by /admin and /coach landing pages.
  *
- * The diamond glyph before the wordmark is the same brand mark used
- * on the landing page and as the favicon — threads brand continuity
- * into every signed-in surface without adding chrome. The "Built by
+ * The PFA logo image IS the brand mark — the same mark used on the
+ * landing page and as the favicon — threading brand continuity into
+ * every signed-in surface without adding chrome. The "Built by
  * Magna Software LLC" credit in the footer is the legal signature,
  * not a marketing line; matches the landing page footer.
  */
@@ -27,7 +26,7 @@ export async function AppShell({
 
   return (
     <>
-      <header className="sticky top-0 z-40 h-14 border-b border-line bg-surface/80 backdrop-blur-md">
+      <header className="sticky top-0 z-40 h-16 border-b border-line bg-page/80 backdrop-blur-md">
         <div className="mx-auto flex h-full max-w-7xl items-center justify-between px-6 lg:px-8">
           <Link
             href={role === "admin" ? "/admin" : "/coach"}
@@ -36,17 +35,14 @@ export async function AppShell({
             <Image
               src="/pfa-logo.png"
               alt="PFA"
-              width={24}
-              height={24}
+              width={28}
+              height={28}
               priority
-              className="h-6 w-6 object-contain"
+              className="h-7 w-7 object-contain"
             />
-            <DiamondMark
-              className="h-2.5 w-2.5 text-gold/70 transition-colors group-hover:text-gold"
-              filled
-            />
-            <span className="text-base font-bold tracking-tight text-gold group-hover:text-gold-hover transition-colors">
-              PFA Cage Rentals
+            <span className="font-semibold tracking-tight text-[17px]">
+              <span className="text-fg">PFA</span>{" "}
+              <span className="text-gold-strong">Engine</span>
             </span>
             <span className="hidden sm:inline text-[10px] uppercase tracking-[0.18em] text-fg-subtle border-l border-line pl-2">
               {role}
@@ -65,7 +61,7 @@ export async function AppShell({
             >
               <button
                 type="submit"
-                className="rounded-md border border-line bg-surface-2 text-fg-muted hover:text-fg hover:border-line-strong h-8 px-3 text-xs font-medium transition-colors"
+                className="rounded-lg border border-line-strong bg-surface text-fg-muted hover:text-fg hover:-translate-y-px shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] h-9 px-3.5 text-[13px] font-medium"
               >
                 Sign out
               </button>

@@ -17,7 +17,7 @@ export function SlotLengthToggle({ value, onChange, className }: Props) {
     <div
       role="radiogroup"
       aria-label="Slot length"
-      className={`inline-flex rounded-md border border-line bg-page p-0.5 ${
+      className={`inline-flex rounded-lg border border-line bg-surface-2 p-0.5 ${
         className ?? ""
       }`}
     >
@@ -43,10 +43,10 @@ function Option({
       aria-checked={active}
       onClick={onClick}
       className={[
-        "px-3 h-8 rounded text-xs font-medium tracking-wide transition-colors",
+        "px-3 h-8 rounded-md border text-xs font-medium tracking-wide transition",
         active
-          ? "bg-surface-2 text-fg shadow-sm"
-          : "text-fg-muted hover:text-fg",
+          ? "bg-gold/10 border-gold/40 text-gold-strong shadow-[var(--shadow-sm)]"
+          : "border-transparent text-fg-muted hover:text-fg",
       ].join(" ")}
     >
       {label}

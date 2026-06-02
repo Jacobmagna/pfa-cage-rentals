@@ -63,7 +63,7 @@ export function OverCapPopover({
       ref={ref}
       role="dialog"
       aria-label={`Over cap: ${info.periodLabel}`}
-      className="absolute left-1/2 top-full z-30 mt-1 w-56 -translate-x-1/2 rounded-md border border-line bg-surface px-3 py-2 text-left text-xs leading-relaxed text-fg-muted shadow-xl"
+      className="absolute left-1/2 top-full z-30 mt-1 w-56 -translate-x-1/2 rounded-md border border-line bg-surface px-3 py-2 text-left text-xs leading-relaxed text-fg-muted shadow-[var(--shadow-lg)]"
     >
       <p className="font-semibold text-danger">{info.periodLabel}</p>
       <p className="mt-1">

@@ -141,10 +141,10 @@ export default async function ProgramsSchedulePage({
 
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div className="space-y-1.5">
-          <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
+          <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
             Schedule
           </p>
-          <h1 className="text-2xl font-bold tracking-tight">{dateLabel}</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">{dateLabel}</h1>
           <p className="text-sm text-fg-muted">
             {blockCount} {blockCount === 1 ? "block" : "blocks"}
           </p>

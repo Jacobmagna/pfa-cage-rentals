@@ -502,7 +502,7 @@ export function ScheduleGrid({
           </div>
         ) : null}
 
-        <div className="overflow-x-auto rounded-lg border border-line">
+        <div className="overflow-x-auto rounded-xl border border-line shadow-[var(--shadow-sm)]">
           <div
             ref={gridRef}
             className="relative grid bg-surface min-w-fit"
@@ -604,9 +604,9 @@ export function ScheduleGrid({
                   type="button"
                   onClick={() => openEditBlock(b)}
                   className={[
-                    "m-0.5 rounded border border-dashed border-danger/60 bg-danger/10 px-2 py-1 text-[11px] text-danger",
+                    "m-0.5 rounded-md border border-dashed border-danger/60 bg-danger/10 px-2 py-1 text-[11px] text-danger shadow-[var(--shadow-sm)]",
                     "flex items-center min-w-0 text-left",
-                    "hover:bg-danger/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors",
+                    "transition hover:bg-danger/15 hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40",
                   ].join(" ")}
                   style={{
                     gridRow: row,
@@ -757,12 +757,12 @@ function DroppableCell({
         "border-b border-line text-left",
         baseBorders,
         isOccupied
-          ? "cursor-default"
+          ? "cursor-default bg-surface-2/40"
           : isDraggingSession
             ? isOver
               ? "bg-gold/20"
               : "bg-page/40"
-            : "hover:bg-gold/5 focus-visible:outline-none focus-visible:bg-gold/10 transition-colors",
+            : "bg-surface-2/40 transition-colors hover:bg-gold/5 focus-visible:outline-none focus-visible:bg-gold/10",
       ].join(" ")}
       style={{ gridRow: row, gridColumn: slotIdx + 2 }}
     />
@@ -815,9 +815,9 @@ function DraggableSession({
       {...listeners}
       {...attributes}
       className={[
-        "m-0.5 rounded border border-line bg-surface-2 px-2 py-1 text-[11px] text-fg",
+        "m-0.5 rounded-md border border-line bg-surface-2 px-2 py-1 text-[11px] text-fg shadow-[var(--shadow-sm)]",
         "flex items-center gap-1.5 min-w-0 text-left",
-        "hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors",
+        "transition hover:bg-surface hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40",
         accent,
         isDragging ? "opacity-40 cursor-grabbing" : "cursor-grab",
       ].join(" ")}

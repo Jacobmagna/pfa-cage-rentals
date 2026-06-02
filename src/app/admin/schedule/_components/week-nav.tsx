@@ -40,16 +40,16 @@ export function WeekNav({ selectedDate }: { selectedDate: Date }) {
               key={key}
               href={`?date=${key}`}
               className={[
-                "flex-1 text-center rounded-md border px-2 py-2 transition-colors",
+                "flex-1 text-center rounded-md border px-2 py-2 shadow-[var(--shadow-sm)] transition",
                 isSelected
-                  ? "border-gold bg-gold/10 text-gold"
-                  : "border-line bg-surface text-fg-muted hover:border-line-strong hover:text-fg",
+                  ? "border-gold bg-gold/10 text-gold-strong"
+                  : "border-line bg-surface text-fg-muted hover:-translate-y-px hover:border-gold/40 hover:text-fg hover:shadow-[var(--shadow-md)]",
               ].join(" ")}
             >
               <p className="text-[10px] uppercase tracking-[0.14em]">
                 {formatPfaWeekday(d)}
               </p>
-              <p className="mt-0.5 text-sm font-semibold tabular-nums">
+              <p className="tnum mt-0.5 text-sm font-semibold">
                 {pfaParts(d).day}
                 {isToday ? (
                   <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-gold align-middle" />
@@ -76,7 +76,7 @@ function NavChevron({
   return (
     <Link
       href={href}
-      className="inline-flex h-12 w-9 items-center justify-center rounded-md border border-line bg-surface text-fg-muted hover:border-line-strong hover:text-fg transition-colors"
+      className="inline-flex h-12 w-9 items-center justify-center rounded-md border border-line-strong bg-surface text-fg-muted shadow-[var(--shadow-sm)] transition hover:-translate-y-px hover:text-fg hover:shadow-[var(--shadow-md)]"
       aria-label={dir === "left" ? "Previous week" : "Next week"}
     >
       <Icon className="h-4 w-4" />

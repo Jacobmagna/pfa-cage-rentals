@@ -142,7 +142,7 @@ export function AvailabilityPanel({
   return (
     <section
       aria-label="Existing bookings"
-      className="mt-8 rounded-lg border border-line bg-surface"
+      className="mt-8 rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] overflow-hidden"
     >
       <header className="flex items-center justify-between px-4 py-3 border-b border-line">
         <div>
@@ -178,8 +178,8 @@ export function AvailabilityPanel({
               className={[
                 "shrink-0 inline-flex items-center gap-1.5 rounded-md px-2.5 h-8 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40",
                 isActive
-                  ? "bg-surface-2 text-fg"
-                  : "text-fg-muted hover:text-fg hover:bg-surface-2/60",
+                  ? "border border-gold/40 bg-gold/10 text-gold-strong"
+                  : "border border-transparent text-fg-muted hover:text-fg hover:bg-surface-2/60",
               ].join(" ")}
             >
               <span
@@ -195,7 +195,7 @@ export function AvailabilityPanel({
       {/* Time strip. Single row, 8 AM – 10 PM. */}
       <div className="px-3 py-3">
         <TimeAxis />
-        <div className="relative mt-1 h-12 rounded-md border border-line/60 bg-page overflow-hidden">
+        <div className="relative mt-1 h-12 rounded-md border border-line bg-surface-2/40 overflow-hidden">
           {/* Quarter-day vertical guide lines so the eye can locate
               the 2-hour boundaries even when nothing's booked there. */}
           {TIME_AXIS.slice(1, -1).map((h) => (
@@ -265,7 +265,7 @@ function SessionSpan({ session }: { session: AvailabilitySession }) {
   return (
     <div
       title={`${session.coachFirstName} · ${format12(spanStartHour(span))}${spanStartMinute(span) === 0 ? "" : `:${pad(spanStartMinute(span))}`}`}
-      className="absolute top-1 bottom-1 rounded-sm border border-line bg-surface-2/90 px-1.5 py-0.5 text-[10px] text-fg overflow-hidden whitespace-nowrap"
+      className="absolute top-1 bottom-1 rounded-md shadow-[var(--shadow-sm)] border border-line bg-surface px-1.5 py-0.5 text-[10px] text-fg overflow-hidden whitespace-nowrap"
       style={{ left: `${span.leftPct}%`, width: `${span.widthPct}%` }}
     >
       {session.coachFirstName}
@@ -281,7 +281,7 @@ function BlockSpan({ block }: { block: AvailabilityBlock }) {
       title={`Blocked: ${block.reason}`}
       // Diagonal-stripe pattern via repeating-linear-gradient so blocks
       // visually distinguish from sessions at a glance.
-      className="absolute top-1 bottom-1 rounded-sm border border-warning/40 text-[10px] text-warning overflow-hidden whitespace-nowrap px-1.5 py-0.5"
+      className="absolute top-1 bottom-1 rounded-md shadow-[var(--shadow-sm)] border border-warning/40 text-[10px] text-warning overflow-hidden whitespace-nowrap px-1.5 py-0.5"
       style={{
         left: `${span.leftPct}%`,
         width: `${span.widthPct}%`,
@@ -298,7 +298,7 @@ function GhostSpan({ span }: { span: Span }) {
   return (
     <div
       aria-hidden
-      className="absolute top-0 bottom-0 rounded-sm border border-gold/60 bg-gold/15 pointer-events-none"
+      className="absolute top-0 bottom-0 rounded-md border border-gold/60 bg-gold/15 pointer-events-none"
       style={{ left: `${span.leftPct}%`, width: `${span.widthPct}%` }}
     />
   );

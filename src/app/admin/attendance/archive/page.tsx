@@ -52,7 +52,7 @@ export default async function ArchivePage() {
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-line/60 bg-surface/40 p-12 text-center">
+      <div className="rounded-xl border border-line bg-surface p-12 text-center shadow-[var(--shadow-sm)]">
         <Archive
           className="mx-auto mb-3 h-7 w-7 text-fg-subtle"
           aria-hidden="true"

@@ -107,7 +107,7 @@ export function MultiSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
-        className="w-full inline-flex items-center justify-between gap-2 rounded-md bg-page border border-line text-fg px-3 h-10 text-sm hover:border-line-strong focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40 transition-colors"
+        className="w-full inline-flex items-center justify-between gap-2 rounded-lg bg-surface border border-line text-fg px-3 h-10 text-sm hover:border-line-strong focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40 transition-colors"
       >
         <span
           className={`truncate ${
@@ -124,7 +124,7 @@ export function MultiSelect({
       </button>
 
       {open ? (
-        <div className="absolute z-50 mt-1 w-full min-w-[240px] rounded-md border border-line bg-surface shadow-lg overflow-hidden">
+        <div className="absolute z-50 mt-1 w-full min-w-[240px] rounded-lg border border-line bg-surface shadow-[var(--shadow-lg)] overflow-hidden">
           {showSearch ? (
             <div className="border-b border-line p-2">
               <div className="relative">
@@ -134,7 +134,7 @@ export function MultiSelect({
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder={searchPlaceholder ?? "Search…"}
-                  className="w-full rounded bg-page border border-line text-fg px-7 h-8 text-xs focus:outline-none focus:border-line-strong"
+                  className="w-full rounded-lg bg-surface-2 border border-line text-fg px-7 h-8 text-xs focus:outline-none focus:border-line-strong"
                   autoFocus
                 />
               </div>
@@ -158,7 +158,7 @@ export function MultiSelect({
                       className={`flex h-4 w-4 items-center justify-center rounded border shrink-0 ${
                         checked
                           ? "border-gold bg-gold text-gold-ink"
-                          : "border-line bg-page"
+                          : "border-line bg-surface-2"
                       }`}
                       aria-hidden="true"
                     >

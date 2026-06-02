@@ -154,7 +154,7 @@ export function AssignSidebar({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-line bg-surface shadow-xl"
+        className="absolute inset-y-0 right-0 flex w-full max-w-md flex-col border-l border-line bg-surface shadow-[var(--shadow-lg)]"
       >
         <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div>
@@ -270,7 +270,7 @@ export function AssignSidebar({
             <button
               type="submit"
               disabled={pending || !programId || count === 0}
-              className="h-9 rounded-md bg-gold px-4 text-sm font-semibold text-gold-ink transition-colors hover:bg-gold-hover disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+              className="h-9 rounded-md bg-gold px-4 text-sm font-semibold text-gold-ink shadow-[var(--shadow-sm)] transition-colors hover:bg-gold-hover disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
             >
               {pending
                 ? "Saving…"

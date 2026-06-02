@@ -66,9 +66,9 @@ export function DeleteCoachCard({
   };
 
   return (
-    <div className="mt-8 rounded-lg border border-danger/30 bg-danger/5 overflow-hidden">
+    <div className="mt-8 rounded-xl border border-danger/30 bg-danger/5 shadow-[var(--shadow-sm)] overflow-hidden">
       <div className="px-5 py-4 border-b border-danger/20 bg-danger/10">
-        <p className="text-[10px] uppercase tracking-[0.18em] text-danger">
+        <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-danger">
           Danger zone
         </p>
         <h3 className="mt-1 text-base font-semibold text-fg">
@@ -97,7 +97,7 @@ export function DeleteCoachCard({
               ? "Admin accounts can't be deleted via this surface"
               : undefined
           }
-          className="inline-flex items-center gap-1.5 rounded-md border border-danger/40 bg-danger/10 text-danger hover:bg-danger/20 hover:border-danger/60 h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-danger/40 bg-danger/10 text-danger hover:bg-danger/20 hover:border-danger/60 shadow-[var(--shadow-sm)] h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
         >
           <Trash2 className="h-3.5 w-3.5" />
           Delete coach

@@ -92,14 +92,14 @@ export function EditableName({ initialName }: { initialName: string }) {
           }}
           maxLength={80}
           disabled={isPending}
-          className="rounded-md border border-line bg-page text-fg px-2 py-1 text-xl font-bold tracking-tight focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+          className="rounded-lg border border-line bg-surface text-fg px-2 py-1 text-xl font-bold tracking-tight focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
           style={{ width: `${Math.max(value.length, 8) + 2}ch` }}
         />
         <button
           type="button"
           onClick={save}
           disabled={isPending}
-          className="rounded-md border border-gold/40 bg-gold/15 px-2.5 py-1 text-xs font-medium text-gold hover:border-gold disabled:opacity-50"
+          className="rounded-lg bg-gold text-gold-ink px-2.5 py-1 text-xs font-medium shadow-[var(--shadow-sm)] hover:bg-gold-hover disabled:opacity-50 transition"
         >
           {isPending ? "Saving…" : "Save"}
         </button>
@@ -107,7 +107,7 @@ export function EditableName({ initialName }: { initialName: string }) {
           type="button"
           onClick={cancel}
           disabled={isPending}
-          className="rounded-md border border-line bg-surface-2 px-2.5 py-1 text-xs font-medium text-fg-muted hover:text-fg hover:border-line-strong disabled:opacity-50"
+          className="rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-xs font-medium text-fg-muted shadow-[var(--shadow-sm)] hover:text-fg hover:shadow-[var(--shadow-md)] disabled:opacity-50 transition"
         >
           Cancel
         </button>

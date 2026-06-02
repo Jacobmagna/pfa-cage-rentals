@@ -23,7 +23,10 @@ export function AttendanceSubnav() {
   const pathname = usePathname() ?? "";
 
   return (
-    <nav aria-label="Attendance sections" className="border-b border-line">
+    <nav
+      aria-label="Attendance sections"
+      className="border-b border-line bg-surface"
+    >
       <ul className="flex gap-1 overflow-x-auto whitespace-nowrap -mb-px">
         {SUB_TABS.map((tab) => {
           const isActive = pathname === tab.href;
@@ -33,10 +36,10 @@ export function AttendanceSubnav() {
                 href={tab.href}
                 aria-current={isActive ? "page" : undefined}
                 className={[
-                  "inline-flex items-center px-3 sm:px-4 py-3 text-sm font-medium border-b-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold rounded-sm",
+                  "inline-flex items-center px-3 sm:px-4 py-3 text-sm border-b-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold rounded-sm",
                   isActive
-                    ? "border-gold text-gold-strong"
-                    : "border-transparent text-fg-muted hover:text-fg",
+                    ? "border-gold text-fg font-semibold"
+                    : "border-transparent text-fg-muted font-medium hover:text-fg",
                 ].join(" ")}
               >
                 {tab.label}

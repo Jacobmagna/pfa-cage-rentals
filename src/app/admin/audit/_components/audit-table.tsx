@@ -11,9 +11,9 @@ import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 
 const ACTION_CLASS: Record<AuditRow["action"], string> = {
   create:
-    "bg-success/15 text-success border-success/30",
-  update: "bg-gold/15 text-gold border-gold/30",
-  delete: "bg-danger/15 text-danger border-danger/30",
+    "bg-success/10 text-success border-success/30",
+  update: "bg-gold/10 text-gold-strong border-gold/30",
+  delete: "bg-danger/10 text-danger border-danger/30",
 };
 
 const ENTITY_LABEL: Record<string, string> = {
@@ -36,21 +36,21 @@ export function AuditTable({ rows }: { rows: AuditRow[] }) {
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
       <table className="w-full min-w-[820px] text-sm">
-        <thead className="text-[11px] uppercase tracking-[0.14em] text-fg-subtle border-b border-line">
+        <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
           <tr>
-            <th scope="col" className="px-4 py-3 text-left font-medium">When</th>
-            <th scope="col" className="px-4 py-3 text-left font-medium">Actor</th>
-            <th scope="col" className="px-4 py-3 text-left font-medium">Action</th>
-            <th scope="col" className="px-4 py-3 text-left font-medium">Entity</th>
-            <th scope="col" className="px-4 py-3 text-left font-medium">Detail</th>
+            <th scope="col" className="px-4 py-3 text-left font-semibold">When</th>
+            <th scope="col" className="px-4 py-3 text-left font-semibold">Actor</th>
+            <th scope="col" className="px-4 py-3 text-left font-semibold">Action</th>
+            <th scope="col" className="px-4 py-3 text-left font-semibold">Entity</th>
+            <th scope="col" className="px-4 py-3 text-left font-semibold">Detail</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.id} className="border-b border-line/50 last:border-b-0 align-top">
-              <td className="px-4 py-3 whitespace-nowrap font-mono tabular-nums text-xs text-fg-muted">
+            <tr key={row.id} className="border-t border-line hover:bg-surface-2 transition-colors align-top">
+              <td className="px-4 py-3 whitespace-nowrap font-mono tnum tabular-nums text-xs text-fg-muted">
                 <p>{formatPfaDate(row.ts)}</p>
                 <p className="text-fg-subtle text-[10px] mt-0.5">
                   {formatPfaTime(row.ts)}

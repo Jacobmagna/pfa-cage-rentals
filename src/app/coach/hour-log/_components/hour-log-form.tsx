@@ -135,7 +135,7 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
         <button
           type="submit"
           disabled={pending}
-          className="w-full sm:w-auto rounded-md bg-gold text-gold-ink hover:bg-gold-hover h-12 px-6 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          className="w-full sm:w-auto rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-12 px-6 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
           {pending ? "Logging…" : "Log hour"}
         </button>
@@ -184,5 +184,5 @@ function Field({
 }
 
 const inputStyles =
-  "w-full rounded-md bg-page border border-line text-fg placeholder:text-fg-subtle px-3 h-12 text-base focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40";
+  "w-full rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle px-3 h-12 text-base focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40";
 const selectStyles = `${inputStyles} appearance-none pr-8`;

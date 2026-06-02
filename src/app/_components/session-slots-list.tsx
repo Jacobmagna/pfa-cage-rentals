@@ -168,7 +168,7 @@ export function SessionSlotsList({
         {slots.map((slot, i) => (
           <li
             key={slot.startAt.toISOString()}
-            className="rounded-md border border-line bg-page p-3"
+            className="rounded-md border border-line bg-surface shadow-[var(--shadow-sm)] p-3 transition hover:border-line-strong hover:shadow-[var(--shadow-md)]"
           >
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <p className="text-sm font-mono tabular-nums text-fg">
@@ -200,7 +200,7 @@ export function SessionSlotsList({
               onChange={(e) => updateNote(i, e.target.value)}
               maxLength={500}
               placeholder="Optional note (student, drill, etc.)"
-              className="mt-2 w-full rounded bg-surface border border-line text-fg placeholder:text-fg-subtle px-2.5 h-8 text-xs focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+              className="mt-2 w-full rounded-lg bg-surface-2 border border-line text-fg placeholder:text-fg-subtle px-2.5 h-8 text-xs focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
             />
           </li>
         ))}
@@ -226,7 +226,7 @@ function SlotPill({
     <label
       className={`inline-flex items-center gap-1 cursor-pointer select-none rounded-full border px-2.5 h-6 text-[11px] font-medium transition-colors ${
         checked
-          ? "border-gold/60 bg-gold/15 text-gold"
+          ? "border-gold/40 bg-gold/10 text-gold-strong"
           : "border-line bg-surface text-fg-muted hover:border-line-strong hover:text-fg"
       }`}
     >

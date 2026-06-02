@@ -33,7 +33,7 @@ export function AddAthleteForm() {
     : `err-${state.error.code}-${state.error.message}`;
 
   return (
-    <section className="rounded-lg border border-line bg-surface p-5">
+    <section className="rounded-xl border border-line bg-surface p-5 shadow-[var(--shadow-sm)]">
       <div className="mb-4 flex items-center gap-2">
         <UserPlus className="h-4 w-4 text-gold" aria-hidden="true" />
         <h2 className="text-sm font-semibold tracking-tight text-fg">
@@ -100,7 +100,7 @@ export function AddAthleteForm() {
         <button
           type="submit"
           disabled={pending}
-          className="h-10 rounded-md bg-gold px-4 text-sm font-semibold text-gold-ink transition-colors hover:bg-gold-hover disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+          className="h-10 rounded-md bg-gold px-4 text-sm font-semibold text-gold-ink shadow-[var(--shadow-sm)] transition-colors hover:bg-gold-hover disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
         >
           {pending ? "Adding…" : "Add"}
         </button>

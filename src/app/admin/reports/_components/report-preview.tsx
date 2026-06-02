@@ -41,21 +41,21 @@ export function ReportPreview({
             <GrandTotal cents={grandTotalCents} sessionCount={detail.length} />
           }
         />
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
           <table className="w-full min-w-[560px] text-sm">
-            <thead className="text-[11px] uppercase tracking-[0.14em] text-fg-subtle border-b border-line">
+            <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
               <tr>
-                <th scope="col" className="px-4 py-3 text-left font-medium">Coach</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium">Cage</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium">Bullpen</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium">Weight Room</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium">Total</th>
-                <th scope="col" className="px-4 py-3 text-center font-medium">Online</th>
+                <th scope="col" className="px-4 py-3 text-left font-semibold">Coach</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Cage</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Bullpen</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Weight Room</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Total</th>
+                <th scope="col" className="px-4 py-3 text-center font-semibold">Online</th>
               </tr>
             </thead>
             <tbody>
               {summary.map((row) => (
-                <tr key={row.coachId} className="border-b border-line/50 last:border-b-0">
+                <tr key={row.coachId} className="border-t border-line hover:bg-surface-2 transition-colors">
                   <td className="px-4 py-3 text-fg">
                     {row.coachName}
                     {row.coachName !== row.coachEmail ? (
@@ -76,12 +76,12 @@ export function ReportPreview({
                     slots={row.weightRoomSlots}
                     cents={row.weightRoomTotalCents}
                   />
-                  <td className="px-4 py-3 text-right font-mono tabular-nums font-semibold text-fg">
+                  <td className="px-4 py-3 text-right font-mono tnum tabular-nums font-semibold text-fg">
                     {formatCents(row.totalCents)}
                   </td>
                   <td className="px-4 py-3 text-center">
                     {row.onlineSessions > 0 ? (
-                      <span className="inline-block rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-success ring-1 ring-inset ring-success/30">
+                      <span className="inline-block rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-success ring-1 ring-inset ring-success/30 tnum">
                         {row.onlineSessions}
                       </span>
                     ) : (
@@ -100,34 +100,34 @@ export function ReportPreview({
           eyebrow="Detail"
           title={`${detail.length} ${detail.length === 1 ? "session" : "sessions"}`}
         />
-        <div className="overflow-x-auto rounded-lg border border-line">
+        <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
           <table className="w-full min-w-[960px] text-sm">
-            <thead className="bg-surface-2 text-xs uppercase tracking-wider text-fg-muted">
+            <thead className="bg-surface-2/50 text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line">
               <tr>
-                <th scope="col" className="px-3 py-3 text-left font-medium">Date</th>
-                <th scope="col" className="px-3 py-3 text-left font-medium">Day</th>
-                <th scope="col" className="px-3 py-3 text-left font-medium">Start</th>
-                <th scope="col" className="px-3 py-3 text-left font-medium">End</th>
-                <th scope="col" className="px-3 py-3 text-left font-medium">Resource</th>
-                <th scope="col" className="px-3 py-3 text-left font-medium">Use</th>
-                <th scope="col" className="px-3 py-3 text-left font-medium">Coach</th>
-                <th scope="col" className="px-3 py-3 text-right font-medium">Slots</th>
-                <th scope="col" className="px-3 py-3 text-right font-medium">Rate</th>
-                <th scope="col" className="px-3 py-3 text-right font-medium">$</th>
-                <th scope="col" className="px-3 py-3 text-left font-medium">Note</th>
+                <th scope="col" className="px-3 py-3 text-left font-semibold">Date</th>
+                <th scope="col" className="px-3 py-3 text-left font-semibold">Day</th>
+                <th scope="col" className="px-3 py-3 text-left font-semibold">Start</th>
+                <th scope="col" className="px-3 py-3 text-left font-semibold">End</th>
+                <th scope="col" className="px-3 py-3 text-left font-semibold">Resource</th>
+                <th scope="col" className="px-3 py-3 text-left font-semibold">Use</th>
+                <th scope="col" className="px-3 py-3 text-left font-semibold">Coach</th>
+                <th scope="col" className="px-3 py-3 text-right font-semibold">Slots</th>
+                <th scope="col" className="px-3 py-3 text-right font-semibold">Rate</th>
+                <th scope="col" className="px-3 py-3 text-right font-semibold">$</th>
+                <th scope="col" className="px-3 py-3 text-left font-semibold">Note</th>
               </tr>
             </thead>
             <tbody>
               {detail.map((row) => (
-                <tr key={row.sessionId} className="border-b border-line/50 last:border-b-0">
-                  <td className="px-3 py-3 font-mono tabular-nums whitespace-nowrap text-fg-muted">
+                <tr key={row.sessionId} className="border-t border-line hover:bg-surface-2 transition-colors">
+                  <td className="px-3 py-3 font-mono tnum tabular-nums whitespace-nowrap text-fg-muted">
                     {row.date}
                   </td>
                   <td className="px-3 py-3 text-fg-muted">{row.dayOfWeek}</td>
-                  <td className="px-3 py-3 font-mono tabular-nums text-fg">
+                  <td className="px-3 py-3 font-mono tnum tabular-nums text-fg">
                     {row.startTime}
                   </td>
-                  <td className="px-3 py-3 font-mono tabular-nums text-fg">
+                  <td className="px-3 py-3 font-mono tnum tabular-nums text-fg">
                     {row.endTime}
                   </td>
                   <td className="px-3 py-3 text-fg">{row.resourceName}</td>
@@ -143,7 +143,7 @@ export function ReportPreview({
                   </td>
                   <NumCell value={row.slots} />
                   <CashCell cents={row.ratePerSlotCents} />
-                  <td className="px-3 py-3 text-right font-mono tabular-nums font-semibold text-fg">
+                  <td className="px-3 py-3 text-right font-mono tnum tabular-nums font-semibold text-fg">
                     {formatCents(row.totalCents)}
                   </td>
                   <td className="px-3 py-3 text-fg-subtle text-xs max-w-[260px] truncate">
@@ -193,7 +193,7 @@ function GrandTotal({
       <p className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
         Grand total
       </p>
-      <p className="text-xl font-semibold font-mono tabular-nums text-fg">
+      <p className="text-xl font-semibold font-mono tnum tabular-nums text-fg">
         {formatCents(cents)}
       </p>
       <p className="text-[11px] text-fg-subtle">
@@ -205,7 +205,7 @@ function GrandTotal({
 
 function NumCell({ value }: { value: number }) {
   return (
-    <td className="px-4 py-3 text-right font-mono tabular-nums text-fg-muted">
+    <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-muted">
       {value === 0 ? <span className="text-fg-subtle">—</span> : value}
     </td>
   );
@@ -220,13 +220,13 @@ function SlotsAndCashCell({
 }) {
   if (slots === 0 && cents === 0) {
     return (
-      <td className="px-4 py-3 text-right font-mono tabular-nums text-fg-subtle">
+      <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-subtle">
         —
       </td>
     );
   }
   return (
-    <td className="px-4 py-3 text-right font-mono tabular-nums leading-tight">
+    <td className="px-4 py-3 text-right font-mono tnum tabular-nums leading-tight">
       <span className="block text-fg">
         {slots} {slots === 1 ? "slot" : "slots"}
       </span>
@@ -239,7 +239,7 @@ function SlotsAndCashCell({
 
 function CashCell({ cents }: { cents: number }) {
   return (
-    <td className="px-4 py-3 text-right font-mono tabular-nums text-fg-muted">
+    <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-muted">
       {cents === 0 ? (
         <span className="text-fg-subtle">—</span>
       ) : (

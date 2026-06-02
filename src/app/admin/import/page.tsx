@@ -30,10 +30,10 @@ export default async function AdminImportPage() {
       </Link>
 
       <div className="space-y-2 mb-8">
-        <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
+        <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
           Stage I — Historical import
         </p>
-        <h1 className="text-3xl font-bold tracking-tight">Import past sessions</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Import past sessions</h1>
         <p className="text-sm text-fg-muted max-w-2xl">
           Upload <code className="text-xs">source_data.xlsx</code> (or a fresh weekly
           file). The dry-run preview groups every distinct raw name; review the unmatched

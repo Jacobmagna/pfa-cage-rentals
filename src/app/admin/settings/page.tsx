@@ -37,10 +37,10 @@ export default async function AdminSettingsPage() {
       </Link>
 
       <div className="mb-8 space-y-1.5">
-        <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
+        <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
           Admin
         </p>
-        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
         <p className="text-sm text-fg-muted">
           Org-wide configuration: PFA payment handle + default rental rates.
         </p>

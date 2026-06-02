@@ -92,7 +92,7 @@ export function SessionsHistoryClient({
         </p>
         <Link
           href="/coach/sessions/new"
-          className="inline-flex items-center gap-1.5 rounded-md bg-gold px-4 h-9 text-sm font-medium text-gold-ink hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-gold shadow-[var(--shadow-sm)] px-4 h-9 text-sm font-medium text-gold-ink hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
           <Plus className="h-4 w-4" strokeWidth={2.5} />
           Log session
@@ -105,7 +105,7 @@ export function SessionsHistoryClient({
           return (
             <li
               key={row.id}
-              className={`rounded-lg border border-line bg-surface p-4 transition-opacity ${
+              className={`rounded-xl border border-line bg-surface p-4 shadow-[var(--shadow-sm)] transition hover:shadow-[var(--shadow-md)] ${
                 isPendingDelete ? "opacity-50" : ""
               }`}
             >

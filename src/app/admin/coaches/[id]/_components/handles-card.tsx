@@ -42,7 +42,7 @@ export function CoachHandlesCard({
     : `err-${state.error.code}-${state.error.message}`;
 
   return (
-    <section className="my-8 rounded-lg border border-line bg-surface overflow-hidden">
+    <section className="my-8 rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] overflow-hidden">
       <header className="px-5 py-4 border-b border-line">
         <h3 className="text-base font-semibold text-fg">Zelle contact</h3>
         <p className="mt-1 text-xs text-fg-muted leading-relaxed">
@@ -87,7 +87,7 @@ export function CoachHandlesCard({
           <button
             type="submit"
             disabled={pending}
-            className="inline-flex items-center gap-1.5 rounded-md bg-gold text-gold-ink hover:bg-gold-hover h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
           >
             <Check className="h-4 w-4" strokeWidth={2.5} />
             {pending ? "Saving…" : "Save Zelle contact"}
@@ -162,4 +162,4 @@ function CopyChip({ value, label }: { value: string; label: string }) {
 }
 
 const inputStyles =
-  "w-full rounded-md bg-page border border-line text-fg placeholder:text-fg-subtle px-3 py-2 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40";
+  "w-full rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle px-3 py-2 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40";

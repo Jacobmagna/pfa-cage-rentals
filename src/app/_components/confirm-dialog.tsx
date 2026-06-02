@@ -149,21 +149,21 @@ export function ConfirmDialog({
 
   const confirmClasses =
     variant === "danger"
-      ? "bg-danger text-page hover:opacity-90 focus-visible:ring-danger/40"
-      : "bg-gold text-gold-ink hover:bg-gold-hover focus-visible:ring-gold/40";
+      ? "bg-danger text-page hover:opacity-90 shadow-[var(--shadow-sm)] focus-visible:ring-danger/40"
+      : "bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] focus-visible:ring-gold/40";
 
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
       onClick={handleBackdropClick}
     >
       <div
         ref={containerRef}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-lg border border-line bg-surface shadow-xl"
+        className="w-full max-w-md rounded-2xl border border-line bg-surface shadow-[var(--shadow-lg)]"
       >
         <div className="px-5 py-4 border-b border-line flex items-start gap-3">
           {variant === "danger" ? (
@@ -219,7 +219,7 @@ export function ConfirmDialog({
             type="button"
             onClick={() => onOpenChange(false)}
             disabled={isPending}
-            className="inline-flex items-center justify-center rounded-md border border-line bg-surface text-fg hover:bg-surface-2 h-9 px-3 text-sm font-medium disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            className="inline-flex items-center justify-center rounded-lg border border-line-strong bg-surface text-fg-muted hover:text-fg hover:-translate-y-px h-9 px-3 text-sm font-medium shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition"
           >
             {cancelLabel}
           </button>
@@ -227,7 +227,7 @@ export function ConfirmDialog({
             type="button"
             onClick={handleConfirmClick}
             disabled={!typedMatches || isPending}
-            className={`inline-flex items-center justify-center gap-1.5 rounded-md h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 transition-colors ${confirmClasses}`}
+            className={`inline-flex items-center justify-center gap-1.5 rounded-lg h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 transition ${confirmClasses}`}
           >
             {isPending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

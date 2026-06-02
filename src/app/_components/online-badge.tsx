@@ -18,7 +18,7 @@ export function OnlineBadge({
       <span
         title="Prepaid online lesson"
         aria-label="Prepaid online lesson"
-        className="inline-flex items-center justify-center h-3.5 w-3.5 rounded-full bg-success/15 text-success ring-1 ring-inset ring-success/30 shrink-0"
+        className="inline-flex items-center justify-center h-3.5 w-3.5 rounded-full bg-success/10 text-success ring-1 ring-inset ring-success/30 shrink-0"
       >
         <Wifi className="h-2 w-2" strokeWidth={3} />
       </span>
@@ -28,7 +28,7 @@ export function OnlineBadge({
   return (
     <span
       aria-label="Prepaid online lesson"
-      className="inline-flex items-center gap-1 rounded-full bg-success/10 px-1.5 py-px text-[10px] font-medium uppercase tracking-wider text-success ring-1 ring-inset ring-success/30"
+      className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success"
     >
       <Wifi className="h-2.5 w-2.5" strokeWidth={2.5} />
       Online

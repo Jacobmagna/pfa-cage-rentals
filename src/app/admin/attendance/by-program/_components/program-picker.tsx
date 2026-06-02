@@ -37,7 +37,7 @@ export function ProgramPicker({
       ref={formRef}
       method="GET"
       action="/admin/attendance/by-program"
-      className="rounded-lg border border-line bg-surface p-5"
+      className="rounded-xl border border-line bg-surface p-5 shadow-[var(--shadow-sm)]"
     >
       <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
         <div className="block">
@@ -68,7 +68,7 @@ export function ProgramPicker({
 
         <button
           type="submit"
-          className="inline-flex items-center justify-center rounded-md bg-gold px-5 h-10 text-sm font-medium text-gold-ink hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          className="inline-flex items-center justify-center rounded-md bg-gold px-5 h-10 text-sm font-medium text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
           View
         </button>

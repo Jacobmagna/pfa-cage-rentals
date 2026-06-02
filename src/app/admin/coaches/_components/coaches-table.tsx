@@ -78,7 +78,7 @@ export function CoachesTable({
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-line/60 bg-surface/40 p-12 text-center">
+      <div className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] p-12 text-center">
         <p className="text-sm font-medium text-fg">No coaches yet</p>
         <p className="mt-1.5 text-sm text-fg-muted">
           The first time a coach signs in, they&apos;ll appear here
@@ -89,9 +89,9 @@ export function CoachesTable({
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
       <table className="w-full min-w-[720px] text-sm">
-        <thead className="text-[11px] uppercase tracking-[0.14em] text-fg-subtle border-b border-line">
+        <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
           <tr>
             <SortHeader
               label="Coach"
@@ -130,7 +130,7 @@ export function CoachesTable({
             />
             <th
               scope="col"
-              className="px-4 py-3 font-medium text-right sr-only"
+              className="px-4 py-3 font-semibold text-right sr-only"
             >
               Actions
             </th>
@@ -140,13 +140,13 @@ export function CoachesTable({
           {sorted.map((row) => (
             <tr
               key={row.id}
-              className="border-b border-line/50 last:border-b-0 hover:bg-surface/60 transition-colors"
+              className="border-t border-line hover:bg-surface-2 transition-colors"
             >
               <td className="px-4 py-3">
                 <div className="flex items-center gap-2 flex-wrap">
                   <Link
                     href={`/admin/coaches/${row.id}`}
-                    className="text-fg hover:text-gold transition-colors font-medium"
+                    className="text-fg hover:text-gold-strong transition-colors font-medium"
                   >
                     {row.name ?? row.email}
                   </Link>
@@ -161,17 +161,17 @@ export function CoachesTable({
                 </div>
               </td>
               <td className="px-4 py-3 text-fg-muted text-xs">{row.email}</td>
-              <td className="px-4 py-3 text-fg-muted font-mono tabular-nums text-xs whitespace-nowrap">
+              <td className="px-4 py-3 text-fg-muted font-mono tnum tabular-nums text-xs whitespace-nowrap">
                 {formatJoined(row.joinedAt)}
               </td>
-              <td className="px-4 py-3 text-right font-mono tabular-nums text-fg-muted">
+              <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-muted">
                 {row.sessionsThisMonth === 0 ? (
                   <span className="text-fg-subtle">—</span>
                 ) : (
                   row.sessionsThisMonth
                 )}
               </td>
-              <td className="px-4 py-3 text-right font-mono tabular-nums font-semibold text-fg">
+              <td className="px-4 py-3 text-right font-mono tnum tabular-nums font-semibold text-fg">
                 {row.owedThisMonthCents === 0 ? (
                   <span className="text-fg-subtle font-normal">—</span>
                 ) : (
@@ -183,7 +183,7 @@ export function CoachesTable({
                   <button
                     type="button"
                     onClick={() => setMergeSource(row)}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 h-7 text-[11px] font-medium text-fg-muted hover:text-fg hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-2.5 h-7 text-[11px] font-medium text-fg-muted hover:text-fg hover:-translate-y-px shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition"
                     title="Re-point this synthetic coach's sessions to a real coach"
                   >
                     <GitMerge className="h-3 w-3" />
@@ -228,7 +228,7 @@ function SortHeader({
     <th
       scope="col"
       className={[
-        "px-4 py-3 font-medium",
+        "px-4 py-3 font-semibold",
         align === "right" ? "text-right" : "text-left",
       ].join(" ")}
     >

@@ -46,7 +46,7 @@ export function RateOverridesCard({
   rows: RateOverrideRow[];
 }) {
   return (
-    <section className="rounded-lg border border-line bg-surface overflow-hidden">
+    <section className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] overflow-hidden">
       <header className="px-5 py-4 border-b border-line">
         <h3 className="text-base font-semibold text-fg">
           Rate overrides
@@ -153,7 +153,7 @@ function Row({
       </div>
 
       <div className="hidden sm:block text-xs text-fg-muted">
-        <p className="font-mono tabular-nums">${defaultDollars}</p>
+        <p className="font-mono tnum tabular-nums">${defaultDollars}</p>
         <p className="text-[10px] text-fg-subtle uppercase tracking-wider mt-0.5">
           default / 30 min
         </p>
@@ -171,7 +171,7 @@ function Row({
             defaultValue={inputDefault}
             placeholder={defaultDollars}
             aria-label={`Override rate for ${RESOURCE_LABEL[row.resourceType]}`}
-            className="w-full pl-7 pr-3 h-10 rounded-md bg-page border border-line text-fg placeholder:text-fg-subtle text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+            className="w-full pl-7 pr-3 h-10 rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
           />
         </div>
         {!state.ok ? (
@@ -193,7 +193,7 @@ function Row({
         <button
           type="submit"
           disabled={pending || removing}
-          className="inline-flex items-center justify-center gap-1 rounded-md bg-gold text-gold-ink hover:bg-gold-hover h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          className="inline-flex items-center justify-center gap-1 rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
           <Check className="h-3.5 w-3.5" />
           {pending ? "Saving…" : "Save"}
@@ -203,7 +203,7 @@ function Row({
             type="button"
             onClick={handleRemove}
             disabled={pending || removing}
-            className="inline-flex items-center justify-center h-9 w-9 rounded-md border border-line text-fg-muted hover:text-danger hover:border-danger/40 hover:bg-danger/10 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
+            className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-line-strong text-fg-muted hover:text-danger hover:border-danger/40 hover:bg-danger/10 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
             aria-label={`Remove override for ${RESOURCE_LABEL[row.resourceType]}`}
             title="Remove override"
           >

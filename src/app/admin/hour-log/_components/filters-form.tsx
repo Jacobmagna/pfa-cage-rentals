@@ -46,7 +46,7 @@ export function FiltersForm({
     <form
       method="GET"
       action="/admin/hour-log"
-      className="rounded-lg border border-line bg-surface p-5 mb-6"
+      className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] p-5 mb-6"
     >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
         <Field label="From">
@@ -102,7 +102,7 @@ export function FiltersForm({
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
           type="submit"
-          className="inline-flex items-center justify-center gap-1.5 rounded-md bg-gold px-5 h-10 text-sm font-medium text-gold-ink hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-gold px-5 h-10 text-sm font-medium text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
           <Search className="h-4 w-4" strokeWidth={2.5} />
           Apply filters
@@ -131,7 +131,7 @@ function Field({
 }) {
   return (
     <div className="block">
-      <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted block mb-1.5">
         {label}
       </span>
       {children}
@@ -140,5 +140,5 @@ function Field({
 }
 
 const inputStyles =
-  "w-full rounded-md bg-page border border-line text-fg placeholder:text-fg-subtle px-3 h-10 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40";
+  "w-full rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle px-3 h-10 text-sm tnum focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40";
 const selectStyles = `${inputStyles} appearance-none pr-8`;

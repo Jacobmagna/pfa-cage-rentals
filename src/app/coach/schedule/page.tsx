@@ -89,7 +89,7 @@ export default async function CoachSchedulePage({
         <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
           Schedule
         </p>
-        <h1 className="mt-2 text-2xl font-bold tracking-tight">
+        <h1 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight">
           Week of {formatPfaDateMedium(monday)} – {formatPfaDateMedium(sunday)}
         </h1>
       </header>
@@ -114,7 +114,7 @@ export default async function CoachSchedulePage({
       </nav>
 
       {weekIsEmpty ? (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-line bg-surface py-16 text-center">
+        <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] py-16 text-center">
           <CalendarDays className="h-8 w-8 text-gold" aria-hidden="true" />
           <p className="text-fg-muted">Nothing scheduled this week.</p>
         </div>
@@ -148,7 +148,7 @@ export default async function CoachSchedulePage({
                     {dayBlocks.map((b) => (
                       <li
                         key={b.id}
-                        className="rounded-md border border-line border-l-2 border-l-gold bg-surface px-4 py-3"
+                        className="rounded-md border border-line border-l-2 border-l-gold bg-surface px-4 py-3 shadow-[var(--shadow-sm)] transition hover:bg-surface-2 hover:shadow-[var(--shadow-md)]"
                       >
                         <p className="text-sm font-medium text-fg tabular-nums">
                           {formatPfaTime(b.startAt)}–{formatPfaTime(b.endAt)}
@@ -187,7 +187,7 @@ function WeekLink({
     <Link
       href={href}
       aria-label={label}
-      className="inline-flex h-10 w-9 items-center justify-center rounded-md border border-line bg-surface text-fg-muted hover:border-line-strong hover:text-fg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+      className="inline-flex h-10 w-9 items-center justify-center rounded-lg border border-line bg-surface text-fg-muted shadow-[var(--shadow-sm)] hover:-translate-y-px hover:border-gold/40 hover:text-gold-strong hover:shadow-[var(--shadow-md)] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
     >
       <Icon className="h-4 w-4" />
     </Link>

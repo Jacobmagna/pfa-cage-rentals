@@ -21,7 +21,7 @@ export default function PrivacyPage() {
             PFA Cage Rentals is an internal billing tool operated by PFA Sports
             for tracking cage, bullpen, and weight-room rentals at the
             facility. The site lives at{" "}
-            <code className="text-fg">pfacagerentals.com</code>. Contact for
+            <code className="text-fg">pfaengine.com</code>. Contact for
             privacy questions:{" "}
             <a className="text-gold underline underline-offset-2 hover:text-gold-hover" href="mailto:mdm@pfasports.com">
               mdm@pfasports.com

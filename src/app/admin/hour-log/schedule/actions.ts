@@ -7,7 +7,7 @@
 // requireRole("admin")-gated paths.
 //
 // Revalidation invariant: every mutating public action revalidates
-// /admin/schedule/programs. Form-action wrappers do not double-
+// /admin/hour-log/schedule. Form-action wrappers do not double-
 // revalidate.
 
 import { revalidatePath } from "next/cache";
@@ -21,7 +21,7 @@ import {
 export async function createProgramScheduleBlock(input: unknown) {
   const session = await requireRole("admin");
   const result = await createProgramScheduleBlockInternal(session.user, input);
-  revalidatePath("/admin/schedule/programs");
+  revalidatePath("/admin/hour-log/schedule");
   return result;
 }
 
@@ -32,12 +32,12 @@ export async function updateProgramScheduleBlock(id: string, input: unknown) {
     id,
     input,
   );
-  revalidatePath("/admin/schedule/programs");
+  revalidatePath("/admin/hour-log/schedule");
   return result;
 }
 
 export async function deleteProgramScheduleBlock(id: string) {
   const session = await requireRole("admin");
   await deleteProgramScheduleBlockInternal(session.user, id);
-  revalidatePath("/admin/schedule/programs");
+  revalidatePath("/admin/hour-log/schedule");
 }

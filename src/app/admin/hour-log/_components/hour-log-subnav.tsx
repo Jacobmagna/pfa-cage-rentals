@@ -3,15 +3,18 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-// Schedule sub-nav (DEC-17 — pure additive nav chrome). Mirrors
-// attendance-subnav.tsx: active by pathname, aria-current="page" on the
+// Hour Log sub-nav (QA2-8 — pure additive nav chrome). Modeled on
+// schedule-subnav.tsx: active by pathname, aria-current="page" on the
 // active item, gold underline, keyboard-accessible focus ring, AA
-// semantic tokens. Two sub-tabs: Cage Rentals (the existing, unchanged
-// cage schedule at /admin/schedule) and Programs (FEAT-15).
+// semantic tokens. Two sub-tabs: Hours (the existing, unchanged
+// hour-log table at /admin/hour-log) and Program Schedule (the program
+// schedule grid moved from /admin/schedule/programs to
+// /admin/hour-log/schedule).
 //
-// Cage Rentals is active ONLY on the exact /admin/schedule path so it
-// doesn't stay lit while a child route (Programs) is open. Programs is
-// active when the pathname starts with /admin/schedule/programs.
+// Hours is active ONLY on the exact /admin/hour-log path so it doesn't
+// stay lit while a child route (Program Schedule) is open. Program
+// Schedule is active when the pathname starts with
+// /admin/hour-log/schedule.
 
 type SubTab = {
   href: string;
@@ -21,23 +24,23 @@ type SubTab = {
 
 const SUB_TABS: SubTab[] = [
   {
-    href: "/admin/schedule",
-    label: "Cage Rentals",
-    isActive: (p) => p === "/admin/schedule",
+    href: "/admin/hour-log",
+    label: "Hours",
+    isActive: (p) => p === "/admin/hour-log",
   },
   {
-    href: "/admin/schedule/programs",
-    label: "Programs",
-    isActive: (p) => p.startsWith("/admin/schedule/programs"),
+    href: "/admin/hour-log/schedule",
+    label: "Program Schedule",
+    isActive: (p) => p.startsWith("/admin/hour-log/schedule"),
   },
 ];
 
-export function ScheduleSubnav() {
+export function HourLogSubnav() {
   const pathname = usePathname() ?? "";
 
   return (
     <nav
-      aria-label="Schedule sections"
+      aria-label="Hour Log sections"
       className="border-b border-line bg-surface"
     >
       <ul className="flex gap-1 overflow-x-auto whitespace-nowrap -mb-px">

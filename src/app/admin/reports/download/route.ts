@@ -19,10 +19,15 @@ export async function GET(request: Request) {
   const filters = filtersFromURLSearchParams(url.searchParams);
   const report = await fetchReportData(filters);
 
-  const buffer = await buildReportWorkbook(report, {
-    from: filters.from,
-    to: filters.to,
-  });
+  const buffer = await buildReportWorkbook(
+    report,
+    {
+      from: filters.from,
+      to: filters.to,
+    },
+    filters.includeCageSessions,
+    filters.includeProgramHours,
+  );
 
   const filename = `pfa-billing-${filters.from}_to_${filters.to}.xlsx`;
 

@@ -23,6 +23,9 @@ type RawSearchParams = Promise<{
   to?: string;
   coachIds?: string | string[];
   resourceTypes?: string | string[];
+  scopeApplied?: string | string[];
+  includeCage?: string | string[];
+  includeProgram?: string | string[];
 }>;
 
 export default async function AdminReportsPage({
@@ -108,6 +111,8 @@ export default async function AdminReportsPage({
           to: filters.to,
           coachIds: filters.coachIds,
           resourceTypes: filters.resourceTypes,
+          includeCageSessions: filters.includeCageSessions,
+          includeProgramHours: filters.includeProgramHours,
         }}
       />
 
@@ -115,6 +120,8 @@ export default async function AdminReportsPage({
         detail={report.detail}
         summary={report.summary}
         grandTotalCents={report.grandTotalCents}
+        includeCageSessions={filters.includeCageSessions}
+        includeProgramHours={filters.includeProgramHours}
       />
     </>
   );

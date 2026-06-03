@@ -115,6 +115,17 @@ function makeReport(): ReportData {
   };
 }
 
+// Default scope = both categories on (the fresh-load default). Tests
+// that exercise the scope gating pass explicit booleans instead.
+const META = { from: "2026-05-01", to: "2026-05-31" } as const;
+function build(
+  report: ReportData,
+  includeCage = true,
+  includeProgram = true,
+): Promise<Buffer> {
+  return buildReportWorkbook(report, META, includeCage, includeProgram);
+}
+
 async function loadWorkbook(buffer: Buffer): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
   // ExcelJS's .load type signature predates modern Node Buffer
@@ -127,10 +138,7 @@ async function loadWorkbook(buffer: Buffer): Promise<ExcelJS.Workbook> {
 
 describe("buildReportWorkbook", () => {
   it("produces a Buffer with both Summary and Detail sheets", async () => {
-    const buf = await buildReportWorkbook(makeReport(), {
-      from: "2026-05-01",
-      to: "2026-05-31",
-    });
+    const buf = await build(makeReport());
     expect(buf).toBeInstanceOf(Buffer);
     expect(buf.length).toBeGreaterThan(2000);
 
@@ -139,10 +147,7 @@ describe("buildReportWorkbook", () => {
   });
 
   it("writes workbook metadata (creator + subject) from the inputs", async () => {
-    const buf = await buildReportWorkbook(makeReport(), {
-      from: "2026-05-01",
-      to: "2026-05-31",
-    });
+    const buf = await build(makeReport());
     const wb = await loadWorkbook(buf);
     expect(wb.creator).toBe("PFA Cage Rentals");
     expect(wb.subject).toBe("Billing 2026-05-01 to 2026-05-31");
@@ -150,10 +155,7 @@ describe("buildReportWorkbook", () => {
 
   describe("Summary sheet", () => {
     it("has the expected header columns in order", async () => {
-      const buf = await buildReportWorkbook(makeReport(), {
-        from: "2026-05-01",
-        to: "2026-05-31",
-      });
+      const buf = await build(makeReport());
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Summary")!;
       const headers = sheet.getRow(1).values as unknown[];
@@ -166,48 +168,41 @@ describe("buildReportWorkbook", () => {
         "Bullpen $",
         "WeightRoom Slots",
         "WeightRoom $",
+        "Program Slots",
+        "Program $",
         "Total",
         "Online Sessions",
       ]);
     });
 
     it("renders dollar values divided by 100 with currency numFmt", async () => {
-      const buf = await buildReportWorkbook(makeReport(), {
-        from: "2026-05-01",
-        to: "2026-05-31",
-      });
+      const buf = await build(makeReport());
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Summary")!;
       const row2 = sheet.getRow(2);
       expect(row2.getCell(1).value).toBe("Alice Coach");
       expect(row2.getCell(4).value).toBe(36); // cage $ = 3600 cents / 100
-      expect(row2.getCell(9).value).toBe(36); // total
-      expect(row2.getCell(10).value).toBe(1); // 1 online session
+      expect(row2.getCell(11).value).toBe(36); // total (col 11 with program cols)
+      expect(row2.getCell(12).value).toBe(1); // 1 online session
 
       expect(sheet.getColumn(4).numFmt).toBe('"$"#,##0.00');
-      expect(sheet.getColumn(9).numFmt).toBe('"$"#,##0.00');
+      expect(sheet.getColumn(11).numFmt).toBe('"$"#,##0.00');
     });
 
     it("appends a bold grand-total footer row", async () => {
-      const buf = await buildReportWorkbook(makeReport(), {
-        from: "2026-05-01",
-        to: "2026-05-31",
-      });
+      const buf = await build(makeReport());
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Summary")!;
       expect(sheet.rowCount).toBe(4); // 1 header + 2 coach rows + 1 footer
       const footer = sheet.getRow(4);
       expect(String(footer.getCell(1).value)).toContain("Grand total");
       expect(String(footer.getCell(1).value)).toContain("3 sessions");
-      expect(footer.getCell(9).value).toBe(50); // 5000 cents / 100
+      expect(footer.getCell(11).value).toBe(50); // 5000 cents / 100 (col 11)
       expect(footer.font?.bold).toBe(true);
     });
 
     it("freezes the header row", async () => {
-      const buf = await buildReportWorkbook(makeReport(), {
-        from: "2026-05-01",
-        to: "2026-05-31",
-      });
+      const buf = await build(makeReport());
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Summary")!;
       const view = sheet.views?.[0];
@@ -215,14 +210,61 @@ describe("buildReportWorkbook", () => {
       const ySplit = (view as { ySplit?: number } | undefined)?.ySplit;
       expect(ySplit).toBe(1);
     });
+
+    it("drops the cage column groups (and Online) when cage scope is off", async () => {
+      const buf = await build(makeReport(), false, true);
+      const wb = await loadWorkbook(buf);
+      const sheet = wb.getWorksheet("Summary")!;
+      const headers = (sheet.getRow(1).values as unknown[]).slice(1);
+      expect(headers).toEqual([
+        "Coach",
+        "Email",
+        "Program Slots",
+        "Program $",
+        "Total",
+      ]);
+      // No leftover empty columns: Total is the last data column.
+      expect(headers).not.toContain("Online Sessions");
+    });
+
+    it("drops the program columns when program scope is off", async () => {
+      const buf = await build(makeReport(), true, false);
+      const wb = await loadWorkbook(buf);
+      const sheet = wb.getWorksheet("Summary")!;
+      const headers = (sheet.getRow(1).values as unknown[]).slice(1);
+      expect(headers).toEqual([
+        "Coach",
+        "Email",
+        "Cage Slots",
+        "Cage $",
+        "Bullpen Slots",
+        "Bullpen $",
+        "WeightRoom Slots",
+        "WeightRoom $",
+        "Total",
+        "Online Sessions",
+      ]);
+      expect(headers).not.toContain("Program Slots");
+    });
+
+    it("writes Program Slots/$ and applies currency format to Program $", async () => {
+      const report = makeReport();
+      report.summary[0].programSlots = 3;
+      report.summary[0].programTotalCents = 7500;
+      const buf = await build(report, false, true);
+      const wb = await loadWorkbook(buf);
+      const sheet = wb.getWorksheet("Summary")!;
+      // Columns: 1 Coach, 2 Email, 3 Program Slots, 4 Program $, 5 Total
+      const row2 = sheet.getRow(2);
+      expect(row2.getCell(3).value).toBe(3); // program slots
+      expect(row2.getCell(4).value).toBe(75); // 7500 cents / 100
+      expect(sheet.getColumn(4).numFmt).toBe('"$"#,##0.00');
+    });
   });
 
   describe("Detail sheet", () => {
     it("has one row per session plus the header", async () => {
-      const buf = await buildReportWorkbook(makeReport(), {
-        from: "2026-05-01",
-        to: "2026-05-31",
-      });
+      const buf = await build(makeReport());
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Detail")!;
       expect(sheet.rowCount).toBe(4); // header + 3 sessions
@@ -233,10 +275,7 @@ describe("buildReportWorkbook", () => {
     //   7 Use · 8 Coach · 9 Team Rental · 10 PFA-Referred · 11 Online
     //   12 Slots · 13 Rate · 14 $ · 15 Note
     it("writes flags + dollar amounts per session", async () => {
-      const buf = await buildReportWorkbook(makeReport(), {
-        from: "2026-05-01",
-        to: "2026-05-31",
-      });
+      const buf = await build(makeReport());
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Detail")!;
 
@@ -267,10 +306,7 @@ describe("buildReportWorkbook", () => {
       summary: [],
       grandTotalCents: 0,
     };
-    const buf = await buildReportWorkbook(empty, {
-      from: "2026-05-01",
-      to: "2026-05-31",
-    });
+    const buf = await build(empty);
     const wb = await loadWorkbook(buf);
     const summary = wb.getWorksheet("Summary")!;
     expect(summary.rowCount).toBe(1);

@@ -14,10 +14,34 @@ import { config } from "dotenv";
 config({ path: ".env.local" });
 
 async function main() {
+  // Visibility line so the operator sees WHICH DB is about to be seeded
+  // before any write. Seeding is idempotent/non-destructive, so no hard
+  // confirm gate — just print the target host parsed from DATABASE_URL.
+  const targetHost =
+    process.env.DATABASE_URL?.match(/@([^/:?]+)/)?.[1] ?? "<unknown>";
+  console.log(`[seed] target DB host: ${targetHost}`);
+
   const { seedResources } = await import("./seed-resources");
   const { seedRateDefaults } = await import("./seed-rate-defaults");
   await seedResources();
   await seedRateDefaults();
+
+  const { db } = await import("./index");
+  const { seedAthletes, loadAthletesFromJson } = await import(
+    "./seed-athletes"
+  );
+  const athleteInputs = loadAthletesFromJson();
+  if (athleteInputs.length === 0) {
+    console.log(
+      "[seed] athletes: no data file at build/seed-data/athletes.json — skipping",
+    );
+  } else {
+    const { inserted, skipped } = await seedAthletes(db, athleteInputs);
+    console.log(
+      `[seed] athletes: inserted ${inserted}, skipped ${skipped} (already present)`,
+    );
+  }
+
   console.log("[seed] complete");
 }
 

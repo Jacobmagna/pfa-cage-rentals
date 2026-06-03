@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_RATES_PER_SLOT_CENTS,
   computeRate,
+  rateForProgram,
   rateForSlot,
   slotsBetween,
   totalFromSnapshot,
+  type ProgramRateOverride,
   type RateOverride,
   type ResourceType,
 } from "./billing";
@@ -110,6 +112,62 @@ describe("rateForSlot", () => {
       weight_room: 800,
     };
     expect(rateForSlot("cage", coachId, [], customDefaults)).toBe(2400);
+  });
+});
+
+describe("rateForProgram", () => {
+  const coachId = "coach-1";
+  const programId = "program-1";
+
+  it("returns the program default when no override matches", () => {
+    expect(rateForProgram(programId, coachId, [], 1500)).toBe(1500);
+  });
+
+  it("applies an override when (coachId, programId) matches", () => {
+    const overrides: ProgramRateOverride[] = [
+      { coachId, programId, ratePer30MinCents: 1800 },
+    ];
+    expect(rateForProgram(programId, coachId, overrides, 1500)).toBe(1800);
+  });
+
+  it("override wins even when the program default is null", () => {
+    const overrides: ProgramRateOverride[] = [
+      { coachId, programId, ratePer30MinCents: 1800 },
+    ];
+    expect(rateForProgram(programId, coachId, overrides, null)).toBe(1800);
+  });
+
+  it("ignores an override for a different coach", () => {
+    const overrides: ProgramRateOverride[] = [
+      { coachId: "other-coach", programId, ratePer30MinCents: 1800 },
+    ];
+    expect(rateForProgram(programId, coachId, overrides, 1500)).toBe(1500);
+  });
+
+  it("ignores an override for a different program", () => {
+    const overrides: ProgramRateOverride[] = [
+      { coachId, programId: "other-program", ratePer30MinCents: 1800 },
+    ];
+    expect(rateForProgram(programId, coachId, overrides, 1500)).toBe(1500);
+  });
+
+  it("returns null when neither override nor program default is set", () => {
+    expect(rateForProgram(programId, coachId, [], null)).toBeNull();
+  });
+
+  it("falls back to the program default when an override targets a different program", () => {
+    const overrides: ProgramRateOverride[] = [
+      { coachId, programId: "other-program", ratePer30MinCents: 1800 },
+    ];
+    expect(rateForProgram(programId, coachId, overrides, null)).toBeNull();
+  });
+
+  it("picks the first matching override (linear scan)", () => {
+    const overrides: ProgramRateOverride[] = [
+      { coachId, programId, ratePer30MinCents: 1800 },
+      { coachId, programId, ratePer30MinCents: 1500 },
+    ];
+    expect(rateForProgram(programId, coachId, overrides, 900)).toBe(1800);
   });
 });
 

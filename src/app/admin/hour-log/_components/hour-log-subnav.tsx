@@ -3,18 +3,21 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-// Hour Log sub-nav (QA2-8 — pure additive nav chrome). Modeled on
-// schedule-subnav.tsx: active by pathname, aria-current="page" on the
-// active item, gold underline, keyboard-accessible focus ring, AA
-// semantic tokens. Two sub-tabs: Hours (the existing, unchanged
-// hour-log table at /admin/hour-log) and Program Schedule (the program
-// schedule grid moved from /admin/schedule/programs to
-// /admin/hour-log/schedule).
+// Hour Log sub-nav (QA2-8 — pure additive nav chrome; QA3-1 added the
+// Programs sub-tab). Modeled on schedule-subnav.tsx: active by pathname,
+// aria-current="page" on the active item, gold underline,
+// keyboard-accessible focus ring, AA semantic tokens. Three sub-tabs:
+// Hours (the existing, unchanged hour-log table at /admin/hour-log),
+// Programs (program CRUD moved from /admin/programs to
+// /admin/hour-log/programs), and Program Schedule (the program schedule
+// grid at /admin/hour-log/schedule).
 //
 // Hours is active ONLY on the exact /admin/hour-log path so it doesn't
-// stay lit while a child route (Program Schedule) is open. Program
-// Schedule is active when the pathname starts with
-// /admin/hour-log/schedule.
+// stay lit while a child route (Programs / Program Schedule) is open.
+// Programs is active when the pathname starts with
+// /admin/hour-log/programs; Program Schedule when it starts with
+// /admin/hour-log/schedule. The two prefixes are disjoint, so they
+// never both light up.
 
 type SubTab = {
   href: string;
@@ -27,6 +30,11 @@ const SUB_TABS: SubTab[] = [
     href: "/admin/hour-log",
     label: "Hours",
     isActive: (p) => p === "/admin/hour-log",
+  },
+  {
+    href: "/admin/hour-log/programs",
+    label: "Programs",
+    isActive: (p) => p.startsWith("/admin/hour-log/programs"),
   },
   {
     href: "/admin/hour-log/schedule",

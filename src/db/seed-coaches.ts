@@ -23,7 +23,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { eq, inArray } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { users } from "./schema";
 import type { db as Database } from "./index";
 
@@ -108,13 +108,20 @@ export async function seedCoaches(
   const deduped = [...byEmail.values()];
   const emails = deduped.map((c) => c.email);
 
-  // Which of these emails already exist? Select only id/email/role — we
-  // never read or write role here beyond detecting existence.
+  // Which of these emails already exist? Match CASE-INSENSITIVELY: an
+  // existing row may store a mixed-case email (e.g. an admin who signed up
+  // as "Drc@pfasports.com"), and our seed emails are lowercased. Comparing
+  // lower(users.email) against the lowercased input finds that row instead
+  // of missing it and inserting a duplicate lowercase row. We lowercase the
+  // returned emails so the Set comparison against the (already lowercased)
+  // input is correct.
   const existingRows = await db
     .select({ email: users.email })
     .from(users)
-    .where(inArray(users.email, emails));
-  const existingEmails = new Set(existingRows.map((r) => r.email));
+    .where(inArray(sql`lower(${users.email})`, emails));
+  const existingEmails = new Set(
+    existingRows.map((r) => r.email.toLowerCase()),
+  );
 
   const toInsert = deduped
     .filter((c) => !existingEmails.has(c.email))
@@ -135,10 +142,12 @@ export async function seedCoaches(
   let updated = 0;
   for (const c of deduped) {
     if (!existingEmails.has(c.email)) continue;
+    // Match case-insensitively so we update the REAL (possibly mixed-case)
+    // row rather than missing it. c.email is already lowercased.
     await db
       .update(users)
       .set({ name: c.name, phone: c.phone })
-      .where(eq(users.email, c.email));
+      .where(sql`lower(${users.email}) = ${c.email}`);
     updated += 1;
   }
 

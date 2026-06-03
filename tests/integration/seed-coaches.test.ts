@@ -18,7 +18,7 @@
 // email ends with the unique SUFFIX) in afterAll.
 
 import { afterAll, describe, expect, it } from "vitest";
-import { eq, like } from "drizzle-orm";
+import { eq, like, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { seedCoaches, type CoachSeedInput } from "@/db/seed-coaches";
@@ -37,6 +37,13 @@ const DOMAIN = "pfa-coachtest.invalid";
 
 const NEW_COACH_EMAIL = `newcoach_${SUFFIX}@${DOMAIN}`;
 const EXISTING_ADMIN_EMAIL = `existingadmin_${SUFFIX}@${DOMAIN}`;
+
+// A pre-existing admin whose email is stored MIXED-CASE. The local-part
+// leads with mixed case ("MixedCase") but the unique `_${SUFFIX}@${DOMAIN}`
+// tail stays lowercase so the afterAll LIKE still scopes the delete to our
+// rows. The seed fixture uses the LOWERCASED form of this email.
+const MIXED_CASE_STORED_EMAIL = `MixedCase_${SUFFIX}@${DOMAIN}`;
+const MIXED_CASE_SEED_EMAIL = MIXED_CASE_STORED_EMAIL.toLowerCase();
 
 const FIXTURE: CoachSeedInput[] = [
   { name: "New Coach", email: NEW_COACH_EMAIL, phone: "555-0100" },
@@ -101,5 +108,42 @@ describeIf("seedCoaches (integration, dev branch)", () => {
     expect(ours.length).toBe(2);
     const adminRow = ours.find((r) => r.email === EXISTING_ADMIN_EMAIL);
     expect(adminRow?.role).toBe("admin");
+  });
+
+  it("matches a pre-existing MIXED-CASE admin email case-insensitively (updates, no duplicate)", async () => {
+    // Pre-seed an admin whose stored email is MIXED-CASE.
+    await db.insert(users).values({
+      email: MIXED_CASE_STORED_EMAIL,
+      name: "Mixed Original Name",
+      phone: null,
+      role: "admin",
+    });
+
+    // Seed with the LOWERCASED form of that email.
+    const fixture: CoachSeedInput[] = [
+      {
+        name: "Mixed Updated Name",
+        email: MIXED_CASE_SEED_EMAIL,
+        phone: "555-0300",
+      },
+    ];
+    const res = await seedCoaches(db, fixture);
+    // Existing row found case-insensitively → updated, not inserted.
+    expect(res.inserted).toBe(0);
+    expect(res.updated).toBe(1);
+
+    // (a) NO duplicate: exactly one row matches case-insensitively.
+    const matches = await db
+      .select({ email: users.email, name: users.name, role: users.role, phone: users.phone })
+      .from(users)
+      .where(sql`lower(${users.email}) = ${MIXED_CASE_SEED_EMAIL}`);
+    expect(matches.length).toBe(1);
+
+    // (b) name + phone updated; (c) role still "admin"; original case kept.
+    const [row] = matches;
+    expect(row.email).toBe(MIXED_CASE_STORED_EMAIL);
+    expect(row.name).toBe("Mixed Updated Name");
+    expect(row.phone).toBe("555-0300");
+    expect(row.role).toBe("admin");
   });
 });

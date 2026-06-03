@@ -23,7 +23,9 @@ import {
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import { EditableName } from "../_components/editable-name";
+import { StatCard } from "../_components/stat-card";
 import { totalFromSnapshot } from "@/lib/billing";
+import { formatDollars } from "@/lib/format-money";
 import {
   formatPfaDateLong,
   formatPfaMonthYear,
@@ -180,20 +182,20 @@ export default async function AdminHome() {
         aria-label="Today and this month at a glance"
         className="mb-12 grid gap-4 sm:grid-cols-3"
       >
-        <Stat
+        <StatCard
           icon={<CalendarDays className="h-4 w-4" />}
           label="Sessions today"
           value={sessionsToday.toString()}
           sub={sessionsToday === 0 ? "Quiet day so far" : "Booked"}
         />
-        <Stat
+        <StatCard
           icon={<Coins className="h-4 w-4" />}
           label={`Owed in ${formatPfaMonthYear(now)}`}
           value={formatDollars(monthCents)}
           sub={`${monthSessionRows.length} ${monthSessionRows.length === 1 ? "session" : "sessions"} this month`}
           accent
         />
-        <Stat
+        <StatCard
           icon={<ClipboardList className="h-4 w-4" />}
           label="Active blocks today"
           value={blocksToday.toString()}
@@ -292,58 +294,6 @@ export default async function AdminHome() {
   );
 }
 
-function Stat({
-  icon,
-  label,
-  value,
-  sub,
-  accent,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  sub: string;
-  accent?: boolean;
-}) {
-  return (
-    <div
-      className={[
-        "relative overflow-hidden rounded-2xl border px-6 py-5 shadow-[var(--shadow-md)] transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-lg)]",
-        accent
-          ? "border-gold/40 bg-gradient-to-b from-[#fffdf8] to-[#fcf4e2]"
-          : "border-line bg-surface",
-      ].join(" ")}
-    >
-      {accent ? (
-        <span
-          aria-hidden="true"
-          className="absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-gold to-gold-strong"
-        />
-      ) : null}
-      <div
-        className={[
-          "flex items-center gap-2",
-          accent ? "text-gold-strong" : "text-fg-muted",
-        ].join(" ")}
-      >
-        {icon}
-        <p className="text-[11px] uppercase tracking-[0.14em] text-fg-muted">
-          {label}
-        </p>
-      </div>
-      <p
-        className={[
-          "tnum mt-4 text-4xl font-semibold tracking-tight",
-          accent ? "text-gold-strong" : "text-fg",
-        ].join(" ")}
-      >
-        {value}
-      </p>
-      <p className="mt-2 text-xs text-fg-subtle">{sub}</p>
-    </div>
-  );
-}
-
 function NavCard({
   href,
   icon,
@@ -372,10 +322,6 @@ function NavCard({
       </span>
     </Link>
   );
-}
-
-function formatDollars(cents: number): string {
-  return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
 function formatRelative(then: Date, now: Date): string {

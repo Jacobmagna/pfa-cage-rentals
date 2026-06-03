@@ -6,6 +6,7 @@ import {
   updateAthleteFormAction,
   type EditAthleteResult,
 } from "../form-actions";
+import { DateInput } from "@/app/_components/date-input";
 import { TermPicker, parseTerm } from "./term-picker";
 
 export type AthleteEditInitialValues = {
@@ -151,8 +152,7 @@ export function AthleteEditDialog({
             </Field>
           </div>
           <Field label="Birthday" optional>
-            <input
-              type="date"
+            <DateInput
               name="birthday"
               defaultValue={defaults.birthday}
               className={inputStyles}

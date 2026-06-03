@@ -8,6 +8,7 @@ import {
 } from "../form-actions";
 import type { ResourceOption } from "./types";
 import { TimeSelect } from "@/app/_components/time-select";
+import { DateInput } from "@/app/_components/date-input";
 import { SessionFlagsRow } from "@/app/_components/session-flags-row";
 import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 
@@ -202,8 +203,7 @@ export function EditSessionDialog({
 
           <div className="grid grid-cols-3 gap-3">
             <Field label="Date">
-              <input
-                type="date"
+              <DateInput
                 name="date"
                 required
                 defaultValue={defaults.date}

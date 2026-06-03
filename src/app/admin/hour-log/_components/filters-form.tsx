@@ -4,7 +4,7 @@
 //
 // Coach + Program are single <select> dropdowns (the hour-log filter
 // shape is one coach / one program, unlike the billing report's
-// multi-select). Date range stays as two <input type="date"> inputs.
+// multi-select). Date range stays as two typable DateInput fields.
 //
 // "No filter" semantics: the empty-value option submits an empty
 // string, which the page's normalizer reads as "all". A cleared
@@ -12,6 +12,7 @@
 
 import { Search, X } from "lucide-react";
 import Link from "next/link";
+import { DateInput } from "@/app/_components/date-input";
 
 type CoachOption = {
   id: string;
@@ -50,16 +51,14 @@ export function FiltersForm({
     >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
         <Field label="From">
-          <input
-            type="date"
+          <DateInput
             name="from"
             defaultValue={values.from}
             className={inputStyles}
           />
         </Field>
         <Field label="To">
-          <input
-            type="date"
+          <DateInput
             name="to"
             defaultValue={values.to}
             className={inputStyles}

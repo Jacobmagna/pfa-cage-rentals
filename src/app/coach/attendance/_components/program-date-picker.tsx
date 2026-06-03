@@ -10,8 +10,9 @@
 // so the coach doesn't have to hunt for a button, but an explicit "Load"
 // submit is kept for accessibility / no-JS.
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
+import { DateInput } from "@/app/_components/date-input";
 
 export type ProgramOption = {
   id: string;
@@ -28,9 +29,21 @@ export function ProgramDatePicker({
   date: string;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
+  const [dateIso, setDateIso] = useState(date);
 
   function autoSubmit() {
     formRef.current?.requestSubmit();
+  }
+
+  // The date field is typable now, so we auto-submit only once it
+  // resolves to a complete valid date (or is cleared) rather than on
+  // every keystroke — preserving the "change the control → reload the
+  // roster" UX without firing a GET mid-typing.
+  function handleDateChange(iso: string) {
+    setDateIso(iso);
+    if (iso !== "" && iso !== date) {
+      autoSubmit();
+    }
   }
 
   return (
@@ -65,12 +78,11 @@ export function ProgramDatePicker({
         </Field>
 
         <Field label="Date">
-          <input
-            type="date"
+          <DateInput
             name="date"
-            defaultValue={date}
+            value={dateIso}
             aria-label="Date"
-            onChange={autoSubmit}
+            onChange={handleDateChange}
             className={inputStyles}
           />
         </Field>

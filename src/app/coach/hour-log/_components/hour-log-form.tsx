@@ -7,6 +7,7 @@ import {
   type HourLogActionResult,
 } from "../form-actions";
 import { CompletionPanel } from "@/app/_components/completion-panel";
+import { DateInput } from "@/app/_components/date-input";
 import { formatPfaDate } from "@/lib/timezone";
 
 export type ProgramOption = {
@@ -103,8 +104,7 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
         </Field>
 
         <Field label="Date">
-          <input
-            type="date"
+          <DateInput
             name="date"
             required
             defaultValue={defaults.date}

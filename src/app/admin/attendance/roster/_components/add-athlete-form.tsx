@@ -6,6 +6,7 @@ import {
   addAthleteFormAction,
   type AddAthleteResult,
 } from "../form-actions";
+import { DateInput } from "@/app/_components/date-input";
 import { TermPicker } from "./term-picker";
 
 const INITIAL_STATE: AddAthleteResult = { ok: true, addedAt: 0 };
@@ -86,8 +87,7 @@ export function AddAthleteForm() {
           />
         </Field>
         <Field label="Birthday" optional>
-          <input
-            type="date"
+          <DateInput
             name="birthday"
             defaultValue={defaults.birthday}
             className={inputStyles}

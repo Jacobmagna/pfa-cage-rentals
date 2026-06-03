@@ -16,6 +16,7 @@ import { logOwnSessionsBatch } from "../../actions";
 import type { ResourceOption } from "../../_components/types";
 import { CompletionPanel } from "@/app/_components/completion-panel";
 import { TimeSelect } from "@/app/_components/time-select";
+import { DateInput } from "@/app/_components/date-input";
 import { SessionFlagsRow } from "@/app/_components/session-flags-row";
 import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
 import {
@@ -426,13 +427,12 @@ export function LogSessionForm({
         </Field>
 
         <Field label="Date">
-          <input
-            type="date"
+          <DateInput
             name="date"
             required
             value={live.date}
-            onChange={(e) =>
-              setLive((p) => ({ ...p, date: e.target.value }))
+            onChange={(iso) =>
+              setLive((p) => ({ ...p, date: iso }))
             }
             className={inputStyles}
           />

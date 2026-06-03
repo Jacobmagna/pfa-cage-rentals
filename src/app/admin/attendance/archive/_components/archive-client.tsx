@@ -4,6 +4,8 @@ import { useMemo, useState, useTransition } from "react";
 import { ArchiveRestore } from "lucide-react";
 import { restoreAthletesAction } from "../form-actions";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
+import { ListSearch } from "@/app/_components/list-search";
+import { nameFields, nameMatchesQuery } from "@/app/_components/list-search.logic";
 
 export type ProgramOption = {
   id: string;
@@ -33,6 +35,16 @@ export function ArchiveClient({
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [isRestoring, startTransition] = useTransition();
+  const [query, setQuery] = useState("");
+
+  // Client-side name filter over the already-loaded archived rows.
+  const filtered = useMemo(
+    () =>
+      athletes.filter((a) =>
+        nameMatchesQuery(query, nameFields(a.firstName, a.lastName)),
+      ),
+    [athletes, query],
+  );
 
   // Drop selected ids that vanished after a revalidation (e.g. restored).
   const selectedIds = useMemo(() => {
@@ -100,6 +112,26 @@ export function ArchiveClient({
         </div>
       ) : null}
 
+      <ListSearch
+        value={query}
+        onChange={setQuery}
+        placeholder="Search archived players…"
+        label="Search archived players by name"
+        resultCount={filtered.length}
+        totalCount={athletes.length}
+      />
+
+      {filtered.length === 0 ? (
+        <div className="rounded-xl border border-line bg-surface p-12 text-center shadow-[var(--shadow-sm)]">
+          <p className="text-sm font-medium text-fg">
+            No players match &ldquo;{query.trim()}&rdquo;.
+          </p>
+          <p className="mt-1.5 text-sm text-fg-muted">
+            Try a different name, or clear the search to see all archived
+            players.
+          </p>
+        </div>
+      ) : (
       <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
         <table className="w-full min-w-[640px] text-sm">
           <thead className="border-b border-line text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
@@ -131,7 +163,7 @@ export function ArchiveClient({
             </tr>
           </thead>
           <tbody>
-            {athletes.map((row) => {
+            {filtered.map((row) => {
               const isSelected = selectedIds.includes(row.id);
               return (
                 <tr
@@ -177,6 +209,7 @@ export function ArchiveClient({
           </tbody>
         </table>
       </div>
+      )}
 
       <ConfirmDialog
         open={restoreOpen}

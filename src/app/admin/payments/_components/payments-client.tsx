@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { Check, ClipboardCopy, Pencil, Plus, Trash2 } from "lucide-react";
 import { confirmPayment, deletePayment } from "../actions";
 import { PaymentDialog, type PaymentInitialValues } from "./payment-dialog";
 import { PFA_TIMEZONE } from "@/lib/timezone";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
+import { ListSearch } from "@/app/_components/list-search";
+import { nameMatchesQuery } from "@/app/_components/list-search.logic";
 
 // Top-level client island for /admin/payments. Owns:
 //   - record/edit dialog open state
@@ -89,6 +91,17 @@ export function PaymentsClient({
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const [confirmRow, setConfirmRow] = useState<RecentPaymentRow | null>(null);
   const [isDeleting, startTransition] = useTransition();
+  const [balanceQuery, setBalanceQuery] = useState("");
+
+  // Client-side coach-name filter over the already-loaded balance rows.
+  // The totals row stays the full-roster total (see BalancesTable).
+  const filteredBalanceRows = useMemo(
+    () =>
+      balanceRows.filter((r) =>
+        nameMatchesQuery(balanceQuery, [r.coachName, r.coachEmail]),
+      ),
+    [balanceRows, balanceQuery],
+  );
 
   const openCreate = (coachId?: string) =>
     setDialog({ mode: "create", coachId });
@@ -155,7 +168,14 @@ export function PaymentsClient({
         </button>
       </div>
 
-      <BalancesTable rows={balanceRows} totals={totals} onRecord={openCreate} />
+      <BalancesTable
+        rows={filteredBalanceRows}
+        totalRowCount={balanceRows.length}
+        totals={totals}
+        onRecord={openCreate}
+        query={balanceQuery}
+        onQueryChange={setBalanceQuery}
+      />
 
       <PendingInbox
         rows={pendingPayments}
@@ -202,14 +222,21 @@ export function PaymentsClient({
 
 function BalancesTable({
   rows,
+  totalRowCount,
   totals,
   onRecord,
+  query,
+  onQueryChange,
 }: {
   rows: BalanceRow[];
+  totalRowCount: number;
   totals: BalanceTotals;
   onRecord: (coachId: string) => void;
+  query: string;
+  onQueryChange: (next: string) => void;
 }) {
-  if (rows.length === 0) {
+  // No coaches on the roster at all — nothing to search.
+  if (totalRowCount === 0) {
     return (
       <div className="rounded-lg border border-line/60 bg-surface/40 p-10 text-center mb-10">
         <p className="text-sm text-fg-muted">
@@ -226,6 +253,23 @@ function BalancesTable({
       >
         Balances
       </h2>
+      <div className="mb-3">
+        <ListSearch
+          value={query}
+          onChange={onQueryChange}
+          placeholder="Search coaches…"
+          label="Search balances by coach"
+          resultCount={rows.length}
+          totalCount={totalRowCount}
+        />
+      </div>
+      {rows.length === 0 ? (
+        <div className="rounded-lg border border-line/60 bg-surface/40 p-10 text-center">
+          <p className="text-sm text-fg-muted">
+            No coaches match &ldquo;{query.trim()}&rdquo;.
+          </p>
+        </div>
+      ) : (
       <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
         <table className="w-full min-w-[560px]">
           <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
@@ -296,7 +340,14 @@ function BalancesTable({
           </tbody>
           <tfoot className="border-t border-line bg-surface-2/50">
             <tr className="text-sm font-medium">
-              <td className="px-4 py-3 text-fg-muted align-top">Roster total</td>
+              <td className="px-4 py-3 text-fg-muted align-top">
+                Roster total
+                {query.trim().length > 0 ? (
+                  <span className="block text-[11px] font-normal text-fg-subtle">
+                    Full roster — not the filtered set
+                  </span>
+                ) : null}
+              </td>
               <td className="px-4 py-3 font-mono tnum tabular-nums text-right text-fg">
                 <span className="block">{formatDollars(totals.owed)}</span>
                 <span className="block text-fg-subtle text-xs tnum font-normal">
@@ -317,6 +368,7 @@ function BalancesTable({
           </tfoot>
         </table>
       </div>
+      )}
     </section>
   );
 }

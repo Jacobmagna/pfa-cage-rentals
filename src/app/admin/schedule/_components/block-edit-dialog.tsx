@@ -9,7 +9,7 @@
 // tab; this component is edit-only.
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
-import { Trash2, X } from "lucide-react";
+import { Pencil, Trash2, X } from "lucide-react";
 import {
   deleteBlockAction,
   updateBlockFormAction,
@@ -43,6 +43,7 @@ export function BlockEditDialog({
   initial?: BlockEditInitialValues;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const editButtonRef = useRef<HTMLButtonElement>(null);
   const [state, formAction, pending] = useActionState(
     updateBlockFormAction,
     INITIAL_STATE,
@@ -50,12 +51,32 @@ export function BlockEditDialog({
   const [deleting, setDeleting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  // This dialog is edit-only; an existing block always opens to the
+  // read-only summary first (QA2-5), with an Edit button to reveal the
+  // form. With no `initial` (defensive) we fall straight to the form.
+  const isEdit = Boolean(initial);
+  const [view, setView] = useState<"summary" | "edit">(
+    isEdit ? "summary" : "edit",
+  );
+  // Reset the view on each (re)open via the adjust-during-render pattern
+  // keyed on the open transition — NOT setState-in-effect (repo lint).
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (open) setView(isEdit ? "summary" : "edit");
+  }
+
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
     if (open && !dialog.open) dialog.showModal();
     else if (!open && dialog.open) dialog.close();
   }, [open]);
+
+  // When entering the dialog in summary view, focus the Edit button.
+  useEffect(() => {
+    if (open && view === "summary") editButtonRef.current?.focus();
+  }, [open, view]);
 
   // Auto-close after a successful update.
   const wasPending = useRef(false);
@@ -97,6 +118,14 @@ export function BlockEditDialog({
     };
   }, [initial, state]);
 
+  const resourceName = useMemo(() => {
+    if (!initial) return "";
+    return (
+      resources.find((r) => r.id === initial.resourceId)?.name ??
+      initial.resourceId
+    );
+  }, [initial, resources]);
+
   const handleDelete = () => {
     if (!initial) return;
     setConfirmOpen(true);
@@ -119,6 +148,73 @@ export function BlockEditDialog({
       ref={dialogRef}
       className="m-auto w-full max-w-lg rounded-xl border border-line bg-surface text-fg p-0 shadow-[var(--shadow-lg)] backdrop:bg-page/70 backdrop:backdrop-blur-sm"
     >
+      {view === "summary" && initial ? (
+        <div className="space-y-5 p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.14em] text-fg-muted">
+                Blocked time
+              </p>
+              <h2 className="text-xl font-semibold tracking-tight mt-0.5">
+                Block
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex items-center justify-center h-8 w-8 -mr-1 -mt-1 rounded-md text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <dl className="space-y-3">
+            <DetailRow label="Resource" value={resourceName} />
+            <DetailRow
+              label="Date"
+              value={formatPfaDate(initial.startAt)}
+              tnum
+            />
+            <DetailRow
+              label="Time"
+              value={`${formatPfaTime(initial.startAt)} – ${formatPfaTime(initial.endAt)}`}
+              tnum
+            />
+            <DetailRow label="Reason" value={initial.reason} />
+          </dl>
+
+          <div className="flex items-center justify-between gap-2 pt-2">
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="inline-flex items-center gap-1.5 rounded-md border border-danger/30 bg-danger/10 text-danger hover:bg-danger/20 h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
+            >
+              <Trash2 className="h-4 w-4" />
+              {deleting ? "Deleting…" : "Delete block"}
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md border border-line bg-surface-2 text-fg-muted hover:text-fg hover:border-line-strong h-9 px-4 text-sm font-medium transition-colors"
+              >
+                Close
+              </button>
+              <button
+                ref={editButtonRef}
+                type="button"
+                onClick={() => setView("edit")}
+                className="inline-flex items-center gap-1.5 rounded-md bg-gold text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover h-9 px-4 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+              >
+                <Pencil className="h-4 w-4" />
+                Edit
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
       <form
         action={formAction}
         // Key includes initial.id so opening edit on a different block
@@ -254,6 +350,7 @@ export function BlockEditDialog({
           </div>
         </div>
       </form>
+      )}
 
       <ConfirmDialog
         open={confirmOpen}
@@ -295,6 +392,26 @@ function Field({
         </span>
       ) : null}
     </label>
+  );
+}
+
+// Read-only label/value row for the summary view (QA2-5).
+function DetailRow({
+  label,
+  value,
+  tnum,
+}: {
+  label: string;
+  value: string;
+  tnum?: boolean;
+}) {
+  return (
+    <div className="grid grid-cols-[7rem_1fr] gap-3 items-baseline">
+      <dt className="text-xs uppercase tracking-wider text-fg-muted">
+        {label}
+      </dt>
+      <dd className={`text-sm text-fg ${tnum ? "tnum" : ""}`}>{value}</dd>
+    </div>
   );
 }
 

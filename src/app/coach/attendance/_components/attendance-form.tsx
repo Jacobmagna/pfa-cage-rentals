@@ -12,12 +12,12 @@
 // session. The form is remounted on each result via a key so the
 // pending-button state resets cleanly. Mirrors the coach hour-log form.
 
-import { useActionState } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { useActionState, useState } from "react";
 import {
   submitOwnAttendanceFormAction,
   type AttendanceActionResult,
 } from "../form-actions";
+import { CompletionPanel } from "@/app/_components/completion-panel";
 
 export type RosterAthlete = {
   id: string;
@@ -47,8 +47,20 @@ export function AttendanceForm({
     INITIAL_STATE,
   );
 
-  const showSuccess = state.ok && state.savedAt > 0;
   const showError = !state.ok;
+
+  // Collapse-to-confirmation: on a successful save we hide the roster
+  // form and render CompletionPanel in its place. `savedAt` is the
+  // success nonce; "Edit attendance" acks it and returns to the form,
+  // which prefills from the now-saved state (re-submitting edits the
+  // SAME session), NOT a blank form. Ephemeral + component-local so
+  // navigating away and back remounts to the base form. No
+  // setState-in-effect (pure compare).
+  const successNonce = state.ok ? state.savedAt : 0;
+  const present = state.ok ? state.present : 0;
+  const total = state.ok ? state.total : 0;
+  const [ackedNonce, setAckedNonce] = useState(0);
+  const showDone = successNonce > 0 && successNonce !== ackedNonce;
 
   // Remount on each distinct result so the checkboxes pick the latest
   // server-rendered prefill (the page re-renders after revalidatePath)
@@ -59,20 +71,20 @@ export function AttendanceForm({
       : "fresh"
     : `err-${state.error.code}-${state.error.message}`;
 
+  if (showDone) {
+    return (
+      <div className="space-y-4 max-w-md">
+        <CompletionPanel
+          message={`Attendance saved — ${present} of ${total} present.`}
+          actionLabel="Edit attendance"
+          onAction={() => setAckedNonce(successNonce)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 max-w-md">
-      {showSuccess ? (
-        <div
-          role="status"
-          className="rounded-md border border-success/30 bg-success/10 px-3 py-2.5 text-sm text-success flex items-center gap-2"
-        >
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>
-            Attendance saved — {state.present} of {state.total} present.
-          </span>
-        </div>
-      ) : null}
-
       {showError ? (
         <div
           role="alert"

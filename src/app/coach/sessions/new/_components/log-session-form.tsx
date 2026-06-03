@@ -7,13 +7,14 @@ import {
   useTransition,
   type FormEvent,
 } from "react";
-import { CheckCircle2, ChevronDown, Plus } from "lucide-react";
+import { ChevronDown, Plus } from "lucide-react";
 import {
   logOwnSessionFormAction,
   type CoachActionResult,
 } from "../form-actions";
 import { logOwnSessionsBatch } from "../../actions";
 import type { ResourceOption } from "../../_components/types";
+import { CompletionPanel } from "@/app/_components/completion-panel";
 import { TimeSelect } from "@/app/_components/time-select";
 import { SessionFlagsRow } from "@/app/_components/session-flags-row";
 import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
@@ -95,18 +96,39 @@ export function LogSessionForm({
     };
   }, [state]);
 
-  // Banner state. The batch banner takes precedence when it's freshly
-  // set — both surfaces never have a meaningful state at once because
-  // each submission path resets the other's transient state.
-  const showSingleSuccess = state.ok && state.loggedAt > 0;
   const showSingleError = !state.ok;
-  const showBatchSuccess = batchResult.status === "success";
   const showBatchError = batchResult.status === "error";
+
+  // Collapse-to-confirmation across BOTH success paths:
+  //   - single slot → useActionState `state.loggedAt` (nonce + message
+  //     "Session logged.")
+  //   - batch        → `batchResult.at` (nonce + count → "{n} sessions
+  //     logged.")
+  // Unify into one `successNonce`; the batch path takes precedence when
+  // freshly set (both never carry a meaningful state at once — each
+  // submission path resets the other's transient state). Acking via the
+  // panel's "Log another session" lands us on a FRESH blank form: the
+  // single path already remounts via `formKey` (key includes loggedAt);
+  // the batch path doesn't bump useActionState, so the ack also bumps
+  // `resetNonce` which feeds `formKey` to force a clean remount (and the
+  // batch submit already cleared slots + revealNotes). Ephemeral +
+  // component-local so navigating away and back remounts to base. No
+  // setState-in-effect (pure compare).
+  const singleNonce = state.ok ? state.loggedAt : 0;
+  const batchNonce = batchResult.status === "success" ? batchResult.at : 0;
+  const successMessage =
+    batchResult.status === "success"
+      ? `${batchResult.count} sessions logged.`
+      : "Session logged.";
+  const successNonce = batchNonce > 0 ? batchNonce : singleNonce;
+  const [ackedNonce, setAckedNonce] = useState(0);
+  const [resetNonce, setResetNonce] = useState(0);
+  const showDone = successNonce > 0 && successNonce !== ackedNonce;
 
   const formKey = state.ok
     ? state.loggedAt > 0
       ? `ok-${state.loggedAt}`
-      : "fresh"
+      : `fresh-${resetNonce}`
     : `err-${state.error.code}-${state.error.message}`;
 
   // Live state for the four "echoed" fields that the AvailabilityPanel
@@ -285,32 +307,55 @@ export function LogSessionForm({
     });
   };
 
+  // "Log another session" → ack the success and return to a FRESH blank
+  // form. The single-slot path is reset by useActionState (new `state`
+  // → `defaults` recompute → prevDefaults resets `live`/useType). The
+  // batch path leaves `state` untouched, so we must reset the
+  // parent-owned controlled state ourselves and bump `resetNonce`
+  // (feeds `formKey`) to remount the form's uncontrolled fields. We use
+  // the current `defaults` (blank on the fresh path) as the reset source.
+  const handleAckSuccess = () => {
+    if (batchNonce > 0) {
+      setLive({
+        date: defaults.date,
+        resourceId: defaults.resourceId,
+        startTime: defaults.startTime,
+        endTime: defaults.endTime,
+      });
+      setUseTypeValue(defaults.useType);
+      setSlotLengthMinutes(30);
+      setSlots([]);
+      setRevealNotes(false);
+      setBatchResult({ status: "idle" });
+      setResetNonce((n) => n + 1);
+    }
+    setAckedNonce(successNonce);
+  };
+
+  if (showDone) {
+    return (
+      <div className="space-y-4">
+        <CompletionPanel
+          message={successMessage}
+          actionLabel="Log another session"
+          onAction={handleAckSuccess}
+        />
+        <AvailabilityPanel
+          resources={resources}
+          date={live.date}
+          resourceId={live.resourceId}
+          onResourceChange={(id) =>
+            setLive((p) => ({ ...p, resourceId: id }))
+          }
+          startTime={live.startTime}
+          endTime={live.endTime}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      {showSingleSuccess && !showBatchSuccess ? (
-        <div
-          role="status"
-          className="rounded-md border border-success/30 bg-success/10 px-3 py-2.5 text-sm text-success flex items-center gap-2"
-        >
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>Session logged. Ready for the next one.</span>
-        </div>
-      ) : null}
-
-      {showBatchSuccess ? (
-        <div
-          role="status"
-          className="rounded-md border border-success/30 bg-success/10 px-3 py-2.5 text-sm text-success flex items-center gap-2"
-        >
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>
-            {batchResult.status === "success"
-              ? `${batchResult.count} sessions logged.`
-              : null}
-          </span>
-        </div>
-      ) : null}
-
       {showSingleError ? (
         <div
           role="alert"

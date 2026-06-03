@@ -1,6 +1,6 @@
 import { LoadingShell, Skeleton } from "@/app/_components/skeleton";
 
-// Mirrors /admin/programs: back link, kicker + h1 + sublabel, the
+// Mirrors /admin/hour-log/programs: back link, kicker + h1 + sublabel, the
 // add-program card, then the programs table.
 export default function Loading() {
   return (

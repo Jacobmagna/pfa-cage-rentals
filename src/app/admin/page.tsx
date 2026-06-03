@@ -232,7 +232,7 @@ export default async function AdminHome() {
             stat={`${activeCoaches} active`}
           />
           <NavCard
-            href="/admin/programs"
+            href="/admin/hour-log/programs"
             icon={<FolderKanban className="h-4 w-4" />}
             title="Programs"
             stat="Caps + coach assignments"

@@ -3,7 +3,7 @@
 // as a public RPC endpoint — and these functions take the actor as a
 // parameter, so exposing them directly would let anyone forge an admin
 // identity. The public, requireRole("admin")-gated wrappers live in
-// src/app/admin/programs/actions.ts.
+// src/app/admin/hour-log/programs/actions.ts.
 //
 // Mirrors src/lib/server/athlete-actions.ts + hour-log-actions.ts:
 //   *Internal(actor, input) — Zod-parse → business checks → db mutate →

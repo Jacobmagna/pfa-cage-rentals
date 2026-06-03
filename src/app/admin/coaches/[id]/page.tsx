@@ -61,6 +61,7 @@ export default async function AdminCoachDetailPage({
           email: users.email,
           role: users.role,
           createdAt: users.createdAt,
+          phone: users.phone,
           zelleContact: users.zelleContact,
         })
         .from(users)
@@ -192,6 +193,9 @@ export default async function AdminCoachDetailPage({
           {coach.name ?? coach.email}
         </h1>
         <p className="text-sm text-fg-muted">{coach.email}</p>
+        <p className="text-sm text-fg-muted">
+          Phone: {coach.phone ?? "—"}
+        </p>
         <p className="text-xs text-fg-subtle font-mono tnum tabular-nums">
           Joined {formatPfaDateMedium(coach.createdAt)}
         </p>

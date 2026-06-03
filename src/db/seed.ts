@@ -42,6 +42,25 @@ async function main() {
     );
   }
 
+  const { seedPrograms } = await import("./seed-programs");
+  const programResult = await seedPrograms(db);
+  console.log(
+    `[seed] programs: inserted ${programResult.inserted}, skipped ${programResult.skipped}`,
+  );
+
+  const { seedCoaches, loadCoachesFromJson } = await import("./seed-coaches");
+  const coachInputs = loadCoachesFromJson();
+  if (coachInputs.length === 0) {
+    console.log(
+      "[seed] coaches: no data file at build/seed-data/coaches.json — skipping",
+    );
+  } else {
+    const coachResult = await seedCoaches(db, coachInputs);
+    console.log(
+      `[seed] coaches: inserted ${coachResult.inserted}, updated ${coachResult.updated}`,
+    );
+  }
+
   console.log("[seed] complete");
 }
 

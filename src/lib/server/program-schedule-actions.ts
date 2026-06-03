@@ -4,7 +4,7 @@
 // the actor as a parameter, so exposing them would let anyone forge an
 // admin identity.
 //
-// Public wrappers in src/app/admin/schedule/programs/actions.ts gate
+// Public wrappers in src/app/admin/hour-log/schedule/actions.ts gate
 // these with requireRole("admin").
 //
 // Pipeline mirrors block-actions.ts / hour-log-actions.ts, SIMPLIFIED —

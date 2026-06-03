@@ -27,29 +27,35 @@ export async function AppShell({
   return (
     <>
       <header className="sticky top-0 z-40 h-16 border-b border-line bg-page/80 backdrop-blur-md">
-        <div className="mx-auto flex h-full max-w-7xl items-center justify-between px-6 lg:px-8">
-          <Link
-            href={role === "admin" ? "/admin" : "/coach"}
-            className="flex items-center gap-2.5 group"
-          >
-            <Image
-              src="/pfa-logo.png"
-              alt="PFA"
-              width={28}
-              height={28}
-              priority
-              className="h-7 w-7 object-contain"
-            />
-            <span className="font-semibold tracking-tight text-[17px]">
-              <span className="text-fg">PFA</span>{" "}
-              <span className="text-gold-strong">Engine</span>
-            </span>
-            <span className="hidden sm:inline text-[10px] uppercase tracking-[0.18em] text-fg-subtle border-l border-line pl-2">
-              {role}
-            </span>
-          </Link>
+        <div className="mx-auto flex h-full max-w-7xl items-center justify-between gap-4 px-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <Link
+              href={role === "admin" ? "/admin" : "/coach"}
+              className="flex shrink-0 items-center gap-2.5 group"
+            >
+              <Image
+                src="/pfa-logo.png"
+                alt="PFA"
+                width={28}
+                height={28}
+                priority
+                className="h-7 w-7 object-contain"
+              />
+              <span className="font-semibold tracking-tight text-[17px]">
+                <span className="text-fg">PFA</span>{" "}
+                <span className="text-gold-strong">Engine</span>
+              </span>
+              <span className="hidden sm:inline text-[10px] uppercase tracking-[0.18em] text-fg-subtle border-l border-line pl-2">
+                {role}
+              </span>
+            </Link>
 
-          <div className="flex items-center gap-4">
+            <div className="border-l border-line pl-3 min-w-0">
+              <TabNav role={role} />
+            </div>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-4">
             <span className="hidden sm:inline text-xs text-fg-muted">
               {displayName}
             </span>
@@ -69,8 +75,6 @@ export async function AppShell({
           </div>
         </div>
       </header>
-
-      <TabNav role={role} />
 
       <main className="flex-1 mx-auto w-full max-w-7xl px-6 lg:px-8 py-10">
         {children}

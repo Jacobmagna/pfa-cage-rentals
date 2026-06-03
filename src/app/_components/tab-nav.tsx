@@ -40,33 +40,28 @@ export function TabNav({ role }: { role: "admin" | "coach" }) {
   const current = activeTab(pathname, role);
 
   return (
-    <nav
-      aria-label="Sections"
-      className="border-b border-line bg-surface"
-    >
-      <div className="mx-auto w-full max-w-7xl px-6 lg:px-8">
-        <ul className="flex gap-1 overflow-x-auto whitespace-nowrap -mb-px">
-          {tabs.map((tab) => {
-            const isActive = tab.key === current;
-            return (
-              <li key={tab.key}>
-                <Link
-                  href={hrefFor(tab.key, base)}
-                  aria-current={isActive ? "page" : undefined}
-                  className={[
-                    "inline-flex items-center px-3 sm:px-4 py-3 text-sm border-b-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold rounded-sm",
-                    isActive
-                      ? "border-gold text-fg font-semibold"
-                      : "border-transparent text-fg-muted font-medium hover:text-fg",
-                  ].join(" ")}
-                >
-                  {tab.label}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
+    <nav aria-label="Sections" className="min-w-0">
+      <ul className="flex items-center gap-1 overflow-x-auto whitespace-nowrap">
+        {tabs.map((tab) => {
+          const isActive = tab.key === current;
+          return (
+            <li key={tab.key}>
+              <Link
+                href={hrefFor(tab.key, base)}
+                aria-current={isActive ? "page" : undefined}
+                className={[
+                  "inline-flex items-center rounded-md px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold",
+                  isActive
+                    ? "bg-gold/10 text-gold-strong font-semibold"
+                    : "text-fg-muted font-medium hover:text-fg",
+                ].join(" ")}
+              >
+                {tab.label}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
     </nav>
   );
 }

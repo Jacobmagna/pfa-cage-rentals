@@ -16,8 +16,8 @@ import {
   pfaDayEnd,
   pfaDayStart,
 } from "@/lib/timezone";
-import { AutoRefresh } from "../_components/auto-refresh";
-import { WeekNav } from "../_components/week-nav";
+import { AutoRefresh } from "@/app/admin/schedule/_components/auto-refresh";
+import { WeekNav } from "@/app/admin/schedule/_components/week-nav";
 import { ProgramScheduleGrid } from "./_components/program-schedule-grid";
 
 // Programs schedule grid page (SCR-1a). Mirrors the cage schedule

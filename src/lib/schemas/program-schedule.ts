@@ -48,3 +48,63 @@ export type CreateProgramScheduleBlockInput = z.infer<
 export type UpdateProgramScheduleBlockInput = z.infer<
   typeof updateProgramScheduleBlockSchema
 >;
+
+// ---------------------------------------------------------------------------
+// RECUR-a: recurring program-schedule SERIES schemas.
+//
+// A series is a weekly recurrence definition that the action layer
+// materializes into one program_schedule_blocks row per occurrence.
+// Validation mirrors the block schema: structural/format rules live here,
+// cross-cutting business rules (program-active, coach-is-coach) and the
+// occurrence-count cap live in the generator + action.
+//
+//  - daysOfWeek: 0=Sunday .. 6=Saturday (JS getUTCDay convention),
+//    non-empty, deduped is left to the action/DB.
+//  - startTime/endTime: zero-padded 24h "HH:MM" (the format TimeSelect
+//    emits); start<end enforced here AND by the generator.
+//  - startsOn/endsOn: "YYYY-MM-DD" PFA calendar dates (endsOn inclusive).
+
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+const programScheduleSeriesShape = {
+  programId: z.string().min(1, "programId is required"),
+  scheduledCoachId: z.string().min(1, "scheduledCoachId is required"),
+  daysOfWeek: z
+    .array(z.number().int().min(0).max(6))
+    .min(1, "Pick at least one weekday"),
+  startTime: z.string().regex(TIME_RE, "startTime must be HH:MM (24h)"),
+  endTime: z.string().regex(TIME_RE, "endTime must be HH:MM (24h)"),
+  startsOn: z.string().regex(DATE_RE, "startsOn must be YYYY-MM-DD"),
+  endsOn: z.string().regex(DATE_RE, "endsOn must be YYYY-MM-DD"),
+  note: z.string().max(200, "Note is at most 200 characters").nullish(),
+};
+
+const seriesBase = z.object(programScheduleSeriesShape);
+
+const seriesTimeError = {
+  message: "startTime must be before endTime",
+  path: ["endTime"],
+};
+const seriesDateError = {
+  message: "startsOn must be on or before endsOn",
+  path: ["endsOn"],
+};
+
+export const createProgramScheduleSeriesSchema = seriesBase
+  .refine((v) => v.startTime < v.endTime, seriesTimeError)
+  .refine((v) => v.startsOn <= v.endsOn, seriesDateError);
+
+// Edit operates on the same editable fields. The materialize step
+// (regenerate future occurrences) reads every field, so they are all
+// required here too — the UI sends the full series definition on save.
+export const editProgramScheduleSeriesSchema = seriesBase
+  .refine((v) => v.startTime < v.endTime, seriesTimeError)
+  .refine((v) => v.startsOn <= v.endsOn, seriesDateError);
+
+export type CreateProgramScheduleSeriesInput = z.infer<
+  typeof createProgramScheduleSeriesSchema
+>;
+export type EditProgramScheduleSeriesInput = z.infer<
+  typeof editProgramScheduleSeriesSchema
+>;

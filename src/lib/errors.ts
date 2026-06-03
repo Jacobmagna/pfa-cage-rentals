@@ -232,6 +232,28 @@ export class ProgramScheduleBlockNotFoundError extends Error {
   }
 }
 
+// RECUR-a: an edit/cancel referenced a program_schedule_series id that
+// doesn't exist (stale client row or a bogus RPC call). Mirrors
+// ProgramScheduleBlockNotFoundError.
+export class ProgramScheduleSeriesNotFoundError extends Error {
+  readonly code = "PROGRAM_SCHEDULE_SERIES_NOT_FOUND" as const;
+  constructor(public readonly seriesId: string) {
+    super(`Program schedule series ${seriesId} not found`);
+    this.name = "ProgramScheduleSeriesNotFoundError";
+  }
+}
+
+// RECUR-a: cancel-occurrence was called on a block that is NOT part of a
+// series (seriesId is null — a one-off block). One-off blocks are
+// deleted via the existing single-block delete path, not cancelled.
+export class NotASeriesOccurrenceError extends Error {
+  readonly code = "NOT_A_SERIES_OCCURRENCE" as const;
+  constructor(public readonly blockId: string) {
+    super(`Block ${blockId} is not a recurring-series occurrence`);
+    this.name = "NotASeriesOccurrenceError";
+  }
+}
+
 // Athlete edit/delete/assign referenced an athletes id that doesn't
 // exist (stale client row, or a direct RPC call with a bogus id).
 export class AthleteNotFoundError extends Error {

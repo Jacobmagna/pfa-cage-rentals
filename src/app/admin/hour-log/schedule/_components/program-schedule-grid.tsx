@@ -26,6 +26,7 @@ import {
   ProgramBlockDialog,
   type CoachOption,
   type ProgramOption,
+  type SeriesView,
 } from "./program-block-dialog";
 
 const FIRST_HOUR = 8;
@@ -40,6 +41,9 @@ export type ProgramScheduleBlockView = {
   startAt: Date;
   endAt: Date;
   note: string | null;
+  // RECUR-b2: NULL for one-off blocks; the parent series id for a
+  // materialized recurring occurrence.
+  seriesId: string | null;
 };
 
 type CreatePrefill = {
@@ -94,12 +98,16 @@ export function ProgramScheduleGrid({
   programs,
   coaches,
   blocks,
+  seriesById,
   selectedDate,
   statuses,
 }: {
   programs: ProgramOption[];
   coaches: CoachOption[];
   blocks: ProgramScheduleBlockView[];
+  // RECUR-b2: editable series definitions keyed by series id, for any
+  // occurrence visible on this day.
+  seriesById: Record<string, SeriesView>;
   selectedDate: Date;
   statuses: Record<string, BlockReconciliation>;
 }) {
@@ -345,7 +353,13 @@ export function ProgramScheduleGrid({
                 startAt: dialog.block.startAt,
                 endAt: dialog.block.endAt,
                 note: dialog.block.note,
+                seriesId: dialog.block.seriesId,
               }
+            : null
+        }
+        editSeriesInitial={
+          dialog.kind === "edit" && dialog.block.seriesId
+            ? (seriesById[dialog.block.seriesId] ?? null)
             : null
         }
       />

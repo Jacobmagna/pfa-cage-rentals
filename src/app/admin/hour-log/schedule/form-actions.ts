@@ -11,15 +11,20 @@
 
 import { ZodError } from "zod";
 import {
+  cancelSeriesOccurrence,
   createProgramScheduleBlock,
+  createProgramScheduleSeries,
   deleteProgramScheduleBlock,
+  editProgramScheduleSeries,
   updateProgramScheduleBlock,
 } from "./actions";
 import {
   CoachNotFoundError,
+  NotASeriesOccurrenceError,
   ProgramInactiveError,
   ProgramNotFoundError,
   ProgramScheduleBlockNotFoundError,
+  ProgramScheduleSeriesNotFoundError,
 } from "@/lib/errors";
 import { parsePfaInput } from "@/lib/timezone";
 
@@ -76,7 +81,9 @@ function translate(
     err instanceof ProgramNotFoundError ||
     err instanceof ProgramInactiveError ||
     err instanceof CoachNotFoundError ||
-    err instanceof ProgramScheduleBlockNotFoundError
+    err instanceof ProgramScheduleBlockNotFoundError ||
+    err instanceof ProgramScheduleSeriesNotFoundError ||
+    err instanceof NotASeriesOccurrenceError
   ) {
     return {
       ok: false,
@@ -100,13 +107,49 @@ function translate(
   throw err;
 }
 
+// Build the recurring-series input from a form. Shared by the create path
+// (RECUR-b1) and the edit-series path (RECUR-b2): `daysOfWeek` collects
+// every checked weekday pill (0=Sun..6=Sat) via getAll, parsed to numbers;
+// start/end stay the raw "HH:MM" the series schema expects (NOT composed
+// to instants); the season-end DateInput's hidden ISO becomes `endsOn`.
+//
+// startsOn: the edit-series form submits an explicit `startsOn` ISO (the
+// season-start DateInput), so we prefer it when present. The create form
+// has no `startsOn` field and falls back to the grid's selected `date`
+// hidden field — keeping the create contract unchanged.
+function buildSeriesInput(formData: FormData) {
+  const note = formData.get("note")?.toString().trim() ?? "";
+  const explicitStartsOn = formData.get("startsOn")?.toString().trim();
+  const startsOn =
+    explicitStartsOn && explicitStartsOn.length > 0
+      ? explicitStartsOn
+      : (formData.get("date")?.toString().trim() ?? "");
+  return {
+    programId: formData.get("programId")?.toString() ?? "",
+    scheduledCoachId: formData.get("scheduledCoachId")?.toString() ?? "",
+    daysOfWeek: formData
+      .getAll("daysOfWeek")
+      .map((v) => Number(v.toString())),
+    startTime: formData.get("startTime")?.toString().trim() ?? "",
+    endTime: formData.get("endTime")?.toString().trim() ?? "",
+    startsOn,
+    endsOn: formData.get("endsOn")?.toString().trim() ?? "",
+    note: note.length > 0 ? note : null,
+  };
+}
+
 export async function createProgramScheduleBlockFormAction(
   _prev: ProgramScheduleActionResult,
   formData: FormData,
 ): Promise<ProgramScheduleActionResult> {
   const values = snapshot(formData);
+  const recurring = formData.get("recurring")?.toString() === "on";
   try {
-    await createProgramScheduleBlock(buildInput(formData));
+    if (recurring) {
+      await createProgramScheduleSeries(buildSeriesInput(formData));
+    } else {
+      await createProgramScheduleBlock(buildInput(formData));
+    }
     return { ok: true };
   } catch (err) {
     return translate(err, values);
@@ -134,6 +177,32 @@ export async function updateProgramScheduleBlockFormAction(
   }
 }
 
+// RECUR-b2: edit the WHOLE series (locked model — no single-occurrence
+// edit). Reads the hidden seriesId, rebuilds the full editable series
+// definition from the form via buildSeriesInput (which prefers the
+// explicit `startsOn` field the edit form submits), then calls the gated
+// editProgramScheduleSeries action. Typed errors → inline banner.
+export async function editProgramScheduleSeriesFormAction(
+  _prev: ProgramScheduleActionResult,
+  formData: FormData,
+): Promise<ProgramScheduleActionResult> {
+  const values = snapshot(formData);
+  const seriesId = formData.get("seriesId")?.toString();
+  if (!seriesId) {
+    return {
+      ok: false,
+      error: { code: "VALIDATION", message: "Missing series id" },
+      values,
+    };
+  }
+  try {
+    await editProgramScheduleSeries(seriesId, buildSeriesInput(formData));
+    return { ok: true };
+  } catch (err) {
+    return translate(err, values);
+  }
+}
+
 // Delete doesn't use useActionState — ConfirmDialog + a button. Returns
 // a Result so the client can surface a typed error inline instead of
 // bubbling to the error boundary. Revalidation happens inside the
@@ -150,6 +219,28 @@ export async function deleteProgramScheduleBlockAction(
     return { ok: true };
   } catch (err) {
     if (err instanceof ProgramScheduleBlockNotFoundError) {
+      return { ok: false, error: { code: err.code, message: err.message } };
+    }
+    throw err;
+  }
+}
+
+// RECUR-b2: cancel a SINGLE occurrence of a series (locked model). Mirrors
+// deleteProgramScheduleBlockAction — ConfirmDialog + a button, returns a
+// Result so the client surfaces a typed error inline. Revalidation happens
+// inside the public cancelSeriesOccurrence action.
+export async function cancelSeriesOccurrenceAction(
+  blockId: string,
+): Promise<DeleteProgramScheduleBlockResult> {
+  try {
+    await cancelSeriesOccurrence(blockId);
+    return { ok: true };
+  } catch (err) {
+    if (
+      err instanceof NotASeriesOccurrenceError ||
+      err instanceof ProgramScheduleSeriesNotFoundError ||
+      err instanceof ProgramScheduleBlockNotFoundError
+    ) {
       return { ok: false, error: { code: err.code, message: err.message } };
     }
     throw err;

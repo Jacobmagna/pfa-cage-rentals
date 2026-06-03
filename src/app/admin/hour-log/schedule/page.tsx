@@ -1,8 +1,14 @@
 import Link from "next/link";
-import { and, asc, eq, gt, gte, isNull, lt } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, isNull, lt } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
-import { hourLogs, programs, programScheduleBlocks, users } from "@/db/schema";
+import {
+  hourLogs,
+  programs,
+  programScheduleBlocks,
+  programScheduleSeries,
+  users,
+} from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import {
   reconcileBlocks,
@@ -61,6 +67,7 @@ export default async function ProgramsSchedulePage({
         startAt: programScheduleBlocks.startAt,
         endAt: programScheduleBlocks.endAt,
         note: programScheduleBlocks.note,
+        seriesId: programScheduleBlocks.seriesId,
       })
       .from(programScheduleBlocks)
       .innerJoin(users, eq(programScheduleBlocks.scheduledCoachId, users.id))
@@ -101,7 +108,38 @@ export default async function ProgramsSchedulePage({
     startAt: b.startAt,
     endAt: b.endAt,
     note: b.note,
+    seriesId: b.seriesId,
   }));
+
+  // RECUR-b2: for any block that is a series occurrence, fetch its parent
+  // series so the dialog can show the recurrence summary + prefill the
+  // "Edit series" form. Query only the distinct non-null seriesIds present
+  // on this day; skip the query entirely when there are none.
+  const seriesIds = [
+    ...new Set(
+      blocks
+        .map((b) => b.seriesId)
+        .filter((id): id is string => id !== null),
+    ),
+  ];
+  const seriesRows =
+    seriesIds.length > 0
+      ? await db
+          .select({
+            id: programScheduleSeries.id,
+            programId: programScheduleSeries.programId,
+            scheduledCoachId: programScheduleSeries.scheduledCoachId,
+            daysOfWeek: programScheduleSeries.daysOfWeek,
+            startTime: programScheduleSeries.startTime,
+            endTime: programScheduleSeries.endTime,
+            startsOn: programScheduleSeries.startsOn,
+            endsOn: programScheduleSeries.endsOn,
+            note: programScheduleSeries.note,
+          })
+          .from(programScheduleSeries)
+          .where(inArray(programScheduleSeries.id, seriesIds))
+      : [];
+  const seriesById = Object.fromEntries(seriesRows.map((s) => [s.id, s]));
 
   // Reconcile the day's scheduled blocks against the coach hour-logs
   // (FEAT-16). The engine is pure — we inject `now` + the PFA time
@@ -161,6 +199,7 @@ export default async function ProgramsSchedulePage({
         programs={activePrograms}
         coaches={coachRows}
         blocks={blocks}
+        seriesById={seriesById}
         selectedDate={selectedDate}
         statuses={reconciliation}
       />

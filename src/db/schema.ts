@@ -11,6 +11,7 @@ import {
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import type { AdapterAccountType } from "next-auth/adapters";
 
 export const roleEnum = pgEnum("role", ["coach", "admin"]);
@@ -642,6 +643,52 @@ export const attendanceSessions = pgTable(
 // Indexes: (program_id, start_at) for per-program reads;
 // (scheduled_coach_id, start_at) for per-coach reconciliation — FEAT-16
 // reads both directions.
+// RECUR-a: a recurring program-schedule series. The admin authors a
+// weekly recurrence (one or more weekdays, a wall-clock time window, a
+// season start + end date) and we MATERIALIZE one program_schedule_blocks
+// row per occurrence (see schedule-recurrence.ts + the series actions).
+// The series row is the editable definition; the blocks are the
+// materialized occurrences the grid + reconciliation already read.
+//
+// daysOfWeek uses the JS getUTCDay() convention: 0=Sunday .. 6=Saturday.
+// startTime/endTime are PFA wall-clock "HH:MM" (24h, the format
+// TimeSelect emits). startsOn/endsOn are PFA calendar dates "YYYY-MM-DD"
+// (endsOn inclusive). skipDates holds cancelled-occurrence dates so a
+// later edit-series regenerate won't recreate a cancelled occurrence.
+//
+// Program FK cascades (same as program_schedule_blocks). A series edit
+// regenerates only FUTURE occurrences; past blocks stay as a historical
+// record (see editProgramScheduleSeriesInternal).
+export const programScheduleSeries = pgTable("program_schedule_series", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  programId: text("program_id")
+    .notNull()
+    .references(() => programs.id, { onDelete: "cascade" }),
+  scheduledCoachId: text("scheduled_coach_id")
+    .notNull()
+    .references(() => users.id),
+  daysOfWeek: integer("days_of_week").array().notNull(),
+  startTime: text("start_time").notNull(),
+  endTime: text("end_time").notNull(),
+  startsOn: text("starts_on").notNull(),
+  endsOn: text("ends_on").notNull(),
+  skipDates: text("skip_dates")
+    .array()
+    .notNull()
+    .default(sql`'{}'`),
+  note: text("note"),
+  createdBy: text("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "date" })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
 export const programScheduleBlocks = pgTable(
   "program_schedule_blocks",
   {
@@ -657,6 +704,12 @@ export const programScheduleBlocks = pgTable(
     startAt: timestamp("start_at", { mode: "date" }).notNull(),
     endAt: timestamp("end_at", { mode: "date" }).notNull(),
     note: text("note"),
+    // RECUR-a: NULL for one-off blocks; set to the parent series when the
+    // block is a materialized recurring occurrence. ON DELETE CASCADE so
+    // deleting a series removes its occurrences.
+    seriesId: text("series_id").references(() => programScheduleSeries.id, {
+      onDelete: "cascade",
+    }),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),
@@ -676,6 +729,7 @@ export const programScheduleBlocks = pgTable(
       table.startAt,
     ),
     index("program_schedule_blocks_start_idx").on(table.startAt),
+    index("program_schedule_blocks_series_idx").on(table.seriesId),
   ],
 );
 

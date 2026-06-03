@@ -13,6 +13,7 @@ export type ProgramEditInitialValues = {
   name: string;
   cap: number | null;
   capPeriod: "week" | "month" | null;
+  defaultRatePer30MinCents: number | null;
 };
 
 // Native <dialog> edit form for a single program (name + optional cap /
@@ -78,9 +79,13 @@ export function ProgramFormDialog({
         cap: initial.cap !== null ? String(initial.cap) : "",
         capPeriod: initial.capPeriod ?? "",
         limit: hasCap,
+        rateDollars:
+          initial.defaultRatePer30MinCents !== null
+            ? (initial.defaultRatePer30MinCents / 100).toFixed(2)
+            : "",
       };
     }
-    return { name: "", cap: "", capPeriod: "", limit: false };
+    return { name: "", cap: "", capPeriod: "", limit: false, rateDollars: "" };
   }, [initial, state]);
 
   return (

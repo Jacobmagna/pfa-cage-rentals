@@ -99,6 +99,17 @@ export class RateOverrideNotFoundError extends Error {
   }
 }
 
+export class ProgramRateOverrideNotFoundError extends Error {
+  readonly code = "PROGRAM_RATE_OVERRIDE_NOT_FOUND" as const;
+  constructor(
+    public readonly coachId: string,
+    public readonly programId: string,
+  ) {
+    super(`No override exists for that coach + program yet.`);
+    this.name = "ProgramRateOverrideNotFoundError";
+  }
+}
+
 export class PaymentNotFoundError extends Error {
   readonly code = "PAYMENT_NOT_FOUND" as const;
   constructor(public readonly paymentId: string) {

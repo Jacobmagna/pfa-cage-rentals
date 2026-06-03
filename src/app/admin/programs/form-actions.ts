@@ -18,7 +18,32 @@ export type ProgramFormValues = {
   cap: string;
   capPeriod: string;
   limit: boolean;
+  rateDollars: string;
 };
+
+/**
+ * Parses an OPTIONAL user-typed dollar string into integer cents.
+ * Empty/blank → null (no rate set). Otherwise mirrors the resource-type
+ * override parser in admin/coaches/[id]/form-actions.ts: accepts "22",
+ * "22.0", "22.50", optional leading $, max 2-decimal precision; multiply
+ * before rounding to dodge half-cent float drift. Rejects negatives and
+ * non-numbers so Zod's int/min/max cap fires a clean error.
+ */
+function optionalDollarsToCents(input: string): number | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.replace(/^\$/, "").trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) {
+    throw new Error(
+      "Pay rate must be a positive dollar amount (e.g. 22 or 22.50)",
+    );
+  }
+  const asFloat = Number(cleaned);
+  if (!Number.isFinite(asFloat) || asFloat < 0) {
+    throw new Error("Pay rate must be a positive dollar amount");
+  }
+  return Math.round(asFloat * 100);
+}
 
 export type CreateProgramResult =
   | { ok: true; createdAt: number }
@@ -42,6 +67,7 @@ function snapshotProgram(formData: FormData): ProgramFormValues {
     cap: formData.get("cap")?.toString() ?? "",
     capPeriod: formData.get("capPeriod")?.toString() ?? "",
     limit: formData.get("limit") === "on",
+    rateDollars: formData.get("rateDollars")?.toString() ?? "",
   };
 }
 
@@ -55,11 +81,17 @@ function buildProgramInput(formData: FormData): {
   name: string;
   cap: number | null;
   capPeriod: "week" | "month" | null;
+  defaultRatePer30MinCents: number | null;
 } {
   const name = formData.get("name")?.toString().trim() ?? "";
+  // Optional pay rate (dollars → cents; empty → null). Always present on
+  // both create + update so update can clear it back to null.
+  const defaultRatePer30MinCents = optionalDollarsToCents(
+    formData.get("rateDollars")?.toString() ?? "",
+  );
   const limit = formData.get("limit") === "on";
   if (!limit) {
-    return { name, cap: null, capPeriod: null };
+    return { name, cap: null, capPeriod: null, defaultRatePer30MinCents };
   }
   const capRaw = formData.get("cap")?.toString().trim() ?? "";
   const capNum = capRaw === "" ? NaN : Number(capRaw);
@@ -68,6 +100,7 @@ function buildProgramInput(formData: FormData): {
     name,
     cap: Number.isNaN(capNum) ? (NaN as unknown as number) : capNum,
     capPeriod: (periodRaw || null) as "week" | "month" | null,
+    defaultRatePer30MinCents,
   };
 }
 
@@ -81,8 +114,24 @@ export async function createProgramFormAction(
   formData: FormData,
 ): Promise<CreateProgramResult> {
   const values = snapshotProgram(formData);
+  let input;
   try {
-    await createProgram(buildProgramInput(formData));
+    // buildProgramInput can throw a friendly Error from the dollar parser
+    // (bad pay-rate string). Catch it here so it surfaces in the banner
+    // instead of bubbling to the error boundary.
+    input = buildProgramInput(formData);
+  } catch (err) {
+    return {
+      ok: false,
+      error: {
+        code: "INPUT",
+        message: err instanceof Error ? err.message : "Invalid input",
+      },
+      values,
+    };
+  }
+  try {
+    await createProgram(input);
     return { ok: true, createdAt: Date.now() };
   } catch (err) {
     if (err instanceof ProgramNameTakenError) {
@@ -117,8 +166,21 @@ export async function updateProgramFormAction(
       values,
     };
   }
+  let input;
   try {
-    await updateProgram(id, buildProgramInput(formData));
+    input = buildProgramInput(formData);
+  } catch (err) {
+    return {
+      ok: false,
+      error: {
+        code: "INPUT",
+        message: err instanceof Error ? err.message : "Invalid input",
+      },
+      values,
+    };
+  }
+  try {
+    await updateProgram(id, input);
     return { ok: true };
   } catch (err) {
     if (

@@ -31,6 +31,16 @@ export const createProgramSchema = z
     cap: z.number().int().positive().nullish(),
     capPeriod: capPeriodSchema.nullish(),
     active: z.boolean().optional(),
+    // Per-program default pay rate, in integer cents per 30-min slot.
+    // null/absent = no rate set ($0 pay until configured). Cap mirrors
+    // the per-coach override cap ($1,000 / 30 min). Dollars→cents
+    // conversion happens at the form-action layer.
+    defaultRatePer30MinCents: z
+      .number()
+      .int()
+      .min(0)
+      .max(1_000_00)
+      .nullish(),
   })
   .refine(capCoRequired, capCoRequiredError);
 
@@ -42,6 +52,13 @@ export const updateProgramSchema = z
     cap: z.number().int().positive().nullable().optional(),
     capPeriod: capPeriodSchema.nullable().optional(),
     active: z.boolean().optional(),
+    // null clears the rate back to "no rate set".
+    defaultRatePer30MinCents: z
+      .number()
+      .int()
+      .min(0)
+      .max(1_000_00)
+      .nullish(),
   })
   .refine(capCoRequired, capCoRequiredError);
 

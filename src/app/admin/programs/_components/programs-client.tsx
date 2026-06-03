@@ -18,6 +18,7 @@ export type ProgramRow = {
   cap: number | null;
   capPeriod: "week" | "month" | null;
   active: boolean;
+  defaultRatePer30MinCents: number | null;
 };
 
 // Top-level client island for the programs page. Owns the edit-dialog
@@ -62,6 +63,7 @@ export function ProgramsClient({ programs }: { programs: ProgramRow[] }) {
         name: editRow.name,
         cap: editRow.cap,
         capPeriod: editRow.capPeriod,
+        defaultRatePer30MinCents: editRow.defaultRatePer30MinCents,
       }
     : undefined;
 

@@ -9,6 +9,8 @@ import {
 import { AssignSidebar } from "./assign-sidebar";
 import { archiveAthletesAction, deleteAthleteAction } from "../form-actions";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
+import { ListSearch } from "@/app/_components/list-search";
+import { nameFields, nameMatchesQuery } from "@/app/_components/list-search.logic";
 
 export type ProgramOption = {
   id: string;
@@ -46,6 +48,18 @@ export function RosterClient({
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [isArchiving, startArchiveTransition] = useTransition();
+  const [query, setQuery] = useState("");
+
+  // Client-side name filter over the already-loaded rows. Composes with
+  // the server-side term filter (?term=): the term narrows what the
+  // server hands us; the search narrows that result set here.
+  const filtered = useMemo(
+    () =>
+      athletes.filter((a) =>
+        nameMatchesQuery(query, nameFields(a.firstName, a.lastName)),
+      ),
+    [athletes, query],
+  );
 
   // Drop any selected ids that no longer exist after a revalidation
   // (e.g. an athlete was deleted). Keeps the bulk bar honest.
@@ -171,6 +185,29 @@ export function RosterClient({
         </div>
       ) : null}
 
+      <ListSearch
+        value={query}
+        onChange={setQuery}
+        placeholder="Search players by name…"
+        label="Search players by name"
+        resultCount={filtered.length}
+        totalCount={athletes.length}
+      />
+
+      {filtered.length === 0 ? (
+        <div className="rounded-xl border border-line bg-surface p-12 text-center shadow-[var(--shadow-sm)]">
+          <Users
+            className="mx-auto mb-3 h-7 w-7 text-fg-subtle"
+            aria-hidden="true"
+          />
+          <p className="text-sm font-medium text-fg">
+            No players match &ldquo;{query.trim()}&rdquo;.
+          </p>
+          <p className="mt-1.5 text-sm text-fg-muted">
+            Try a different name, or clear the search to see all players.
+          </p>
+        </div>
+      ) : (
       <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
         <table className="w-full min-w-[640px] text-sm">
           <thead className="border-b border-line text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
@@ -208,7 +245,7 @@ export function RosterClient({
             </tr>
           </thead>
           <tbody>
-            {athletes.map((row) => {
+            {filtered.map((row) => {
               const isPendingDelete = pendingDeleteId === row.id;
               const isSelected = selectedIds.includes(row.id);
               return (
@@ -284,6 +321,7 @@ export function RosterClient({
           </tbody>
         </table>
       </div>
+      )}
 
       <AthleteEditDialog
         open={editRow !== null}

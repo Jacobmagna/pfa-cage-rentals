@@ -5,6 +5,8 @@ import Link from "next/link";
 import { ArrowDown, ArrowUp, ArrowUpDown, GitMerge } from "lucide-react";
 import { PFA_TIMEZONE } from "@/lib/timezone";
 import { MergeCoachDialog } from "./merge-coach-dialog";
+import { ListSearch } from "@/app/_components/list-search";
+import { nameMatchesQuery } from "@/app/_components/list-search.logic";
 
 // Client-side sortable table. The page pre-aggregates one row per
 // coach, so sorting here is purely O(n log n) on a small array — no
@@ -58,15 +60,22 @@ export function CoachesTable({
     dir: "asc",
   });
   const [mergeSource, setMergeSource] = useState<CoachRow | null>(null);
+  const [query, setQuery] = useState("");
 
+  // Client-side name/email filter, composed with the existing sort:
+  // filter the rows first, then sort the survivors.
   const sorted = useMemo(() => {
-    const copy = [...rows];
+    const copy = rows.filter((r) =>
+      // Coaches are keyed by email, so match on name (or email fallback)
+      // AND the email itself.
+      nameMatchesQuery(query, [r.name ?? r.email, r.email]),
+    );
     copy.sort((a, b) => {
       const cmp = compareByKey(a, b, sort.key);
       return sort.dir === "asc" ? cmp : -cmp;
     });
     return copy;
-  }, [rows, sort]);
+  }, [rows, sort, query]);
 
   const onHeaderClick = (key: SortKey) => {
     setSort((s) =>
@@ -89,6 +98,26 @@ export function CoachesTable({
   }
 
   return (
+    <div className="space-y-4">
+      <ListSearch
+        value={query}
+        onChange={setQuery}
+        placeholder="Search coaches…"
+        label="Search coaches by name or email"
+        resultCount={sorted.length}
+        totalCount={rows.length}
+      />
+
+      {sorted.length === 0 ? (
+        <div className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] p-12 text-center">
+          <p className="text-sm font-medium text-fg">
+            No coaches match &ldquo;{query.trim()}&rdquo;.
+          </p>
+          <p className="mt-1.5 text-sm text-fg-muted">
+            Try a different name or email, or clear the search.
+          </p>
+        </div>
+      ) : (
     <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
       <table className="w-full min-w-[720px] text-sm">
         <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
@@ -195,6 +224,8 @@ export function CoachesTable({
           ))}
         </tbody>
       </table>
+    </div>
+      )}
 
       <MergeCoachDialog
         open={mergeSource !== null}

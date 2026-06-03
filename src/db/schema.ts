@@ -45,6 +45,9 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   emailVerified: timestamp("email_verified", { mode: "date" }),
   image: text("image"),
+  // Contact number, seeded from the coach roster (FEAT-12 pass 2).
+  // NULL = unknown. Shown read-only on /admin/coaches/[id].
+  phone: text("phone"),
   role: roleEnum("role").notNull().default("coach"),
   // Payment handles. Admin sees Zelle on /admin/coaches/[id] and
   // /admin/payments as a reconciliation hint. Coach-facing surfaces

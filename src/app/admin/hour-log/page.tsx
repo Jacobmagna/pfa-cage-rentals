@@ -1,14 +1,18 @@
 import Link from "next/link";
-import { and, asc, eq, isNull } from "drizzle-orm";
-import { ArrowLeft, Download } from "lucide-react";
+import { and, asc, eq, gte, isNull, lt, sql as drizzleSql } from "drizzle-orm";
+import { ArrowLeft, CalendarDays, Clock, Download, Wallet } from "lucide-react";
 import { db } from "@/db";
-import { programs, users } from "@/db/schema";
+import { hourLogs, programScheduleBlocks, programs, users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import {
   hourLogFiltersToQueryString,
   normalizeHourLogFilters,
 } from "@/lib/reports/hour-log-filters";
 import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
+import { slotsBetween, totalFromSnapshot } from "@/lib/billing";
+import { formatDollars } from "@/lib/format-money";
+import { pfaDayEnd, pfaDayStart, pfaMonthEnd, pfaMonthStart } from "@/lib/timezone";
+import { StatCard } from "@/app/_components/stat-card";
 import { FiltersForm } from "./_components/filters-form";
 import { HoursClient } from "./_components/hours-client";
 
@@ -42,7 +46,23 @@ export default async function AdminHourLogPage({
 
   const filters = normalizeHourLogFilters(params);
 
-  const [rows, coachOptions, programOptions] = await Promise.all([
+  // Glance-row windows. Same PFA-calendar derivation as /admin/page.tsx:
+  // a [start, end) half-open window for both "today" and "this month".
+  // These power the 3 program-scoped StatCards only; the table below
+  // keeps reading its own URL-driven filter window.
+  const now = new Date();
+  const dayStart = pfaDayStart(now);
+  const dayEnd = pfaDayEnd(now);
+  const monthStart = pfaMonthStart(now);
+  const monthEndExclusive = pfaMonthEnd(now);
+
+  const [
+    rows,
+    coachOptions,
+    programOptions,
+    monthHourLogRows,
+    [{ count: programsScheduledToday }],
+  ] = await Promise.all([
     fetchHourLogRowsWithScheduleNotes(filters),
     // Filter dropdown — coaches role only, active only.
     db
@@ -55,7 +75,56 @@ export default async function AdminHourLogPage({
       .from(programs)
       .where(eq(programs.active, true))
       .orderBy(asc(programs.name)),
+    // Glance cards 1 + 2: every program hour-log row that STARTS within
+    // the current PFA-calendar month. Carries the snapshotted rate so
+    // the owed total reads the historical pay (never recomputes).
+    db
+      .select({
+        startAt: hourLogs.startAt,
+        endAt: hourLogs.endAt,
+        ratePer30MinCents: hourLogs.ratePer30MinCents,
+      })
+      .from(hourLogs)
+      .where(
+        and(
+          gte(hourLogs.startAt, monthStart),
+          lt(hourLogs.startAt, monthEndExclusive),
+        ),
+      ),
+    // Glance card 3: distinct programs with a schedule block starting
+    // today. Same raw-SQL count style as /admin/page.tsx.
+    db
+      .select({
+        count: drizzleSql<number>`count(distinct ${programScheduleBlocks.programId})::int`,
+      })
+      .from(programScheduleBlocks)
+      .where(
+        and(
+          gte(programScheduleBlocks.startAt, dayStart),
+          lt(programScheduleBlocks.startAt, dayEnd),
+        ),
+      ),
   ]);
+
+  // Card 1: program hours this month. Each 30-min slot = 0.5 hr.
+  // Card 2: program pay PFA owes coaches this month — sum the snapshot
+  // total, treating a null stamped rate as $0 (the "$0 pay" convention).
+  let monthSlots = 0;
+  let owedProgramCents = 0;
+  for (const r of monthHourLogRows) {
+    monthSlots += slotsBetween(r.startAt, r.endAt);
+    owedProgramCents += totalFromSnapshot(
+      r.startAt,
+      r.endAt,
+      r.ratePer30MinCents ?? 0,
+    );
+  }
+  const monthHours = monthSlots / 2;
+  // Up to 1 decimal, trailing ".0" stripped: 42.5 → "42.5", 40 → "40".
+  const monthHoursLabel = monthHours
+    .toFixed(1)
+    .replace(/\.0$/, "");
+  const monthEntryCount = monthHourLogRows.length;
 
   const downloadHref = `/admin/hour-log/download?${hourLogFiltersToQueryString(filters)}`;
 
@@ -69,19 +138,45 @@ export default async function AdminHourLogPage({
         Back
       </Link>
 
-      <div className="mb-8 space-y-2">
+      <header className="mb-8 space-y-2">
         <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
           Admin
         </p>
-        <h1 className="text-3xl font-semibold tracking-tight">Hour Log</h1>
+        <h1 className="mt-2 text-3xl font-bold tracking-tight">Hour Log</h1>
         <p className="text-sm text-fg-muted">
-          Filter and edit logged hours. Defaults to the current month.
+          Program hours logged by coaches. Filter and edit below; defaults
+          to the current month.
         </p>
         <p className="text-xs italic text-fg-subtle md:hidden">
           This page is designed for desktop. Rotate your device or use a
           laptop for the full experience.
         </p>
-      </div>
+      </header>
+
+      <section
+        aria-label="Program hours at a glance"
+        className="mb-10 grid gap-4 sm:grid-cols-3"
+      >
+        <StatCard
+          icon={<Clock className="h-4 w-4" />}
+          label="Program hours this month"
+          value={monthHoursLabel}
+          sub={`${monthEntryCount} ${monthEntryCount === 1 ? "entry" : "entries"} this month`}
+        />
+        <StatCard
+          icon={<Wallet className="h-4 w-4" />}
+          label="Owed to coaches — program"
+          value={formatDollars(owedProgramCents)}
+          sub="PFA owes coaches for program hours"
+          accent
+        />
+        <StatCard
+          icon={<CalendarDays className="h-4 w-4" />}
+          label="Programs scheduled today"
+          value={programsScheduledToday.toString()}
+          sub={programsScheduledToday > 0 ? "Scheduled" : "Nothing scheduled"}
+        />
+      </section>
 
       <FiltersForm
         coaches={coachOptions}

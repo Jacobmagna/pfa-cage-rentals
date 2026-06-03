@@ -7,7 +7,7 @@ import {
   useTransition,
   type FormEvent,
 } from "react";
-import { CheckCircle2, ChevronDown } from "lucide-react";
+import { CheckCircle2, ChevronDown, Plus } from "lucide-react";
 import {
   logOwnSessionFormAction,
   type CoachActionResult,
@@ -19,6 +19,7 @@ import { SessionFlagsRow } from "@/app/_components/session-flags-row";
 import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
 import {
   SessionSlotsList,
+  deriveSlots,
   type SlotInput,
 } from "@/app/_components/session-slots-list";
 import { formatPfaDate, formatPfaTime, parsePfaInput } from "@/lib/timezone";
@@ -132,6 +133,9 @@ export function LogSessionForm({
   // / 30min), count = 0 and we show an inline error.
   const [slotLengthMinutes, setSlotLengthMinutes] = useState<30 | 60>(30);
   const [slots, setSlots] = useState<SlotInput[]>([]);
+  // Per-session notes editor is collapsed by default on multi-slot.
+  // The coach reveals it on demand via a small affordance.
+  const [revealNotes, setRevealNotes] = useState(false);
   const [useTypeValue, setUseTypeValue] = useState(defaults.useType);
 
   // Reset useType when defaults change (post-success or post-error reset).
@@ -193,6 +197,36 @@ export function LogSessionForm({
 
   const isMultiSlot = slotCount > 1;
 
+  // CRITICAL: the parent OWNS slot derivation so `slots[]` is always
+  // populated from (rangeStart, rangeEnd, slotLengthMinutes) whenever
+  // the range is a valid multi-slot range — regardless of whether the
+  // per-session notes editor is revealed. Without this, hiding
+  // SessionSlotsList would leave `slots` empty and the
+  // `if (slots.length === 0) return;` guard in handleSubmit would
+  // silently block the batch submit.
+  //
+  // Derive during render (the repo's adjust-state-on-prop-change
+  // pattern, same as prevDefaults/prevUseTypeDefault above) keyed by a
+  // range signature — not an effect, which the lint config forbids for
+  // setState. `deriveSlots` preserves any already-typed notes/flags
+  // (matched by start/end signature), so per-session edits made while
+  // the editor is open survive a range-signature-stable re-render and
+  // flow into the batch submit. When the range/length changes we also
+  // collapse the editor so a later multi-slot range starts collapsed.
+  const rangeSig = `${rangeStart?.getTime() ?? "x"}|${rangeEnd?.getTime() ?? "x"}|${slotLengthMinutes}`;
+  // Sentinel initial value so the FIRST render always derives — the
+  // default range is a multi-slot span and the notes editor is
+  // collapsed (unmounted) by default, so slots would otherwise be
+  // empty on load and the batch submit guard would block.
+  const [prevRangeSig, setPrevRangeSig] = useState(" init");
+  if (rangeSig !== prevRangeSig) {
+    setPrevRangeSig(rangeSig);
+    setSlots((prior) =>
+      deriveSlots(rangeStart, rangeEnd, slotLengthMinutes, prior),
+    );
+    if (prevRangeSig !== " init") setRevealNotes(false);
+  }
+
   const submitLabel = (() => {
     if (pending || batchPending) return "Logging…";
     if (slotCount === 0) return "Log session";
@@ -235,6 +269,7 @@ export function LogSessionForm({
         });
         // Reset slot state for the next batch.
         setSlots([]);
+        setRevealNotes(false);
         // Reset the form via the existing remount path: dispatch a no-op
         // to bump useActionState. Simpler: nudge live state and let the
         // useMemo "defaults" path naturally reset on the next render.
@@ -385,15 +420,25 @@ export function LogSessionForm({
           </Field>
         </div>
 
-        <Field
-          label="Slot length"
-          hint="30 min = back-to-back half-hour lessons. 1 hr = full hours."
-        >
+        {/* Compact, clearly-secondary slot-length micro-control. Sits
+            just under the Start/End row rather than as a full Field so
+            it doesn't read as a peer of the time selectors. */}
+        <div className="-mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-[11px] uppercase tracking-wider text-fg-muted">
+            Slot length
+          </span>
           <SlotLengthToggle
             value={slotLengthMinutes}
             onChange={(v) => setSlotLengthMinutes(v)}
+            size="sm"
           />
-        </Field>
+          <span
+            className="text-[11px] text-fg-subtle leading-snug basis-full sm:basis-auto"
+            title="30 min = back-to-back half-hour lessons. 1 hr = full hours."
+          >
+            30 min = back-to-back half-hour lessons. 1 hr = full hours.
+          </span>
+        </div>
 
         {divisibilityError ? (
           <div
@@ -405,11 +450,24 @@ export function LogSessionForm({
           </div>
         ) : null}
 
-        {slotCount > 1 && !divisibilityError ? (
-          <p className="text-xs text-fg-subtle">
-            Will create <span className="text-fg">{slotCount}</span> sessions of{" "}
-            {slotLengthMinutes} min each.
-          </p>
+        {isMultiSlot && !divisibilityError ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <p className="text-xs text-fg-subtle">
+              Will create{" "}
+              <span className="text-fg tnum">{slotCount}</span> sessions of{" "}
+              {slotLengthMinutes} min each.
+            </p>
+            {!revealNotes ? (
+              <button
+                type="button"
+                onClick={() => setRevealNotes(true)}
+                className="inline-flex items-center gap-1 text-xs font-medium text-fg-muted hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 rounded transition-colors"
+              >
+                <Plus aria-hidden className="h-3.5 w-3.5" />
+                Add per-session notes
+              </button>
+            ) : null}
+          </div>
         ) : null}
 
         <Field
@@ -438,7 +496,7 @@ export function LogSessionForm({
                 name="note"
                 defaultValue={defaults.note}
                 maxLength={500}
-                placeholder="Optional context (e.g. JP De La Cruz)"
+                placeholder="Optional context"
                 className={inputStyles}
               />
             </Field>
@@ -451,16 +509,17 @@ export function LogSessionForm({
               }}
             />
           </>
-        ) : (
+        ) : revealNotes ? (
+          // Presentational-only: the parent owns derivation (see the
+          // deriveSlots effect above), so we do NOT pass range props.
+          // This keeps `slots[]` populated even when this editor is
+          // collapsed, while edits here still flow back into `slots`.
           <SessionSlotsList
-            rangeStart={rangeStart}
-            rangeEnd={rangeEnd}
-            slotLengthMinutes={slotLengthMinutes}
             slots={slots}
             onChange={setSlots}
             showTeamRental={false}
           />
-        )}
+        ) : null}
 
         <button
           type="submit"

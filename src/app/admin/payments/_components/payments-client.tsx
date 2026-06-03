@@ -28,8 +28,18 @@ export type BalanceRow = {
   coachEmail: string;
   zelleContact: string | null;
   owedCents: number;
+  owedCageCents: number;
+  owedProgramCents: number;
   paidCents: number;
   balanceCents: number;
+};
+
+type BalanceTotals = {
+  owed: number;
+  owedCage: number;
+  owedProgram: number;
+  paid: number;
+  balance: number;
 };
 
 export type PendingPaymentRow = {
@@ -70,7 +80,7 @@ export function PaymentsClient({
   coachOptions,
 }: {
   balanceRows: BalanceRow[];
-  totals: { owed: number; paid: number; balance: number };
+  totals: BalanceTotals;
   pendingPayments: PendingPaymentRow[];
   recentPayments: RecentPaymentRow[];
   coachOptions: CoachOption[];
@@ -196,7 +206,7 @@ function BalancesTable({
   onRecord,
 }: {
   rows: BalanceRow[];
-  totals: { owed: number; paid: number; balance: number };
+  totals: BalanceTotals;
   onRecord: (coachId: string) => void;
 }) {
   if (rows.length === 0) {
@@ -243,7 +253,7 @@ function BalancesTable({
                 key={row.coachId}
                 className="border-t border-line hover:bg-surface-2 transition-colors"
               >
-                <td className="px-4 py-3 text-sm">
+                <td className="px-4 py-3 text-sm align-top">
                   <div className="flex flex-col gap-1">
                     <span>{row.coachName}</span>
                     {row.zelleContact ? (
@@ -257,17 +267,21 @@ function BalancesTable({
                   </div>
                 </td>
                 <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right text-fg-muted whitespace-nowrap">
-                  {formatDollars(row.owedCents)}
+                  <span className="block">{formatDollars(row.owedCents)}</span>
+                  <span className="block text-fg-subtle text-xs tnum">
+                    Cage {formatDollars(row.owedCageCents)} · Program{" "}
+                    {formatDollars(row.owedProgramCents)}
+                  </span>
                 </td>
-                <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right text-fg-muted whitespace-nowrap">
+                <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right text-fg-muted whitespace-nowrap align-top">
                   {formatDollars(row.paidCents)}
                 </td>
                 <td
-                  className={`px-4 py-3 text-sm font-mono tnum tabular-nums text-right whitespace-nowrap ${balanceColor(row.balanceCents)}`}
+                  className={`px-4 py-3 text-sm font-mono tnum tabular-nums text-right whitespace-nowrap align-top ${balanceColor(row.balanceCents)}`}
                 >
                   {formatDollars(row.balanceCents)}
                 </td>
-                <td className="px-4 py-3 text-right whitespace-nowrap">
+                <td className="px-4 py-3 text-right whitespace-nowrap align-top">
                   <button
                     type="button"
                     onClick={() => onRecord(row.coachId)}
@@ -282,15 +296,19 @@ function BalancesTable({
           </tbody>
           <tfoot className="border-t border-line bg-surface-2/50">
             <tr className="text-sm font-medium">
-              <td className="px-4 py-3 text-fg-muted">Roster total</td>
+              <td className="px-4 py-3 text-fg-muted align-top">Roster total</td>
               <td className="px-4 py-3 font-mono tnum tabular-nums text-right text-fg">
-                {formatDollars(totals.owed)}
+                <span className="block">{formatDollars(totals.owed)}</span>
+                <span className="block text-fg-subtle text-xs tnum font-normal">
+                  Cage {formatDollars(totals.owedCage)} · Program{" "}
+                  {formatDollars(totals.owedProgram)}
+                </span>
               </td>
-              <td className="px-4 py-3 font-mono tnum tabular-nums text-right text-fg">
+              <td className="px-4 py-3 font-mono tnum tabular-nums text-right text-fg align-top">
                 {formatDollars(totals.paid)}
               </td>
               <td
-                className={`px-4 py-3 font-mono tnum tabular-nums text-right ${balanceColor(totals.balance)}`}
+                className={`px-4 py-3 font-mono tnum tabular-nums text-right align-top ${balanceColor(totals.balance)}`}
               >
                 {formatDollars(totals.balance)}
               </td>

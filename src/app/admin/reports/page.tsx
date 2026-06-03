@@ -51,7 +51,9 @@ export default async function AdminReportsPage({
   ]);
 
   const downloadHref = `/admin/reports/download?${filtersToQueryString(filters)}`;
-  const hasResults = report.detail.length > 0;
+  // Program-only coaches produce summary rows with no session detail —
+  // treat the report as non-empty when either has data.
+  const hasResults = report.detail.length > 0 || report.summary.length > 0;
 
   return (
     <>

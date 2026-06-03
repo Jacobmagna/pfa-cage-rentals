@@ -6,9 +6,10 @@
 
 import { and, asc, eq, gte, inArray, lt } from "drizzle-orm";
 import { db } from "@/db";
-import { resources, sessionsBilling, users } from "@/db/schema";
+import { hourLogs, resources, sessionsBilling, users } from "@/db/schema";
 import {
   aggregateReport,
+  type AggregateHourLogInput,
   type AggregateSessionInput,
   type ReportData,
 } from "./aggregate";
@@ -62,6 +63,44 @@ export async function fetchReportData(
     .where(and(...conditions))
     .orderBy(asc(sessionsBilling.startAt));
 
+  // Program hours: same date window as sessions, plus the coach filter
+  // when one is set. Program hours aren't a resource type, so a
+  // resource-type filter (cage/bullpen/weight_room) naturally excludes
+  // them — only fetch when the view spans all resource types.
+  const includeProgramHours =
+    filters.resourceTypes.length === 0 || filters.resourceTypes.length === 3;
+  const hourLogConditions = [
+    gte(hourLogs.startAt, filters.fromDate),
+    lt(hourLogs.startAt, filters.toDateExclusive),
+  ];
+  if (filters.coachIds.length > 0) {
+    hourLogConditions.push(inArray(hourLogs.coachId, filters.coachIds));
+  }
+  const hourLogRows = includeProgramHours
+    ? await db
+        .select({
+          coachId: hourLogs.coachId,
+          coachName: users.name,
+          coachEmail: users.email,
+          startAt: hourLogs.startAt,
+          endAt: hourLogs.endAt,
+          ratePer30MinCents: hourLogs.ratePer30MinCents,
+        })
+        .from(hourLogs)
+        .innerJoin(users, eq(hourLogs.coachId, users.id))
+        .where(and(...hourLogConditions))
+        .orderBy(asc(hourLogs.startAt))
+    : [];
+
+  const hourLogInputs: AggregateHourLogInput[] = hourLogRows.map((r) => ({
+    coachId: r.coachId,
+    coachName: r.coachName,
+    coachEmail: r.coachEmail,
+    startAt: r.startAt,
+    endAt: r.endAt,
+    ratePer30MinCents: r.ratePer30MinCents ?? 0,
+  }));
+
   const aggregateInputs: AggregateSessionInput[] = sessionRows.map((r) => ({
     sessionId: r.sessionId,
     coachId: r.coachId,
@@ -80,5 +119,5 @@ export async function fetchReportData(
     ratePer30MinCents: r.ratePer30MinCents,
   }));
 
-  return aggregateReport(aggregateInputs);
+  return aggregateReport(aggregateInputs, hourLogInputs);
 }

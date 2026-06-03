@@ -19,7 +19,7 @@ export function ReportPreview({
   summary: SummaryRow[];
   grandTotalCents: number;
 }) {
-  if (detail.length === 0) {
+  if (detail.length === 0 && summary.length === 0) {
     return (
       <div className="rounded-lg border border-line/60 bg-surface/40 p-10 text-center">
         <p className="text-sm font-medium text-fg">No sessions match</p>
@@ -49,6 +49,7 @@ export function ReportPreview({
                 <th scope="col" className="px-4 py-3 text-right font-semibold">Cage</th>
                 <th scope="col" className="px-4 py-3 text-right font-semibold">Bullpen</th>
                 <th scope="col" className="px-4 py-3 text-right font-semibold">Weight Room</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Program hours</th>
                 <th scope="col" className="px-4 py-3 text-right font-semibold">Total</th>
                 <th scope="col" className="px-4 py-3 text-center font-semibold">Online</th>
               </tr>
@@ -76,6 +77,10 @@ export function ReportPreview({
                     slots={row.weightRoomSlots}
                     cents={row.weightRoomTotalCents}
                   />
+                  <SlotsAndCashCell
+                    slots={row.programSlots}
+                    cents={row.programTotalCents}
+                  />
                   <td className="px-4 py-3 text-right font-mono tnum tabular-nums font-semibold text-fg">
                     {formatCents(row.totalCents)}
                   </td>
@@ -95,6 +100,7 @@ export function ReportPreview({
         </div>
       </section>
 
+      {detail.length > 0 ? (
       <section>
         <SectionHeader
           eyebrow="Detail"
@@ -155,6 +161,7 @@ export function ReportPreview({
           </table>
         </div>
       </section>
+      ) : null}
     </div>
   );
 }

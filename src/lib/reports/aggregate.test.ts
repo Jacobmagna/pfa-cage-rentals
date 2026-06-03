@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateReport,
+  type AggregateHourLogInput,
   type AggregateSessionInput,
 } from "./aggregate";
 
@@ -126,5 +127,73 @@ describe("aggregateReport — summary roll-up", () => {
     expect(detail).toEqual([]);
     expect(summary).toEqual([]);
     expect(grandTotalCents).toBe(0);
+  });
+
+  it("defaults program fields to 0 when no hour logs are passed", () => {
+    const { summary } = aggregateReport([session()]);
+    expect(summary[0].programSlots).toBe(0);
+    expect(summary[0].programTotalCents).toBe(0);
+  });
+});
+
+// Build a program-hour log input; same UTC date convention as session().
+function hourLog(
+  overrides: Partial<AggregateHourLogInput> = {},
+): AggregateHourLogInput {
+  return {
+    coachId: "coach-a",
+    coachName: "Coach A",
+    coachEmail: "a@example.com",
+    startAt: new Date("2026-05-01T13:00:00Z"),
+    endAt: new Date("2026-05-01T14:00:00Z"), // 1 hour = 2 slots
+    ratePer30MinCents: 1500,
+    ...overrides,
+  };
+}
+
+describe("aggregateReport — program hours", () => {
+  it("rolls hour logs into a program category and the coach total", () => {
+    const { summary, grandTotalCents } = aggregateReport(
+      [session()], // cage: 2 × 2200 = 4400
+      [hourLog()], // program: 2 × 1500 = 3000
+    );
+    expect(summary).toHaveLength(1);
+    const row = summary[0];
+    expect(row.cageTotalCents).toBe(4400);
+    expect(row.programSlots).toBe(2);
+    expect(row.programTotalCents).toBe(3000);
+    expect(row.totalCents).toBe(7400);
+    expect(grandTotalCents).toBe(7400);
+  });
+
+  it("creates a summary row for a coach with only program hours (no detail)", () => {
+    const { detail, summary } = aggregateReport(
+      [],
+      [hourLog({ coachId: "c-prog", coachName: "Prog Only" })],
+    );
+    expect(detail).toEqual([]);
+    expect(summary).toHaveLength(1);
+    expect(summary[0].coachName).toBe("Prog Only");
+    expect(summary[0].programTotalCents).toBe(3000);
+    expect(summary[0].cageTotalCents).toBe(0);
+    expect(summary[0].totalCents).toBe(3000);
+  });
+
+  it("treats a null/zero snapshot rate as $0 program pay", () => {
+    const { summary } = aggregateReport(
+      [],
+      [hourLog({ ratePer30MinCents: 0 })],
+    );
+    expect(summary[0].programSlots).toBe(2);
+    expect(summary[0].programTotalCents).toBe(0);
+    expect(summary[0].totalCents).toBe(0);
+  });
+
+  it("falls back to coach email when the hour-log coach name is null", () => {
+    const { summary } = aggregateReport(
+      [],
+      [hourLog({ coachName: null, coachEmail: "noname@example.com" })],
+    );
+    expect(summary[0].coachName).toBe("noname@example.com");
   });
 });

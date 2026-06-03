@@ -22,6 +22,7 @@ import {
   type ProgramScheduleActionResult,
 } from "../form-actions";
 import { TimeSelect } from "@/app/_components/time-select";
+import { DateInput } from "@/app/_components/date-input";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 import type { BlockReconciliation } from "@/lib/server/reconciliation";
 import {
@@ -29,7 +30,29 @@ import {
   formatPfaDateMedium,
   formatPfaTime,
   formatPfaTime12h,
+  formatPfaWeekday,
 } from "@/lib/timezone";
+
+// Day pills for the recurring CREATE path (RECUR-b1). 0=Sun..6=Sat,
+// matching createProgramScheduleSeriesSchema / generateOccurrences.
+const WEEKDAY_PILLS: { value: number; label: string }[] = [
+  { value: 0, label: "Sun" },
+  { value: 1, label: "Mon" },
+  { value: 2, label: "Tue" },
+  { value: 3, label: "Wed" },
+  { value: 4, label: "Thu" },
+  { value: 5, label: "Fri" },
+  { value: 6, label: "Sat" },
+];
+
+// PFA-local weekday (0=Sun..6=Sat) of the grid's selected date, derived
+// from formatPfaWeekday's three-letter name so it never drifts with the
+// runtime TZ.
+function pfaWeekdayIndex(d: Date): number {
+  const short = formatPfaWeekday(d);
+  const idx = WEEKDAY_PILLS.findIndex((p) => p.label === short);
+  return idx >= 0 ? idx : 0;
+}
 
 export type ProgramOption = { id: string; name: string };
 export type CoachOption = {
@@ -115,10 +138,40 @@ export function ProgramBlockDialog({
   // Reset the view on each (re)open via adjust-during-render keyed on the
   // open transition — NOT setState-in-effect (repo lint).
   const [prevOpen, setPrevOpen] = useState(open);
+
+  // RECUR-b1: create-recurring toggle + its fields. Default UNCHECKED so
+  // the create form behaves exactly as before until the admin opts in.
+  // selectedDays seeds with the grid's selected weekday; endsOn (ISO) is
+  // the season-end DateInput value. Reset on each (re)open of the create
+  // dialog (keyed on the open transition, NOT setState-in-effect).
+  const selectedWeekday = useMemo(() => pfaWeekdayIndex(date), [date]);
+  const [recurring, setRecurring] = useState(false);
+  const [selectedDays, setSelectedDays] = useState<Set<number>>(
+    () => new Set([selectedWeekday]),
+  );
+  const [endsOn, setEndsOn] = useState("");
+  const [recurError, setRecurError] = useState<string | null>(null);
+
   if (open !== prevOpen) {
     setPrevOpen(open);
-    if (open) setView(isEdit ? "summary" : "edit");
+    if (open) {
+      setView(isEdit ? "summary" : "edit");
+      setRecurring(false);
+      setSelectedDays(new Set([selectedWeekday]));
+      setEndsOn("");
+      setRecurError(null);
+    }
   }
+
+  const toggleDay = (value: number) => {
+    setRecurError(null);
+    setSelectedDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
+  };
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -329,7 +382,21 @@ export function ProgramBlockDialog({
           </div>
         </div>
       ) : (
-      <form action={formAction} key={formKey} className="space-y-5 p-6">
+      <form
+        action={formAction}
+        key={formKey}
+        onSubmit={(e) => {
+          // Client guard for the recurring path: at least one weekday must
+          // be checked. The server schema is still the source of truth, but
+          // this gives an immediate inline message. endsOn `required` on the
+          // DateInput blocks an empty season-end via native validation.
+          if (!isEdit && recurring && selectedDays.size === 0) {
+            e.preventDefault();
+            setRecurError("Pick at least one weekday.");
+          }
+        }}
+        className="space-y-5 p-6"
+      >
         {isEdit && editInitial ? (
           <input type="hidden" name="id" defaultValue={editInitial.id} />
         ) : null}
@@ -444,6 +511,93 @@ export function ProgramBlockDialog({
             </Field>
           </div>
 
+          {!isEdit ? (
+            <div className="space-y-3">
+              <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  name="recurring"
+                  checked={recurring}
+                  onChange={(e) => {
+                    setRecurring(e.target.checked);
+                    setRecurError(null);
+                  }}
+                  className="h-4 w-4 rounded border-line text-gold accent-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+                />
+                <span className="text-sm text-fg">Repeats weekly</span>
+              </label>
+
+              {recurring ? (
+                <div className="space-y-3 rounded-md border border-line bg-surface-2/40 p-3">
+                  <div>
+                    <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
+                      Repeat on
+                    </span>
+                    <div
+                      role="group"
+                      aria-label="Repeat on"
+                      className="flex flex-wrap gap-1.5"
+                    >
+                      {WEEKDAY_PILLS.map((d) => {
+                        const active = selectedDays.has(d.value);
+                        return (
+                          <label
+                            key={d.value}
+                            className={`inline-flex items-center justify-center h-8 min-w-[2.75rem] px-2.5 rounded-md border text-xs font-medium cursor-pointer select-none transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-gold/40 ${
+                              active
+                                ? "bg-gold/10 border-gold/40 text-gold-strong"
+                                : "border-line text-fg-muted hover:text-fg hover:border-line-strong"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              name="daysOfWeek"
+                              value={d.value}
+                              checked={active}
+                              onChange={() => toggleDay(d.value)}
+                              className="sr-only"
+                            />
+                            {d.label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <Field
+                    label="Season ends on"
+                    hint="Repeats every chosen day through this date."
+                  >
+                    <DateInput
+                      name="endsOn"
+                      value={endsOn}
+                      onChange={(iso) => {
+                        setEndsOn(iso);
+                        setRecurError(null);
+                      }}
+                      required
+                      aria-label="Season ends on"
+                    />
+                  </Field>
+
+                  <p className="text-[11px] text-fg-subtle leading-snug">
+                    Creates a block on each chosen day from{" "}
+                    {formatPfaDateMedium(date)} through the end date.
+                  </p>
+
+                  {recurError ? (
+                    <p
+                      role="alert"
+                      className="text-[11px] text-danger leading-snug"
+                    >
+                      {recurError}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <Field
             label="Note"
             hint="Optional — e.g. 'Bring radar gun', context for the coach."
@@ -489,7 +643,9 @@ export function ProgramBlockDialog({
                 ? "Saving…"
                 : isEdit
                   ? "Save changes"
-                  : "Schedule block"}
+                  : recurring
+                    ? "Schedule series"
+                    : "Schedule block"}
             </button>
           </div>
         </div>

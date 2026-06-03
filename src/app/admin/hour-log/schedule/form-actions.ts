@@ -12,6 +12,7 @@
 import { ZodError } from "zod";
 import {
   createProgramScheduleBlock,
+  createProgramScheduleSeries,
   deleteProgramScheduleBlock,
   updateProgramScheduleBlock,
 } from "./actions";
@@ -100,13 +101,40 @@ function translate(
   throw err;
 }
 
+// Build the recurring-series input from the create form. Reuses the same
+// fields as the single-block path: `date` (the grid's selected date, a
+// hidden field) becomes the series start; the season-end DateInput's
+// hidden ISO becomes `endsOn`; `daysOfWeek` collects every checked weekday
+// pill (0=Sun..6=Sat) via getAll, parsed to numbers. Start/end stay the
+// raw "HH:MM" the series schema expects (NOT composed to instants).
+function buildSeriesInput(formData: FormData) {
+  const note = formData.get("note")?.toString().trim() ?? "";
+  return {
+    programId: formData.get("programId")?.toString() ?? "",
+    scheduledCoachId: formData.get("scheduledCoachId")?.toString() ?? "",
+    daysOfWeek: formData
+      .getAll("daysOfWeek")
+      .map((v) => Number(v.toString())),
+    startTime: formData.get("startTime")?.toString().trim() ?? "",
+    endTime: formData.get("endTime")?.toString().trim() ?? "",
+    startsOn: formData.get("date")?.toString().trim() ?? "",
+    endsOn: formData.get("endsOn")?.toString().trim() ?? "",
+    note: note.length > 0 ? note : null,
+  };
+}
+
 export async function createProgramScheduleBlockFormAction(
   _prev: ProgramScheduleActionResult,
   formData: FormData,
 ): Promise<ProgramScheduleActionResult> {
   const values = snapshot(formData);
+  const recurring = formData.get("recurring")?.toString() === "on";
   try {
-    await createProgramScheduleBlock(buildInput(formData));
+    if (recurring) {
+      await createProgramScheduleSeries(buildSeriesInput(formData));
+    } else {
+      await createProgramScheduleBlock(buildInput(formData));
+    }
     return { ok: true };
   } catch (err) {
     return translate(err, values);

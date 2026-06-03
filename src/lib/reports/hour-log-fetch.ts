@@ -17,7 +17,7 @@ import {
   type ReconBlock,
   type ReconLog,
 } from "@/lib/server/reconciliation";
-import { formatPfaTime } from "@/lib/timezone";
+import { formatPfaTime12h } from "@/lib/timezone";
 import type { HourLogWorkbookRow } from "./hour-log-excel";
 import type { NormalizedHourLogFilters } from "./hour-log-filters";
 
@@ -107,7 +107,7 @@ export async function fetchHourLogRowsWithScheduleNotes(
     endAt: r.endAt,
   }));
 
-  const notes = annotateLogs({ logs, blocks }, formatPfaTime);
+  const notes = annotateLogs({ logs, blocks }, formatPfaTime12h);
 
   return rows.map((r) => ({ ...r, scheduleNote: notes[r.id] ?? null }));
 }

@@ -18,7 +18,12 @@ import {
 import type { ResourceOption } from "@/app/admin/sessions/_components/sessions-client";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
-import { formatPfaDate, formatPfaDateMedium, formatPfaTime } from "@/lib/timezone";
+import {
+  formatPfaDate,
+  formatPfaDateMedium,
+  formatPfaTime,
+  formatPfaTime12h,
+} from "@/lib/timezone";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 
 export type BlockEditInitialValues = {
@@ -173,12 +178,12 @@ export function BlockEditDialog({
             <DetailRow label="Resource" value={resourceName} />
             <DetailRow
               label="Date"
-              value={formatPfaDate(initial.startAt)}
+              value={formatPfaDateMedium(initial.startAt)}
               tnum
             />
             <DetailRow
               label="Time"
-              value={`${formatPfaTime(initial.startAt)} – ${formatPfaTime(initial.endAt)}`}
+              value={`${formatPfaTime12h(initial.startAt)} – ${formatPfaTime12h(initial.endAt)}`}
               tnum
             />
             <DetailRow label="Reason" value={initial.reason} />

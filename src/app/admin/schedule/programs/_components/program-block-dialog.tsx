@@ -28,6 +28,7 @@ import {
   formatPfaDate,
   formatPfaDateMedium,
   formatPfaTime,
+  formatPfaTime12h,
 } from "@/lib/timezone";
 
 export type ProgramOption = { id: string; name: string };
@@ -286,12 +287,12 @@ export function ProgramBlockDialog({
             <DetailRow label="Coach" value={coachName} />
             <DetailRow
               label="Date"
-              value={formatPfaDate(editInitial.startAt)}
+              value={formatPfaDateMedium(editInitial.startAt)}
               tnum
             />
             <DetailRow
               label="Time"
-              value={`${formatPfaTime(editInitial.startAt)} – ${formatPfaTime(editInitial.endAt)}`}
+              value={`${formatPfaTime12h(editInitial.startAt)} – ${formatPfaTime12h(editInitial.endAt)}`}
               tnum
             />
             <DetailRow label="Note" value={editInitial.note ?? "—"} />

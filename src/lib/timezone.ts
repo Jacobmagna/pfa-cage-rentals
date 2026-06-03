@@ -39,6 +39,22 @@ export function formatPfaTime(d: Date): string {
 }
 
 /**
+ * "7:30 PM" — 12-hour time with AM/PM in PFA TZ, no leading zero on
+ * the hour. Noon → "12:00 PM", midnight → "12:00 AM". Used by the
+ * read-only schedule summaries and the user-facing reconciliation
+ * detail strings; the 24h `formatPfaTime` stays for dense grid cells
+ * and form internals.
+ */
+export function formatPfaTime12h(d: Date): string {
+  return d.toLocaleTimeString("en-US", {
+    timeZone: PFA_TIMEZONE,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+/**
  * "Mon" — three-letter weekday in PFA TZ.
  */
 export function formatPfaWeekday(d: Date): string {

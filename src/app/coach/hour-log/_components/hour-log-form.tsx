@@ -8,6 +8,7 @@ import {
 } from "../form-actions";
 import { CompletionPanel } from "@/app/_components/completion-panel";
 import { DateInput } from "@/app/_components/date-input";
+import { TimeInput } from "@/app/_components/time-input";
 import { formatPfaDate } from "@/lib/timezone";
 
 export type ProgramOption = {
@@ -114,8 +115,7 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Start">
-            <input
-              type="time"
+            <TimeInput
               name="startTime"
               required
               defaultValue={defaults.startTime}
@@ -123,8 +123,7 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
             />
           </Field>
           <Field label="End">
-            <input
-              type="time"
+            <TimeInput
               name="endTime"
               required
               defaultValue={defaults.endTime}

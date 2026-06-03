@@ -40,6 +40,36 @@ export type RateOverride = {
   ratePer30MinCents: number;
 };
 
+// Program-hour pay: per-PROGRAM default rate + optional per-(coach,
+// program) override. Same cents-per-30-min unit as cage sessions, but
+// keyed on program rather than resource type. There is no online=$0
+// carve-out — program hours are always billable.
+export type ProgramRateOverride = {
+  coachId: string;
+  programId: string;
+  ratePer30MinCents: number;
+};
+
+/**
+ * Resolves the cents-per-30-min pay rate for a (coach, program) pair:
+ * the (coach, program) override if present, else the program's default,
+ * else null. Null means "no rate set" → $0 pay until an admin sets one;
+ * callers stamp the null snapshot and read-side math treats it as 0.
+ *
+ * Linear scan is intentional: the overrides list is small.
+ */
+export function rateForProgram(
+  programId: string,
+  coachId: string,
+  overrides: ProgramRateOverride[],
+  programDefaultCents: number | null,
+): number | null {
+  const override = overrides.find(
+    (o) => o.coachId === coachId && o.programId === programId,
+  );
+  return override?.ratePer30MinCents ?? programDefaultCents;
+}
+
 /**
  * Counts billable 30-minute slots between two timestamps. startAt
  * floors to its slot boundary, endAt ceils — a 9:14–10:01 session

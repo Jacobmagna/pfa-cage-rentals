@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import {
   coachPayments,
   coachRateOverrides,
+  programRateOverrides,
+  programs,
   sessionsBilling,
   users,
 } from "@/db/schema";
@@ -20,6 +22,10 @@ import {
   RateOverridesCard,
   type RateOverrideRow,
 } from "./_components/rate-overrides-card";
+import {
+  ProgramRateOverridesCard,
+  type ProgramRateOverrideRow,
+} from "./_components/program-rate-overrides-card";
 import { DeleteCoachCard } from "./_components/delete-coach-card";
 import { CoachPaymentsCard } from "./_components/coach-payments-card";
 import { CoachHandlesCard } from "./_components/handles-card";
@@ -40,8 +46,14 @@ export default async function AdminCoachDetailPage({
   await requireRole("admin");
   const { id } = await params;
 
-  const [coachResult, overrideRows, sessionRows, paymentRows] =
-    await Promise.all([
+  const [
+    coachResult,
+    overrideRows,
+    sessionRows,
+    paymentRows,
+    programRows,
+    programOverrideRows,
+  ] = await Promise.all([
       db
         .select({
           id: users.id,
@@ -89,6 +101,22 @@ export default async function AdminCoachDetailPage({
           ),
         )
         .orderBy(desc(coachPayments.paidAt)),
+      // Active programs (for the per-coach Program rates card): one row
+      // per active program, with its default pay rate.
+      db
+        .select({
+          id: programs.id,
+          name: programs.name,
+          defaultRatePer30MinCents: programs.defaultRatePer30MinCents,
+        })
+        .from(programs)
+        .where(eq(programs.active, true))
+        .orderBy(asc(programs.name)),
+      // This coach's program rate overrides, keyed on (coach, program).
+      db
+        .select()
+        .from(programRateOverrides)
+        .where(eq(programRateOverrides.coachId, id)),
     ]);
 
   const coach = coachResult[0];
@@ -130,6 +158,22 @@ export default async function AdminCoachDetailPage({
     };
   });
 
+  // One row per ACTIVE program; merge in this coach's override when set.
+  const programOverrideByProgram = new Map(
+    programOverrideRows.map((o) => [o.programId, o]),
+  );
+  const programRateRows: ProgramRateOverrideRow[] = programRows.map((p) => {
+    const o = programOverrideByProgram.get(p.id);
+    return {
+      programId: p.id,
+      programName: p.name,
+      defaultCents: p.defaultRatePer30MinCents,
+      override: o
+        ? { ratePer30MinCents: o.ratePer30MinCents, updatedAt: o.updatedAt }
+        : null,
+    };
+  });
+
   return (
     <>
       <Link
@@ -154,6 +198,11 @@ export default async function AdminCoachDetailPage({
       </div>
 
       <RateOverridesCard coachId={coach.id} rows={rateRows} />
+
+      <ProgramRateOverridesCard
+        coachId={coach.id}
+        rows={programRateRows}
+      />
 
       <CoachHandlesCard
         coachId={coach.id}

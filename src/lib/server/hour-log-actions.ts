@@ -20,10 +20,11 @@
 // captures audit failures so a logging hiccup never loses a logged
 // hour). Same shape as the session create path.
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { hourLogs, programs } from "@/db/schema";
+import { hourLogs, programRateOverrides, programs } from "@/db/schema";
 import { type AuthedSession } from "@/lib/authz";
+import { rateForProgram } from "@/lib/billing";
 import {
   HourLogNotFoundError,
   ProgramInactiveError,
@@ -34,6 +35,41 @@ import {
   editHourLogSchema,
 } from "@/lib/schemas/hour-log";
 import { safeLogAudit } from "./audit-helpers";
+
+// Resolves the per-30-min cents pay rate to stamp on a new hour_logs
+// row. Reads the (coach, program) override from program_rate_overrides,
+// then delegates to billing.rateForProgram, falling back to the
+// program's default_rate_per_30_min_cents and finally null (no rate
+// set → $0 pay). Mirrors resolveRateCents in session-actions.ts.
+export async function resolveRateCentsForProgram(args: {
+  coachId: string;
+  programId: string;
+  programDefaultCents: number | null;
+}): Promise<number | null> {
+  const [override] = await db
+    .select()
+    .from(programRateOverrides)
+    .where(
+      and(
+        eq(programRateOverrides.coachId, args.coachId),
+        eq(programRateOverrides.programId, args.programId),
+      ),
+    );
+  return rateForProgram(
+    args.programId,
+    args.coachId,
+    override
+      ? [
+          {
+            coachId: override.coachId,
+            programId: override.programId,
+            ratePer30MinCents: override.ratePer30MinCents,
+          },
+        ]
+      : [],
+    args.programDefaultCents,
+  );
+}
 
 export async function logHourInternal(
   actor: AuthedSession["user"],
@@ -51,6 +87,15 @@ export async function logHourInternal(
     throw new ProgramInactiveError(program.id, program.name);
   }
 
+  // Stamp the resolved pay rate as a snapshot (cents per 30-min slot),
+  // mirroring sessions_billing. May be null when the program has no
+  // rate set → $0 pay; reads treat null as 0.
+  const ratePer30MinCents = await resolveRateCentsForProgram({
+    coachId: actor.id,
+    programId: parsed.programId,
+    programDefaultCents: program.defaultRatePer30MinCents,
+  });
+
   const [inserted] = await db
     .insert(hourLogs)
     .values({
@@ -59,6 +104,7 @@ export async function logHourInternal(
       startAt: parsed.startAt,
       endAt: parsed.endAt,
       note: parsed.note ?? null,
+      ratePer30MinCents,
       createdBy: actor.id,
     })
     .returning();

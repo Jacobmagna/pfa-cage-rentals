@@ -9,7 +9,7 @@
 // confirm() — no useActionState needed.
 
 import { ZodError } from "zod";
-import { upsertRateOverride } from "./actions";
+import { upsertProgramRateOverride, upsertRateOverride } from "./actions";
 
 export type RateOverrideFormValues = {
   coachId: string;
@@ -104,5 +104,80 @@ export async function upsertRateOverrideFormAction(
     return { ok: true };
   } catch (err) {
     return translate(err, values);
+  }
+}
+
+// --- Per-coach PROGRAM rate overrides ---------------------------------
+// Mirrors the resource-type override form-action above but keyed on
+// (coachId, programId). Reuses the same dollarsToCents parser (override
+// must be ≥ $0.01) and the same discriminated-union result shape.
+
+export type ProgramRateOverrideFormValues = {
+  coachId: string;
+  programId: string;
+  /** As the user typed it (dollars, "22.00"). Echoed back on error. */
+  rateDollars: string;
+};
+
+export type ProgramRateOverrideActionResult =
+  | { ok: true }
+  | {
+      ok: false;
+      error: { code: string; message: string };
+      values: ProgramRateOverrideFormValues;
+    };
+
+function snapshotProgram(
+  formData: FormData,
+): ProgramRateOverrideFormValues {
+  return {
+    coachId: formData.get("coachId")?.toString() ?? "",
+    programId: formData.get("programId")?.toString() ?? "",
+    rateDollars: formData.get("rateDollars")?.toString() ?? "",
+  };
+}
+
+function translateProgram(
+  err: unknown,
+  values: ProgramRateOverrideFormValues,
+): ProgramRateOverrideActionResult {
+  if (err instanceof ZodError) {
+    const first = err.issues[0];
+    return {
+      ok: false,
+      error: {
+        code: "VALIDATION",
+        message: first
+          ? `${first.path.join(".")}: ${first.message}`
+          : "Invalid input",
+      },
+      values,
+    };
+  }
+  if (err instanceof Error) {
+    return {
+      ok: false,
+      error: { code: "INPUT", message: err.message },
+      values,
+    };
+  }
+  throw err;
+}
+
+export async function upsertProgramRateOverrideFormAction(
+  _prev: ProgramRateOverrideActionResult,
+  formData: FormData,
+): Promise<ProgramRateOverrideActionResult> {
+  const values = snapshotProgram(formData);
+  try {
+    const cents = dollarsToCents(values.rateDollars);
+    await upsertProgramRateOverride({
+      coachId: values.coachId,
+      programId: values.programId,
+      ratePer30MinCents: cents,
+    });
+    return { ok: true };
+  } catch (err) {
+    return translateProgram(err, values);
   }
 }

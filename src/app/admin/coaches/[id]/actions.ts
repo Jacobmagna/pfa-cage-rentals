@@ -19,6 +19,10 @@ import {
   deleteRateOverrideInternal,
   upsertRateOverrideInternal,
 } from "@/lib/server/rate-override-actions";
+import {
+  deleteProgramRateOverrideInternal,
+  upsertProgramRateOverrideInternal,
+} from "@/lib/server/program-rate-override-actions";
 import { deleteCoachInternal } from "@/lib/server/user-actions";
 import { updateUserHandlesInternal } from "@/lib/server/handles-actions";
 
@@ -44,6 +48,30 @@ export async function deleteRateOverride(
 ) {
   const session = await requireRole("admin");
   await deleteRateOverrideInternal(session.user, { coachId, resourceType });
+  revalidateOverrideSurfaces(coachId);
+}
+
+// Per-coach PROGRAM rate overrides. Mirrors the resource-type override
+// actions above but keyed on (coachId, programId). Both revalidate the
+// coach detail page so the program-rate card re-renders.
+export async function upsertProgramRateOverride(input: unknown) {
+  const session = await requireRole("admin");
+  const result = await upsertProgramRateOverrideInternal(session.user, input);
+  revalidateOverrideSurfaces(result.coachId);
+  return result;
+}
+
+// Explicit args (matches deleteRateOverride convention). The internal
+// still Zod-parses for defense-in-depth.
+export async function deleteProgramRateOverride(
+  coachId: string,
+  programId: string,
+) {
+  const session = await requireRole("admin");
+  await deleteProgramRateOverrideInternal(session.user, {
+    coachId,
+    programId,
+  });
   revalidateOverrideSurfaces(coachId);
 }
 

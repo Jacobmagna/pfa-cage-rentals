@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import {
   coachPayments,
+  hourLogs,
   sessionsBilling,
   users,
 } from "@/db/schema";
@@ -20,9 +21,12 @@ import { PaymentsClient, type CoachOption, type RecentPaymentRow } from "./_comp
 //   3. Recent payments: last 100 confirmed + pending entries with
 //      inline edit / delete / confirm actions.
 //
-// Snapshot rule: per-coach owed sums sessionsBilling.ratePer30MinCents
-// straight off each session row × its slot count. Renegotiating an
-// override only affects future bookings — past balances never drift.
+// Snapshot rule: per-coach owed sums two snapshotted sources —
+// sessionsBilling.ratePer30MinCents (cage rentals) and
+// hourLogs.ratePer30MinCents (program hours) — straight off each row
+// × its slot count. The program-hour rate is likewise snapshotted at
+// log time. Renegotiating an override only affects future bookings /
+// logs — past balances never drift.
 //
 // All-time scope: imported historical data means lifetime-owed can be
 // large at launch. Dad's workflow for backfilling historical
@@ -39,6 +43,7 @@ export default async function AdminPaymentsPage() {
   const [
     activeCoaches,
     sessionRows,
+    hourLogRows,
     confirmedPaymentRows,
     pendingPaymentRows,
     recentRows,
@@ -61,6 +66,14 @@ export default async function AdminPaymentsPage() {
         ratePer30MinCents: sessionsBilling.ratePer30MinCents,
       })
       .from(sessionsBilling),
+    db
+      .select({
+        coachId: hourLogs.coachId,
+        startAt: hourLogs.startAt,
+        endAt: hourLogs.endAt,
+        ratePer30MinCents: hourLogs.ratePer30MinCents,
+      })
+      .from(hourLogs),
     db
       .select({
         coachId: coachPayments.coachId,
@@ -116,14 +129,30 @@ export default async function AdminPaymentsPage() {
       .limit(RECENT_LIMIT),
   ]);
 
-  // Per-coach owed = sum of session snapshot totals. Reading
-  // sessionsBilling.ratePer30MinCents directly preserves the historical
-  // rate at booking time — renegotiating an override never rewrites
-  // past balances.
-  const owedByCoach = new Map<string, number>();
+  // Per-coach owed = cage rentals + program hours, each summed from its
+  // own snapshot. Reading ratePer30MinCents directly off each row
+  // preserves the historical rate at booking / log time — renegotiating
+  // an override never rewrites past balances. The hour_logs snapshot is
+  // nullable (pre-rate logs) → treat null as $0.
+  const owedCageByCoach = new Map<string, number>();
   for (const s of sessionRows) {
     const total = totalFromSnapshot(s.startAt, s.endAt, s.ratePer30MinCents);
-    owedByCoach.set(s.coachId, (owedByCoach.get(s.coachId) ?? 0) + total);
+    owedCageByCoach.set(
+      s.coachId,
+      (owedCageByCoach.get(s.coachId) ?? 0) + total,
+    );
+  }
+  const owedProgramByCoach = new Map<string, number>();
+  for (const h of hourLogRows) {
+    const total = totalFromSnapshot(
+      h.startAt,
+      h.endAt,
+      h.ratePer30MinCents ?? 0,
+    );
+    owedProgramByCoach.set(
+      h.coachId,
+      (owedProgramByCoach.get(h.coachId) ?? 0) + total,
+    );
   }
   const paidByCoach = new Map<string, number>();
   for (const p of confirmedPaymentRows) {
@@ -136,7 +165,9 @@ export default async function AdminPaymentsPage() {
   // Roster rows + sort by balance descending (biggest debtors first).
   const balanceRows = activeCoaches
     .map((c) => {
-      const owed = owedByCoach.get(c.id) ?? 0;
+      const owedCage = owedCageByCoach.get(c.id) ?? 0;
+      const owedProgram = owedProgramByCoach.get(c.id) ?? 0;
+      const owed = owedCage + owedProgram;
       const paid = paidByCoach.get(c.id) ?? 0;
       return {
         coachId: c.id,
@@ -144,6 +175,8 @@ export default async function AdminPaymentsPage() {
         coachEmail: c.email,
         zelleContact: c.zelleContact,
         owedCents: owed,
+        owedCageCents: owedCage,
+        owedProgramCents: owedProgram,
         paidCents: paid,
         balanceCents: owed - paid,
       };
@@ -154,11 +187,13 @@ export default async function AdminPaymentsPage() {
   const totals = balanceRows.reduce(
     (acc, r) => {
       acc.owed += r.owedCents;
+      acc.owedCage += r.owedCageCents;
+      acc.owedProgram += r.owedProgramCents;
       acc.paid += r.paidCents;
       acc.balance += r.balanceCents;
       return acc;
     },
-    { owed: 0, paid: 0, balance: 0 },
+    { owed: 0, owedCage: 0, owedProgram: 0, paid: 0, balance: 0 },
   );
 
   const coachOptions: CoachOption[] = activeCoaches.map((c) => ({
@@ -208,8 +243,9 @@ export default async function AdminPaymentsPage() {
         </p>
         <h1 className="text-3xl font-semibold tracking-tight">Payments</h1>
         <p className="text-sm text-fg-muted">
-          What each coach owes PFA, and the payment history. Only confirmed
-          payments reduce the balance — pending entries wait in the inbox.
+          What each coach owes PFA — cage rentals plus program hours — and the
+          payment history. Only confirmed payments reduce the balance — pending
+          entries wait in the inbox.
         </p>
         <p className="text-xs italic text-fg-subtle md:hidden">
           This page is designed for desktop. Rotate your device or use a

@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { createProgramSchema, updateProgramSchema } from "./program";
+import {
+  deleteProgramRateOverrideSchema,
+  upsertProgramRateOverrideSchema,
+} from "./rate-override";
 import { createAthleteSchema, updateAthleteSchema } from "./athlete";
 import { createHourLogSchema } from "./hour-log";
 import { submitAttendanceSchema } from "./attendance";
@@ -80,6 +84,42 @@ describe("createProgramSchema", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("accepts a valid defaultRatePer30MinCents", () => {
+    expect(
+      createProgramSchema.safeParse({
+        name: "Elite",
+        defaultRatePer30MinCents: 2200,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts a null defaultRatePer30MinCents (no rate set)", () => {
+    expect(
+      createProgramSchema.safeParse({
+        name: "Elite",
+        defaultRatePer30MinCents: null,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a defaultRatePer30MinCents over the $1,000 cap", () => {
+    expect(
+      createProgramSchema.safeParse({
+        name: "Elite",
+        defaultRatePer30MinCents: 100_001,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a non-integer defaultRatePer30MinCents", () => {
+    expect(
+      createProgramSchema.safeParse({
+        name: "Elite",
+        defaultRatePer30MinCents: 22.5,
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("updateProgramSchema", () => {
@@ -97,6 +137,81 @@ describe("updateProgramSchema", () => {
 
   it("allows an empty update object", () => {
     expect(updateProgramSchema.safeParse({}).success).toBe(true);
+  });
+
+  it("allows clearing the pay rate via null", () => {
+    expect(
+      updateProgramSchema.safeParse({ defaultRatePer30MinCents: null })
+        .success,
+    ).toBe(true);
+  });
+
+  it("rejects a pay rate over the $1,000 cap on update", () => {
+    expect(
+      updateProgramSchema.safeParse({ defaultRatePer30MinCents: 100_001 })
+        .success,
+    ).toBe(false);
+  });
+});
+
+describe("upsertProgramRateOverrideSchema", () => {
+  const base = { coachId: "c1", programId: "p1" };
+
+  it("accepts a valid override", () => {
+    expect(
+      upsertProgramRateOverrideSchema.safeParse({
+        ...base,
+        ratePer30MinCents: 1800,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a zero rate (must be > $0)", () => {
+    expect(
+      upsertProgramRateOverrideSchema.safeParse({
+        ...base,
+        ratePer30MinCents: 0,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a rate over the $1,000 cap", () => {
+    expect(
+      upsertProgramRateOverrideSchema.safeParse({
+        ...base,
+        ratePer30MinCents: 100_001,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a missing programId", () => {
+    expect(
+      upsertProgramRateOverrideSchema.safeParse({
+        coachId: "c1",
+        programId: "",
+        ratePer30MinCents: 1800,
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("deleteProgramRateOverrideSchema", () => {
+  it("accepts a valid coach + program pair", () => {
+    expect(
+      deleteProgramRateOverrideSchema.safeParse({
+        coachId: "c1",
+        programId: "p1",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a missing coachId", () => {
+    expect(
+      deleteProgramRateOverrideSchema.safeParse({
+        coachId: "",
+        programId: "p1",
+      }).success,
+    ).toBe(false);
   });
 });
 

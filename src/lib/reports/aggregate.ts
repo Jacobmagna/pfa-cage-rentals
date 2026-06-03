@@ -11,7 +11,11 @@
 //
 // Cents discipline: every monetary number stays in integer cents.
 
-import { slotsBetween, type ResourceType } from "@/lib/billing";
+import {
+  slotsBetween,
+  totalFromSnapshot,
+  type ResourceType,
+} from "@/lib/billing";
 import {
   formatPfaDate,
   formatPfaTime,
@@ -34,6 +38,25 @@ export type AggregateSessionInput = {
   pfaReferred: boolean;
   isOnline: boolean;
   /** Cents-per-30-min rate stamped on the session row at creation. */
+  ratePer30MinCents: number;
+};
+
+/**
+ * A program-hour log contributes to a coach's payroll alongside cage /
+ * bullpen / weight-room sessions, but it isn't a resource booking — it
+ * has no resourceType and never appears in the session detail table.
+ * It rolls up into the summary's "Program hours" category only.
+ */
+export type AggregateHourLogInput = {
+  coachId: string;
+  coachName: string | null;
+  coachEmail: string;
+  startAt: Date;
+  endAt: Date;
+  /**
+   * Cents-per-30-min rate snapshotted at log time. NULLABLE — pre-rate
+   * logs stay null and contribute $0; callers pass `?? 0`.
+   */
   ratePer30MinCents: number;
 };
 
@@ -69,6 +92,9 @@ export type SummaryRow = {
   bullpenTotalCents: number;
   weightRoomSlots: number;
   weightRoomTotalCents: number;
+  /** Program-hour slots logged in range (additive; never a resource type). */
+  programSlots: number;
+  programTotalCents: number;
   totalCents: number;
   onlineSessions: number;
 };
@@ -87,9 +113,15 @@ export type ReportData = {
  * Reads `ratePer30MinCents` straight off each input row — never
  * recomputes. Online sessions arrive with rate 0 and naturally
  * contribute $0 to totals.
+ *
+ * `hourLogs` (optional) are program-hour entries: they roll into each
+ * coach's summary as the additive "Program hours" category and into the
+ * per-coach + grand totals, but never appear in the session detail
+ * table (they aren't resource bookings).
  */
 export function aggregateReport(
   sessions: AggregateSessionInput[],
+  hourLogs: AggregateHourLogInput[] = [],
 ): ReportData {
   const detail: DetailRow[] = sessions.map((s) => {
     const slots = slotsBetween(s.startAt, s.endAt);
@@ -122,24 +154,37 @@ export function aggregateReport(
   // Roll detail rows up per coach. Map keyed by coachId for O(1)
   // upsert; converted to array + sorted at the end.
   const summaryMap = new Map<string, SummaryRow>();
-  for (const row of detail) {
-    let entry = summaryMap.get(row.coachId);
+  // Upsert helper so the session loop and the program-hour loop share
+  // one initializer — a coach who only logged program hours (no
+  // resource sessions) still gets a summary row.
+  const ensureEntry = (
+    coachId: string,
+    coachName: string,
+    coachEmail: string,
+  ): SummaryRow => {
+    let entry = summaryMap.get(coachId);
     if (!entry) {
       entry = {
-        coachId: row.coachId,
-        coachName: row.coachName,
-        coachEmail: row.coachEmail,
+        coachId,
+        coachName,
+        coachEmail,
         cageSlots: 0,
         cageTotalCents: 0,
         bullpenSlots: 0,
         bullpenTotalCents: 0,
         weightRoomSlots: 0,
         weightRoomTotalCents: 0,
+        programSlots: 0,
+        programTotalCents: 0,
         totalCents: 0,
         onlineSessions: 0,
       };
-      summaryMap.set(row.coachId, entry);
+      summaryMap.set(coachId, entry);
     }
+    return entry;
+  };
+  for (const row of detail) {
+    const entry = ensureEntry(row.coachId, row.coachName, row.coachEmail);
     switch (row.resourceType) {
       case "cage":
         entry.cageSlots += row.slots;
@@ -158,11 +203,34 @@ export function aggregateReport(
     if (row.isOnline) entry.onlineSessions += 1;
   }
 
+  // Fold program hours into the same per-coach summary as an additive
+  // "Program hours" category. Snapshot rate × slot count, same as
+  // sessions; null snapshots already arrive as 0 from the caller.
+  let programGrandTotalCents = 0;
+  for (const log of hourLogs) {
+    const entry = ensureEntry(
+      log.coachId,
+      log.coachName ?? log.coachEmail,
+      log.coachEmail,
+    );
+    const slots = slotsBetween(log.startAt, log.endAt);
+    const totalCents = totalFromSnapshot(
+      log.startAt,
+      log.endAt,
+      log.ratePer30MinCents,
+    );
+    entry.programSlots += slots;
+    entry.programTotalCents += totalCents;
+    entry.totalCents += totalCents;
+    programGrandTotalCents += totalCents;
+  }
+
   const summary = Array.from(summaryMap.values()).sort((a, b) =>
     a.coachName.localeCompare(b.coachName),
   );
 
-  const grandTotalCents = detail.reduce((sum, r) => sum + r.totalCents, 0);
+  const grandTotalCents =
+    detail.reduce((sum, r) => sum + r.totalCents, 0) + programGrandTotalCents;
 
   return { detail, summary, grandTotalCents };
 }

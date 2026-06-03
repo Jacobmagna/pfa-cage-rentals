@@ -196,6 +196,32 @@ export const coachRateOverrides = pgTable(
   ],
 );
 
+// Per-(coach, program) pay-rate override for logged program hours.
+// Mirrors coach_rate_overrides but keyed on (coach, program) instead of
+// (coach, resource_type): when present it wins over the program's
+// default_rate_per_30_min_cents. Both FKs cascade — an override row has
+// no meaning without its coach + program. Composite PK enforces one
+// override per (coach, program).
+export const programRateOverrides = pgTable(
+  "program_rate_overrides",
+  {
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    programId: text("program_id")
+      .notNull()
+      .references(() => programs.id, { onDelete: "cascade" }),
+    ratePer30MinCents: integer("rate_per_30_min_cents").notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    primaryKey({ columns: [table.coachId, table.programId] }),
+  ],
+);
+
 // Billing sessions — the row that every report, schedule grid, and
 // coach history reads from. Named `sessions_billing` because Auth.js
 // already owns `sessions` for login sessions and the FK chaos isn't
@@ -444,6 +470,12 @@ export const programs = pgTable("programs", {
   cap: integer("cap"),
   capPeriod: capPeriod("cap_period"),
   active: boolean("active").notNull().default(true),
+  // Per-program default pay rate for logged hours, in cents per 30-min
+  // slot. NULLABLE with no default: a program with no rate set resolves
+  // to null → $0 pay until an admin sets one (QA2-9b UI). Mirrors the
+  // resource-type defaults in rate_defaults, but lives on the program
+  // row since program pay is per-program, not per-resource-type.
+  defaultRatePer30MinCents: integer("default_rate_per_30_min_cents"),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "date" })
     .notNull()
@@ -542,6 +574,12 @@ export const hourLogs = pgTable(
     startAt: timestamp("start_at", { mode: "date" }).notNull(),
     endAt: timestamp("end_at", { mode: "date" }).notNull(),
     note: text("note"),
+    // Snapshot of the resolved per-30-min pay rate (cents) stamped at
+    // write time, mirroring sessions_billing.rate_per_30_min_cents.
+    // NULLABLE: pre-existing rows stay null (back-fill is out of scope),
+    // and a new row stamps null when the program has no rate set → $0
+    // pay. Reads use this snapshot, never recompute from current rates.
+    ratePer30MinCents: integer("rate_per_30_min_cents"),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),
@@ -689,6 +727,9 @@ export type NewSessionBilling = typeof sessionsBilling.$inferInsert;
 export type SessionUseType = (typeof sessionUseType.enumValues)[number];
 export type CoachRateOverride = typeof coachRateOverrides.$inferSelect;
 export type NewCoachRateOverride = typeof coachRateOverrides.$inferInsert;
+export type ProgramRateOverride = typeof programRateOverrides.$inferSelect;
+export type NewProgramRateOverride =
+  typeof programRateOverrides.$inferInsert;
 export type BlockedTime = typeof blockedTimes.$inferSelect;
 export type NewBlockedTime = typeof blockedTimes.$inferInsert;
 

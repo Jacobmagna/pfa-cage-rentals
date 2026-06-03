@@ -23,7 +23,7 @@ export function AddProgramForm() {
 
   const defaults = useMemo(() => {
     if (!state.ok) return state.values;
-    return { name: "", cap: "", capPeriod: "", limit: false };
+    return { name: "", cap: "", capPeriod: "", limit: false, rateDollars: "" };
   }, [state]);
 
   const showSuccess = state.ok && state.createdAt > 0;

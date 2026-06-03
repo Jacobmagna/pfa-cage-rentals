@@ -30,6 +30,7 @@ export default async function ProgramsPage() {
     cap: p.cap,
     capPeriod: p.capPeriod,
     active: p.active,
+    defaultRatePer30MinCents: p.defaultRatePer30MinCents,
   }));
 
   const activeCount = rows.filter((r) => r.active).length;

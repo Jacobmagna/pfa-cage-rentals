@@ -69,6 +69,7 @@ export async function createProgramInternal(
         cap: parsed.cap ?? null,
         capPeriod: parsed.capPeriod ?? null,
         active: parsed.active ?? true,
+        defaultRatePer30MinCents: parsed.defaultRatePer30MinCents ?? null,
       })
       .returning();
   } catch (err) {
@@ -115,11 +116,17 @@ export async function updateProgramInternal(
     cap?: number | null;
     capPeriod?: "week" | "month" | null;
     active?: boolean;
+    defaultRatePer30MinCents?: number | null;
   } = {};
   if (parsed.name !== undefined) patch.name = parsed.name;
   if ("cap" in parsed) patch.cap = parsed.cap ?? null;
   if ("capPeriod" in parsed) patch.capPeriod = parsed.capPeriod ?? null;
   if (parsed.active !== undefined) patch.active = parsed.active;
+  // null is a meaningful "clear the rate" value, so distinguish
+  // present-but-null from absent via the key check (same as cap).
+  if ("defaultRatePer30MinCents" in parsed) {
+    patch.defaultRatePer30MinCents = parsed.defaultRatePer30MinCents ?? null;
+  }
 
   let updated;
   try {

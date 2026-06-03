@@ -14,6 +14,8 @@ export type ProgramFieldDefaults = {
   cap: string;
   capPeriod: string;
   limit: boolean;
+  /** Pay rate per 30 min, as dollars (e.g. "22.00"). "" = no rate. */
+  rateDollars: string;
 };
 
 export function ProgramFields({
@@ -35,6 +37,23 @@ export function ProgramFields({
           placeholder="e.g. Elite Hitting"
           className={inputStyles}
         />
+      </Field>
+
+      <Field label="Pay rate (per 30 min)">
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-fg-subtle">
+            $
+          </span>
+          <input
+            type="text"
+            inputMode="decimal"
+            name="rateDollars"
+            defaultValue={defaults.rateDollars}
+            placeholder="Optional — e.g. 22.00"
+            aria-label="Pay rate per 30 minutes"
+            className={`${inputStyles} pl-7`}
+          />
+        </div>
       </Field>
 
       <label className="flex items-center gap-2.5 text-sm text-fg">

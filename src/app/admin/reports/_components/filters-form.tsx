@@ -11,6 +11,7 @@
 
 import { Search } from "lucide-react";
 import { MultiSelect } from "@/app/_components/multi-select";
+import { DateInput } from "@/app/_components/date-input";
 
 type FilterValues = {
   from: string;
@@ -55,16 +56,14 @@ export function FiltersForm({
     >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
         <Field label="From">
-          <input
-            type="date"
+          <DateInput
             name="from"
             defaultValue={values.from}
             className={inputStyles}
           />
         </Field>
         <Field label="To">
-          <input
-            type="date"
+          <DateInput
             name="to"
             defaultValue={values.to}
             className={inputStyles}

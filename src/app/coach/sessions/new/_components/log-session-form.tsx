@@ -7,18 +7,21 @@ import {
   useTransition,
   type FormEvent,
 } from "react";
-import { CheckCircle2, ChevronDown } from "lucide-react";
+import { ChevronDown, Plus } from "lucide-react";
 import {
   logOwnSessionFormAction,
   type CoachActionResult,
 } from "../form-actions";
 import { logOwnSessionsBatch } from "../../actions";
 import type { ResourceOption } from "../../_components/types";
+import { CompletionPanel } from "@/app/_components/completion-panel";
 import { TimeSelect } from "@/app/_components/time-select";
+import { DateInput } from "@/app/_components/date-input";
 import { SessionFlagsRow } from "@/app/_components/session-flags-row";
 import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
 import {
   SessionSlotsList,
+  deriveSlots,
   type SlotInput,
 } from "@/app/_components/session-slots-list";
 import { formatPfaDate, formatPfaTime, parsePfaInput } from "@/lib/timezone";
@@ -94,18 +97,39 @@ export function LogSessionForm({
     };
   }, [state]);
 
-  // Banner state. The batch banner takes precedence when it's freshly
-  // set — both surfaces never have a meaningful state at once because
-  // each submission path resets the other's transient state.
-  const showSingleSuccess = state.ok && state.loggedAt > 0;
   const showSingleError = !state.ok;
-  const showBatchSuccess = batchResult.status === "success";
   const showBatchError = batchResult.status === "error";
+
+  // Collapse-to-confirmation across BOTH success paths:
+  //   - single slot → useActionState `state.loggedAt` (nonce + message
+  //     "Session logged.")
+  //   - batch        → `batchResult.at` (nonce + count → "{n} sessions
+  //     logged.")
+  // Unify into one `successNonce`; the batch path takes precedence when
+  // freshly set (both never carry a meaningful state at once — each
+  // submission path resets the other's transient state). Acking via the
+  // panel's "Log another session" lands us on a FRESH blank form: the
+  // single path already remounts via `formKey` (key includes loggedAt);
+  // the batch path doesn't bump useActionState, so the ack also bumps
+  // `resetNonce` which feeds `formKey` to force a clean remount (and the
+  // batch submit already cleared slots + revealNotes). Ephemeral +
+  // component-local so navigating away and back remounts to base. No
+  // setState-in-effect (pure compare).
+  const singleNonce = state.ok ? state.loggedAt : 0;
+  const batchNonce = batchResult.status === "success" ? batchResult.at : 0;
+  const successMessage =
+    batchResult.status === "success"
+      ? `${batchResult.count} sessions logged.`
+      : "Session logged.";
+  const successNonce = batchNonce > 0 ? batchNonce : singleNonce;
+  const [ackedNonce, setAckedNonce] = useState(0);
+  const [resetNonce, setResetNonce] = useState(0);
+  const showDone = successNonce > 0 && successNonce !== ackedNonce;
 
   const formKey = state.ok
     ? state.loggedAt > 0
       ? `ok-${state.loggedAt}`
-      : "fresh"
+      : `fresh-${resetNonce}`
     : `err-${state.error.code}-${state.error.message}`;
 
   // Live state for the four "echoed" fields that the AvailabilityPanel
@@ -132,6 +156,9 @@ export function LogSessionForm({
   // / 30min), count = 0 and we show an inline error.
   const [slotLengthMinutes, setSlotLengthMinutes] = useState<30 | 60>(30);
   const [slots, setSlots] = useState<SlotInput[]>([]);
+  // Per-session notes editor is collapsed by default on multi-slot.
+  // The coach reveals it on demand via a small affordance.
+  const [revealNotes, setRevealNotes] = useState(false);
   const [useTypeValue, setUseTypeValue] = useState(defaults.useType);
 
   // Reset useType when defaults change (post-success or post-error reset).
@@ -193,6 +220,36 @@ export function LogSessionForm({
 
   const isMultiSlot = slotCount > 1;
 
+  // CRITICAL: the parent OWNS slot derivation so `slots[]` is always
+  // populated from (rangeStart, rangeEnd, slotLengthMinutes) whenever
+  // the range is a valid multi-slot range — regardless of whether the
+  // per-session notes editor is revealed. Without this, hiding
+  // SessionSlotsList would leave `slots` empty and the
+  // `if (slots.length === 0) return;` guard in handleSubmit would
+  // silently block the batch submit.
+  //
+  // Derive during render (the repo's adjust-state-on-prop-change
+  // pattern, same as prevDefaults/prevUseTypeDefault above) keyed by a
+  // range signature — not an effect, which the lint config forbids for
+  // setState. `deriveSlots` preserves any already-typed notes/flags
+  // (matched by start/end signature), so per-session edits made while
+  // the editor is open survive a range-signature-stable re-render and
+  // flow into the batch submit. When the range/length changes we also
+  // collapse the editor so a later multi-slot range starts collapsed.
+  const rangeSig = `${rangeStart?.getTime() ?? "x"}|${rangeEnd?.getTime() ?? "x"}|${slotLengthMinutes}`;
+  // Sentinel initial value so the FIRST render always derives — the
+  // default range is a multi-slot span and the notes editor is
+  // collapsed (unmounted) by default, so slots would otherwise be
+  // empty on load and the batch submit guard would block.
+  const [prevRangeSig, setPrevRangeSig] = useState(" init");
+  if (rangeSig !== prevRangeSig) {
+    setPrevRangeSig(rangeSig);
+    setSlots((prior) =>
+      deriveSlots(rangeStart, rangeEnd, slotLengthMinutes, prior),
+    );
+    if (prevRangeSig !== " init") setRevealNotes(false);
+  }
+
   const submitLabel = (() => {
     if (pending || batchPending) return "Logging…";
     if (slotCount === 0) return "Log session";
@@ -235,6 +292,7 @@ export function LogSessionForm({
         });
         // Reset slot state for the next batch.
         setSlots([]);
+        setRevealNotes(false);
         // Reset the form via the existing remount path: dispatch a no-op
         // to bump useActionState. Simpler: nudge live state and let the
         // useMemo "defaults" path naturally reset on the next render.
@@ -250,32 +308,55 @@ export function LogSessionForm({
     });
   };
 
+  // "Log another session" → ack the success and return to a FRESH blank
+  // form. The single-slot path is reset by useActionState (new `state`
+  // → `defaults` recompute → prevDefaults resets `live`/useType). The
+  // batch path leaves `state` untouched, so we must reset the
+  // parent-owned controlled state ourselves and bump `resetNonce`
+  // (feeds `formKey`) to remount the form's uncontrolled fields. We use
+  // the current `defaults` (blank on the fresh path) as the reset source.
+  const handleAckSuccess = () => {
+    if (batchNonce > 0) {
+      setLive({
+        date: defaults.date,
+        resourceId: defaults.resourceId,
+        startTime: defaults.startTime,
+        endTime: defaults.endTime,
+      });
+      setUseTypeValue(defaults.useType);
+      setSlotLengthMinutes(30);
+      setSlots([]);
+      setRevealNotes(false);
+      setBatchResult({ status: "idle" });
+      setResetNonce((n) => n + 1);
+    }
+    setAckedNonce(successNonce);
+  };
+
+  if (showDone) {
+    return (
+      <div className="space-y-4">
+        <CompletionPanel
+          message={successMessage}
+          actionLabel="Log another session"
+          onAction={handleAckSuccess}
+        />
+        <AvailabilityPanel
+          resources={resources}
+          date={live.date}
+          resourceId={live.resourceId}
+          onResourceChange={(id) =>
+            setLive((p) => ({ ...p, resourceId: id }))
+          }
+          startTime={live.startTime}
+          endTime={live.endTime}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      {showSingleSuccess && !showBatchSuccess ? (
-        <div
-          role="status"
-          className="rounded-md border border-success/30 bg-success/10 px-3 py-2.5 text-sm text-success flex items-center gap-2"
-        >
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>Session logged. Ready for the next one.</span>
-        </div>
-      ) : null}
-
-      {showBatchSuccess ? (
-        <div
-          role="status"
-          className="rounded-md border border-success/30 bg-success/10 px-3 py-2.5 text-sm text-success flex items-center gap-2"
-        >
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>
-            {batchResult.status === "success"
-              ? `${batchResult.count} sessions logged.`
-              : null}
-          </span>
-        </div>
-      ) : null}
-
       {showSingleError ? (
         <div
           role="alert"
@@ -346,13 +427,12 @@ export function LogSessionForm({
         </Field>
 
         <Field label="Date">
-          <input
-            type="date"
+          <DateInput
             name="date"
             required
             value={live.date}
-            onChange={(e) =>
-              setLive((p) => ({ ...p, date: e.target.value }))
+            onChange={(iso) =>
+              setLive((p) => ({ ...p, date: iso }))
             }
             className={inputStyles}
           />
@@ -385,15 +465,25 @@ export function LogSessionForm({
           </Field>
         </div>
 
-        <Field
-          label="Slot length"
-          hint="30 min = back-to-back half-hour lessons. 1 hr = full hours."
-        >
+        {/* Compact, clearly-secondary slot-length micro-control. Sits
+            just under the Start/End row rather than as a full Field so
+            it doesn't read as a peer of the time selectors. */}
+        <div className="-mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-[11px] uppercase tracking-wider text-fg-muted">
+            Slot length
+          </span>
           <SlotLengthToggle
             value={slotLengthMinutes}
             onChange={(v) => setSlotLengthMinutes(v)}
+            size="sm"
           />
-        </Field>
+          <span
+            className="text-[11px] text-fg-subtle leading-snug basis-full sm:basis-auto"
+            title="30 min = back-to-back half-hour lessons. 1 hr = full hours."
+          >
+            30 min = back-to-back half-hour lessons. 1 hr = full hours.
+          </span>
+        </div>
 
         {divisibilityError ? (
           <div
@@ -405,11 +495,24 @@ export function LogSessionForm({
           </div>
         ) : null}
 
-        {slotCount > 1 && !divisibilityError ? (
-          <p className="text-xs text-fg-subtle">
-            Will create <span className="text-fg">{slotCount}</span> sessions of{" "}
-            {slotLengthMinutes} min each.
-          </p>
+        {isMultiSlot && !divisibilityError ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <p className="text-xs text-fg-subtle">
+              Will create{" "}
+              <span className="text-fg tnum">{slotCount}</span> sessions of{" "}
+              {slotLengthMinutes} min each.
+            </p>
+            {!revealNotes ? (
+              <button
+                type="button"
+                onClick={() => setRevealNotes(true)}
+                className="inline-flex items-center gap-1 text-xs font-medium text-fg-muted hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 rounded transition-colors"
+              >
+                <Plus aria-hidden className="h-3.5 w-3.5" />
+                Add per-session notes
+              </button>
+            ) : null}
+          </div>
         ) : null}
 
         <Field
@@ -438,7 +541,7 @@ export function LogSessionForm({
                 name="note"
                 defaultValue={defaults.note}
                 maxLength={500}
-                placeholder="Optional context (e.g. JP De La Cruz)"
+                placeholder="Optional context"
                 className={inputStyles}
               />
             </Field>
@@ -451,16 +554,17 @@ export function LogSessionForm({
               }}
             />
           </>
-        ) : (
+        ) : revealNotes ? (
+          // Presentational-only: the parent owns derivation (see the
+          // deriveSlots effect above), so we do NOT pass range props.
+          // This keeps `slots[]` populated even when this editor is
+          // collapsed, while edits here still flow back into `slots`.
           <SessionSlotsList
-            rangeStart={rangeStart}
-            rangeEnd={rangeEnd}
-            slotLengthMinutes={slotLengthMinutes}
             slots={slots}
             onChange={setSlots}
             showTeamRental={false}
           />
-        )}
+        ) : null}
 
         <button
           type="submit"

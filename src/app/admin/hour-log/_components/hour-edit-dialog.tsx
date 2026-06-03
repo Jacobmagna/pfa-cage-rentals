@@ -7,6 +7,7 @@ import {
   type HourActionResult,
 } from "../form-actions";
 import { TimeSelect } from "@/app/_components/time-select";
+import { DateInput } from "@/app/_components/date-input";
 import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 
 export type HourEditInitialValues = {
@@ -149,8 +150,7 @@ export function HourEditDialog({
         <div className="space-y-3">
           <div className="grid grid-cols-3 gap-3">
             <Field label="Date">
-              <input
-                type="date"
+              <DateInput
                 name="date"
                 required
                 defaultValue={defaults.date}

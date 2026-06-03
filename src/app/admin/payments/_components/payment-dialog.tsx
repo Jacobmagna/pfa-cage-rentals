@@ -15,6 +15,7 @@ import {
 } from "../form-actions";
 import type { CoachOption } from "./payments-client";
 import { formatPfaDate } from "@/lib/timezone";
+import { DateInput } from "@/app/_components/date-input";
 import { PAYMENT_METHODS, type PaymentMethod } from "@/lib/schemas/payment";
 
 // Methods shown in the dropdown for NEW payments. Venmo dropped 2026-05-25
@@ -212,8 +213,7 @@ export function PaymentDialog({
             </Field>
 
             <Field label="Date">
-              <input
-                type="date"
+              <DateInput
                 name="paidAtDate"
                 required
                 defaultValue={defaults.paidAtDate}

@@ -9,6 +9,7 @@ import type {
   EntityType,
   NormalizedAuditFilters,
 } from "@/lib/audit/filters";
+import { DateInput } from "@/app/_components/date-input";
 
 type ActorOption = {
   id: string;
@@ -44,16 +45,14 @@ export function FiltersForm({
     >
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1.5fr_auto] lg:items-end">
         <Field label="From">
-          <input
-            type="date"
+          <DateInput
             name="from"
             defaultValue={values.from}
             className={inputStyles}
           />
         </Field>
         <Field label="To">
-          <input
-            type="date"
+          <DateInput
             name="to"
             defaultValue={values.to}
             className={inputStyles}

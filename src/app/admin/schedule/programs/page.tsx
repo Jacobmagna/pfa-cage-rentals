@@ -11,7 +11,7 @@ import {
 } from "@/lib/server/reconciliation";
 import {
   formatPfaDateLong,
-  formatPfaTime,
+  formatPfaTime12h,
   parsePfaInput,
   pfaDayEnd,
   pfaDayStart,
@@ -123,7 +123,7 @@ export default async function ProgramsSchedulePage({
   }));
   const reconciliation = reconcileBlocks(
     { blocks: reconBlocks, logs: reconLogs, now: new Date() },
-    formatPfaTime,
+    formatPfaTime12h,
   );
 
   const dateLabel = formatPfaDateLong(selectedDate);

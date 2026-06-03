@@ -5,7 +5,7 @@
 // Coach / Resource / Use type use the shared MultiSelect popover so
 // the page scales past a few coaches without growing a checkbox
 // thicket (see /admin/reports for the older inline-checkbox style).
-// Date range stays as two <input type="date"> inputs because a date
+// Date range stays as two typable DateInput fields because a date
 // range isn't really multi-select — it's two endpoints.
 //
 // "No filter" semantics: a MultiSelect with nothing checked renders
@@ -16,6 +16,7 @@
 import { Search, X } from "lucide-react";
 import Link from "next/link";
 import { MultiSelect } from "@/app/_components/multi-select";
+import { DateInput } from "@/app/_components/date-input";
 
 type CoachOption = {
   id: string;
@@ -79,16 +80,14 @@ export function FiltersForm({
     >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-7 lg:items-end">
         <Field label="From">
-          <input
-            type="date"
+          <DateInput
             name="from"
             defaultValue={values.from}
             className={inputStyles}
           />
         </Field>
         <Field label="To">
-          <input
-            type="date"
+          <DateInput
             name="to"
             defaultValue={values.to}
             className={inputStyles}

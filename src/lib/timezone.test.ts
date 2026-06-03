@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatPfaDate,
   formatPfaTime,
+  formatPfaTime12h,
   parsePfaInput,
   pfaDayEnd,
   pfaDayStart,
@@ -39,6 +40,27 @@ describe("pfaWallClockToUtc", () => {
 
   it("throws on invalid inputs", () => {
     expect(() => pfaWallClockToUtc("not-a-date", "14:30")).toThrow();
+  });
+});
+
+describe("formatPfaTime12h", () => {
+  it("formats 12-hour AM/PM with no leading zero on the hour", () => {
+    // 09:00 EST -> "9:00 AM"; build the UTC instant from PFA wall-clock.
+    expect(formatPfaTime12h(pfaWallClockToUtc("2026-01-15", "09:00"))).toBe(
+      "9:00 AM",
+    );
+    expect(formatPfaTime12h(pfaWallClockToUtc("2026-05-01", "19:30"))).toBe(
+      "7:30 PM",
+    );
+  });
+
+  it("handles noon and midnight edge cases", () => {
+    expect(formatPfaTime12h(pfaWallClockToUtc("2026-05-01", "12:00"))).toBe(
+      "12:00 PM",
+    );
+    expect(formatPfaTime12h(pfaWallClockToUtc("2026-05-01", "00:00"))).toBe(
+      "12:00 AM",
+    );
   });
 });
 

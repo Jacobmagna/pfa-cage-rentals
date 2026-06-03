@@ -24,6 +24,7 @@ import {
   type BlockActionResult,
 } from "../form-actions";
 import { TimeSelect } from "@/app/_components/time-select";
+import { DateInput } from "@/app/_components/date-input";
 import { SessionFlagsRow } from "@/app/_components/session-flags-row";
 import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
 import {
@@ -488,12 +489,11 @@ function SessionTab({
 
       <div className="grid grid-cols-3 gap-3">
         <Field label="Date">
-          <input
-            type="date"
+          <DateInput
             name="date"
             required
             value={live.date}
-            onChange={(e) => setLive((p) => ({ ...p, date: e.target.value }))}
+            onChange={(iso) => setLive((p) => ({ ...p, date: iso }))}
             className={inputStyles}
           />
         </Field>
@@ -687,8 +687,7 @@ function DateAndTimeRow({
   return (
     <div className="grid grid-cols-3 gap-3">
       <Field label="Date">
-        <input
-          type="date"
+        <DateInput
           name="date"
           required
           defaultValue={defaults.date}

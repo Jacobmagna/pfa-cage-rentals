@@ -1,11 +1,14 @@
 "use client";
 
-import { useActionState, useMemo } from "react";
-import { CheckCircle2, ChevronDown } from "lucide-react";
+import { useActionState, useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import {
   logOwnHourFormAction,
   type HourLogActionResult,
 } from "../form-actions";
+import { CompletionPanel } from "@/app/_components/completion-panel";
+import { DateInput } from "@/app/_components/date-input";
+import { TimeInput } from "@/app/_components/time-input";
 import { formatPfaDate } from "@/lib/timezone";
 
 export type ProgramOption = {
@@ -39,8 +42,17 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
     };
   }, [state]);
 
-  const showSuccess = state.ok && state.loggedAt > 0;
   const showError = !state.ok;
+
+  // Collapse-to-confirmation: on a successful submit we hide the form
+  // and render CompletionPanel in its place. `loggedAt` is the success
+  // nonce; we ack it when the coach clicks "Log another hour", which
+  // also lands us on a FRESH form (the key below includes the nonce).
+  // Ephemeral + component-local → navigating away and back remounts to
+  // the base form automatically. No setState-in-effect (pure compare).
+  const successNonce = state.ok ? state.loggedAt : 0;
+  const [ackedNonce, setAckedNonce] = useState(0);
+  const showDone = successNonce > 0 && successNonce !== ackedNonce;
 
   const formKey = state.ok
     ? state.loggedAt > 0
@@ -48,18 +60,20 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
       : "fresh"
     : `err-${state.error.code}-${state.error.message}`;
 
+  if (showDone) {
+    return (
+      <div className="space-y-4">
+        <CompletionPanel
+          message="Hour logged."
+          actionLabel="Log another hour"
+          onAction={() => setAckedNonce(successNonce)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      {showSuccess ? (
-        <div
-          role="status"
-          className="rounded-md border border-success/30 bg-success/10 px-3 py-2.5 text-sm text-success flex items-center gap-2"
-        >
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>Hour logged. Ready for the next one.</span>
-        </div>
-      ) : null}
-
       {showError ? (
         <div
           role="alert"
@@ -91,8 +105,7 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
         </Field>
 
         <Field label="Date">
-          <input
-            type="date"
+          <DateInput
             name="date"
             required
             defaultValue={defaults.date}
@@ -102,8 +115,7 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Start">
-            <input
-              type="time"
+            <TimeInput
               name="startTime"
               required
               defaultValue={defaults.startTime}
@@ -111,8 +123,7 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
             />
           </Field>
           <Field label="End">
-            <input
-              type="time"
+            <TimeInput
               name="endTime"
               required
               defaultValue={defaults.endTime}

@@ -4,24 +4,30 @@
 // cards, one per generated time range, each with its own optional
 // note and team-rental checkbox. Coach (or admin) picks a date +
 // start + end + slot length on the parent form; this component
-// reads that range and emits N cards.
+// renders an editor over the `slots` array.
 //
 // State strategy: per-slot notes + team-rental flags live in the
-// parent's state. This component is a controlled view — it rebuilds
-// the slot array from (rangeStart, rangeEnd, slotLengthMinutes) and
-// emits via onChange. When the range or length changes, notes typed
-// so far are lost; the realistic flow is "pick range first, type
-// notes last," so this matches usage. If we ever need
-// preserve-on-resize behavior, store the cache in the parent (not
-// here) to satisfy React Compiler's no-refs-during-render rule.
+// parent's state. The canonical slot derivation lives in `deriveSlots`
+// (exported below).
 //
-// Submission: this component doesn't submit itself. The parent
-// receives the slot array via `onChange` and includes it in its own
-// form-action call to logOwnSessionsBatch / createSessionsBatch.
+// Two integration modes:
+//   1. Self-deriving (legacy, admin forms): pass `rangeStart` /
+//      `rangeEnd` / `slotLengthMinutes` and this component rebuilds the
+//      slot array from them and emits via `onChange` (effect). The list
+//      only renders cards once the parent's `slots` is non-empty.
+//   2. Presentational-only (coach form): omit the range props. The
+//      PARENT owns derivation (calling `deriveSlots` directly) so its
+//      `slots[]` is always populated whether or not this editor is even
+//      mounted — that keeps the multi-slot batch submit correct even
+//      when the per-session notes UI is collapsed/hidden.
 //
-// Note: kept under SAFE_SLOT_LIMIT (server enforces 50) to stop the
-// UI from rendering hundreds of cards if a user pastes garbage into
-// the date inputs.
+// Submission: this component doesn't submit itself. The parent owns
+// the slot array and includes it in its own logOwnSessionsBatch /
+// createSessionsBatch call.
+//
+// Note: derivation is kept under SAFE_SLOT_LIMIT (server enforces 50)
+// to stop the UI from rendering hundreds of cards if a user pastes
+// garbage into the date inputs.
 
 import { useEffect, useMemo, useRef } from "react";
 import { PFA_TIMEZONE } from "@/lib/timezone";
@@ -37,13 +43,76 @@ export type SlotInput = {
   isOnline: boolean;
 };
 
+// Canonical slot derivation. Given the computed range + slot length,
+// produce the N slot inputs. Each slot keeps its existing note/flags
+// ONLY if its (startAt, endAt) signature is unchanged vs.
+// `priorSlots` — so a range tweak that produces overlapping slot
+// signatures keeps typed notes. Returns [] for any invalid range (no
+// range, non-positive span, non-divisible span, or count outside
+// 1..SAFE_SLOT_LIMIT).
+//
+// Pure + side-effect-free so it can live in a parent's render and be
+// unit-tested directly.
+export function deriveSlots(
+  rangeStart: Date | null,
+  rangeEnd: Date | null,
+  slotLengthMinutes: 30 | 60,
+  priorSlots: SlotInput[] = [],
+): SlotInput[] {
+  if (!rangeStart || !rangeEnd) return [];
+  const lengthMs = slotLengthMinutes * 60_000;
+  const totalMs = rangeEnd.getTime() - rangeStart.getTime();
+  if (totalMs <= 0) return [];
+  if (totalMs % lengthMs !== 0) return [];
+  const count = totalMs / lengthMs;
+  if (count <= 0 || count > SAFE_SLOT_LIMIT) return [];
+
+  const priorByKey = new Map<
+    string,
+    {
+      note: string;
+      isTeamRental: boolean;
+      pfaReferred: boolean;
+      isOnline: boolean;
+    }
+  >();
+  for (const s of priorSlots) {
+    priorByKey.set(slotKey(s.startAt, s.endAt), {
+      note: s.note,
+      isTeamRental: s.isTeamRental,
+      pfaReferred: s.pfaReferred,
+      isOnline: s.isOnline,
+    });
+  }
+
+  const out: SlotInput[] = [];
+  for (let i = 0; i < count; i++) {
+    const startAt = new Date(rangeStart.getTime() + i * lengthMs);
+    const endAt = new Date(startAt.getTime() + lengthMs);
+    const prior = priorByKey.get(slotKey(startAt, endAt));
+    out.push({
+      startAt,
+      endAt,
+      note: prior?.note ?? "",
+      isTeamRental: prior?.isTeamRental ?? false,
+      pfaReferred: prior?.pfaReferred ?? false,
+      isOnline: prior?.isOnline ?? false,
+    });
+  }
+  return out;
+}
+
 type Props = {
-  /** Computed UTC instant for the FIRST slot start. */
-  rangeStart: Date | null;
+  /**
+   * Computed UTC instant for the FIRST slot start. Pass (with rangeEnd
+   * + slotLengthMinutes) to run the legacy self-deriving mode. Omit for
+   * presentational-only mode where the parent owns derivation.
+   */
+  rangeStart?: Date | null;
   /** Computed UTC instant for the LAST slot end (exclusive). */
-  rangeEnd: Date | null;
+  rangeEnd?: Date | null;
   /** 30 or 60. */
-  slotLengthMinutes: 30 | 60;
+  slotLengthMinutes?: 30 | 60;
   /** Current per-slot inputs. Parent owns the array. */
   slots: SlotInput[];
   /** Emit a new slots array when the user edits a note or toggle. */
@@ -60,63 +129,30 @@ export function SessionSlotsList({
   onChange,
   showTeamRental = true,
 }: Props) {
-  // Recompute the canonical slot list from the range + length. Each
-  // slot keeps its existing note/teamRental ONLY if its (startAt,
-  // endAt) signature is unchanged — handled by reading from the
-  // parent's `slots` prop (not a ref) so React Compiler is happy.
+  // Legacy self-deriving mode: only active when the parent supplies the
+  // range props. The coach form omits them (it owns derivation), so
+  // this whole block is inert there.
+  const selfDeriving =
+    rangeStart !== undefined &&
+    rangeEnd !== undefined &&
+    slotLengthMinutes !== undefined;
+
   const computed = useMemo<SlotInput[]>(() => {
-    if (!rangeStart || !rangeEnd) return [];
-    const lengthMs = slotLengthMinutes * 60_000;
-    const totalMs = rangeEnd.getTime() - rangeStart.getTime();
-    if (totalMs <= 0) return [];
-    if (totalMs % lengthMs !== 0) return [];
-    const count = totalMs / lengthMs;
-    if (count <= 0 || count > SAFE_SLOT_LIMIT) return [];
-
-    // Build a lookup from the parent's current slots (props) so a
-    // range tweak that produces overlapping slot signatures keeps
-    // typed notes. Reading props during render is fine; reading a
-    // ref isn't.
-    const priorByKey = new Map<
-      string,
-      {
-        note: string;
-        isTeamRental: boolean;
-        pfaReferred: boolean;
-        isOnline: boolean;
-      }
-    >();
-    for (const s of slots) {
-      priorByKey.set(slotKey(s.startAt, s.endAt), {
-        note: s.note,
-        isTeamRental: s.isTeamRental,
-        pfaReferred: s.pfaReferred,
-        isOnline: s.isOnline,
-      });
-    }
-
-    const out: SlotInput[] = [];
-    for (let i = 0; i < count; i++) {
-      const startAt = new Date(rangeStart.getTime() + i * lengthMs);
-      const endAt = new Date(startAt.getTime() + lengthMs);
-      const prior = priorByKey.get(slotKey(startAt, endAt));
-      out.push({
-        startAt,
-        endAt,
-        note: prior?.note ?? "",
-        isTeamRental: prior?.isTeamRental ?? false,
-        pfaReferred: prior?.pfaReferred ?? false,
-        isOnline: prior?.isOnline ?? false,
-      });
-    }
-    return out;
-  }, [rangeStart, rangeEnd, slotLengthMinutes, slots]);
+    if (!selfDeriving) return [];
+    return deriveSlots(
+      rangeStart ?? null,
+      rangeEnd ?? null,
+      slotLengthMinutes ?? 30,
+      slots,
+    );
+  }, [selfDeriving, rangeStart, rangeEnd, slotLengthMinutes, slots]);
 
   // Propagate the rebuilt array upward. Effect (not direct setState)
   // because computed is derived from props; calling onChange during
   // render would loop.
   const lastEmittedRef = useRef<string>("");
   useEffect(() => {
+    if (!selfDeriving) return;
     const sig = computed
       .map(
         (s) =>
@@ -133,7 +169,7 @@ export function SessionSlotsList({
       lastEmittedRef.current = sig;
       onChange(computed);
     }
-  }, [computed, slots, onChange]);
+  }, [selfDeriving, computed, slots, onChange]);
 
   if (slots.length === 0) return null;
 

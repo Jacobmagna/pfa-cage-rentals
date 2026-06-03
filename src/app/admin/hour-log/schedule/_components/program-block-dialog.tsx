@@ -14,10 +14,12 @@
 // submitted date + start/end times via parsePfaInput.
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
-import { Pencil, Trash2, X } from "lucide-react";
+import { ChevronLeft, Pencil, Repeat, Trash2, X } from "lucide-react";
 import {
+  cancelSeriesOccurrenceAction,
   createProgramScheduleBlockFormAction,
   deleteProgramScheduleBlockAction,
+  editProgramScheduleSeriesFormAction,
   updateProgramScheduleBlockFormAction,
   type ProgramScheduleActionResult,
 } from "../form-actions";
@@ -31,6 +33,7 @@ import {
   formatPfaTime,
   formatPfaTime12h,
   formatPfaWeekday,
+  parsePfaInput,
 } from "@/lib/timezone";
 
 // Day pills for the recurring CREATE path (RECUR-b1). 0=Sun..6=Sat,
@@ -54,6 +57,23 @@ function pfaWeekdayIndex(d: Date): number {
   return idx >= 0 ? idx : 0;
 }
 
+// RECUR-b2: medium label ("Aug 30, 2026") for a "YYYY-MM-DD" series date.
+// Parses at noon PFA-local so the day never shifts across a DST/TZ edge,
+// then reuses the shared medium formatter.
+function formatIsoDateMedium(iso: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  return formatPfaDateMedium(parsePfaInput(iso, "12:00"));
+}
+
+// RECUR-b2: "Mon, Wed" short weekday names for a daysOfWeek set, in
+// Sun→Sat order via the existing WEEKDAY_PILLS labels.
+function formatWeekdayList(days: number[]): string {
+  const set = new Set(days);
+  return WEEKDAY_PILLS.filter((p) => set.has(p.value))
+    .map((p) => p.label)
+    .join(", ");
+}
+
 export type ProgramOption = { id: string; name: string };
 export type CoachOption = {
   id: string;
@@ -67,6 +87,24 @@ export type ProgramBlockEditInitial = {
   scheduledCoachId: string;
   startAt: Date;
   endAt: Date;
+  note: string | null;
+  // RECUR-b2: NULL for one-off blocks; the parent series id for a series
+  // occurrence (branches the summary into series-aware actions).
+  seriesId: string | null;
+};
+
+// RECUR-b2: the editable definition of a recurring series, prefilling the
+// "Edit series" form. daysOfWeek = 0=Sun..6=Sat; startTime/endTime are
+// "HH:MM"; startsOn/endsOn are "YYYY-MM-DD".
+export type SeriesView = {
+  id: string;
+  programId: string;
+  scheduledCoachId: string;
+  daysOfWeek: number[];
+  startTime: string;
+  endTime: string;
+  startsOn: string;
+  endsOn: string;
   note: string | null;
 };
 
@@ -104,6 +142,7 @@ export function ProgramBlockDialog({
   coaches,
   createPrefill,
   editInitial,
+  editSeriesInitial,
   reconciliation,
 }: {
   open: boolean;
@@ -114,11 +153,15 @@ export function ProgramBlockDialog({
   coaches: CoachOption[];
   createPrefill: { programId: string; startTime: string; endTime: string } | null;
   editInitial: ProgramBlockEditInitial | null;
+  editSeriesInitial?: SeriesView | null;
   reconciliation?: BlockReconciliation | null;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const editButtonRef = useRef<HTMLButtonElement>(null);
   const isEdit = mode === "edit";
+  // RECUR-b2: this edit targets a recurring-series occurrence (vs a one-off
+  // block). Drives the summary branch + enables the "Edit series" view.
+  const isSeries = Boolean(editInitial?.seriesId && editSeriesInitial);
 
   const [state, formAction, pending] = useActionState(
     isEdit
@@ -126,13 +169,26 @@ export function ProgramBlockDialog({
       : createProgramScheduleBlockFormAction,
     INITIAL_STATE,
   );
+  // RECUR-b2: dedicated action state for the whole-series edit form. Lives
+  // top-level/unconditionally (hooks rules); only consumed in the
+  // "editSeries" view.
+  const [seriesState, seriesFormAction, seriesPending] = useActionState(
+    editProgramScheduleSeriesFormAction,
+    INITIAL_STATE,
+  );
   const [deleting, setDeleting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // RECUR-b2: "Cancel this occurrence" state (mirrors delete) + its own
+  // confirm dialog + inline error.
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
   // Edit opens to a read-only summary first (QA2-5); create goes straight
-  // to the form as before.
-  const [view, setView] = useState<"summary" | "edit">(
+  // to the form as before. RECUR-b2 adds the "editSeries" whole-series form.
+  const [view, setView] = useState<"summary" | "edit" | "editSeries">(
     isEdit ? "summary" : "edit",
   );
   // Reset the view on each (re)open via adjust-during-render keyed on the
@@ -152,6 +208,20 @@ export function ProgramBlockDialog({
   const [endsOn, setEndsOn] = useState("");
   const [recurError, setRecurError] = useState<string | null>(null);
 
+  // RECUR-b2: edit-series form state — weekday pills + season start/end
+  // dates, seeded from the parent series. Kept separate from the create
+  // path's state so neither clobbers the other. Reset on each (re)open.
+  const [seriesDays, setSeriesDays] = useState<Set<number>>(
+    () => new Set(editSeriesInitial?.daysOfWeek ?? []),
+  );
+  const [seriesStartsOn, setSeriesStartsOn] = useState(
+    editSeriesInitial?.startsOn ?? "",
+  );
+  const [seriesEndsOn, setSeriesEndsOn] = useState(
+    editSeriesInitial?.endsOn ?? "",
+  );
+  const [seriesError, setSeriesError] = useState<string | null>(null);
+
   if (open !== prevOpen) {
     setPrevOpen(open);
     if (open) {
@@ -160,12 +230,27 @@ export function ProgramBlockDialog({
       setSelectedDays(new Set([selectedWeekday]));
       setEndsOn("");
       setRecurError(null);
+      setSeriesDays(new Set(editSeriesInitial?.daysOfWeek ?? []));
+      setSeriesStartsOn(editSeriesInitial?.startsOn ?? "");
+      setSeriesEndsOn(editSeriesInitial?.endsOn ?? "");
+      setSeriesError(null);
+      setCancelError(null);
     }
   }
 
   const toggleDay = (value: number) => {
     setRecurError(null);
     setSelectedDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
+  };
+
+  const toggleSeriesDay = (value: number) => {
+    setSeriesError(null);
+    setSeriesDays((prev) => {
       const next = new Set(prev);
       if (next.has(value)) next.delete(value);
       else next.add(value);
@@ -191,6 +276,15 @@ export function ProgramBlockDialog({
     if (wasPending.current && !pending && state.ok && open) onClose();
     wasPending.current = pending;
   }, [pending, state, open, onClose]);
+
+  // RECUR-b2: same auto-close pattern for the whole-series edit form. Its
+  // own pending/state refs keep it independent from the block form effect.
+  const seriesWasPending = useRef(false);
+  useEffect(() => {
+    if (seriesWasPending.current && !seriesPending && seriesState.ok && open)
+      onClose();
+    seriesWasPending.current = seriesPending;
+  }, [seriesPending, seriesState, open, onClose]);
 
   // Native close (Escape, backdrop click).
   useEffect(() => {
@@ -257,6 +351,44 @@ export function ProgramBlockDialog({
     return coach ? (coach.name ?? coach.email) : editInitial.scheduledCoachId;
   }, [editInitial, coaches]);
 
+  // RECUR-b2: prefill values for the edit-series form. On an errored submit
+  // echo what was submitted; otherwise seed from the parent series.
+  const seriesDefaults = useMemo(() => {
+    if (!seriesState.ok && seriesState.values) {
+      return {
+        programId: seriesState.values.programId,
+        scheduledCoachId: seriesState.values.scheduledCoachId,
+        startTime: seriesState.values.startTime,
+        endTime: seriesState.values.endTime,
+        note: seriesState.values.note,
+      };
+    }
+    if (editSeriesInitial) {
+      return {
+        programId: editSeriesInitial.programId,
+        scheduledCoachId: editSeriesInitial.scheduledCoachId,
+        startTime: editSeriesInitial.startTime,
+        endTime: editSeriesInitial.endTime,
+        note: editSeriesInitial.note ?? "",
+      };
+    }
+    return {
+      programId: "",
+      scheduledCoachId: "",
+      startTime: "09:00",
+      endTime: "10:00",
+      note: "",
+    };
+  }, [editSeriesInitial, seriesState]);
+
+  // Recurrence summary line for a series occurrence, e.g.
+  // "Repeats Mon, Wed · through Aug 30, 2026".
+  const recurrenceLine = useMemo(() => {
+    if (!editSeriesInitial) return "";
+    const days = formatWeekdayList(editSeriesInitial.daysOfWeek);
+    return `Repeats ${days} · through ${formatIsoDateMedium(editSeriesInitial.endsOn)}`;
+  }, [editSeriesInitial]);
+
   const handleDelete = () => {
     if (!editInitial) return;
     setDeleteError(null);
@@ -280,11 +412,42 @@ export function ProgramBlockDialog({
     }
   };
 
+  // RECUR-b2: cancel just THIS occurrence (mirrors delete). On success →
+  // close; on typed error → inline alert in the summary.
+  const handleCancelOccurrence = () => {
+    if (!editInitial) return;
+    setCancelError(null);
+    setCancelConfirmOpen(true);
+  };
+
+  const handleConfirmCancelOccurrence = async () => {
+    if (!editInitial) return;
+    setCancelling(true);
+    try {
+      const result = await cancelSeriesOccurrenceAction(editInitial.id);
+      if (result.ok) {
+        setCancelConfirmOpen(false);
+        onClose();
+      } else {
+        setCancelError(result.error.message);
+        setCancelConfirmOpen(false);
+      }
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   // Key remounts the inputs when switching between blocks / modes and
   // re-populates submitted values on error.
   const formKey = state.ok
     ? `psb-${mode}-${editInitial?.id ?? createPrefill?.programId ?? "none"}-${defaults.startTime}`
     : `psb-err-${state.error.code}-${state.error.message}`;
+
+  // RECUR-b2: separate key for the series form so an errored submit
+  // re-seeds its echoed values, and a fresh open re-seeds from the series.
+  const seriesFormKey = seriesState.ok
+    ? `pss-${editSeriesInitial?.id ?? "none"}`
+    : `pss-err-${seriesState.error.code}-${seriesState.error.message}`;
 
   return (
     <dialog
@@ -295,12 +458,23 @@ export function ProgramBlockDialog({
         <div className="space-y-5 p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-xs uppercase tracking-[0.14em] text-fg-muted">
-                Edit
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-xs uppercase tracking-[0.14em] text-fg-muted">
+                  Edit
+                </p>
+                {isSeries ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-gold/40 bg-gold/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-gold-strong">
+                    <Repeat className="h-3 w-3" />
+                    Recurring
+                  </span>
+                ) : null}
+              </div>
               <h2 className="text-xl font-semibold tracking-tight mt-0.5">
                 Program block
               </h2>
+              {isSeries && recurrenceLine ? (
+                <p className="text-xs text-fg-muted mt-1">{recurrenceLine}</p>
+              ) : null}
             </div>
             <button
               type="button"
@@ -318,6 +492,15 @@ export function ProgramBlockDialog({
               className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
             >
               {deleteError}
+            </div>
+          ) : null}
+
+          {cancelError ? (
+            <div
+              role="alert"
+              className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+            >
+              {cancelError}
             </div>
           ) : null}
 
@@ -352,15 +535,27 @@ export function ProgramBlockDialog({
           </dl>
 
           <div className="flex items-center justify-between gap-2 pt-2">
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={deleting}
-              className="inline-flex items-center gap-1.5 rounded-md border border-danger/30 bg-danger/10 text-danger hover:bg-danger/20 h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
-            >
-              <Trash2 className="h-4 w-4" />
-              {deleting ? "Deleting…" : "Delete block"}
-            </button>
+            {isSeries ? (
+              <button
+                type="button"
+                onClick={handleCancelOccurrence}
+                disabled={cancelling}
+                className="inline-flex items-center gap-1.5 rounded-md border border-danger/30 bg-danger/10 text-danger hover:bg-danger/20 h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
+              >
+                <Trash2 className="h-4 w-4" />
+                {cancelling ? "Cancelling…" : "Cancel this occurrence"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="inline-flex items-center gap-1.5 rounded-md border border-danger/30 bg-danger/10 text-danger hover:bg-danger/20 h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
+              >
+                <Trash2 className="h-4 w-4" />
+                {deleting ? "Deleting…" : "Delete block"}
+              </button>
+            )}
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -372,15 +567,237 @@ export function ProgramBlockDialog({
               <button
                 ref={editButtonRef}
                 type="button"
-                onClick={() => setView("edit")}
+                onClick={() => setView(isSeries ? "editSeries" : "edit")}
                 className="inline-flex items-center gap-1.5 rounded-md bg-gold text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover h-9 px-4 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
               >
                 <Pencil className="h-4 w-4" />
-                Edit
+                {isSeries ? "Edit series" : "Edit"}
               </button>
             </div>
           </div>
         </div>
+      ) : view === "editSeries" && editSeriesInitial ? (
+        <form
+          action={seriesFormAction}
+          key={seriesFormKey}
+          onSubmit={(e) => {
+            // Client guard: at least one weekday must be checked. Server
+            // schema is still the source of truth.
+            if (seriesDays.size === 0) {
+              e.preventDefault();
+              setSeriesError("Pick at least one weekday.");
+            }
+          }}
+          className="space-y-5 p-6"
+        >
+          <input
+            type="hidden"
+            name="seriesId"
+            defaultValue={editSeriesInitial.id}
+          />
+
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.14em] text-fg-muted">
+                Edit series
+              </p>
+              <h2 className="text-xl font-semibold tracking-tight mt-0.5">
+                Recurring program block
+              </h2>
+              <p className="text-xs text-fg-muted mt-1">
+                Saving updates the whole series and regenerates future dates.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex items-center justify-center h-8 w-8 -mr-1 -mt-1 rounded-md text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {!seriesState.ok ? (
+            <div
+              role="alert"
+              className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+            >
+              {seriesState.error.message}
+            </div>
+          ) : null}
+
+          <div className="space-y-3">
+            <Field label="Program">
+              <select
+                name="programId"
+                required
+                defaultValue={seriesDefaults.programId}
+                className={selectStyles}
+              >
+                <option value="" disabled>
+                  Choose a program…
+                </option>
+                {programs.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Scheduled coach">
+              <select
+                name="scheduledCoachId"
+                required
+                defaultValue={seriesDefaults.scheduledCoachId}
+                className={selectStyles}
+              >
+                <option value="" disabled>
+                  Choose a coach…
+                </option>
+                {coaches.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name ?? c.email}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Start">
+                <TimeSelect
+                  name="startTime"
+                  variant="start"
+                  required
+                  defaultValue={seriesDefaults.startTime}
+                  className={selectStyles}
+                />
+              </Field>
+              <Field label="End">
+                <TimeSelect
+                  name="endTime"
+                  variant="end"
+                  required
+                  defaultValue={seriesDefaults.endTime}
+                  className={selectStyles}
+                />
+              </Field>
+            </div>
+
+            <div>
+              <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
+                Repeat on
+              </span>
+              <div
+                role="group"
+                aria-label="Repeat on"
+                className="flex flex-wrap gap-1.5"
+              >
+                {WEEKDAY_PILLS.map((d) => {
+                  const active = seriesDays.has(d.value);
+                  return (
+                    <label
+                      key={d.value}
+                      className={`inline-flex items-center justify-center h-8 min-w-[2.75rem] px-2.5 rounded-md border text-xs font-medium cursor-pointer select-none transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-gold/40 ${
+                        active
+                          ? "bg-gold/10 border-gold/40 text-gold-strong"
+                          : "border-line text-fg-muted hover:text-fg hover:border-line-strong"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        name="daysOfWeek"
+                        value={d.value}
+                        checked={active}
+                        onChange={() => toggleSeriesDay(d.value)}
+                        className="sr-only"
+                      />
+                      {d.label}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Season starts on">
+                <DateInput
+                  name="startsOn"
+                  value={seriesStartsOn}
+                  onChange={(iso) => {
+                    setSeriesStartsOn(iso);
+                    setSeriesError(null);
+                  }}
+                  required
+                  aria-label="Season starts on"
+                />
+              </Field>
+              <Field label="Season ends on">
+                <DateInput
+                  name="endsOn"
+                  value={seriesEndsOn}
+                  onChange={(iso) => {
+                    setSeriesEndsOn(iso);
+                    setSeriesError(null);
+                  }}
+                  required
+                  aria-label="Season ends on"
+                />
+              </Field>
+            </div>
+
+            {seriesError ? (
+              <p
+                role="alert"
+                className="text-[11px] text-danger leading-snug"
+              >
+                {seriesError}
+              </p>
+            ) : null}
+
+            <Field
+              label="Note"
+              hint="Optional — e.g. 'Bring radar gun', context for the coach."
+            >
+              <input
+                type="text"
+                name="note"
+                maxLength={200}
+                defaultValue={seriesDefaults.note}
+                className={inputStyles}
+              />
+            </Field>
+          </div>
+
+          <div className="flex items-center justify-between gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setView("summary")}
+              disabled={seriesPending}
+              className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface-2 text-fg-muted hover:text-fg hover:border-line-strong h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Back
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md border border-line bg-surface-2 text-fg-muted hover:text-fg hover:border-line-strong h-9 px-4 text-sm font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={seriesPending}
+                className="rounded-md bg-gold text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+              >
+                {seriesPending ? "Saving…" : "Save series"}
+              </button>
+            </div>
+          </div>
+        </form>
       ) : (
       <form
         action={formAction}
@@ -666,6 +1083,22 @@ export function ProgramBlockDialog({
         confirmLabel={deleting ? "Deleting…" : "Delete block"}
         onConfirm={handleConfirmDelete}
         isPending={deleting}
+      />
+
+      <ConfirmDialog
+        open={cancelConfirmOpen}
+        onOpenChange={(next) => {
+          if (!cancelling) setCancelConfirmOpen(next);
+        }}
+        title="Cancel this occurrence?"
+        description={
+          editInitial
+            ? `Cancel the ${formatPfaDateMedium(editInitial.startAt)} occurrence? Other dates in the series are unaffected.`
+            : undefined
+        }
+        confirmLabel={cancelling ? "Cancelling…" : "Cancel occurrence"}
+        onConfirm={handleConfirmCancelOccurrence}
+        isPending={cancelling}
       />
     </dialog>
   );

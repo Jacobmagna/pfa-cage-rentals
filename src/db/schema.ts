@@ -466,10 +466,9 @@ export const auditLog = pgTable(
 
 // Training programs (e.g. "Elite Hitting", "Speed & Agility").
 //
-// Optional participation cap measured per week or per month. `cap` and
-// `capPeriod` are co-required: both NULL (no cap) or both NOT NULL —
-// enforced by a hand-added CHECK constraint in the migration (drizzle-kit
-// does not emit CHECK constraints).
+// `cap` / `capPeriod` are DORMANT (see below): the session cap moved to
+// the per-athlete enrollment (athlete_programs.cap, FEAT-11). The columns
+// + their CHECK constraint are kept to avoid a destructive migration.
 //
 // `name` is unique so seeds + admin edits can't double-create a program,
 // mirroring resources.name. Programs are never hard-deleted: use the
@@ -482,6 +481,10 @@ export const programs = pgTable("programs", {
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull().unique(),
+  // DORMANT: the session cap moved to athlete_programs.cap — these two
+  // columns are unused (the Programs form/actions no longer read/write
+  // them), kept to avoid a destructive migration. A future cleanup
+  // migration can drop them along with the cap_period enum.
   cap: integer("cap"),
   capPeriod: capPeriod("cap_period"),
   active: boolean("active").notNull().default(true),

@@ -16,7 +16,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { auditLog, programs } from "@/db/schema";
+import { auditLog } from "@/db/schema";
 import {
   createProgramInternal,
   deactivateProgramInternal,
@@ -62,8 +62,6 @@ describe("createProgramInternal", () => {
 
     expect(created.id).toBeTruthy();
     expect(created.name).toBe(name);
-    expect(created.cap).toBeNull();
-    expect(created.capPeriod).toBeNull();
     expect(created.active).toBe(true);
 
     const auditRows = await db
@@ -75,25 +73,6 @@ describe("createProgramInternal", () => {
     expect(auditRows).toHaveLength(1);
     expect(auditRows[0].entityType).toBe("program");
     expect(auditRows[0].actorUserId).toBe(fixtures.admin.id);
-  });
-
-  it("persists a cap + period when both are supplied", async () => {
-    const created = await createProgramInternal(fixtures.admin, {
-      name: programName(),
-      cap: 8,
-      capPeriod: "week",
-    });
-    expect(created.cap).toBe(8);
-    expect(created.capPeriod).toBe("week");
-  });
-
-  it("rejects a cap without a period (ZodError, co-requirement)", async () => {
-    await expect(
-      createProgramInternal(fixtures.admin, {
-        name: programName(),
-        cap: 8,
-      }),
-    ).rejects.toThrow(/cap and capPeriod/);
   });
 
   it("rejects a duplicate name with ProgramNameTakenError", async () => {
@@ -133,33 +112,6 @@ describe("updateProgramInternal", () => {
     expect(diff.after.name).toBe(newName);
     // active didn't change → must not appear in the diff.
     expect(diff.before).not.toHaveProperty("active");
-  });
-
-  it("sets a cap/period then clears them (both null) and persists", async () => {
-    const created = await createProgramInternal(fixtures.admin, {
-      name: programName(),
-    });
-
-    const withCap = await updateProgramInternal(fixtures.admin, created.id, {
-      cap: 5,
-      capPeriod: "month",
-    });
-    expect(withCap.cap).toBe(5);
-    expect(withCap.capPeriod).toBe("month");
-
-    const cleared = await updateProgramInternal(fixtures.admin, created.id, {
-      cap: null,
-      capPeriod: null,
-    });
-    expect(cleared.cap).toBeNull();
-    expect(cleared.capPeriod).toBeNull();
-
-    const [row] = await db
-      .select()
-      .from(programs)
-      .where(eq(programs.id, created.id));
-    expect(row.cap).toBeNull();
-    expect(row.capPeriod).toBeNull();
   });
 
   it("throws ProgramNotFoundError for a missing id", async () => {

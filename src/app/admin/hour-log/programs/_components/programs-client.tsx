@@ -15,8 +15,6 @@ import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 export type ProgramRow = {
   id: string;
   name: string;
-  cap: number | null;
-  capPeriod: "week" | "month" | null;
   active: boolean;
   defaultRatePer30MinCents: number | null;
 };
@@ -61,8 +59,6 @@ export function ProgramsClient({ programs }: { programs: ProgramRow[] }) {
     ? {
         id: editRow.id,
         name: editRow.name,
-        cap: editRow.cap,
-        capPeriod: editRow.capPeriod,
         defaultRatePer30MinCents: editRow.defaultRatePer30MinCents,
       }
     : undefined;
@@ -82,9 +78,6 @@ export function ProgramsClient({ programs }: { programs: ProgramRow[] }) {
               <tr>
                 <th scope="col" className="px-4 py-3 text-left font-semibold">
                   Program
-                </th>
-                <th scope="col" className="px-4 py-3 text-left font-semibold">
-                  Cap
                 </th>
                 <th scope="col" className="px-4 py-3 text-left font-semibold">
                   Status
@@ -109,11 +102,6 @@ export function ProgramsClient({ programs }: { programs: ProgramRow[] }) {
                   >
                     <td className="px-4 py-3 text-sm font-medium text-fg">
                       {row.name}
-                    </td>
-                    <td className="tnum px-4 py-3 text-sm text-fg-muted whitespace-nowrap">
-                      {row.cap !== null && row.capPeriod !== null
-                        ? `${row.cap} / ${row.capPeriod}`
-                        : "No cap"}
                     </td>
                     <td className="px-4 py-3 text-sm whitespace-nowrap">
                       {row.active ? (

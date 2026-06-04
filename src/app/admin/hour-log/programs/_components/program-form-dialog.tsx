@@ -11,13 +11,11 @@ import { ProgramFields } from "./program-fields";
 export type ProgramEditInitialValues = {
   id: string;
   name: string;
-  cap: number | null;
-  capPeriod: "week" | "month" | null;
   defaultRatePer30MinCents: number | null;
 };
 
-// Native <dialog> edit form for a single program (name + optional cap /
-// period via the shared ProgramFields) using useActionState +
+// Native <dialog> edit form for a single program (name + optional pay
+// rate via the shared ProgramFields) using useActionState +
 // updateProgramFormAction, auto-closing on success. Mirrors
 // admin/attendance/roster/_components/athlete-edit-dialog.tsx. Create
 // mode lives in the inline AddProgramForm at the top of the page.
@@ -73,19 +71,15 @@ export function ProgramFormDialog({
       return state.values;
     }
     if (initial) {
-      const hasCap = initial.cap !== null && initial.capPeriod !== null;
       return {
         name: initial.name,
-        cap: initial.cap !== null ? String(initial.cap) : "",
-        capPeriod: initial.capPeriod ?? "",
-        limit: hasCap,
         rateDollars:
           initial.defaultRatePer30MinCents !== null
             ? (initial.defaultRatePer30MinCents / 100).toFixed(2)
             : "",
       };
     }
-    return { name: "", cap: "", capPeriod: "", limit: false, rateDollars: "" };
+    return { name: "", rateDollars: "" };
   }, [initial, state]);
 
   return (

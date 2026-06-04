@@ -11,8 +11,9 @@
 //
 // Programs are soft-deleted (DEC-10): "delete" flips active=false so the
 // no-cascade FKs on hour_logs / attendance_sessions keep their target.
-// cap + capPeriod are co-required (DEC-03; enforced by the Zod refine +
-// the DB CHECK).
+// The program-level session cap was removed — the cap is now a
+// per-athlete enrollment cap (FEAT-11). The programs.cap /
+// programs.cap_period columns are left dormant.
 
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
@@ -51,9 +52,9 @@ function isProgramNameViolation(err: unknown): boolean {
   return false;
 }
 
-// Insert a new program. cap/capPeriod default to null when omitted; the
-// Zod refine enforces both-or-neither before we ever hit the DB. Audit
-// "program"/"create" with the full row.
+// Insert a new program. The dormant cap/cap_period columns are left NULL
+// (the session cap is now per-athlete, FEAT-11). Audit "program"/"create"
+// with the full row.
 export async function createProgramInternal(
   actor: AuthedSession["user"],
   input: unknown,
@@ -66,8 +67,6 @@ export async function createProgramInternal(
       .insert(programs)
       .values({
         name: parsed.name,
-        cap: parsed.cap ?? null,
-        capPeriod: parsed.capPeriod ?? null,
         active: parsed.active ?? true,
         defaultRatePer30MinCents: parsed.defaultRatePer30MinCents ?? null,
       })
@@ -90,8 +89,7 @@ export async function createProgramInternal(
 }
 
 // Edit an existing program. Fetch first (else ProgramNotFoundError),
-// Zod-parse the patch, update only the provided fields. cap/capPeriod
-// accept null to explicitly clear them (together — DEC-03). Audit a
+// Zod-parse the patch, update only the provided fields. Audit a
 // changed-keys-only before/after diff. Reactivate is just this with
 // {active:true}; deactivate has its own helper for the audit clarity.
 export async function updateProgramInternal(
@@ -109,18 +107,12 @@ export async function updateProgramInternal(
   const parsed = updateProgramSchema.parse(input);
 
   // Build a patch containing only the keys the caller actually sent.
-  // cap/capPeriod are special: `null` is a meaningful "clear" value, so
-  // we distinguish present-but-null from absent via hasOwnProperty.
   const patch: {
     name?: string;
-    cap?: number | null;
-    capPeriod?: "week" | "month" | null;
     active?: boolean;
     defaultRatePer30MinCents?: number | null;
   } = {};
   if (parsed.name !== undefined) patch.name = parsed.name;
-  if ("cap" in parsed) patch.cap = parsed.cap ?? null;
-  if ("capPeriod" in parsed) patch.capPeriod = parsed.capPeriod ?? null;
   if (parsed.active !== undefined) patch.active = parsed.active;
   // null is a meaningful "clear the rate" value, so distinguish
   // present-but-null from absent via the key check (same as cap).

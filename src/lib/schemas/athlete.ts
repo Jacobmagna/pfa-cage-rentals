@@ -27,16 +27,46 @@ export const updateAthleteSchema = z.object({
   term: z.string().trim().min(1).max(50).nullish(),
 });
 
+// Per-enrollment session-cap window. Must match the
+// enrollment_cap_period pgEnum in src/db/schema.ts: "week" (Sun–Sat),
+// "month" (calendar month), "total" (whole program, no reset).
+export const enrollmentCapPeriodSchema = z.enum(["week", "month", "total"]);
+
+// Both-or-neither: cap and capPeriod are co-required for an assignment.
+// `undefined` and `null` both count as "absent" so the box-unchecked path
+// (no cap) and the box-checked path (cap + period) share one rule. Mirrors
+// the program-level capCoRequired refine in src/lib/schemas/program.ts.
+function assignCapCoRequired(v: {
+  cap?: number | null;
+  capPeriod?: "week" | "month" | "total" | null;
+}): boolean {
+  const hasCap = v.cap !== undefined && v.cap !== null;
+  const hasPeriod = v.capPeriod !== undefined && v.capPeriod !== null;
+  return hasCap === hasPeriod;
+}
+
+const assignCapCoRequiredError = {
+  message: "cap and capPeriod must be set together or both omitted",
+  path: ["cap"],
+};
+
 // Assign one or more athletes to a single program.
 //   - "add"  — insert (athleteId, programId) idempotently; keeps any
 //     existing assignments the athlete already has.
 //   - "move" — clear ALL the athlete's program assignments, then insert
 //     the one; net effect is the athlete belongs to exactly this program.
-export const assignAthletesToProgramSchema = z.object({
-  athleteIds: z.array(z.string().min(1)).min(1, "at least one athlete"),
-  programId: z.string().min(1, "programId is required"),
-  mode: z.enum(["add", "move"]).default("add"),
-});
+// cap/capPeriod set the per-enrollment session cap for the assigned
+// athlete(s) (both present = cap; both absent = no cap / clear it).
+export const assignAthletesToProgramSchema = z
+  .object({
+    athleteIds: z.array(z.string().min(1)).min(1, "at least one athlete"),
+    programId: z.string().min(1, "programId is required"),
+    mode: z.enum(["add", "move"]).default("add"),
+    // Coerce from the form string; a positive whole number of sessions.
+    cap: z.coerce.number().int().positive().nullish(),
+    capPeriod: enrollmentCapPeriodSchema.nullish(),
+  })
+  .refine(assignCapCoRequired, assignCapCoRequiredError);
 
 export type CreateAthleteInput = z.infer<typeof createAthleteSchema>;
 export type UpdateAthleteInput = z.infer<typeof updateAthleteSchema>;

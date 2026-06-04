@@ -175,8 +175,15 @@ export async function assignAthletesFormAction(
   const athleteIds = formData.getAll("athleteId").map((v) => v.toString());
   const programId = formData.get("programId")?.toString() ?? "";
   const mode = formData.get("mode")?.toString() === "move" ? "move" : "add";
+  // Cap is only present when the "Specific session cap" box is checked.
+  // Empty / missing → undefined so the schema's "no cap" (clear) path
+  // applies and the co-requirement refine doesn't trip.
+  const capRaw = formData.get("cap")?.toString().trim() ?? "";
+  const capPeriodRaw = formData.get("capPeriod")?.toString().trim() ?? "";
+  const cap = capRaw === "" ? undefined : capRaw;
+  const capPeriod = capPeriodRaw === "" ? undefined : capPeriodRaw;
   try {
-    await assignAthletes({ athleteIds, programId, mode });
+    await assignAthletes({ athleteIds, programId, mode, cap, capPeriod });
     return { ok: true, assignedAt: Date.now() };
   } catch (err) {
     if (

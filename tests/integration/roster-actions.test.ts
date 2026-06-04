@@ -327,6 +327,59 @@ describe("assignAthletesToProgramInternal", () => {
     await db.delete(athletes).where(eq(athletes.id, athlete.id));
   });
 
+  it("sets a per-enrollment cap on assign, then clears it on a capless re-assign", async () => {
+    const program = await createProgram();
+    const athlete = await createAthleteInternal(fixtures.admin, {
+      firstName: "Cap",
+      lastName: `Ped-${uniqueSuffix()}`,
+    });
+
+    // Assign WITH a cap: 2 sessions total per program.
+    await assignAthletesToProgramInternal(fixtures.admin, {
+      athleteIds: [athlete.id],
+      programId: program.id,
+      mode: "add",
+      cap: 2,
+      capPeriod: "total",
+    });
+
+    let [row] = await db
+      .select()
+      .from(athletePrograms)
+      .where(
+        and(
+          eq(athletePrograms.athleteId, athlete.id),
+          eq(athletePrograms.programId, program.id),
+        ),
+      );
+    expect(row.cap).toBe(2);
+    expect(row.capPeriod).toBe("total");
+
+    // Re-assign the same athlete to the same program with NO cap → cleared.
+    await assignAthletesToProgramInternal(fixtures.admin, {
+      athleteIds: [athlete.id],
+      programId: program.id,
+      mode: "add",
+    });
+
+    [row] = await db
+      .select()
+      .from(athletePrograms)
+      .where(
+        and(
+          eq(athletePrograms.athleteId, athlete.id),
+          eq(athletePrograms.programId, program.id),
+        ),
+      );
+    expect(row.cap).toBeNull();
+    expect(row.capPeriod).toBeNull();
+
+    await db
+      .delete(athletePrograms)
+      .where(eq(athletePrograms.athleteId, athlete.id));
+    await db.delete(athletes).where(eq(athletes.id, athlete.id));
+  });
+
   it("rejects a nonexistent program (ProgramNotFoundError)", async () => {
     const athlete = await createAthleteInternal(fixtures.admin, {
       firstName: "No",

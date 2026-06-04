@@ -16,6 +16,7 @@ const ADMIN_TABS: Tab[] = [
   { key: "cage", label: "Cage Rentals" },
   { key: "hour-log", label: "Hour Log" },
   { key: "attendance", label: "Attendance" },
+  { key: "records", label: "Billing & Records" },
 ];
 
 // Coach tab list: no Home tab; Schedule is coach-only (admin reaches its
@@ -41,6 +42,9 @@ function hrefFor(key: TabKey, base: string): string {
       return `${base}/attendance`;
     case "schedule":
       return `${base}/schedule`;
+    case "records":
+      // Admin-only tab; coaches never receive it, so the admin base is fine.
+      return `${base}/records`;
   }
 }
 

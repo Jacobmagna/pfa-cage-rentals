@@ -18,6 +18,8 @@ type FilterValues = {
   to: string;
   coachIds: string[]; // empty means "all coaches"
   resourceTypes: ("cage" | "bullpen" | "weight_room")[]; // empty means "all"
+  includeCageSessions: boolean; // scope: cage rental sessions (default on)
+  includeProgramHours: boolean; // scope: program hours (default on)
 };
 
 type CoachOption = {
@@ -54,6 +56,9 @@ export function FiltersForm({
       action="/admin/reports"
       className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] p-5 mb-6"
     >
+      {/* Hidden marker so the GET submit can tell "scope unchecked" from
+          "fresh load" — see normalizeFilters. Always present. */}
+      <input type="hidden" name="scopeApplied" value="1" />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
         <Field label="From">
           <DateInput
@@ -101,6 +106,26 @@ export function FiltersForm({
                 defaultChecked={isTypeChecked(t)}
               />
             ))}
+          </div>
+        </Field>
+
+        <Field
+          label="Scope"
+          hint="Both on by default. Off categories are dropped from the report and the Excel."
+        >
+          <div className="flex flex-wrap gap-3 h-10 items-center">
+            <CheckboxChip
+              name="includeCage"
+              value="1"
+              label="Cage rental sessions"
+              defaultChecked={values.includeCageSessions}
+            />
+            <CheckboxChip
+              name="includeProgram"
+              value="1"
+              label="Program hours"
+              defaultChecked={values.includeProgramHours}
+            />
           </div>
         </Field>
       </div>

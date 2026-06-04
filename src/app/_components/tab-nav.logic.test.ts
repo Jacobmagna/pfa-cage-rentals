@@ -2,12 +2,36 @@ import { describe, it, expect } from "vitest";
 import { activeTab } from "./tab-nav.logic";
 
 describe("activeTab", () => {
-  it("returns cage for the admin section root", () => {
+  it("returns cage for the admin section root with no role (back-compat)", () => {
     expect(activeTab("/admin")).toBe("cage");
+  });
+
+  it("returns home for the admin section root when role is admin", () => {
+    expect(activeTab("/admin", "admin")).toBe("home");
+  });
+
+  it("returns home for the admin root with a trailing slash when role is admin", () => {
+    expect(activeTab("/admin/", "admin")).toBe("home");
+  });
+
+  it("returns cage for /admin/cage-rentals when role is admin", () => {
+    expect(activeTab("/admin/cage-rentals", "admin")).toBe("cage");
+  });
+
+  it("returns cage for /admin/sessions when role is admin", () => {
+    expect(activeTab("/admin/sessions", "admin")).toBe("cage");
   });
 
   it("returns cage for the coach section root", () => {
     expect(activeTab("/coach")).toBe("cage");
+  });
+
+  it("returns cage for the coach section root when role is coach", () => {
+    expect(activeTab("/coach", "coach")).toBe("cage");
+  });
+
+  it("returns hour-log for /admin/hour-log when role is admin", () => {
+    expect(activeTab("/admin/hour-log", "admin")).toBe("hour-log");
   });
 
   it("returns hour-log for /admin/hour-log", () => {

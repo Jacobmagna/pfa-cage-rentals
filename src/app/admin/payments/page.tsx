@@ -13,26 +13,34 @@ import { totalFromSnapshot } from "@/lib/billing";
 import { PaymentsClient, type CoachOption, type RecentPaymentRow } from "./_components/payments-client";
 
 // /admin/payments — coach-to-PFA ledger. Three stacked sections:
-//   1. Balances by coach: lifetime owed (rentals) minus lifetime
+//   1. Balances by coach: lifetime cage-rental owed minus lifetime
 //      confirmed payments. Pending payments don't reduce the balance.
+//      Program hours (a payout PFA owes the coach) are shown in their
+//      own neutral column and never netted into this balance.
 //   2. Pending inbox: coach-self-reported payments awaiting admin
 //      confirmation. Phase P4 will populate this; for launch it
 //      typically renders an empty state.
 //   3. Recent payments: last 100 confirmed + pending entries with
 //      inline edit / delete / confirm actions.
 //
-// Snapshot rule: per-coach owed sums two snapshotted sources —
+// Money direction: cage rentals are money the coach OWES PFA (a
+// receivable); program hours are money PFA PAYS the coach (a payout).
+// They flow OPPOSITE ways and are kept SEPARATE — program pay is NOT
+// netted into the cage balance. Balance = cage owed − confirmed
+// payments. Program pay shows in its own neutral column.
+//
+// Snapshot rule: each source is summed straight off its own snapshot —
 // sessionsBilling.ratePer30MinCents (cage rentals) and
-// hourLogs.ratePer30MinCents (program hours) — straight off each row
-// × its slot count. The program-hour rate is likewise snapshotted at
-// log time. Renegotiating an override only affects future bookings /
-// logs — past balances never drift.
+// hourLogs.ratePer30MinCents (program hours) — × its slot count. The
+// program-hour rate is likewise snapshotted at log time. Renegotiating
+// an override only affects future bookings / logs — past balances
+// never drift.
 //
 // All-time scope: imported historical data means lifetime-owed can be
 // large at launch. Dad's workflow for backfilling historical
 // settlement (a single "Pre-launch settlement" record per coach, or
 // per-month breakdowns) is offline-driven; the app just shows the
-// raw owed - paid math.
+// raw cage-owed − paid math.
 
 const RECENT_LIMIT = 100;
 
@@ -129,11 +137,12 @@ export default async function AdminPaymentsPage() {
       .limit(RECENT_LIMIT),
   ]);
 
-  // Per-coach owed = cage rentals + program hours, each summed from its
-  // own snapshot. Reading ratePer30MinCents directly off each row
-  // preserves the historical rate at booking / log time — renegotiating
-  // an override never rewrites past balances. The hour_logs snapshot is
-  // nullable (pre-rate logs) → treat null as $0.
+  // Cage owed (what the coach owes PFA) and program pay (what PFA owes
+  // the coach) are summed from their own snapshots and kept separate.
+  // Reading ratePer30MinCents directly off each row preserves the
+  // historical rate at booking / log time — renegotiating an override
+  // never rewrites past balances. The hour_logs snapshot is nullable
+  // (pre-rate logs) → treat null as $0.
   const owedCageByCoach = new Map<string, number>();
   for (const s of sessionRows) {
     const total = totalFromSnapshot(s.startAt, s.endAt, s.ratePer30MinCents);
@@ -167,18 +176,17 @@ export default async function AdminPaymentsPage() {
     .map((c) => {
       const owedCage = owedCageByCoach.get(c.id) ?? 0;
       const owedProgram = owedProgramByCoach.get(c.id) ?? 0;
-      const owed = owedCage + owedProgram;
       const paid = paidByCoach.get(c.id) ?? 0;
+      // Balance is cage-only: program pay is a payout, never reduces it.
       return {
         coachId: c.id,
         coachName: c.name ?? c.email,
         coachEmail: c.email,
         zelleContact: c.zelleContact,
-        owedCents: owed,
         owedCageCents: owedCage,
         owedProgramCents: owedProgram,
         paidCents: paid,
-        balanceCents: owed - paid,
+        balanceCents: owedCage - paid,
       };
     })
     .sort((a, b) => b.balanceCents - a.balanceCents);
@@ -186,14 +194,13 @@ export default async function AdminPaymentsPage() {
   // Grand totals across the active roster.
   const totals = balanceRows.reduce(
     (acc, r) => {
-      acc.owed += r.owedCents;
       acc.owedCage += r.owedCageCents;
       acc.owedProgram += r.owedProgramCents;
       acc.paid += r.paidCents;
       acc.balance += r.balanceCents;
       return acc;
     },
-    { owed: 0, owedCage: 0, owedProgram: 0, paid: 0, balance: 0 },
+    { owedCage: 0, owedProgram: 0, paid: 0, balance: 0 },
   );
 
   const coachOptions: CoachOption[] = activeCoaches.map((c) => ({
@@ -243,9 +250,11 @@ export default async function AdminPaymentsPage() {
         </p>
         <h1 className="text-3xl font-semibold tracking-tight">Payments</h1>
         <p className="text-sm text-fg-muted">
-          What each coach owes PFA — cage rentals plus program hours — and the
-          payment history. Only confirmed payments reduce the balance — pending
-          entries wait in the inbox.
+          Cage-rental balances (what each coach owes PFA) and the program hours
+          PFA owes them. <span className="font-medium text-fg">Balance = cage
+          owed − confirmed payments</span>; program pay is a separate payout and
+          does not reduce the cage balance. Only confirmed payments reduce the
+          balance — pending entries wait in the inbox.
         </p>
         <p className="text-xs italic text-fg-subtle md:hidden">
           This page is designed for desktop. Rotate your device or use a

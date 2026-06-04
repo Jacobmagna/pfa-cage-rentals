@@ -14,10 +14,14 @@ export function ReportPreview({
   detail,
   summary,
   grandTotalCents,
+  includeCageSessions,
+  includeProgramHours,
 }: {
   detail: DetailRow[];
   summary: SummaryRow[];
   grandTotalCents: number;
+  includeCageSessions: boolean;
+  includeProgramHours: boolean;
 }) {
   if (detail.length === 0 && summary.length === 0) {
     return (
@@ -46,12 +50,20 @@ export function ReportPreview({
             <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
               <tr>
                 <th scope="col" className="px-4 py-3 text-left font-semibold">Coach</th>
-                <th scope="col" className="px-4 py-3 text-right font-semibold">Cage</th>
-                <th scope="col" className="px-4 py-3 text-right font-semibold">Bullpen</th>
-                <th scope="col" className="px-4 py-3 text-right font-semibold">Weight Room</th>
-                <th scope="col" className="px-4 py-3 text-right font-semibold">Program hours</th>
+                {includeCageSessions ? (
+                  <>
+                    <th scope="col" className="px-4 py-3 text-right font-semibold">Cage</th>
+                    <th scope="col" className="px-4 py-3 text-right font-semibold">Bullpen</th>
+                    <th scope="col" className="px-4 py-3 text-right font-semibold">Weight Room</th>
+                  </>
+                ) : null}
+                {includeProgramHours ? (
+                  <th scope="col" className="px-4 py-3 text-right font-semibold">Program hours</th>
+                ) : null}
                 <th scope="col" className="px-4 py-3 text-right font-semibold">Total</th>
-                <th scope="col" className="px-4 py-3 text-center font-semibold">Online</th>
+                {includeCageSessions ? (
+                  <th scope="col" className="px-4 py-3 text-center font-semibold">Online</th>
+                ) : null}
               </tr>
             </thead>
             <tbody>
@@ -65,34 +77,42 @@ export function ReportPreview({
                       </span>
                     ) : null}
                   </td>
-                  <SlotsAndCashCell
-                    slots={row.cageSlots}
-                    cents={row.cageTotalCents}
-                  />
-                  <SlotsAndCashCell
-                    slots={row.bullpenSlots}
-                    cents={row.bullpenTotalCents}
-                  />
-                  <SlotsAndCashCell
-                    slots={row.weightRoomSlots}
-                    cents={row.weightRoomTotalCents}
-                  />
-                  <SlotsAndCashCell
-                    slots={row.programSlots}
-                    cents={row.programTotalCents}
-                  />
+                  {includeCageSessions ? (
+                    <>
+                      <SlotsAndCashCell
+                        slots={row.cageSlots}
+                        cents={row.cageTotalCents}
+                      />
+                      <SlotsAndCashCell
+                        slots={row.bullpenSlots}
+                        cents={row.bullpenTotalCents}
+                      />
+                      <SlotsAndCashCell
+                        slots={row.weightRoomSlots}
+                        cents={row.weightRoomTotalCents}
+                      />
+                    </>
+                  ) : null}
+                  {includeProgramHours ? (
+                    <SlotsAndCashCell
+                      slots={row.programSlots}
+                      cents={row.programTotalCents}
+                    />
+                  ) : null}
                   <td className="px-4 py-3 text-right font-mono tnum tabular-nums font-semibold text-fg">
                     {formatCents(row.totalCents)}
                   </td>
-                  <td className="px-4 py-3 text-center">
-                    {row.onlineSessions > 0 ? (
-                      <span className="inline-block rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-success ring-1 ring-inset ring-success/30 tnum">
-                        {row.onlineSessions}
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-fg-subtle">—</span>
-                    )}
-                  </td>
+                  {includeCageSessions ? (
+                    <td className="px-4 py-3 text-center">
+                      {row.onlineSessions > 0 ? (
+                        <span className="inline-block rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-success ring-1 ring-inset ring-success/30 tnum">
+                          {row.onlineSessions}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-fg-subtle">—</span>
+                      )}
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>

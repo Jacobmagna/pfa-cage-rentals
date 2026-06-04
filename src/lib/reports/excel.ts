@@ -24,13 +24,15 @@ const CURRENCY_FMT = '"$"#,##0.00';
 export async function buildReportWorkbook(
   report: ReportData,
   meta: WorkbookMeta,
+  includeCageSessions: boolean,
+  includeProgramHours: boolean,
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "PFA Cage Rentals";
   workbook.created = new Date();
   workbook.subject = `Billing ${meta.from} to ${meta.to}`;
 
-  addSummarySheet(workbook, report);
+  addSummarySheet(workbook, report, includeCageSessions, includeProgramHours);
   addDetailSheet(workbook, report);
 
   // exceljs writeBuffer returns ArrayBuffer / Uint8Array; coerce to
@@ -40,35 +42,93 @@ export async function buildReportWorkbook(
   return Buffer.from(out);
 }
 
-function addSummarySheet(workbook: ExcelJS.Workbook, report: ReportData) {
+function addSummarySheet(
+  workbook: ExcelJS.Workbook,
+  report: ReportData,
+  includeCageSessions: boolean,
+  includeProgramHours: boolean,
+) {
   const sheet = workbook.addWorksheet("Summary");
 
-  sheet.columns = [
+  // Build the column list dynamically so dropped scope categories leave
+  // NO empty columns. `dollar` columns get currency format, `num`
+  // columns get right-alignment — tracked by key so styling stays
+  // correct regardless of which categories are present.
+  type SummaryCol = {
+    header: string;
+    key: string;
+    width: number;
+    kind?: "dollar" | "num";
+  };
+  const columns: SummaryCol[] = [
     { header: "Coach", key: "coach", width: 28 },
     { header: "Email", key: "email", width: 28 },
-    { header: "Cage Slots", key: "cageSlots", width: 12 },
-    { header: "Cage $", key: "cageDollars", width: 12 },
-    { header: "Bullpen Slots", key: "bullpenSlots", width: 13 },
-    { header: "Bullpen $", key: "bullpenDollars", width: 12 },
-    { header: "WeightRoom Slots", key: "weightRoomSlots", width: 18 },
-    { header: "WeightRoom $", key: "weightRoomDollars", width: 14 },
-    { header: "Total", key: "total", width: 12 },
-    { header: "Online Sessions", key: "onlineSessions", width: 16 },
   ];
+  // Cage rental sessions (money the coach owes PFA) — session-only
+  // categories, including the Online sessions count.
+  if (includeCageSessions) {
+    columns.push(
+      { header: "Cage Slots", key: "cageSlots", width: 12, kind: "num" },
+      { header: "Cage $", key: "cageDollars", width: 12, kind: "dollar" },
+      { header: "Bullpen Slots", key: "bullpenSlots", width: 13, kind: "num" },
+      { header: "Bullpen $", key: "bullpenDollars", width: 12, kind: "dollar" },
+      {
+        header: "WeightRoom Slots",
+        key: "weightRoomSlots",
+        width: 18,
+        kind: "num",
+      },
+      {
+        header: "WeightRoom $",
+        key: "weightRoomDollars",
+        width: 14,
+        kind: "dollar",
+      },
+    );
+  }
+  // Program hours (coach pay) — neutral labels; Program $ is coach pay.
+  if (includeProgramHours) {
+    columns.push(
+      { header: "Program Slots", key: "programSlots", width: 13, kind: "num" },
+      { header: "Program $", key: "programDollars", width: 12, kind: "dollar" },
+    );
+  }
+  columns.push({ header: "Total", key: "total", width: 12, kind: "dollar" });
+  // Online is a session-only count — only when cage scope is on.
+  if (includeCageSessions) {
+    columns.push({
+      header: "Online Sessions",
+      key: "onlineSessions",
+      width: 16,
+    });
+  }
+
+  sheet.columns = columns.map(({ header, key, width }) => ({
+    header,
+    key,
+    width,
+  }));
 
   for (const row of report.summary) {
-    sheet.addRow({
+    const data: Record<string, string | number> = {
       coach: row.coachName,
       email: row.coachEmail,
-      cageSlots: row.cageSlots,
-      cageDollars: row.cageTotalCents / 100,
-      bullpenSlots: row.bullpenSlots,
-      bullpenDollars: row.bullpenTotalCents / 100,
-      weightRoomSlots: row.weightRoomSlots,
-      weightRoomDollars: row.weightRoomTotalCents / 100,
       total: row.totalCents / 100,
-      onlineSessions: row.onlineSessions || "",
-    });
+    };
+    if (includeCageSessions) {
+      data.cageSlots = row.cageSlots;
+      data.cageDollars = row.cageTotalCents / 100;
+      data.bullpenSlots = row.bullpenSlots;
+      data.bullpenDollars = row.bullpenTotalCents / 100;
+      data.weightRoomSlots = row.weightRoomSlots;
+      data.weightRoomDollars = row.weightRoomTotalCents / 100;
+      data.onlineSessions = row.onlineSessions || "";
+    }
+    if (includeProgramHours) {
+      data.programSlots = row.programSlots;
+      data.programDollars = row.programTotalCents / 100;
+    }
+    sheet.addRow(data);
   }
 
   // Grand total row at the bottom. Blank cells for non-applicable
@@ -88,21 +148,16 @@ function addSummarySheet(workbook: ExcelJS.Workbook, report: ReportData) {
   headerRow.alignment = { vertical: "middle" };
   headerRow.border = { bottom: { style: "thin" } };
 
-  // Currency formatting on the $ columns.
-  for (const key of [
-    "cageDollars",
-    "bullpenDollars",
-    "weightRoomDollars",
-    "total",
-  ] as const) {
-    const col = sheet.getColumn(key);
-    col.numFmt = CURRENCY_FMT;
-    col.alignment = { horizontal: "right" };
-  }
-
-  // Right-align slot count columns.
-  for (const key of ["cageSlots", "bullpenSlots", "weightRoomSlots"] as const) {
-    sheet.getColumn(key).alignment = { horizontal: "right" };
+  // Currency formatting on the $ columns, right-align on slot counts —
+  // only for columns actually present.
+  for (const c of columns) {
+    if (c.kind === "dollar") {
+      const col = sheet.getColumn(c.key);
+      col.numFmt = CURRENCY_FMT;
+      col.alignment = { horizontal: "right" };
+    } else if (c.kind === "num") {
+      sheet.getColumn(c.key).alignment = { horizontal: "right" };
+    }
   }
 
   // Freeze the header row so it stays put while Dad scrolls. Meta

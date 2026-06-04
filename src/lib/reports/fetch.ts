@@ -39,7 +39,13 @@ export async function fetchReportData(
   // row. No override fetch — overrides are only consulted at session
   // CREATION time (in src/lib/server/session-actions.ts), never on
   // the read path.
-  const sessionRows = await db
+  //
+  // Scope gate: when the "Cage rental sessions" box is off, skip the
+  // session query entirely (cleaner than a false WHERE) — the aggregate
+  // keeps cage/program separate so empty inputs leave those fields 0.
+  const sessionRows = !filters.includeCageSessions
+    ? []
+    : await db
     .select({
       sessionId: sessionsBilling.id,
       coachId: sessionsBilling.coachId,
@@ -66,9 +72,11 @@ export async function fetchReportData(
   // Program hours: same date window as sessions, plus the coach filter
   // when one is set. Program hours aren't a resource type, so a
   // resource-type filter (cage/bullpen/weight_room) naturally excludes
-  // them — only fetch when the view spans all resource types.
-  const includeProgramHours =
-    filters.resourceTypes.length === 0 || filters.resourceTypes.length === 3;
+  // them — only fetch when the view spans all resource types. AND that
+  // existing coupling with the new "Program hours" scope box.
+  const effectiveIncludeProgram =
+    filters.includeProgramHours &&
+    (filters.resourceTypes.length === 0 || filters.resourceTypes.length === 3);
   const hourLogConditions = [
     gte(hourLogs.startAt, filters.fromDate),
     lt(hourLogs.startAt, filters.toDateExclusive),
@@ -76,7 +84,7 @@ export async function fetchReportData(
   if (filters.coachIds.length > 0) {
     hourLogConditions.push(inArray(hourLogs.coachId, filters.coachIds));
   }
-  const hourLogRows = includeProgramHours
+  const hourLogRows = effectiveIncludeProgram
     ? await db
         .select({
           coachId: hourLogs.coachId,

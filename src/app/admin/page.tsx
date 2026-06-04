@@ -1,83 +1,94 @@
-import Link from "next/link";
-import { and, eq, gte, isNull, lt, sql as drizzleSql } from "drizzle-orm";
-import {
-  ArrowUpRight,
-  CalendarDays,
-  ClipboardList,
-  Coins,
-  FileText,
-  FolderKanban,
-  History,
-  Settings,
-  Upload,
-  Users,
-  Wallet,
-} from "lucide-react";
+import { and, asc, eq, gt, gte, lt, sql as drizzleSql } from "drizzle-orm";
+import { CalendarDays, ClipboardList, Coins, Wallet } from "lucide-react";
 import { db } from "@/db";
 import {
-  auditLog,
   blockedTimes,
-  coachPayments,
+  hourLogs,
+  programs,
+  programScheduleBlocks,
+  resources,
   sessionsBilling,
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
-import { EditableName } from "../_components/editable-name";
 import { totalFromSnapshot } from "@/lib/billing";
+import { formatDollars } from "@/lib/format-money";
 import {
-  formatPfaDateLong,
-  formatPfaMonthYear,
+  reconcileBlocks,
+  type ReconBlock,
+  type ReconLog,
+} from "@/lib/server/reconciliation";
+import {
+  formatPfaTime12h,
+  parsePfaInput,
   pfaDayEnd,
   pfaDayStart,
   pfaMonthEnd,
   pfaMonthStart,
 } from "@/lib/timezone";
+import { StatCard } from "@/app/_components/stat-card";
+import {
+  MasterScheduleGrid,
+  type MasterBlockedTime,
+  type MasterProgramBlock,
+  type MasterProgramRow,
+  type MasterResourceRow,
+  type MasterSession,
+} from "@/app/admin/_components/master-schedule-grid";
+import { AutoRefresh } from "@/app/admin/schedule/_components/auto-refresh";
+import { WeekNav } from "@/app/admin/schedule/_components/week-nav";
 
-// /admin landing. J4e: real-data dashboard pattern. Three small queries
-// hydrate a stats hero (today's sessions, this month's billing, today's
-// blocks), then a sectioned nav grid groups surfaces by purpose rather
-// than dumping six identical cards.
+// /admin landing — the new Home tab (QA4-C1). Two surfaces:
 //
-// All counts are server-rendered + revalidated on every visit (no
-// cache: 'force-dynamic' needed — these are inside a server component
-// that already opts out of static caching via the auth check).
+//   1. Four StatCards anchored to `now` (NOT the selected day): money
+//      owed/owing this month + session counts today. Money direction is
+//      load-bearing — cage rentals are a RECEIVABLE (coaches OWE PFA) and
+//      program hours are a PAYOUT (PFA PAYS coaches), so the two money
+//      cards must never be swapped.
 //
-// Snapshot rule: month + lifetime owed totals read sessionsBilling.ratePer30MinCents
-// directly. Renegotiating an override changes future bookings only.
+//   2. A read-only Master Schedule for a selectable day (?date=YYYY-MM-DD,
+//      default today). Reuses the shared MasterScheduleGrid + WeekNav +
+//      AutoRefresh; program-block colors come from the same pure
+//      reconcileBlocks engine the Programs schedule page feeds.
+//
+// The cage dashboard that used to live here moved to /admin/cage-rentals.
 
-const ACTIVE_COACH_FILTER = and(
-  eq(users.role, "coach"),
-  isNull(users.deletedAt),
-);
+type SearchParams = Promise<{ date?: string }>;
 
-export default async function AdminHome() {
-  const session = await requireRole("admin");
+export default async function AdminHome({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
+  await requireRole("admin");
 
+  const params = await searchParams;
+  const selectedDate = parseDateInput(params.date) ?? startOfToday();
+
+  // Card windows are anchored to NOW, never the selected day.
   const now = new Date();
-  const dayStart = pfaDayStart(now);
-  const dayEnd = pfaDayEnd(now);
+  const dayStartNow = pfaDayStart(now);
+  const dayEndNow = pfaDayEnd(now);
   const monthStart = pfaMonthStart(now);
   const monthEndExclusive = pfaMonthEnd(now);
 
+  // Master Schedule windows follow the SELECTED day.
+  const schedDayStart = pfaDayStart(selectedDate);
+  const schedDayEnd = pfaDayEnd(selectedDate);
+
   const [
-    [{ count: sessionsToday }],
-    monthSessionRows,
-    [{ count: blocksToday }],
-    [{ count: activeCoaches }],
-    [{ ts: lastAuditTs }],
-    allSessionsForBalance,
-    confirmedPaymentRows,
-    [{ count: pendingPaymentsCount }],
+    cageMonthRows,
+    programMonthRows,
+    [{ count: cageSessionsToday }],
+    [{ count: programSessionsToday }],
+    resourceRows,
+    sessionRows,
+    blockRows,
+    programRows,
+    programBlockRows,
+    logRows,
   ] = await Promise.all([
-    db
-      .select({ count: drizzleSql<number>`count(*)::int` })
-      .from(sessionsBilling)
-      .where(
-        and(
-          gte(sessionsBilling.startAt, dayStart),
-          lt(sessionsBilling.startAt, dayEnd),
-        ),
-      ),
+    // Cage rentals this month → coaches OWE PFA (receivable).
     db
       .select({
         startAt: sessionsBilling.startAt,
@@ -91,301 +102,275 @@ export default async function AdminHome() {
           lt(sessionsBilling.startAt, monthEndExclusive),
         ),
       ),
+    // Program hours this month → PFA PAYS coaches (payout).
+    db
+      .select({
+        startAt: hourLogs.startAt,
+        endAt: hourLogs.endAt,
+        ratePer30MinCents: hourLogs.ratePer30MinCents,
+      })
+      .from(hourLogs)
+      .where(
+        and(
+          gte(hourLogs.startAt, monthStart),
+          lt(hourLogs.startAt, monthEndExclusive),
+        ),
+      ),
     db
       .select({ count: drizzleSql<number>`count(*)::int` })
+      .from(sessionsBilling)
+      .where(
+        and(
+          gte(sessionsBilling.startAt, dayStartNow),
+          lt(sessionsBilling.startAt, dayEndNow),
+        ),
+      ),
+    db
+      .select({ count: drizzleSql<number>`count(*)::int` })
+      .from(programScheduleBlocks)
+      .where(
+        and(
+          gte(programScheduleBlocks.startAt, dayStartNow),
+          lt(programScheduleBlocks.startAt, dayEndNow),
+        ),
+      ),
+    // Master Schedule data for the SELECTED day.
+    db
+      .select({
+        id: resources.id,
+        name: resources.name,
+        type: resources.type,
+        sortOrder: resources.sortOrder,
+      })
+      .from(resources)
+      .where(eq(resources.active, true))
+      .orderBy(asc(resources.sortOrder)),
+    db
+      .select({
+        id: sessionsBilling.id,
+        resourceId: sessionsBilling.resourceId,
+        coachName: users.name,
+        coachEmail: users.email,
+        startAt: sessionsBilling.startAt,
+        endAt: sessionsBilling.endAt,
+        useType: sessionsBilling.useType,
+        isTeamRental: sessionsBilling.isTeamRental,
+      })
+      .from(sessionsBilling)
+      .innerJoin(users, eq(sessionsBilling.coachId, users.id))
+      .where(
+        and(
+          gte(sessionsBilling.startAt, schedDayStart),
+          lt(sessionsBilling.startAt, schedDayEnd),
+        ),
+      )
+      .orderBy(asc(sessionsBilling.startAt)),
+    db
+      .select({
+        id: blockedTimes.id,
+        resourceId: blockedTimes.resourceId,
+        startAt: blockedTimes.startAt,
+        endAt: blockedTimes.endAt,
+        reason: blockedTimes.reason,
+      })
       .from(blockedTimes)
       .where(
         and(
-          gte(blockedTimes.startAt, dayStart),
-          lt(blockedTimes.startAt, dayEnd),
+          gte(blockedTimes.startAt, schedDayStart),
+          lt(blockedTimes.startAt, schedDayEnd),
         ),
       ),
     db
-      .select({ count: drizzleSql<number>`count(*)::int` })
-      .from(users)
-      .where(ACTIVE_COACH_FILTER),
-    // neon-http returns SQL aggregates as strings, not Date objects.
-    // The caller wraps in `new Date()` before formatting.
-    db
-      .select({ ts: drizzleSql<string | null>`max(ts)` })
-      .from(auditLog),
-    // Balance feed for the Payments NavCard: lifetime owed (rentals)
-    // minus lifetime confirmed payments. Same all-time scope as
-    // /admin/payments — keeps the NavCard's number consistent with
-    // what Dad sees on the detail page.
+      .select({ id: programs.id, name: programs.name })
+      .from(programs)
+      .where(eq(programs.active, true))
+      .orderBy(asc(programs.name)),
     db
       .select({
-        startAt: sessionsBilling.startAt,
-        endAt: sessionsBilling.endAt,
-        ratePer30MinCents: sessionsBilling.ratePer30MinCents,
+        id: programScheduleBlocks.id,
+        programId: programScheduleBlocks.programId,
+        scheduledCoachId: programScheduleBlocks.scheduledCoachId,
+        coachName: users.name,
+        coachEmail: users.email,
+        startAt: programScheduleBlocks.startAt,
+        endAt: programScheduleBlocks.endAt,
+        seriesId: programScheduleBlocks.seriesId,
       })
-      .from(sessionsBilling),
+      .from(programScheduleBlocks)
+      .innerJoin(users, eq(programScheduleBlocks.scheduledCoachId, users.id))
+      .where(
+        and(
+          gte(programScheduleBlocks.startAt, schedDayStart),
+          lt(programScheduleBlocks.startAt, schedDayEnd),
+        ),
+      )
+      .orderBy(asc(programScheduleBlocks.startAt)),
+    // Hour-logs overlapping the selected day, for reconciliation
+    // (same shape the Programs schedule page feeds reconcileBlocks).
     db
       .select({
-        amountCents: coachPayments.amountCents,
+        coachId: hourLogs.coachId,
+        coachName: users.name,
+        coachEmail: users.email,
+        programId: hourLogs.programId,
+        startAt: hourLogs.startAt,
+        endAt: hourLogs.endAt,
       })
-      .from(coachPayments)
+      .from(hourLogs)
+      .innerJoin(users, eq(hourLogs.coachId, users.id))
       .where(
-        and(
-          isNull(coachPayments.deletedAt),
-          eq(coachPayments.status, "confirmed"),
-        ),
-      ),
-    db
-      .select({ count: drizzleSql<number>`count(*)::int` })
-      .from(coachPayments)
-      .where(
-        and(
-          isNull(coachPayments.deletedAt),
-          eq(coachPayments.status, "pending"),
-        ),
+        and(lt(hourLogs.startAt, schedDayEnd), gt(hourLogs.endAt, schedDayStart)),
       ),
   ]);
 
-  // Month + lifetime totals read the snapshotted rate from each session
-  // row directly. Same shape as /admin/reports — never recompute from
-  // current overrides.
-  let monthCents = 0;
-  for (const s of monthSessionRows) {
-    monthCents += totalFromSnapshot(s.startAt, s.endAt, s.ratePer30MinCents);
-  }
-
-  let lifetimeOwedCents = 0;
-  for (const s of allSessionsForBalance) {
-    lifetimeOwedCents += totalFromSnapshot(
+  // Money totals read each row's snapshotted rate directly — never
+  // recompute from current overrides.
+  let cageOwedMonthCents = 0;
+  for (const s of cageMonthRows) {
+    cageOwedMonthCents += totalFromSnapshot(
       s.startAt,
       s.endAt,
       s.ratePer30MinCents,
     );
   }
-  const lifetimePaidCents = confirmedPaymentRows.reduce(
-    (sum, p) => sum + p.amountCents,
-    0,
+  let programPayMonthCents = 0;
+  for (const l of programMonthRows) {
+    programPayMonthCents += totalFromSnapshot(
+      l.startAt,
+      l.endAt,
+      l.ratePer30MinCents ?? 0,
+    );
+  }
+
+  // Shape the Master Schedule rows for the read-only grid.
+  const masterResources: MasterResourceRow[] = resourceRows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    type: r.type,
+  }));
+  const masterSessions: MasterSession[] = sessionRows.map((s) => ({
+    id: s.id,
+    resourceId: s.resourceId,
+    coachName: s.coachName ?? s.coachEmail,
+    startAt: s.startAt,
+    endAt: s.endAt,
+    useType: s.useType,
+    isTeamRental: s.isTeamRental,
+  }));
+  const masterBlocked: MasterBlockedTime[] = blockRows.map((b) => ({
+    id: b.id,
+    resourceId: b.resourceId,
+    startAt: b.startAt,
+    endAt: b.endAt,
+    reason: b.reason,
+  }));
+  const masterPrograms: MasterProgramRow[] = programRows.map((p) => ({
+    id: p.id,
+    name: p.name,
+  }));
+
+  // Reconcile the day's scheduled program blocks against coach hour-logs
+  // (FEAT-16). The engine is pure — inject `now` + the PFA time formatter.
+  const reconBlocks: ReconBlock[] = programBlockRows.map((b) => ({
+    id: b.id,
+    programId: b.programId,
+    scheduledCoachId: b.scheduledCoachId,
+    scheduledCoachName: b.coachName ?? b.coachEmail,
+    startAt: b.startAt,
+    endAt: b.endAt,
+  }));
+  const reconLogs: ReconLog[] = logRows.map((l) => ({
+    coachId: l.coachId,
+    coachName: l.coachName ?? l.coachEmail,
+    programId: l.programId,
+    startAt: l.startAt,
+    endAt: l.endAt,
+  }));
+  const reconciliation = reconcileBlocks(
+    { blocks: reconBlocks, logs: reconLogs, now: new Date() },
+    formatPfaTime12h,
   );
-  const outstandingCents = lifetimeOwedCents - lifetimePaidCents;
+
+  const masterProgramBlocks: MasterProgramBlock[] = programBlockRows.map(
+    (b) => ({
+      id: b.id,
+      programId: b.programId,
+      coachName: b.coachName ?? b.coachEmail,
+      startAt: b.startAt,
+      endAt: b.endAt,
+      status: reconciliation[b.id]?.status,
+    }),
+  );
 
   return (
     <>
       <header className="mb-10">
-        <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
-          {formatPfaDateLong(now)}
+        <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
+          Admin
         </p>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight">
-          Welcome back,{" "}
-          <EditableName initialName={session.user.name ?? "Admin"} />
-        </h1>
+        <h1 className="mt-2 text-3xl font-bold tracking-tight">Home</h1>
+        <p className="mt-1 text-sm text-fg-muted">
+          Today at a glance across cage rentals and programs.
+        </p>
       </header>
 
-      <section
-        aria-label="Today and this month at a glance"
-        className="mb-12 grid gap-4 sm:grid-cols-3"
-      >
-        <Stat
-          icon={<CalendarDays className="h-4 w-4" />}
-          label="Sessions today"
-          value={sessionsToday.toString()}
-          sub={sessionsToday === 0 ? "Quiet day so far" : "Booked"}
-        />
-        <Stat
+      <section className="mb-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
           icon={<Coins className="h-4 w-4" />}
-          label={`Owed in ${formatPfaMonthYear(now)}`}
-          value={formatDollars(monthCents)}
-          sub={`${monthSessionRows.length} ${monthSessionRows.length === 1 ? "session" : "sessions"} this month`}
+          label="Coaches owe PFA"
+          value={formatDollars(cageOwedMonthCents)}
+          sub="Cage rentals this month"
           accent
         />
-        <Stat
+        <StatCard
+          icon={<Wallet className="h-4 w-4" />}
+          label="PFA owes coaches"
+          value={formatDollars(programPayMonthCents)}
+          sub="Program pay this month"
+        />
+        <StatCard
+          icon={<CalendarDays className="h-4 w-4" />}
+          label="Cage sessions today"
+          value={String(cageSessionsToday)}
+          sub={cageSessionsToday > 0 ? "Booked" : "Quiet day so far"}
+        />
+        <StatCard
           icon={<ClipboardList className="h-4 w-4" />}
-          label="Active blocks today"
-          value={blocksToday.toString()}
-          sub={blocksToday === 0 ? "Cages all bookable" : "Resources held"}
+          label="Program sessions today"
+          value={String(programSessionsToday)}
+          sub={programSessionsToday > 0 ? "Scheduled" : "Nothing scheduled"}
         />
       </section>
 
-      <section aria-labelledby="operations-heading" className="mb-10">
+      <section aria-labelledby="master-schedule-heading">
         <h2
-          id="operations-heading"
+          id="master-schedule-heading"
           className="mb-4 text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted"
         >
-          Operations
+          Master Schedule
         </h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <NavCard
-            href="/admin/schedule"
-            icon={<CalendarDays className="h-4 w-4" />}
-            title="Schedule"
-            stat={
-              sessionsToday === 0 && blocksToday === 0
-                ? "Nothing on today"
-                : `${sessionsToday} session${sessionsToday === 1 ? "" : "s"}${blocksToday > 0 ? ` · ${blocksToday} block${blocksToday === 1 ? "" : "s"}` : ""} today`
-            }
-          />
-          <NavCard
-            href="/admin/sessions"
-            icon={<ClipboardList className="h-4 w-4" />}
-            title="Sessions"
-            stat="Log, edit, review"
-          />
-          <NavCard
-            href="/admin/coaches"
-            icon={<Users className="h-4 w-4" />}
-            title="Coaches"
-            stat={`${activeCoaches} active`}
-          />
-          <NavCard
-            href="/admin/hour-log/programs"
-            icon={<FolderKanban className="h-4 w-4" />}
-            title="Programs"
-            stat="Caps + coach assignments"
-          />
-        </div>
-      </section>
 
-      <section aria-labelledby="billing-heading" className="mb-10">
-        <h2
-          id="billing-heading"
-          className="mb-4 text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted"
-        >
-          Billing &amp; records
-        </h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <NavCard
-            href="/admin/reports"
-            icon={<FileText className="h-4 w-4" />}
-            title="Reports"
-            stat={`${formatDollars(monthCents)} this month`}
-          />
-          <NavCard
-            href="/admin/audit"
-            icon={<History className="h-4 w-4" />}
-            title="Audit log"
-            stat={
-              lastAuditTs
-                ? `Last entry ${formatRelative(new Date(lastAuditTs), now)}`
-                : "No activity yet"
-            }
-          />
-          <NavCard
-            href="/admin/payments"
-            icon={<Wallet className="h-4 w-4" />}
-            title="Payments"
-            stat={
-              pendingPaymentsCount > 0
-                ? `${formatDollars(outstandingCents)} outstanding · ${pendingPaymentsCount} to confirm`
-                : `${formatDollars(outstandingCents)} outstanding`
-            }
-          />
-          <NavCard
-            href="/admin/import"
-            icon={<Upload className="h-4 w-4" />}
-            title="Historical import"
-            stat="Excel → preview → commit"
-          />
-          <NavCard
-            href="/admin/settings"
-            icon={<Settings className="h-4 w-4" />}
-            title="Settings"
-            stat="PFA handles, org-wide config"
-          />
-        </div>
+        <WeekNav selectedDate={selectedDate} />
+
+        <AutoRefresh />
+
+        <MasterScheduleGrid
+          resources={masterResources}
+          sessions={masterSessions}
+          blockedTimes={masterBlocked}
+          programs={masterPrograms}
+          programBlocks={masterProgramBlocks}
+        />
       </section>
     </>
   );
 }
 
-function Stat({
-  icon,
-  label,
-  value,
-  sub,
-  accent,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  sub: string;
-  accent?: boolean;
-}) {
-  return (
-    <div
-      className={[
-        "relative overflow-hidden rounded-2xl border px-6 py-5 shadow-[var(--shadow-md)] transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-lg)]",
-        accent
-          ? "border-gold/40 bg-gradient-to-b from-[#fffdf8] to-[#fcf4e2]"
-          : "border-line bg-surface",
-      ].join(" ")}
-    >
-      {accent ? (
-        <span
-          aria-hidden="true"
-          className="absolute inset-y-0 left-0 w-[3px] bg-gradient-to-b from-gold to-gold-strong"
-        />
-      ) : null}
-      <div
-        className={[
-          "flex items-center gap-2",
-          accent ? "text-gold-strong" : "text-fg-muted",
-        ].join(" ")}
-      >
-        {icon}
-        <p className="text-[11px] uppercase tracking-[0.14em] text-fg-muted">
-          {label}
-        </p>
-      </div>
-      <p
-        className={[
-          "tnum mt-4 text-4xl font-semibold tracking-tight",
-          accent ? "text-gold-strong" : "text-fg",
-        ].join(" ")}
-      >
-        {value}
-      </p>
-      <p className="mt-2 text-xs text-fg-subtle">{sub}</p>
-    </div>
-  );
+function parseDateInput(s: string | undefined): Date | null {
+  if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  return parsePfaInput(s, "00:00");
 }
 
-function NavCard({
-  href,
-  icon,
-  title,
-  stat,
-}: {
-  href: string;
-  icon: React.ReactNode;
-  title: string;
-  stat: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="group relative flex items-start gap-3.5 rounded-xl border border-line bg-surface px-5 py-4 shadow-[var(--shadow-sm)] transition hover:-translate-y-0.5 hover:border-gold/40 hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:border-gold/40 focus-visible:ring-2 focus-visible:ring-gold/40"
-    >
-      <span className="grid h-10 w-10 flex-none place-items-center rounded-[10px] border border-line bg-surface-2 text-fg-muted transition group-hover:border-gold/40 group-hover:bg-gold/10 group-hover:text-gold-strong">
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center justify-between">
-          <span className="text-sm font-semibold text-fg">{title}</span>
-          <ArrowUpRight className="h-3.5 w-3.5 -translate-x-1 text-gold-strong opacity-0 transition group-hover:translate-x-0 group-hover:opacity-100" />
-        </span>
-        <span className="mt-0.5 block text-sm text-fg-muted">{stat}</span>
-      </span>
-    </Link>
-  );
-}
-
-function formatDollars(cents: number): string {
-  return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-}
-
-function formatRelative(then: Date, now: Date): string {
-  const diffMs = now.getTime() - then.getTime();
-  const diffMin = Math.floor(diffMs / 60_000);
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return formatPfaDateLong(then);
+function startOfToday(): Date {
+  return pfaDayStart(new Date());
 }

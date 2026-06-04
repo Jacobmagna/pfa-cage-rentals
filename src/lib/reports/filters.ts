@@ -24,6 +24,10 @@ export type RawFilterInput = {
   to?: string | string[];
   coachIds?: string | string[];
   resourceTypes?: string | string[];
+  /** Hidden marker: present means the scope checkboxes were submitted. */
+  scopeApplied?: string | string[];
+  includeCage?: string | string[];
+  includeProgram?: string | string[];
 };
 
 export type NormalizedFilters = {
@@ -39,6 +43,16 @@ export type NormalizedFilters = {
   coachIds: string[];
   /** Empty array means "no resource type filter" — include all three. */
   resourceTypes: ResourceType[];
+  /**
+   * Scope: whether to include cage/bullpen/weight-room session billing
+   * (money the coach owes PFA). Default true on a fresh load.
+   */
+  includeCageSessions: boolean;
+  /**
+   * Scope: whether to include program hours (coach pay). Default true on
+   * a fresh load. Still gated separately by resource-type narrowing.
+   */
+  includeProgramHours: boolean;
 };
 
 const VALID_RESOURCE_TYPES = new Set<ResourceType>([
@@ -74,7 +88,37 @@ export function normalizeFilters(input: RawFilterInput): NormalizedFilters {
   // following day.
   const toDateExclusive = pfaDayEnd(parsePfaInput(to, "00:00"));
 
-  return { from, to, fromDate, toDateExclusive, coachIds, resourceTypes };
+  // Scope checkboxes. A GET form submits nothing for unchecked boxes,
+  // which is indistinguishable from a fresh load. The hidden
+  // `scopeApplied` marker disambiguates: when present, an absent
+  // checkbox means "explicitly off"; when absent (fresh load), both
+  // categories default on.
+  const scopeApplied = present(input.scopeApplied);
+  const includeCageSessions = scopeApplied ? present(input.includeCage) : true;
+  const includeProgramHours = scopeApplied
+    ? present(input.includeProgram)
+    : true;
+
+  return {
+    from,
+    to,
+    fromDate,
+    toDateExclusive,
+    coachIds,
+    resourceTypes,
+    includeCageSessions,
+    includeProgramHours,
+  };
+}
+
+/**
+ * A query param "counts as present" when it was submitted with a
+ * non-empty value. Mirrors HTML checkbox semantics: a checked box with
+ * `value="1"` submits `"1"`; an unchecked box submits nothing.
+ */
+function present(v: string | string[] | undefined): boolean {
+  if (v === undefined) return false;
+  return Array.isArray(v) ? v.length > 0 : v !== "";
 }
 
 export function filtersFromURLSearchParams(
@@ -85,6 +129,9 @@ export function filtersFromURLSearchParams(
     to: sp.get("to") ?? undefined,
     coachIds: sp.getAll("coachIds"),
     resourceTypes: sp.getAll("resourceTypes"),
+    scopeApplied: sp.get("scopeApplied") ?? undefined,
+    includeCage: sp.get("includeCage") ?? undefined,
+    includeProgram: sp.get("includeProgram") ?? undefined,
   });
 }
 
@@ -98,6 +145,11 @@ export function filtersToQueryString(filters: NormalizedFilters): string {
   sp.set("to", filters.to);
   for (const id of filters.coachIds) sp.append("coachIds", id);
   for (const t of filters.resourceTypes) sp.append("resourceTypes", t);
+  // Always emit the scope marker so the round-trip is unambiguous, then
+  // each included category only when on (mirroring checkbox submit).
+  sp.set("scopeApplied", "1");
+  if (filters.includeCageSessions) sp.set("includeCage", "1");
+  if (filters.includeProgramHours) sp.set("includeProgram", "1");
   return sp.toString();
 }
 

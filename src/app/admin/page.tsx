@@ -9,7 +9,15 @@ import {
   lt,
   sql as drizzleSql,
 } from "drizzle-orm";
-import { CalendarDays, ClipboardList, Coins, Wallet } from "lucide-react";
+import {
+  CalendarDays,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
+  Coins,
+  Wallet,
+} from "lucide-react";
+import Link from "next/link";
 import { db } from "@/db";
 import {
   auditLog,
@@ -70,7 +78,17 @@ import { WeekNav } from "@/app/admin/schedule/_components/week-nav";
 //
 // The cage dashboard that used to live here moved to /admin/cage-rentals.
 
-type SearchParams = Promise<{ date?: string }>;
+type SearchParams = Promise<{ date?: string; schedule?: string }>;
+
+// Build a clean `/admin?...` href, dropping undefined/empty values so the
+// toggle links stay tidy (e.g. `/admin` when nothing is set).
+function buildAdminHref(query: Record<string, string | undefined>): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(query)) {
+    if (v) parts.push(`${k}=${v}`);
+  }
+  return parts.length ? `/admin?${parts.join("&")}` : "/admin";
+}
 
 export default async function AdminHome({
   searchParams,
@@ -81,6 +99,13 @@ export default async function AdminHome({
 
   const params = await searchParams;
   const selectedDate = parseDateInput(params.date) ?? startOfToday();
+  const scheduleOpen = params.schedule === "open";
+
+  // Toggle-bar href: closed → add schedule=open; open → drop it. Both
+  // preserve the current ?date so navigating in/out keeps the selected day.
+  const toggleHref = scheduleOpen
+    ? buildAdminHref({ date: params.date })
+    : buildAdminHref({ date: params.date, schedule: "open" });
 
   // Card windows are anchored to NOW, never the selected day.
   const now = new Date();
@@ -432,24 +457,54 @@ export default async function AdminHome({
       <ActivityFeed items={activityItems} />
 
       <section aria-labelledby="master-schedule-heading">
-        <h2
-          id="master-schedule-heading"
-          className="mb-4 text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted"
-        >
+        <h2 id="master-schedule-heading" className="sr-only">
           Master Schedule
         </h2>
 
-        <WeekNav selectedDate={selectedDate} />
+        <Link
+          href={toggleHref}
+          aria-expanded={scheduleOpen}
+          className="flex w-full items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3 text-left shadow-[var(--shadow-sm)] transition hover:-translate-y-px hover:border-gold/40 hover:shadow-[var(--shadow-md)]"
+        >
+          <span className="flex h-8 w-8 items-center justify-center rounded-md border border-line bg-bg text-fg-muted">
+            <CalendarDays className="h-4 w-4" />
+          </span>
+          <span className="flex-1">
+            <span className="block text-sm font-semibold">Master Schedule</span>
+            <span className="block text-xs text-fg-muted">
+              {scheduleOpen
+                ? "Browsing cage + program sessions by day"
+                : "Show cage + program sessions for a day"}
+            </span>
+          </span>
+          <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-fg-muted">
+            {scheduleOpen ? "Hide" : "Show"}
+            {scheduleOpen ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </span>
+        </Link>
 
-        <AutoRefresh />
+        {scheduleOpen ? (
+          <div className="mt-5">
+            <WeekNav
+              selectedDate={selectedDate}
+              extraParams={{ schedule: "open" }}
+            />
 
-        <MasterScheduleGrid
-          resources={masterResources}
-          sessions={masterSessions}
-          blockedTimes={masterBlocked}
-          programs={masterPrograms}
-          programBlocks={masterProgramBlocks}
-        />
+            <AutoRefresh />
+
+            <MasterScheduleGrid
+              resources={masterResources}
+              sessions={masterSessions}
+              blockedTimes={masterBlocked}
+              programs={masterPrograms}
+              programBlocks={masterProgramBlocks}
+            />
+          </div>
+        ) : null}
       </section>
     </>
   );

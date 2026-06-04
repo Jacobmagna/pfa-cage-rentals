@@ -1,23 +1,26 @@
 // Pure over-cap red-flag logic for the admin Attendance-by-Program grid
 // (FEAT-11, DEC-26 + DEC-03). No DB, no React, no I/O — consumes the
-// FEAT-10 grid shape (athletes / sessions / present) plus the selected
-// program's cap + capPeriod and returns which present cells are OVER the
-// cap. The page builds the grid (buildAttendanceGrid) and reads the
-// program row; this layers the flags on top. Mirrors the pure-transform
-// + unit-test pattern of src/lib/reports/aggregate.ts.
+// FEAT-10 grid shape (athletes / sessions / present) plus PER-ATHLETE
+// enrollment caps (capsByAthlete) and returns which present cells are OVER
+// each athlete's own cap. The page builds the grid (buildAttendanceGrid)
+// and reads the per-enrollment caps; this layers the flags on top.
+// Mirrors the pure-transform + unit-test pattern of
+// src/lib/reports/aggregate.ts.
 //
 // Settled decisions implemented exactly:
 //  - DEC-26 present-only: only sessions where present === true count
 //    toward the cap. Absent (A) and blank cells are never flagged.
 //  - DEC-03 period: capPeriod "month" → calendar month; "week" →
-//    Sunday–Saturday week.
+//    Sunday–Saturday week; "total" → one bucket for the whole program
+//    (no reset — the Nth+1 present session overall is flagged).
 //  - Period key = pure calendar arithmetic on the "YYYY-MM-DD"
 //    sessionDate (no Intl/instant math — a calendar day's weekday is
 //    timezone-independent, so this is DST-irrelevant and unit-testable).
 //  - Within each (athlete, period bucket), order the athlete's PRESENT
 //    sessions ascending by sessionDate; positions 1..cap are within
 //    limit, positions cap+1 and beyond are OVER → flagged.
-//  - Only when cap != null && capPeriod != null. Uncapped → no flags.
+//  - Per-athlete: an athlete with no entry in capsByAthlete is uncapped
+//    → never flagged.
 
 import {
   formatGridDate,
@@ -34,6 +37,9 @@ export type OverCapInfo = {
 
 // athleteId → sessionId → info. Present only for flagged (over) cells.
 export type OverCapFlags = Record<string, Record<string, OverCapInfo>>;
+
+// Single bucket key for the "total" period (whole program, no reset).
+const TOTAL_BUCKET = "__total__";
 
 const MONTHS_LONG = [
   "January",
@@ -78,13 +84,17 @@ export function weekKey(dateStr: string): string {
 
 /**
  * Human label for a period bucket. month → "June 2026"; week →
- * "Week of Jun 1" (reuses formatGridDate for the Sunday). Pure — no TZ.
+ * "Week of Jun 1" (reuses formatGridDate for the Sunday); total →
+ * "Total" (whole program, no reset). Pure — no TZ.
  */
 function periodLabel(
-  capPeriod: "week" | "month",
+  capPeriod: "week" | "month" | "total",
   key: string,
   sundayDateStr: string,
 ): string {
+  if (capPeriod === "total") {
+    return "Total";
+  }
   if (capPeriod === "month") {
     const [y, m] = key.split("-").map(Number);
     return `${MONTHS_LONG[m - 1]} ${y}`;
@@ -93,18 +103,21 @@ function periodLabel(
 }
 
 /**
- * Computes which present cells are OVER the program's cap. Returns {} when
- * uncapped. See module header for the settled decisions.
+ * Computes which present cells are OVER each athlete's OWN enrollment cap.
+ * Athletes without an entry in `capsByAthlete` are uncapped → no flags.
+ * Returns {} when nobody is capped. See module header for the settled
+ * decisions.
  */
 export function computeOverCapFlags(input: {
   athletes: GridAthlete[];
   sessions: GridSession[];
   present: Record<string, Record<string, boolean>>;
-  cap: number | null;
-  capPeriod: "week" | "month" | null;
+  capsByAthlete: Record<
+    string,
+    { cap: number; capPeriod: "week" | "month" | "total" }
+  >;
 }): OverCapFlags {
-  const { athletes, sessions, present, cap, capPeriod } = input;
-  if (cap == null || capPeriod == null) return {};
+  const { athletes, sessions, present, capsByAthlete } = input;
 
   // sessionId → sessionDate lookup.
   const dateById = new Map<string, string>();
@@ -113,6 +126,11 @@ export function computeOverCapFlags(input: {
   const flags: OverCapFlags = {};
 
   for (const a of athletes) {
+    // Per-athlete cap: no entry → uncapped → skip.
+    const capEntry = capsByAthlete[a.id];
+    if (!capEntry) continue;
+    const { cap, capPeriod } = capEntry;
+
     const marks = present[a.id];
     if (!marks) continue;
 
@@ -126,11 +144,15 @@ export function computeOverCapFlags(input: {
     }
     if (presentSessions.length === 0) continue;
 
-    // Group by period key.
+    // Group by period key. "total" → one bucket for the whole program.
     const groups = new Map<string, { id: string; date: string }[]>();
     for (const ps of presentSessions) {
       const key =
-        capPeriod === "month" ? monthKey(ps.date) : weekKey(ps.date);
+        capPeriod === "total"
+          ? TOTAL_BUCKET
+          : capPeriod === "month"
+            ? monthKey(ps.date)
+            : weekKey(ps.date);
       (groups.get(key) ?? groups.set(key, []).get(key)!).push(ps);
     }
 

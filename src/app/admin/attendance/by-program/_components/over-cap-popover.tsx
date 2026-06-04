@@ -25,7 +25,13 @@ export function OverCapPopover({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const overBy = info.indexInPeriod - info.cap;
-  const unit = info.periodLabel.startsWith("Week") ? "week" : "month";
+  // "Week of …" → "week"; "Total" → "program"; otherwise a month label.
+  const unit =
+    info.periodLabel === "Total"
+      ? "program"
+      : info.periodLabel.startsWith("Week")
+        ? "week"
+        : "month";
 
   // Escape closes; click-outside closes. Focus returns to the trigger
   // when this unmounts (i.e. on close).

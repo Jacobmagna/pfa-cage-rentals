@@ -1,5 +1,5 @@
 import { CalendarCheck } from "lucide-react";
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   athletePrograms,
@@ -85,16 +85,32 @@ export default async function AttendanceByProgramPage({
     );
   }
 
-  // The selected program's participation cap (FEAT-11). cap + capPeriod
-  // are co-required (both NULL = uncapped). A tiny single-row lookup —
-  // the picker fetch stays id/name only so its option type is unchanged.
-  const [selectedProgram] = await db
-    .select({ cap: programs.cap, capPeriod: programs.capPeriod })
-    .from(programs)
-    .where(eq(programs.id, selectedProgramId))
-    .limit(1);
-  const cap = selectedProgram?.cap ?? null;
-  const capPeriod = selectedProgram?.capPeriod ?? null;
+  // Per-athlete enrollment caps for this program (FEAT-11 redesign).
+  // cap + capPeriod are co-required (both NULL = that enrollment is
+  // uncapped — filtered out here). Build a capsByAthlete lookup for the
+  // pure flag logic. All caps are NULL until the assign-form UI lands, so
+  // this currently yields no flags (correct).
+  const capRows = await db
+    .select({
+      athleteId: athletePrograms.athleteId,
+      cap: athletePrograms.cap,
+      capPeriod: athletePrograms.capPeriod,
+    })
+    .from(athletePrograms)
+    .where(
+      and(
+        eq(athletePrograms.programId, selectedProgramId),
+        isNotNull(athletePrograms.cap),
+      ),
+    );
+  const capsByAthlete: Record<
+    string,
+    { cap: number; capPeriod: "week" | "month" | "total" }
+  > = {};
+  for (const row of capRows) {
+    if (row.cap == null || row.capPeriod == null) continue;
+    capsByAthlete[row.athleteId] = { cap: row.cap, capPeriod: row.capPeriod };
+  }
 
   // Set-based reads for the selected program.
   // (a) current roster athletes.
@@ -156,13 +172,13 @@ export default async function AttendanceByProgramPage({
   });
 
   // Over-cap red flags (FEAT-11). Pure logic on the already-built grid;
-  // uncapped programs → {} → grid renders exactly as FEAT-10.
+  // athletes without an enrollment cap → no flags → grid renders exactly
+  // as FEAT-10.
   const flags = computeOverCapFlags({
     athletes: grid.athletes,
     sessions: grid.sessions,
     present: grid.present,
-    cap,
-    capPeriod,
+    capsByAthlete,
   });
 
   const empty = grid.sessions.length === 0 || grid.athletes.length === 0;

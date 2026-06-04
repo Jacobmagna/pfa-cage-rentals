@@ -27,6 +27,17 @@ export const sessionUseType = pgEnum("use_type", ["hitting", "pitching"]);
 // NOT NULL — enforced by a hand-added CHECK constraint in the migration).
 export const capPeriod = pgEnum("cap_period", ["week", "month"]);
 
+// Period over which a PER-ATHLETE enrollment participation cap is
+// measured (FEAT-11 redesign). Used by athlete_programs.cap_period.
+// "week" = Sun–Sat, "month" = calendar month, "total" = the whole
+// program (no reset). Distinct enum from `capPeriod` (the dormant
+// program-level cap) because it adds the "total" option.
+export const enrollmentCapPeriod = pgEnum("enrollment_cap_period", [
+  "week",
+  "month",
+  "total",
+]);
+
 // `deletedAt`: soft-delete timestamp for the J9 GDPR-style account-
 // removal flow. NULL = active. When set, the row is anonymized:
 // `name` becomes "Former coach" and `email` becomes
@@ -455,10 +466,9 @@ export const auditLog = pgTable(
 
 // Training programs (e.g. "Elite Hitting", "Speed & Agility").
 //
-// Optional participation cap measured per week or per month. `cap` and
-// `capPeriod` are co-required: both NULL (no cap) or both NOT NULL —
-// enforced by a hand-added CHECK constraint in the migration (drizzle-kit
-// does not emit CHECK constraints).
+// `cap` / `capPeriod` are DORMANT (see below): the session cap moved to
+// the per-athlete enrollment (athlete_programs.cap, FEAT-11). The columns
+// + their CHECK constraint are kept to avoid a destructive migration.
 //
 // `name` is unique so seeds + admin edits can't double-create a program,
 // mirroring resources.name. Programs are never hard-deleted: use the
@@ -471,6 +481,10 @@ export const programs = pgTable("programs", {
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull().unique(),
+  // DORMANT: the session cap moved to athlete_programs.cap — these two
+  // columns are unused (the Programs form/actions no longer read/write
+  // them), kept to avoid a destructive migration. A future cleanup
+  // migration can drop them along with the cap_period enum.
   cap: integer("cap"),
   capPeriod: capPeriod("cap_period"),
   active: boolean("active").notNull().default(true),
@@ -526,6 +540,12 @@ export const athletePrograms = pgTable(
     assignedAt: timestamp("assigned_at", { mode: "date" })
       .notNull()
       .defaultNow(),
+    // Per-athlete participation cap for THIS enrollment (FEAT-11 redesign):
+    // cap = max present sessions; capPeriod = the window it resets over
+    // (week = Sun–Sat, month = calendar month, total = whole program, no
+    // reset). Both NULL = no cap. Co-required (CHECK in the migration).
+    cap: integer("cap"),
+    capPeriod: enrollmentCapPeriod("cap_period"),
   },
   (table) => [
     primaryKey({ columns: [table.athleteId, table.programId] }),
@@ -797,6 +817,8 @@ export type Athlete = typeof athletes.$inferSelect;
 export type NewAthlete = typeof athletes.$inferInsert;
 export type AthleteProgram = typeof athletePrograms.$inferSelect;
 export type NewAthleteProgram = typeof athletePrograms.$inferInsert;
+export type EnrollmentCapPeriod =
+  (typeof enrollmentCapPeriod.enumValues)[number];
 export type CoachProgram = typeof coachPrograms.$inferSelect;
 export type NewCoachProgram = typeof coachPrograms.$inferInsert;
 export type HourLog = typeof hourLogs.$inferSelect;

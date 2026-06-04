@@ -5,7 +5,10 @@
 // Sunday–Saturday weeks vs calendar months (DEC-03) by pure calendar
 // arithmetic on the "YYYY-MM-DD" sessionDate (including week buckets that
 // cross a month/year boundary), (cap+1)th-and-beyond flagged, uncapped →
-// no flags, exactly-at-cap → no flags.
+// no flags, exactly-at-cap → no flags. PER-ATHLETE caps: each athlete is
+// flagged against its OWN cap (capsByAthlete); an athlete with no entry is
+// never flagged. The "total" period is one bucket for the whole program
+// (no reset).
 
 import { describe, expect, it } from "vitest";
 import { computeOverCapFlags, monthKey, weekKey } from "./attendance-flags";
@@ -29,6 +32,14 @@ function presentFor(
   const inner: Record<string, boolean> = {};
   for (const [date, p] of Object.entries(marks)) inner[`s-${date}`] = p;
   return { [athleteId]: inner };
+}
+
+// Helper: a single-athlete capsByAthlete for ATH ("a1").
+function capFor(
+  cap: number,
+  capPeriod: "week" | "month" | "total",
+): Record<string, { cap: number; capPeriod: "week" | "month" | "total" }> {
+  return { a1: { cap, capPeriod } };
 }
 
 describe("period key helpers", () => {
@@ -64,8 +75,7 @@ describe("computeOverCapFlags — week cap", () => {
         "2026-06-09": true,
         "2026-06-10": true,
       }),
-      cap: 2,
-      capPeriod: "week",
+      capsByAthlete: capFor(2, "week"),
     });
 
     expect(flags.a1?.["s-2026-06-07"]).toBeUndefined();
@@ -100,8 +110,7 @@ describe("computeOverCapFlags — week cap", () => {
         "2026-06-03": true,
         "2026-06-08": true,
       }),
-      cap: 2,
-      capPeriod: "week",
+      capsByAthlete: capFor(2, "week"),
     });
 
     expect(flags.a1?.["s-2026-05-31"]).toBeUndefined();
@@ -137,8 +146,7 @@ describe("computeOverCapFlags — month cap", () => {
         "a1",
         Object.fromEntries(dates.map((d) => [d, true])),
       ),
-      cap: 4,
-      capPeriod: "month",
+      capsByAthlete: capFor(4, "month"),
     });
 
     for (const d of dates.slice(0, 4)) {
@@ -167,8 +175,7 @@ describe("computeOverCapFlags — month cap", () => {
         "a1",
         Object.fromEntries(dates.map((d) => [d, true])),
       ),
-      cap: 2,
-      capPeriod: "month",
+      capsByAthlete: capFor(2, "month"),
     });
 
     expect(flags.a1?.["s-2026-05-04"]).toBeUndefined();
@@ -179,6 +186,34 @@ describe("computeOverCapFlags — month cap", () => {
       periodPresentCount: 3,
     });
     expect(flags.a1?.["s-2026-06-01"]).toBeUndefined();
+  });
+});
+
+describe("computeOverCapFlags — total cap (no reset)", () => {
+  it("flags the 3rd present across different weeks (cap=2 total)", () => {
+    // Three present sessions in three different weeks/months. With a
+    // weekly/monthly cap none would flag, but "total" is one bucket → the
+    // 3rd overall present is over.
+    const dates = ["2026-05-04", "2026-05-18", "2026-06-08"];
+    const flags = computeOverCapFlags({
+      athletes: [ATH],
+      sessions: sessions(dates),
+      present: presentFor("a1", {
+        "2026-05-04": true,
+        "2026-05-18": true,
+        "2026-06-08": true,
+      }),
+      capsByAthlete: capFor(2, "total"),
+    });
+
+    expect(flags.a1?.["s-2026-05-04"]).toBeUndefined();
+    expect(flags.a1?.["s-2026-05-18"]).toBeUndefined();
+    expect(flags.a1?.["s-2026-06-08"]).toEqual({
+      periodLabel: "Total",
+      indexInPeriod: 3,
+      periodPresentCount: 3,
+      cap: 2,
+    });
   });
 });
 
@@ -204,8 +239,7 @@ describe("computeOverCapFlags — present-only (DEC-26)", () => {
         "2026-06-10": true,
         "2026-06-11": false,
       }),
-      cap: 2,
-      capPeriod: "week",
+      capsByAthlete: capFor(2, "week"),
     });
 
     expect(flags.a1?.["s-2026-06-08"]).toBeUndefined(); // absent
@@ -218,7 +252,7 @@ describe("computeOverCapFlags — present-only (DEC-26)", () => {
 });
 
 describe("computeOverCapFlags — edges", () => {
-  it("uncapped (cap=null) → {}", () => {
+  it("no caps (empty capsByAthlete) → {}", () => {
     const dates = ["2026-06-07", "2026-06-08", "2026-06-09"];
     expect(
       computeOverCapFlags({
@@ -228,8 +262,7 @@ describe("computeOverCapFlags — edges", () => {
           "a1",
           Object.fromEntries(dates.map((d) => [d, true])),
         ),
-        cap: null,
-        capPeriod: null,
+        capsByAthlete: {},
       }),
     ).toEqual({});
   });
@@ -243,8 +276,7 @@ describe("computeOverCapFlags — edges", () => {
         "2026-06-07": true,
         "2026-06-09": true,
       }),
-      cap: 2,
-      capPeriod: "week",
+      capsByAthlete: capFor(2, "week"),
     });
     expect(flags).toEqual({});
   });
@@ -258,8 +290,7 @@ describe("computeOverCapFlags — edges", () => {
         "a1",
         Object.fromEntries(dates.map((d) => [d, true])),
       ),
-      cap: 2,
-      capPeriod: "week",
+      capsByAthlete: capFor(2, "week"),
     });
 
     expect(flags.a1?.["s-2026-06-07"]).toBeUndefined();
@@ -275,20 +306,61 @@ describe("computeOverCapFlags — edges", () => {
       cap: 2,
     });
   });
+});
 
-  it("isolates flags per athlete", () => {
+describe("computeOverCapFlags — per-athlete caps", () => {
+  it("each athlete is flagged against its OWN cap", () => {
+    const ath2: GridAthlete = { id: "a2", firstName: "Lee", lastName: "Park" };
+    const dates = ["2026-06-07", "2026-06-08", "2026-06-09", "2026-06-10"];
+    const flags = computeOverCapFlags({
+      athletes: [ATH, ath2],
+      sessions: sessions(dates),
+      present: {
+        // Both present 4 times in the same week.
+        a1: {
+          "s-2026-06-07": true,
+          "s-2026-06-08": true,
+          "s-2026-06-09": true,
+          "s-2026-06-10": true,
+        },
+        a2: {
+          "s-2026-06-07": true,
+          "s-2026-06-08": true,
+          "s-2026-06-09": true,
+          "s-2026-06-10": true,
+        },
+      },
+      capsByAthlete: {
+        a1: { cap: 2, capPeriod: "week" }, // 3rd + 4th over
+        a2: { cap: 3, capPeriod: "week" }, // only 4th over
+      },
+    });
+
+    // a1 (cap 2): 06-09 (#3) and 06-10 (#4) flagged.
+    expect(flags.a1?.["s-2026-06-08"]).toBeUndefined();
+    expect(flags.a1?.["s-2026-06-09"]).toMatchObject({ indexInPeriod: 3 });
+    expect(flags.a1?.["s-2026-06-10"]).toMatchObject({ indexInPeriod: 4 });
+
+    // a2 (cap 3): only 06-10 (#4) flagged.
+    expect(flags.a2?.["s-2026-06-09"]).toBeUndefined();
+    expect(flags.a2?.["s-2026-06-10"]).toMatchObject({
+      indexInPeriod: 4,
+      cap: 3,
+    });
+  });
+
+  it("an athlete with no entry in capsByAthlete is never flagged", () => {
     const ath2: GridAthlete = { id: "a2", firstName: "Lee", lastName: "Park" };
     const dates = ["2026-06-07", "2026-06-09", "2026-06-10"];
     const flags = computeOverCapFlags({
       athletes: [ATH, ath2],
       sessions: sessions(dates),
       present: {
-        // a1: 3 present → over. a2: 1 present → fine.
+        // a1: 3 present, capped → over. a2: 3 present, uncapped → fine.
         a1: { "s-2026-06-07": true, "s-2026-06-09": true, "s-2026-06-10": true },
-        a2: { "s-2026-06-07": true },
+        a2: { "s-2026-06-07": true, "s-2026-06-09": true, "s-2026-06-10": true },
       },
-      cap: 2,
-      capPeriod: "week",
+      capsByAthlete: { a1: { cap: 2, capPeriod: "week" } }, // a2 absent
     });
 
     expect(flags.a1?.["s-2026-06-10"]).toBeDefined();

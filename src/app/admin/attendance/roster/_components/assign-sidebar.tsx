@@ -48,6 +48,11 @@ export function AssignSidebar({
   const titleId = useId();
   const [mode, setMode] = useState<"add" | "move">("add");
   const [programId, setProgramId] = useState("");
+  const [capEnabled, setCapEnabled] = useState(false);
+  const [cap, setCap] = useState("");
+  const [capPeriod, setCapPeriod] = useState<"week" | "month" | "total">(
+    "week",
+  );
   const [state, formAction, pending] = useActionState(
     assignAthletesFormAction,
     INITIAL_STATE,
@@ -69,6 +74,9 @@ export function AssignSidebar({
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setMode("add");
       setProgramId("");
+      setCapEnabled(false);
+      setCap("");
+      setCapPeriod("week");
     }
   }, [open]);
 
@@ -191,6 +199,14 @@ export function AssignSidebar({
           ))}
           <input type="hidden" name="programId" value={programId} />
           <input type="hidden" name="mode" value={mode} />
+          {/* Only submit cap fields when the box is checked; otherwise
+              they're absent and the action clears the cap. */}
+          {capEnabled ? (
+            <>
+              <input type="hidden" name="cap" value={cap} />
+              <input type="hidden" name="capPeriod" value={capPeriod} />
+            </>
+          ) : null}
 
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
             {!state.ok ? (
@@ -254,6 +270,59 @@ export function AssignSidebar({
                     </label>
                   ))}
                 </div>
+              )}
+            </fieldset>
+
+            <fieldset>
+              <legend className="mb-2 text-xs uppercase tracking-wider text-fg-muted">
+                Session cap
+              </legend>
+              <label className="flex cursor-pointer items-center gap-2.5 text-sm text-fg">
+                <input
+                  type="checkbox"
+                  checked={capEnabled}
+                  onChange={(e) => setCapEnabled(e.target.checked)}
+                  className="h-4 w-4 accent-gold"
+                />
+                <span>Specific session cap</span>
+              </label>
+              {capEnabled ? (
+                <div className="mt-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      inputMode="numeric"
+                      value={cap}
+                      onChange={(e) => setCap(e.target.value)}
+                      aria-label="Cap (sessions)"
+                      placeholder="0"
+                      className="h-9 w-24 rounded-md border border-line bg-page px-3 text-sm text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+                    />
+                    <select
+                      value={capPeriod}
+                      onChange={(e) =>
+                        setCapPeriod(
+                          e.target.value as "week" | "month" | "total",
+                        )
+                      }
+                      aria-label="Cap period"
+                      className="h-9 flex-1 rounded-md border border-line bg-page px-3 text-sm text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+                    >
+                      <option value="week">Per week</option>
+                      <option value="month">Per month</option>
+                      <option value="total">Total per program</option>
+                    </select>
+                  </div>
+                  <p className="text-[11px] text-fg-subtle">
+                    Applies to the selected athlete(s).
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-2 text-[11px] text-fg-subtle">
+                  No cap — the athlete(s) can attend any number of sessions.
+                </p>
               )}
             </fieldset>
           </div>

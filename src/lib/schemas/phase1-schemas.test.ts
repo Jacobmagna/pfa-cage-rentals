@@ -13,76 +13,14 @@ import {
 } from "./program-schedule";
 
 describe("createProgramSchema", () => {
-  it("accepts no cap and no period", () => {
+  it("accepts a name-only program", () => {
     expect(createProgramSchema.safeParse({ name: "Open Gym" }).success).toBe(
       true,
     );
   });
 
-  it("accepts null cap and null period (uncapped create via form)", () => {
-    expect(
-      createProgramSchema.safeParse({
-        name: "Open Gym",
-        cap: null,
-        capPeriod: null,
-      }).success,
-    ).toBe(true);
-  });
-
-  it("accepts both cap and period", () => {
-    const r = createProgramSchema.safeParse({
-      name: "Elite",
-      cap: 12,
-      capPeriod: "week",
-    });
-    expect(r.success).toBe(true);
-  });
-
-  it("rejects cap without period", () => {
-    expect(
-      createProgramSchema.safeParse({ name: "Elite", cap: 12 }).success,
-    ).toBe(false);
-  });
-
-  it("rejects period without cap", () => {
-    expect(
-      createProgramSchema.safeParse({ name: "Elite", capPeriod: "month" })
-        .success,
-    ).toBe(false);
-  });
-
-  it("rejects a non-positive cap", () => {
-    expect(
-      createProgramSchema.safeParse({
-        name: "Elite",
-        cap: 0,
-        capPeriod: "week",
-      }).success,
-    ).toBe(false);
-  });
-
-  it("rejects a non-integer cap", () => {
-    expect(
-      createProgramSchema.safeParse({
-        name: "Elite",
-        cap: 1.5,
-        capPeriod: "week",
-      }).success,
-    ).toBe(false);
-  });
-
   it("rejects an empty name", () => {
     expect(createProgramSchema.safeParse({ name: "" }).success).toBe(false);
-  });
-
-  it("rejects an unknown cap period", () => {
-    expect(
-      createProgramSchema.safeParse({
-        name: "Elite",
-        cap: 5,
-        capPeriod: "year",
-      }).success,
-    ).toBe(false);
   });
 
   it("accepts a valid defaultRatePer30MinCents", () => {
@@ -123,18 +61,6 @@ describe("createProgramSchema", () => {
 });
 
 describe("updateProgramSchema", () => {
-  it("allows clearing both cap and period via null", () => {
-    expect(
-      updateProgramSchema.safeParse({ cap: null, capPeriod: null }).success,
-    ).toBe(true);
-  });
-
-  it("rejects clearing only one side", () => {
-    expect(
-      updateProgramSchema.safeParse({ cap: null, capPeriod: "week" }).success,
-    ).toBe(false);
-  });
-
   it("allows an empty update object", () => {
     expect(updateProgramSchema.safeParse({}).success).toBe(true);
   });

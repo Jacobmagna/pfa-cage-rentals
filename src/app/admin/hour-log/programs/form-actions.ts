@@ -15,9 +15,6 @@ import { ProgramNameTakenError, ProgramNotFoundError } from "@/lib/errors";
 
 export type ProgramFormValues = {
   name: string;
-  cap: string;
-  capPeriod: string;
-  limit: boolean;
   rateDollars: string;
 };
 
@@ -64,23 +61,15 @@ export type EditProgramResult =
 function snapshotProgram(formData: FormData): ProgramFormValues {
   return {
     name: formData.get("name")?.toString() ?? "",
-    cap: formData.get("cap")?.toString() ?? "",
-    capPeriod: formData.get("capPeriod")?.toString() ?? "",
-    limit: formData.get("limit") === "on",
     rateDollars: formData.get("rateDollars")?.toString() ?? "",
   };
 }
 
-// Maps FormData → the createProgramSchema / updateProgramSchema shape.
-// When the "Limit sessions" checkbox is off we clear cap + capPeriod
-// (null for update, which also satisfies create's omit semantics — the
-// Zod refine treats null/undefined identically). When on, we parse the
-// number (NaN → undefined so Zod's positive-int check fires a friendly
-// error rather than a coercion surprise).
+// Maps FormData → the createProgramSchema / updateProgramSchema shape:
+// name + an optional pay rate. The program-level session cap was removed
+// (it's now a per-athlete enrollment cap, FEAT-11).
 function buildProgramInput(formData: FormData): {
   name: string;
-  cap: number | null;
-  capPeriod: "week" | "month" | null;
   defaultRatePer30MinCents: number | null;
 } {
   const name = formData.get("name")?.toString().trim() ?? "";
@@ -89,19 +78,7 @@ function buildProgramInput(formData: FormData): {
   const defaultRatePer30MinCents = optionalDollarsToCents(
     formData.get("rateDollars")?.toString() ?? "",
   );
-  const limit = formData.get("limit") === "on";
-  if (!limit) {
-    return { name, cap: null, capPeriod: null, defaultRatePer30MinCents };
-  }
-  const capRaw = formData.get("cap")?.toString().trim() ?? "";
-  const capNum = capRaw === "" ? NaN : Number(capRaw);
-  const periodRaw = formData.get("capPeriod")?.toString().trim() ?? "";
-  return {
-    name,
-    cap: Number.isNaN(capNum) ? (NaN as unknown as number) : capNum,
-    capPeriod: (periodRaw || null) as "week" | "month" | null,
-    defaultRatePer30MinCents,
-  };
+  return { name, defaultRatePer30MinCents };
 }
 
 function zodMessage(err: ZodError): string {

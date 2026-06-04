@@ -9,7 +9,7 @@
 //   *Internal(actor, input) — Zod-parse → business checks → db mutate →
 //   safeLogAudit (sequential; neon-http has no transactions).
 
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
   athletePrograms,
@@ -211,6 +211,25 @@ export async function assignAthletesToProgramInternal(
       });
     }
   }
+
+  // Set the per-enrollment cap for the affected (athlete, program) rows.
+  // The assign form is the single source of an enrollment's cap: when the
+  // box is checked we have both cap + capPeriod and write them; when it's
+  // unchecked both are absent and we clear them to NULL. This UPDATE runs
+  // unconditionally over the assigned athletes so the form can set, change,
+  // OR clear the cap on every submit (idempotent for already-enrolled
+  // athletes in "add" mode too).
+  const cap = parsed.cap ?? null;
+  const capPeriod = parsed.capPeriod ?? null;
+  await db
+    .update(athletePrograms)
+    .set({ cap, capPeriod })
+    .where(
+      and(
+        eq(athletePrograms.programId, parsed.programId),
+        inArray(athletePrograms.athleteId, parsed.athleteIds),
+      ),
+    );
 
   return { mode: parsed.mode, programId: parsed.programId, added, removed };
 }

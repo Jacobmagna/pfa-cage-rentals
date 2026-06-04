@@ -162,6 +162,13 @@
       "when": 1780524163461,
       "tag": "0022_condemned_marauders",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1780598639937,
+      "tag": "0023_messy_wild_pack",
+      "breakpoints": true
     }
   ]
 }

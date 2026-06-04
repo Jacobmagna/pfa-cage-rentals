@@ -9,9 +9,10 @@ import { ProgramsClient, type ProgramRow } from "./_components/programs-client";
 
 // /admin/hour-log/programs (FEAT-08, DEC-23; QA3-1 moved under Hour
 // Log). Admin-only CRUD over training programs: create / edit /
-// deactivate (soft-delete, DEC-10), set or clear a per-program session
-// cap + period (DEC-03). Per-program coach assignment was removed in
-// DEC-29 — coaches can now log hours / take attendance for ANY active
+// deactivate (soft-delete, DEC-10). The program-level session cap was
+// removed — the cap is now a PER-ATHLETE enrollment cap set on the
+// Roster assign flow (FEAT-11). Per-program coach assignment was removed
+// in DEC-29 — coaches can now log hours / take attendance for ANY active
 // program, so there's no coach_programs surface here anymore.
 //
 // Server-fetches all programs, then hands them to the client island.
@@ -28,8 +29,6 @@ export default async function ProgramsPage() {
   const rows: ProgramRow[] = programRows.map((p) => ({
     id: p.id,
     name: p.name,
-    cap: p.cap,
-    capPeriod: p.capPeriod,
     active: p.active,
     defaultRatePer30MinCents: p.defaultRatePer30MinCents,
   }));
@@ -52,7 +51,7 @@ export default async function ProgramsPage() {
         </p>
         <h1 className="text-3xl font-semibold tracking-tight">Programs</h1>
         <p className="text-sm text-fg-muted">
-          Create programs and set session caps. {activeCount}{" "}
+          Create and manage training programs. {activeCount}{" "}
           {activeCount === 1 ? "program" : "programs"} active.
         </p>
         <p className="text-xs italic text-fg-subtle md:hidden">

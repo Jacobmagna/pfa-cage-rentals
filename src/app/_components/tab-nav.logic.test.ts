@@ -91,4 +91,56 @@ describe("activeTab", () => {
   it("returns cage for /coach/schedule with no role (not schedule)", () => {
     expect(activeTab("/coach/schedule")).toBe("cage");
   });
+
+  it("returns records for /admin/records when role is admin", () => {
+    expect(activeTab("/admin/records", "admin")).toBe("records");
+  });
+
+  it("returns records for /admin/coaches when role is admin", () => {
+    expect(activeTab("/admin/coaches", "admin")).toBe("records");
+  });
+
+  it("returns records for nested /admin/coaches/123 when role is admin", () => {
+    expect(activeTab("/admin/coaches/123", "admin")).toBe("records");
+  });
+
+  it("returns records for /admin/reports when role is admin", () => {
+    expect(activeTab("/admin/reports", "admin")).toBe("records");
+  });
+
+  it("returns records for /admin/payments when role is admin", () => {
+    expect(activeTab("/admin/payments", "admin")).toBe("records");
+  });
+
+  it("returns records for /admin/audit when role is admin", () => {
+    expect(activeTab("/admin/audit", "admin")).toBe("records");
+  });
+
+  it("returns records for /admin/import when role is admin", () => {
+    expect(activeTab("/admin/import", "admin")).toBe("records");
+  });
+
+  it("returns records for /admin/settings when role is admin", () => {
+    expect(activeTab("/admin/settings", "admin")).toBe("records");
+  });
+
+  it("returns cage for /admin/sessions when role is admin (records guard)", () => {
+    expect(activeTab("/admin/sessions", "admin")).toBe("cage");
+  });
+
+  it("returns cage for /admin/schedule when role is admin (records guard)", () => {
+    expect(activeTab("/admin/schedule", "admin")).toBe("cage");
+  });
+
+  it("returns cage for /admin/cage-rentals when role is admin (records guard)", () => {
+    expect(activeTab("/admin/cage-rentals", "admin")).toBe("cage");
+  });
+
+  it("returns home for /admin when role is admin (records guard)", () => {
+    expect(activeTab("/admin", "admin")).toBe("home");
+  });
+
+  it("returns cage for /admin/coaches/123 with no role (back-compat, records gated on admin)", () => {
+    expect(activeTab("/admin/coaches/123")).toBe("cage");
+  });
 });

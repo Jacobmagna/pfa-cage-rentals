@@ -27,7 +27,7 @@ export async function AppShell({
   return (
     <>
       <header className="sticky top-0 z-40 h-16 border-b border-line bg-page/80 backdrop-blur-md">
-        <div className="mx-auto flex h-full max-w-7xl items-center justify-between gap-4 px-6 lg:px-8">
+        <div className="mx-auto flex h-full items-center justify-between gap-4 px-6 lg:px-8 2xl:px-12">
           <div className="flex min-w-0 items-center gap-3">
             <Link
               href={role === "admin" ? "/admin" : "/coach"}
@@ -76,11 +76,11 @@ export async function AppShell({
         </div>
       </header>
 
-      <main className="flex-1 mx-auto w-full max-w-7xl px-6 lg:px-8 py-10">
+      <main className="flex-1 mx-auto w-full px-6 lg:px-8 2xl:px-12 py-10">
         {children}
       </main>
 
-      <footer className="mx-auto w-full max-w-7xl px-6 lg:px-8 pb-6 pt-4 border-t border-line/60 text-xs text-fg-subtle">
+      <footer className="mx-auto w-full px-6 lg:px-8 2xl:px-12 pb-6 pt-4 border-t border-line/60 text-xs text-fg-subtle">
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
           <div className="flex gap-4">
             <Link href="/privacy" className="hover:text-fg-muted transition-colors">

@@ -1,7 +1,18 @@
-import { and, asc, eq, gt, gte, lt, sql as drizzleSql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  isNull,
+  lt,
+  sql as drizzleSql,
+} from "drizzle-orm";
 import { CalendarDays, ClipboardList, Coins, Wallet } from "lucide-react";
 import { db } from "@/db";
 import {
+  auditLog,
   blockedTimes,
   hourLogs,
   programs,
@@ -13,6 +24,7 @@ import {
 import { requireRole } from "@/lib/authz";
 import { totalFromSnapshot } from "@/lib/billing";
 import { formatDollars } from "@/lib/format-money";
+import { formatRelative } from "@/lib/format-relative";
 import {
   reconcileBlocks,
   type ReconBlock,
@@ -27,6 +39,11 @@ import {
   pfaMonthStart,
 } from "@/lib/timezone";
 import { StatCard } from "@/app/_components/stat-card";
+import {
+  ActivityFeed,
+  type ActivityFeedItem,
+} from "@/app/admin/_components/activity-feed";
+import { describeActivity } from "@/app/admin/_components/activity-feed.logic";
 import {
   MasterScheduleGrid,
   type MasterBlockedTime,
@@ -87,6 +104,8 @@ export default async function AdminHome({
     programRows,
     programBlockRows,
     logRows,
+    coachAuditRows,
+    coachAccountRows,
   ] = await Promise.all([
     // Cage rentals this month → coaches OWE PFA (receivable).
     db
@@ -221,6 +240,36 @@ export default async function AdminHome({
       .where(
         and(lt(hourLogs.startAt, schedDayEnd), gt(hourLogs.endAt, schedDayStart)),
       ),
+    // Recent activity feed (QA6-2): the latest things COACHES have done.
+    // Join the audit log to its actor and keep only coach actors so admin
+    // actions never leak into the feed. Over-fetch (12) so the merge+filter
+    // below can still produce ~10 interesting rows.
+    db
+      .select({
+        id: auditLog.id,
+        name: users.name,
+        email: users.email,
+        entityType: auditLog.entityType,
+        action: auditLog.action,
+        ts: auditLog.ts,
+      })
+      .from(auditLog)
+      .innerJoin(users, eq(auditLog.actorUserId, users.id))
+      .where(eq(users.role, "coach"))
+      .orderBy(desc(auditLog.ts))
+      .limit(12),
+    // New coach accounts → highlighted "Joined" rows (a security signal).
+    db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .where(and(eq(users.role, "coach"), isNull(users.deletedAt)))
+      .orderBy(desc(users.createdAt))
+      .limit(12),
   ]);
 
   // Money totals read each row's snapshotted rate directly — never
@@ -302,6 +351,44 @@ export default async function AdminHome({
     }),
   );
 
+  // Build the Recent activity feed: map coach audit events through the pure
+  // describeActivity mapper (skipping uninteresting entities) and coach
+  // signups into "Joined" rows, merge, sort newest-first, take the top 10,
+  // then attach a relative "time ago" string anchored to `now`.
+  const feedNow = new Date();
+  type FeedSeed = ActivityFeedItem & { ts: Date };
+  const feedSeeds: FeedSeed[] = [];
+  for (const row of coachAuditRows) {
+    const described = describeActivity(row.entityType, row.action);
+    if (!described) continue;
+    feedSeeds.push({
+      id: `audit:${row.id}`,
+      coachName: row.name ?? row.email,
+      kind: described.kind,
+      label: described.label,
+      timeAgo: "",
+      ts: row.ts,
+    });
+  }
+  for (const row of coachAccountRows) {
+    feedSeeds.push({
+      id: `joined:${row.id}`,
+      coachName: row.name ?? row.email,
+      kind: "joined",
+      label: "Joined",
+      timeAgo: "",
+      ts: row.createdAt,
+    });
+  }
+  feedSeeds.sort((a, b) => b.ts.getTime() - a.ts.getTime());
+  const activityItems: ActivityFeedItem[] = feedSeeds.slice(0, 10).map((s) => ({
+    id: s.id,
+    coachName: s.coachName,
+    kind: s.kind,
+    label: s.label,
+    timeAgo: formatRelative(s.ts, feedNow),
+  }));
+
   return (
     <>
       <header className="mb-10">
@@ -341,6 +428,8 @@ export default async function AdminHome({
           sub={programSessionsToday > 0 ? "Scheduled" : "Nothing scheduled"}
         />
       </section>
+
+      <ActivityFeed items={activityItems} />
 
       <section aria-labelledby="master-schedule-heading">
         <h2

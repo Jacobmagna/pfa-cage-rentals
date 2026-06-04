@@ -10,7 +10,27 @@ import { formatPfaDate, formatPfaWeekday, pfaDayStart, pfaParts } from "@/lib/ti
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export function WeekNav({ selectedDate }: { selectedDate: Date }) {
+// Build a `?date=...&...` querystring for a given day, appending any
+// non-empty extraParams. With no extraParams this is byte-for-byte the
+// historical `?date=YYYY-MM-DD`, so existing callers are unaffected.
+function dayHref(
+  dateKey: string,
+  extraParams: Record<string, string | undefined>,
+): string {
+  const parts = [`date=${dateKey}`];
+  for (const [k, v] of Object.entries(extraParams)) {
+    if (v) parts.push(`${k}=${v}`);
+  }
+  return `?${parts.join("&")}`;
+}
+
+export function WeekNav({
+  selectedDate,
+  extraParams = {},
+}: {
+  selectedDate: Date;
+  extraParams?: Record<string, string | undefined>;
+}) {
   const monday = pfaWeekStart(selectedDate);
   const days = Array.from({ length: 7 }, (_, i) =>
     // Add 0.5 day per step then snap to PFA midnight — handles DST
@@ -28,7 +48,7 @@ export function WeekNav({ selectedDate }: { selectedDate: Date }) {
 
   return (
     <div className="mb-5 flex items-center gap-2">
-      <NavChevron href={`?date=${formatPfaDate(prevWeek)}`} dir="left" />
+      <NavChevron href={dayHref(formatPfaDate(prevWeek), extraParams)} dir="left" />
 
       <div className="flex flex-1 gap-1">
         {days.map((d) => {
@@ -38,7 +58,7 @@ export function WeekNav({ selectedDate }: { selectedDate: Date }) {
           return (
             <Link
               key={key}
-              href={`?date=${key}`}
+              href={dayHref(key, extraParams)}
               className={[
                 "flex-1 text-center rounded-md border px-2 py-2 shadow-[var(--shadow-sm)] transition",
                 isSelected
@@ -60,7 +80,7 @@ export function WeekNav({ selectedDate }: { selectedDate: Date }) {
         })}
       </div>
 
-      <NavChevron href={`?date=${formatPfaDate(nextWeek)}`} dir="right" />
+      <NavChevron href={dayHref(formatPfaDate(nextWeek), extraParams)} dir="right" />
     </div>
   );
 }

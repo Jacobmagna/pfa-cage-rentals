@@ -1,7 +1,26 @@
-import { and, asc, eq, gt, gte, lt, sql as drizzleSql } from "drizzle-orm";
-import { CalendarDays, ClipboardList, Coins, Wallet } from "lucide-react";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  isNull,
+  lt,
+  sql as drizzleSql,
+} from "drizzle-orm";
+import {
+  CalendarDays,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
+  Coins,
+  Wallet,
+} from "lucide-react";
+import Link from "next/link";
 import { db } from "@/db";
 import {
+  auditLog,
   blockedTimes,
   hourLogs,
   programs,
@@ -13,6 +32,7 @@ import {
 import { requireRole } from "@/lib/authz";
 import { totalFromSnapshot } from "@/lib/billing";
 import { formatDollars } from "@/lib/format-money";
+import { formatRelative } from "@/lib/format-relative";
 import {
   reconcileBlocks,
   type ReconBlock,
@@ -27,6 +47,11 @@ import {
   pfaMonthStart,
 } from "@/lib/timezone";
 import { StatCard } from "@/app/_components/stat-card";
+import {
+  ActivityFeed,
+  type ActivityFeedItem,
+} from "@/app/admin/_components/activity-feed";
+import { describeActivity } from "@/app/admin/_components/activity-feed.logic";
 import {
   MasterScheduleGrid,
   type MasterBlockedTime,
@@ -53,7 +78,17 @@ import { WeekNav } from "@/app/admin/schedule/_components/week-nav";
 //
 // The cage dashboard that used to live here moved to /admin/cage-rentals.
 
-type SearchParams = Promise<{ date?: string }>;
+type SearchParams = Promise<{ date?: string; schedule?: string }>;
+
+// Build a clean `/admin?...` href, dropping undefined/empty values so the
+// toggle links stay tidy (e.g. `/admin` when nothing is set).
+function buildAdminHref(query: Record<string, string | undefined>): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(query)) {
+    if (v) parts.push(`${k}=${v}`);
+  }
+  return parts.length ? `/admin?${parts.join("&")}` : "/admin";
+}
 
 export default async function AdminHome({
   searchParams,
@@ -64,6 +99,13 @@ export default async function AdminHome({
 
   const params = await searchParams;
   const selectedDate = parseDateInput(params.date) ?? startOfToday();
+  const scheduleOpen = params.schedule === "open";
+
+  // Toggle-bar href: closed → add schedule=open; open → drop it. Both
+  // preserve the current ?date so navigating in/out keeps the selected day.
+  const toggleHref = scheduleOpen
+    ? buildAdminHref({ date: params.date })
+    : buildAdminHref({ date: params.date, schedule: "open" });
 
   // Card windows are anchored to NOW, never the selected day.
   const now = new Date();
@@ -87,6 +129,8 @@ export default async function AdminHome({
     programRows,
     programBlockRows,
     logRows,
+    coachAuditRows,
+    coachAccountRows,
   ] = await Promise.all([
     // Cage rentals this month → coaches OWE PFA (receivable).
     db
@@ -221,6 +265,36 @@ export default async function AdminHome({
       .where(
         and(lt(hourLogs.startAt, schedDayEnd), gt(hourLogs.endAt, schedDayStart)),
       ),
+    // Recent activity feed (QA6-2): the latest things COACHES have done.
+    // Join the audit log to its actor and keep only coach actors so admin
+    // actions never leak into the feed. Over-fetch (12) so the merge+filter
+    // below can still produce ~10 interesting rows.
+    db
+      .select({
+        id: auditLog.id,
+        name: users.name,
+        email: users.email,
+        entityType: auditLog.entityType,
+        action: auditLog.action,
+        ts: auditLog.ts,
+      })
+      .from(auditLog)
+      .innerJoin(users, eq(auditLog.actorUserId, users.id))
+      .where(eq(users.role, "coach"))
+      .orderBy(desc(auditLog.ts))
+      .limit(12),
+    // New coach accounts → highlighted "Joined" rows (a security signal).
+    db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .where(and(eq(users.role, "coach"), isNull(users.deletedAt)))
+      .orderBy(desc(users.createdAt))
+      .limit(12),
   ]);
 
   // Money totals read each row's snapshotted rate directly — never
@@ -302,6 +376,44 @@ export default async function AdminHome({
     }),
   );
 
+  // Build the Recent activity feed: map coach audit events through the pure
+  // describeActivity mapper (skipping uninteresting entities) and coach
+  // signups into "Joined" rows, merge, sort newest-first, take the top 10,
+  // then attach a relative "time ago" string anchored to `now`.
+  const feedNow = new Date();
+  type FeedSeed = ActivityFeedItem & { ts: Date };
+  const feedSeeds: FeedSeed[] = [];
+  for (const row of coachAuditRows) {
+    const described = describeActivity(row.entityType, row.action);
+    if (!described) continue;
+    feedSeeds.push({
+      id: `audit:${row.id}`,
+      coachName: row.name ?? row.email,
+      kind: described.kind,
+      label: described.label,
+      timeAgo: "",
+      ts: row.ts,
+    });
+  }
+  for (const row of coachAccountRows) {
+    feedSeeds.push({
+      id: `joined:${row.id}`,
+      coachName: row.name ?? row.email,
+      kind: "joined",
+      label: "Joined",
+      timeAgo: "",
+      ts: row.createdAt,
+    });
+  }
+  feedSeeds.sort((a, b) => b.ts.getTime() - a.ts.getTime());
+  const activityItems: ActivityFeedItem[] = feedSeeds.slice(0, 10).map((s) => ({
+    id: s.id,
+    coachName: s.coachName,
+    kind: s.kind,
+    label: s.label,
+    timeAgo: formatRelative(s.ts, feedNow),
+  }));
+
   return (
     <>
       <header className="mb-10">
@@ -342,25 +454,57 @@ export default async function AdminHome({
         />
       </section>
 
+      <ActivityFeed items={activityItems} />
+
       <section aria-labelledby="master-schedule-heading">
-        <h2
-          id="master-schedule-heading"
-          className="mb-4 text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted"
-        >
+        <h2 id="master-schedule-heading" className="sr-only">
           Master Schedule
         </h2>
 
-        <WeekNav selectedDate={selectedDate} />
+        <Link
+          href={toggleHref}
+          aria-expanded={scheduleOpen}
+          className="flex w-full items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3 text-left shadow-[var(--shadow-sm)] transition hover:-translate-y-px hover:border-gold/40 hover:shadow-[var(--shadow-md)]"
+        >
+          <span className="flex h-8 w-8 items-center justify-center rounded-md border border-line bg-bg text-fg-muted">
+            <CalendarDays className="h-4 w-4" />
+          </span>
+          <span className="flex-1">
+            <span className="block text-sm font-semibold">Master Schedule</span>
+            <span className="block text-xs text-fg-muted">
+              {scheduleOpen
+                ? "Browsing cage + program sessions by day"
+                : "Show cage + program sessions for a day"}
+            </span>
+          </span>
+          <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-fg-muted">
+            {scheduleOpen ? "Hide" : "Show"}
+            {scheduleOpen ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </span>
+        </Link>
 
-        <AutoRefresh />
+        {scheduleOpen ? (
+          <div className="mt-5">
+            <WeekNav
+              selectedDate={selectedDate}
+              extraParams={{ schedule: "open" }}
+            />
 
-        <MasterScheduleGrid
-          resources={masterResources}
-          sessions={masterSessions}
-          blockedTimes={masterBlocked}
-          programs={masterPrograms}
-          programBlocks={masterProgramBlocks}
-        />
+            <AutoRefresh />
+
+            <MasterScheduleGrid
+              resources={masterResources}
+              sessions={masterSessions}
+              blockedTimes={masterBlocked}
+              programs={masterPrograms}
+              programBlocks={masterProgramBlocks}
+            />
+          </div>
+        ) : null}
       </section>
     </>
   );

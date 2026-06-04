@@ -2,10 +2,11 @@ import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import Resend from "next-auth/providers/resend";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { users, accounts, sessions, verificationTokens } from "@/db/schema";
 import { isAdminEmail } from "@/lib/admin-emails";
+import { decideSignIn } from "@/lib/auth-access";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: DrizzleAdapter(db, {
@@ -38,6 +39,41 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     signIn: "/",
   },
   callbacks: {
+    // Invite-only gate (Jacob, LOCKED). A sign-in (Google or magic
+    // link) is allowed ONLY when the email is on the hardcoded admin
+    // allowlist OR a non-soft-deleted user row already exists for it.
+    // Any other email is rejected here. This closes the open-signup
+    // gap: previously any Google account became a coach (default role)
+    // and could view minor athletes' rosters. We match on EMAIL ONLY,
+    // never name.
+    //
+    // Correctness:
+    //  - A SEEDED coach's first Google login: their users row already
+    //    exists (by email) with no linked account yet → the lookup
+    //    finds it → allowed → allowDangerousEmailAccountLinking then
+    //    links the Google account. Existing admins/coaches keep working.
+    //  - A SOFT-DELETED (purged) coach: deletedAt is set → excluded by
+    //    isNull(...) → rejected (desired; re-authorize via Add coach).
+    //  - Returning false makes Auth.js redirect to the sign-in page
+    //    with ?error=AccessDenied and (for the email provider) does NOT
+    //    send a magic link to a non-allowed address.
+    //  - Admins bypass the DB call via isAdminEmail, so a transient DB
+    //    error never locks admins out.
+    async signIn({ user, profile }) {
+      const email = (user?.email ?? profile?.email ?? "")
+        .toLowerCase()
+        .trim();
+      if (!email) return false;
+      if (isAdminEmail(email)) return true;
+      const rows = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(
+          and(eq(sql`lower(${users.email})`, email), isNull(users.deletedAt)),
+        )
+        .limit(1);
+      return decideSignIn({ email, isAdmin: false, userExists: rows.length > 0 });
+    },
     async session({ session, user }) {
       if (session.user) {
         session.user.id = user.id;

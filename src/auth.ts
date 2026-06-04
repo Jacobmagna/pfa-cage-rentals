@@ -34,7 +34,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // the linking flow safely without an opt-in.)
     }),
   ],
-  session: { strategy: "database" },
+  session: {
+    strategy: "database",
+    // 90-day rolling sessions (Jacob): sign-in lasts ~3 months so
+    // coaches/admins rarely re-authenticate. Auth.js extends the session
+    // on use (default updateAge 24h). Applies to the session row + cookie.
+    maxAge: 90 * 24 * 60 * 60,
+  },
   pages: {
     signIn: "/",
   },

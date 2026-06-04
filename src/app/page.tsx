@@ -28,6 +28,11 @@ const ERROR_COPY: Record<string, string> = {
   // Auth.js: verification token expired or already consumed.
   Verification:
     "That sign-in link expired or was already used. Request a new one.",
+  // Auth.js: our signIn callback returned false because the email
+  // isn't authorized (invite-only). Friendly, and deliberately does
+  // NOT reveal whether the email exists.
+  AccessDenied:
+    "This email isn't authorized for PFA Engine yet. Ask PFA to add you, then try again.",
 };
 
 const ERROR_FALLBACK =

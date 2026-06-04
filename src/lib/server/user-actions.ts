@@ -27,7 +27,8 @@
 // pattern as session/block actions — neon-http can't transact, so the
 // audit insert is sequential and Sentry-captured on failure.
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { z } from "zod";
 import * as Sentry from "@sentry/nextjs";
 import { db } from "@/db";
 import {
@@ -216,4 +217,99 @@ export async function mergeSyntheticCoachInternal(
   });
 
   return { movedSessions: moved.length };
+}
+
+// ---- Add coach (invite path) --------------------------------------------
+//
+// Invite-only sign-in (see src/auth.ts signIn callback) needs a way to
+// pre-authorize a new coach BY EMAIL before they ever sign in. This is
+// that path: an admin types name + email, and we make sure a usable
+// (non-soft-deleted) users row exists for that email so the signIn gate
+// will let them in.
+//
+// Like the rest of this module, addCoachInternal takes the resolved
+// `actor` and holds only the DB logic — it's what the integration test
+// exercises directly (like deleteCoachInternal). The public, requireRole-
+// gated server action that the add-coach-form calls lives in the route's
+// "use server" file (src/app/admin/coaches/actions.ts), so this module
+// stays free of the @/auth chain at import time and exposes no RPC
+// endpoint of its own.
+
+export const addCoachSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(80, "Name is too long"),
+  email: z.string().trim().toLowerCase().email("Enter a valid email address"),
+});
+
+export type AddCoachInput = z.infer<typeof addCoachSchema>;
+
+// Thrown when an ACTIVE (non-soft-deleted) user already owns the email.
+// A soft-deleted match is NOT an error — it's restored in-place.
+export class CoachEmailTakenError extends Error {
+  readonly code = "ALREADY_EXISTS";
+  constructor() {
+    super("A user with that email already exists.");
+    this.name = "CoachEmailTakenError";
+  }
+}
+
+export type AddCoachOutcome = {
+  user: typeof users.$inferSelect;
+  mode: "created" | "restored";
+};
+
+export async function addCoachInternal(
+  actor: AuthedSession["user"],
+  input: unknown,
+): Promise<AddCoachOutcome> {
+  const parsed = addCoachSchema.parse(input);
+
+  // Look up any existing user by case-insensitive email, INCLUDING
+  // soft-deleted ones (so we can re-authorize a previously removed
+  // coach instead of colliding on the unique email constraint).
+  const [existing] = await db
+    .select()
+    .from(users)
+    .where(eq(sql`lower(${users.email})`, parsed.email))
+    .limit(1);
+
+  if (existing && existing.deletedAt === null) {
+    throw new CoachEmailTakenError();
+  }
+
+  if (existing) {
+    // Soft-deleted row for this email → restore + re-authorize as a
+    // coach. Audit as an update with the pre/post snapshots.
+    const [updated] = await db
+      .update(users)
+      .set({ deletedAt: null, role: "coach", name: parsed.name })
+      .where(eq(users.id, existing.id))
+      .returning();
+
+    await safeLogAudit(db, {
+      actorUserId: actor.id,
+      entityType: "user",
+      entityId: existing.id,
+      action: "update",
+      before: existing as unknown as Record<string, unknown>,
+      after: updated as unknown as Record<string, unknown>,
+    });
+
+    return { user: updated, mode: "restored" };
+  }
+
+  // No row at all → insert a fresh coach.
+  const [created] = await db
+    .insert(users)
+    .values({ email: parsed.email, name: parsed.name, role: "coach" })
+    .returning();
+
+  await safeLogAudit(db, {
+    actorUserId: actor.id,
+    entityType: "user",
+    entityId: created.id,
+    action: "create",
+    after: created as unknown as Record<string, unknown>,
+  });
+
+  return { user: created, mode: "created" };
 }

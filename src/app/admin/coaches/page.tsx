@@ -11,6 +11,7 @@ import {
   pfaMonthStart,
 } from "@/lib/timezone";
 import { isSyntheticUserEmail } from "@/lib/server/user-actions";
+import { AddCoachForm } from "./_components/add-coach-form";
 import { CoachesTable, type CoachRow } from "./_components/coaches-table";
 
 // /admin/coaches — list of every user with role=coach plus their
@@ -124,6 +125,8 @@ export default async function AdminCoachesPage() {
           laptop for the full experience.
         </p>
       </div>
+
+      <AddCoachForm />
 
       <CoachesTable rows={rows} mergeTargets={mergeTargets} />
     </>

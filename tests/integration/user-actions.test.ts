@@ -11,6 +11,7 @@
 // only resets the mutable session/block tables; user rows are durable.
 
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { ZodError } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -23,7 +24,9 @@ import {
   verificationTokens,
 } from "@/db/schema";
 import {
+  addCoachInternal,
   anonymizedEmailFor,
+  CoachEmailTakenError,
   deleteCoachInternal,
   FORMER_COACH_NAME,
   mergeSyntheticCoachInternal,
@@ -495,5 +498,115 @@ describe("mergeSyntheticCoachInternal", () => {
       .from(users)
       .where(eq(users.id, source.id));
     expect(sourceUser).toHaveLength(0);
+  });
+});
+
+// ---- addCoachInternal (invite path) ------------------------------------
+//
+// Same direct-internal pattern as above — call addCoachInternal with the
+// synthetic admin actor instead of through the requireRole-gated
+// addCoachAction wrapper. The wrapper's only extra behavior is
+// requireRole + Result reshaping; the gate is covered generically in
+// admin-actions-authz.test.ts.
+
+describe("addCoachInternal", () => {
+  it("inserts a fresh coach row (role=coach, not deleted) and audits create", async () => {
+    const email = uniqueEmail("addcoach");
+    const { user, mode } = await addCoachInternal(fixtures.admin, {
+      name: "Brand New Coach",
+      email,
+    });
+
+    expect(mode).toBe("created");
+    expect(user.email).toBe(email);
+    expect(user.name).toBe("Brand New Coach");
+    expect(user.role).toBe("coach");
+    expect(user.deletedAt).toBeNull();
+
+    const [audit] = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.entityType, "user"),
+          eq(auditLog.entityId, user.id),
+          eq(auditLog.action, "create"),
+        ),
+      );
+    expect(audit).toBeDefined();
+    expect(audit.actorUserId).toBe(fixtures.admin.id);
+  });
+
+  it("lowercases + trims the email before insert", async () => {
+    const base = uniqueEmail("MixedCase");
+    const { user } = await addCoachInternal(fixtures.admin, {
+      name: "  Spaced Name  ",
+      email: `  ${base.toUpperCase()}  `,
+    });
+    expect(user.email).toBe(base.toLowerCase());
+    expect(user.name).toBe("Spaced Name");
+  });
+
+  it("rejects when an ACTIVE user already owns the email", async () => {
+    const coach = await createThrowawayCoach("Existing Active");
+    await expect(
+      addCoachInternal(fixtures.admin, {
+        name: "Dup Attempt",
+        email: coach.email.toUpperCase(),
+      }),
+    ).rejects.toBeInstanceOf(CoachEmailTakenError);
+  });
+
+  it("restores a soft-deleted coach matching the email (re-authorize)", async () => {
+    // Simulate the legacy-coach purge, which sets ONLY deletedAt and
+    // preserves the real email — so re-adding by that email should
+    // restore the SAME row rather than insert a new one.
+    const coach = await createThrowawayCoach("Purged Coach");
+    await db
+      .update(users)
+      .set({ deletedAt: new Date(), role: "coach" })
+      .where(eq(users.id, coach.id));
+
+    const { user, mode } = await addCoachInternal(fixtures.admin, {
+      name: "Welcomed Back",
+      email: coach.email,
+    });
+
+    expect(mode).toBe("restored");
+    expect(user.id).toBe(coach.id);
+    expect(user.deletedAt).toBeNull();
+    expect(user.role).toBe("coach");
+    expect(user.name).toBe("Welcomed Back");
+
+    const [audit] = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.entityType, "user"),
+          eq(auditLog.entityId, coach.id),
+          eq(auditLog.action, "update"),
+        ),
+      );
+    expect(audit).toBeDefined();
+    expect(audit.actorUserId).toBe(fixtures.admin.id);
+  });
+
+  it("rejects an invalid email via ZodError", async () => {
+    await expect(
+      addCoachInternal(fixtures.admin, {
+        name: "Bad Email",
+        email: "not-an-email",
+      }),
+    ).rejects.toBeInstanceOf(ZodError);
+  });
+
+  it("rejects an empty name via ZodError", async () => {
+    await expect(
+      addCoachInternal(fixtures.admin, {
+        name: "   ",
+        email: uniqueEmail("emptyname"),
+      }),
+    ).rejects.toBeInstanceOf(ZodError);
   });
 });

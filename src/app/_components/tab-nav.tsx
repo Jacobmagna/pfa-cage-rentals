@@ -9,20 +9,32 @@ type Tab = {
   label: string;
 };
 
-const BASE_TABS: Tab[] = [
+// Admin tab list: Home is the leftmost landing tab (QA4-C1); Cage Rentals
+// now lives at its own /admin/cage-rentals route.
+const ADMIN_TABS: Tab[] = [
+  { key: "home", label: "Home" },
   { key: "cage", label: "Cage Rentals" },
   { key: "hour-log", label: "Hour Log" },
   { key: "attendance", label: "Attendance" },
 ];
 
-// The Schedule tab is coach-only (admin reaches its schedule via
-// /admin/schedule, which keeps lighting Cage Rentals).
-const COACH_SCHEDULE_TAB: Tab = { key: "schedule", label: "Schedule" };
+// Coach tab list: no Home tab; Schedule is coach-only (admin reaches its
+// schedule via /admin/schedule, which keeps lighting Cage Rentals).
+const COACH_TABS: Tab[] = [
+  { key: "cage", label: "Cage Rentals" },
+  { key: "hour-log", label: "Hour Log" },
+  { key: "attendance", label: "Attendance" },
+  { key: "schedule", label: "Schedule" },
+];
 
 function hrefFor(key: TabKey, base: string): string {
   switch (key) {
-    case "cage":
+    case "home":
       return base;
+    case "cage":
+      // Admin's Cage Rentals now lives at its own route; coach's cage tab
+      // stays at /coach.
+      return base === "/admin" ? "/admin/cage-rentals" : base;
     case "hour-log":
       return `${base}/hour-log`;
     case "attendance":
@@ -35,8 +47,7 @@ function hrefFor(key: TabKey, base: string): string {
 export function TabNav({ role }: { role: "admin" | "coach" }) {
   const pathname = usePathname() ?? "";
   const base = role === "admin" ? "/admin" : "/coach";
-  const tabs =
-    role === "coach" ? [...BASE_TABS, COACH_SCHEDULE_TAB] : BASE_TABS;
+  const tabs = role === "coach" ? COACH_TABS : ADMIN_TABS;
   const current = activeTab(pathname, role);
 
   return (

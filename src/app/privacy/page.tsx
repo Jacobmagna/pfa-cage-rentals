@@ -123,7 +123,7 @@ export default function PrivacyPage() {
           </p>
           <p>
             Sign-in sessions (the cookie that keeps you logged in) expire after
-            30 days. Magic-link tokens expire after 24 hours.
+            90 days. Magic-link tokens expire after 24 hours.
           </p>
         </Section>
 

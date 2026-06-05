@@ -27,9 +27,15 @@ function dayHref(
 export function WeekNav({
   selectedDate,
   extraParams = {},
+  preserveScroll = false,
 }: {
   selectedDate: Date;
   extraParams?: Record<string, string | undefined>;
+  // Opt-in: when true, nav links pass App-Router `scroll={false}` so
+  // changing weeks/days doesn't jump the viewport back to the top.
+  // Default false preserves the historical behavior for standalone
+  // schedule pages (where the nav sits at the top anyway).
+  preserveScroll?: boolean;
 }) {
   const monday = pfaWeekStart(selectedDate);
   const days = Array.from({ length: 7 }, (_, i) =>
@@ -48,7 +54,11 @@ export function WeekNav({
 
   return (
     <div className="mb-5 flex items-center gap-2">
-      <NavChevron href={dayHref(formatPfaDate(prevWeek), extraParams)} dir="left" />
+      <NavChevron
+        href={dayHref(formatPfaDate(prevWeek), extraParams)}
+        dir="left"
+        preserveScroll={preserveScroll}
+      />
 
       <div className="flex flex-1 gap-1">
         {days.map((d) => {
@@ -59,6 +69,7 @@ export function WeekNav({
             <Link
               key={key}
               href={dayHref(key, extraParams)}
+              scroll={preserveScroll ? false : undefined}
               className={[
                 "flex-1 text-center rounded-md border px-2 py-2 shadow-[var(--shadow-sm)] transition",
                 isSelected
@@ -80,7 +91,11 @@ export function WeekNav({
         })}
       </div>
 
-      <NavChevron href={dayHref(formatPfaDate(nextWeek), extraParams)} dir="right" />
+      <NavChevron
+        href={dayHref(formatPfaDate(nextWeek), extraParams)}
+        dir="right"
+        preserveScroll={preserveScroll}
+      />
     </div>
   );
 }
@@ -88,14 +103,17 @@ export function WeekNav({
 function NavChevron({
   href,
   dir,
+  preserveScroll = false,
 }: {
   href: string;
   dir: "left" | "right";
+  preserveScroll?: boolean;
 }) {
   const Icon = dir === "left" ? ChevronLeft : ChevronRight;
   return (
     <Link
       href={href}
+      scroll={preserveScroll ? false : undefined}
       className="inline-flex h-12 w-9 items-center justify-center rounded-md border border-line-strong bg-surface text-fg-muted shadow-[var(--shadow-sm)] transition hover:-translate-y-px hover:text-fg hover:shadow-[var(--shadow-md)]"
       aria-label={dir === "left" ? "Previous week" : "Next week"}
     >

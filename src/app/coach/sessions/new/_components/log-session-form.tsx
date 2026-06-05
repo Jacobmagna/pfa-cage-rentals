@@ -25,6 +25,7 @@ import {
   type SlotInput,
 } from "@/app/_components/session-slots-list";
 import { formatPfaDate, formatPfaTime, parsePfaInput } from "@/lib/timezone";
+import { cageUseTypeError } from "@/lib/use-type-validation";
 import { AvailabilityPanel } from "./availability-panel";
 
 const INITIAL_STATE: CoachActionResult = { ok: true, loggedAt: 0 };
@@ -266,6 +267,26 @@ export function LogSessionForm({
     e.preventDefault();
     if (slotCount === 0 || divisibilityError) return;
     if (slots.length === 0) return;
+
+    // Cage use-type guard BEFORE hitting the batch action. The server
+    // still enforces this (createSessionsBatchInternal throws
+    // UseTypeValidationError), but an uncaught server-action throw is
+    // redacted to a generic "Server Components render" message in
+    // production — so we surface the friendly inline message here,
+    // through the same batchResult error channel the action errors use.
+    const selectedResource = resources.find((r) => r.id === live.resourceId);
+    const cageError = selectedResource
+      ? cageUseTypeError(
+          selectedResource.type,
+          useTypeValue === "hitting" || useTypeValue === "pitching"
+            ? useTypeValue
+            : null,
+        )
+      : null;
+    if (cageError) {
+      setBatchResult({ status: "error", message: cageError });
+      return;
+    }
 
     setBatchResult({ status: "idle" });
     startBatchTransition(async () => {

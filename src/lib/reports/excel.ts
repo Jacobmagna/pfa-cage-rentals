@@ -179,7 +179,7 @@ function addDetailSheet(workbook: ExcelJS.Workbook, report: ReportData) {
     { header: "Coach", key: "coach", width: 24 },
     { header: "Team Rental", key: "teamRental", width: 12 },
     { header: "PFA-Referred", key: "pfaReferred", width: 14 },
-    { header: "Online", key: "online", width: 8 },
+    { header: "Prepaid online", key: "online", width: 14 },
     { header: "Slots", key: "slots", width: 8 },
     { header: "Rate", key: "rate", width: 10 },
     { header: "$", key: "total", width: 12 },

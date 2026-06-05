@@ -492,6 +492,7 @@ export default async function AdminHome({
             <WeekNav
               selectedDate={selectedDate}
               extraParams={{ schedule: "open" }}
+              preserveScroll
             />
 
             <AutoRefresh />

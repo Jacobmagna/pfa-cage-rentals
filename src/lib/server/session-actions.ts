@@ -54,6 +54,7 @@ import {
   createSessionSchema,
   updateSessionSchema,
 } from "@/lib/schemas/session";
+import { CAGE_USE_TYPE_REQUIRED_MESSAGE } from "@/lib/use-type-validation";
 
 // Resolves the per-30-min cents rate to stamp on a new (or edited)
 // session row. Reads the coach's override + the resource-type default
@@ -170,6 +171,11 @@ async function findOverlappingSession(
 // Validates that useType matches the resource's type rules. Cages
 // require hitting or pitching; bullpens and weight rooms must not
 // have a useType. Throws UseTypeValidationError on mismatch.
+//
+// The cage-missing case (the only one a coach/admin can hit from the
+// UI) reuses the shared friendly copy in @/lib/use-type-validation so
+// the message the server stamps here is byte-identical to the inline
+// message the batch-submit guards render client-side.
 function validateUseType(
   resourceName: string,
   resourceType: "cage" | "bullpen" | "weight_room",
@@ -177,9 +183,7 @@ function validateUseType(
 ) {
   if (resourceType === "cage") {
     if (!useType) {
-      throw new UseTypeValidationError(
-        `${resourceName} is a cage — choose hitting or pitching.`,
-      );
+      throw new UseTypeValidationError(CAGE_USE_TYPE_REQUIRED_MESSAGE);
     }
   } else if (useType) {
     throw new UseTypeValidationError(

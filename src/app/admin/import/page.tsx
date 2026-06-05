@@ -1,32 +1,27 @@
 import Link from "next/link";
-import { asc, isNull } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
-import { db } from "@/db";
-import { users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
+import { listActiveCoaches } from "@/lib/server/coaches";
 import { ImportForm } from "./_components/import-form";
 
 export default async function AdminImportPage() {
   await requireRole("admin");
 
   // Pre-fetch the coach roster so the "map to existing coach" dropdown
-  // can render without an extra round-trip per row. Soft-deleted users
-  // are excluded — re-mapping an Excel row to "Former coach" would just
-  // re-create the privacy leak we promised to fix.
-  const coaches = await db
-    .select({ id: users.id, name: users.name, email: users.email })
-    .from(users)
-    .where(isNull(users.deletedAt))
-    .orderBy(asc(users.name), asc(users.email));
+  // can render without an extra round-trip per row. Only active coaches
+  // (role=coach, not soft-deleted) appear — re-mapping an Excel row to a
+  // "Former coach" would just re-create the privacy leak we promised to
+  // fix, and admins / name-less accounts were never valid mapping targets.
+  const coaches = await listActiveCoaches();
 
   return (
     <>
       <Link
-        href="/admin"
+        href="/admin/records"
         className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
-        Back
+        Back to Billing &amp; Records
       </Link>
 
       <div className="space-y-2 mb-8">

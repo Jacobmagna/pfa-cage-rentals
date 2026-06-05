@@ -1,9 +1,7 @@
 import Link from "next/link";
-import { and, asc, eq, isNull } from "drizzle-orm";
 import { ArrowLeft, Download } from "lucide-react";
-import { db } from "@/db";
-import { users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
+import { listActiveCoaches } from "@/lib/server/coaches";
 import { fetchReportData } from "@/lib/reports/fetch";
 import {
   filtersToQueryString,
@@ -45,11 +43,7 @@ export default async function AdminReportsPage({
     // filter dropdown — only active coaches need to appear, since the
     // admin can't meaningfully filter to a coach who was deleted before
     // they had a chance to learn the new system.
-    db
-      .select({ id: users.id, name: users.name, email: users.email })
-      .from(users)
-      .where(and(eq(users.role, "coach"), isNull(users.deletedAt)))
-      .orderBy(asc(users.name), asc(users.email)),
+    listActiveCoaches(),
     fetchReportData(filters),
   ]);
 
@@ -61,11 +55,11 @@ export default async function AdminReportsPage({
   return (
     <>
       <Link
-        href="/admin"
+        href="/admin/records"
         className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
-        Back
+        Back to Billing &amp; Records
       </Link>
 
       <div className="mb-6 flex items-start justify-between gap-4">

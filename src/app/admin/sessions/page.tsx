@@ -4,8 +4,9 @@ import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import { resources, sessionsBilling, users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
-import { parsePfaInput, pfaDayEnd, pfaParts } from "@/lib/timezone";
+import { parsePfaInput, pfaDayEnd } from "@/lib/timezone";
 import { FiltersForm } from "./_components/filters-form";
+import { defaultSessionsRange, DEFAULT_RANGE_DAYS } from "./filters.logic";
 import { SessionsClient } from "./_components/sessions-client";
 
 // Admin sessions page. Filterable row-level view of bookings —
@@ -13,9 +14,10 @@ import { SessionsClient } from "./_components/sessions-client";
 // rollup (`/admin/reports`). All filter state lives in the URL,
 // so the page is shareable and the browser back button works.
 //
-// Default window is the last 14 days, which empirically keeps the
-// list short enough to scan without pagination. To go further back
-// the admin extends the date range.
+// Default window straddles today: last 14 days through next 14 days,
+// so both recent-past and upcoming sessions show without the admin
+// touching the filter bar. To go further out the admin extends the
+// date range. (See defaultSessionsRange in filters.logic.ts.)
 //
 // Coach + resource filter dropdowns only list active coaches /
 // active resources, but the table itself joins unfiltered — so
@@ -23,7 +25,6 @@ import { SessionsClient } from "./_components/sessions-client";
 // deactivated resource still appear and can still be edited /
 // deleted in the dialog.
 
-const DEFAULT_LOOKBACK_DAYS = 14;
 const MAX_ROWS = 500;
 
 const VALID_USE_TYPES = new Set(["hitting", "pitching"] as const);
@@ -145,7 +146,7 @@ export default async function AdminSessionsPage({
         <h1 className="text-3xl font-semibold tracking-tight">Sessions</h1>
         <p className="text-sm text-fg-muted">
           Filter and edit individual bookings. Defaults to the last{" "}
-          {DEFAULT_LOOKBACK_DAYS} days.
+          {DEFAULT_RANGE_DAYS} days through the next {DEFAULT_RANGE_DAYS} days.
         </p>
         <p className="text-xs italic text-fg-subtle md:hidden">
           This page is designed for desktop. Rotate your device or use a
@@ -191,7 +192,7 @@ type NormalizedFilters = {
   teamRental: ("yes" | "no")[];
   /** Same yes/no semantics as teamRental. */
   pfaReferred: ("yes" | "no")[];
-  /** True if any filter differs from the default (last 14 days, all coaches/resources/uses/rentals). */
+  /** True if any filter differs from the default (last 14 days → next 14 days, all coaches/resources/uses/rentals). */
   isFiltered: boolean;
 };
 
@@ -209,25 +210,15 @@ function normalizeFilters(input: {
   const fromInput = pickFirst(input.from);
   const toInput = pickFirst(input.to);
 
-  // Defaults in PFA TZ: today and (LOOKBACK - 1) days ago, so the
-  // inclusive window covers exactly DEFAULT_LOOKBACK_DAYS calendar
-  // days. Calendar arithmetic on detached YMD numbers — the JS Date
-  // here is just a counter, never compared as an instant, so the
-  // server's UTC clock doesn't matter.
-  const todayParts = pfaParts(new Date());
-  const todayInput = `${todayParts.year}-${pad2(todayParts.month)}-${pad2(todayParts.day)}`;
-  const lookbackInput = (() => {
-    const counter = new Date(
-      todayParts.year,
-      todayParts.month - 1,
-      todayParts.day,
-    );
-    counter.setDate(counter.getDate() - (DEFAULT_LOOKBACK_DAYS - 1));
-    return `${counter.getFullYear()}-${pad2(counter.getMonth() + 1)}-${pad2(counter.getDate())}`;
-  })();
+  // Defaults in PFA TZ: today − 14 days through today + 14 days, so the
+  // window straddles "now" and shows both recent-past and upcoming
+  // sessions. Pure date math lives in defaultSessionsRange (tested).
+  // Each bound defaults independently: an explicitly supplied From/To is
+  // honored exactly; only an absent/blank bound falls back to the default.
+  const defaults = defaultSessionsRange(new Date());
 
-  const from = isDateInput(fromInput) ? fromInput : lookbackInput;
-  const to = isDateInput(toInput) ? toInput : todayInput;
+  const from = isDateInput(fromInput) ? fromInput : defaults.from;
+  const to = isDateInput(toInput) ? toInput : defaults.to;
 
   const coachIds = toArray(input.coachIds).filter(Boolean);
   const resourceIds = toArray(input.resourceIds).filter(Boolean);
@@ -247,8 +238,8 @@ function normalizeFilters(input: {
   const toInstantExclusive = pfaDayEnd(parsePfaInput(to, "00:00"));
 
   const isFiltered =
-    from !== lookbackInput ||
-    to !== todayInput ||
+    from !== defaults.from ||
+    to !== defaults.to ||
     coachIds.length > 0 ||
     resourceIds.length > 0 ||
     useTypes.length > 0 ||
@@ -281,8 +272,4 @@ function toArray(v: string | string[] | undefined): string[] {
 
 function isDateInput(v: string | undefined): v is string {
   return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
-}
-
-function pad2(n: number): string {
-  return n.toString().padStart(2, "0");
 }

@@ -27,8 +27,10 @@ const MIN = 60_000;
 const at = (iso: string) => new Date(iso);
 
 // A scheduled block: program p1, coach c1 ("Sam"), 14:00–15:00 UTC.
+// `coaches` defaults to the single primary so single-coach behavior is
+// byte-identical to pre-W3.2; multi-coach tests pass `coaches` explicitly.
 function block(over: Partial<ReconBlock> = {}): ReconBlock {
-  return {
+  const base = {
     id: "b1",
     programId: "p1",
     scheduledCoachId: "c1",
@@ -36,6 +38,12 @@ function block(over: Partial<ReconBlock> = {}): ReconBlock {
     startAt: at("2026-06-01T14:00:00Z"),
     endAt: at("2026-06-01T15:00:00Z"),
     ...over,
+  };
+  return {
+    ...base,
+    coaches: over.coaches ?? [
+      { coachId: base.scheduledCoachId, coachName: base.scheduledCoachName },
+    ],
   };
 }
 
@@ -204,6 +212,104 @@ describe("reconcileBlocks", () => {
     );
     expect(r.b1.status).toBe("no_show");
   });
+
+  it("single-coach result carries a coaches[] of length 1 mirroring the block", () => {
+    const r = reconcileBlocks(
+      { blocks: [block()], logs: [log()], now: NOW_DONE },
+      fmt,
+    );
+    expect(r.b1.coaches).toHaveLength(1);
+    expect(r.b1.coaches[0]).toMatchObject({
+      coachId: "c1",
+      coachName: "Sam",
+      status: "logged",
+    });
+    // Aggregate detail is byte-identical to the single coach's detail.
+    expect(r.b1.detail).toBe(r.b1.coaches[0].detail);
+  });
+
+  describe("multi-coach (QA10 W3.2)", () => {
+    // Two scheduled coaches: c1 "Ana" (primary) + c2 "Ben".
+    const twoCoaches = () =>
+      block({
+        scheduledCoachId: "c1",
+        scheduledCoachName: "Ana",
+        coaches: [
+          { coachId: "c1", coachName: "Ana" },
+          { coachId: "c2", coachName: "Ben" },
+        ],
+      });
+
+    it("one coach on-time, the other no-shows → per-coach split, aggregate red", () => {
+      const r = reconcileBlocks(
+        {
+          blocks: [twoCoaches()],
+          // Only Ana logs on schedule; Ben logs nothing.
+          logs: [log({ coachId: "c1", coachName: "Ana" })],
+          now: NOW_DONE,
+        },
+        fmt,
+      );
+      expect(r.b1.coaches.map((c) => c.status)).toEqual(["logged", "no_show"]);
+      // no_show outranks logged → aggregate red (no_show).
+      expect(r.b1.status).toBe("no_show");
+      // Pinned aggregate detail format: "<name>: <detail>" joined by "  ·  ".
+      expect(r.b1.detail).toBe(
+        "Ana: On schedule — Ana logged 14:00–15:00.  ·  Ben: Ben didn't log anything for this block.",
+      );
+    });
+
+    it("an UNSCHEDULED coach's log → wrong_coach for both scheduled coaches", () => {
+      const r = reconcileBlocks(
+        {
+          blocks: [twoCoaches()],
+          // c3 "Cy" is NOT in the block's coach set.
+          logs: [log({ coachId: "c3", coachName: "Cy" })],
+          now: NOW_DONE,
+        },
+        fmt,
+      );
+      expect(r.b1.coaches.map((c) => c.status)).toEqual([
+        "wrong_coach",
+        "wrong_coach",
+      ]);
+      expect(r.b1.coaches[0].detail).toBe(
+        "Cy logged 14:00–15:00 instead of Ana.",
+      );
+      expect(r.b1.status).toBe("wrong_coach");
+    });
+
+    it("a SCHEDULED coach's on-time log does NOT count as wrong_coach against the other coach", () => {
+      const r = reconcileBlocks(
+        {
+          blocks: [twoCoaches()],
+          // Ben (scheduled) logs on time; Ana logs nothing.
+          logs: [log({ coachId: "c2", coachName: "Ben" })],
+          now: NOW_DONE,
+        },
+        fmt,
+      );
+      // Ana sees no_show (Ben is in the set, so not "wrong_coach"); Ben logged.
+      expect(r.b1.coaches.map((c) => c.status)).toEqual(["no_show", "logged"]);
+      expect(r.b1.status).toBe("no_show");
+    });
+
+    it("both coaches log on time → aggregate green (all logged)", () => {
+      const r = reconcileBlocks(
+        {
+          blocks: [twoCoaches()],
+          logs: [
+            log({ coachId: "c1", coachName: "Ana" }),
+            log({ coachId: "c2", coachName: "Ben" }),
+          ],
+          now: NOW_DONE,
+        },
+        fmt,
+      );
+      expect(r.b1.coaches.map((c) => c.status)).toEqual(["logged", "logged"]);
+      expect(r.b1.status).toBe("logged");
+    });
+  });
 });
 
 describe("annotateLogs", () => {
@@ -267,5 +373,47 @@ describe("annotateLogs", () => {
       fmt,
     );
     expect(r.l1).toBeNull();
+  });
+
+  it("multi-coach: a log by a coach IN the 2-coach set, on-time → null", () => {
+    // Block scheduled for Ana + Ben; Ben (in the set) logs on time.
+    const r = annotateLogs(
+      {
+        logs: [{ ...log({ coachId: "c2", coachName: "Ben" }), id: "l1" }],
+        blocks: [
+          block({
+            scheduledCoachId: "c1",
+            scheduledCoachName: "Ana",
+            coaches: [
+              { coachId: "c1", coachName: "Ana" },
+              { coachId: "c2", coachName: "Ben" },
+            ],
+          }),
+        ],
+      },
+      fmt,
+    );
+    expect(r.l1).toBeNull();
+  });
+
+  it("multi-coach: a log by an OUTSIDER → 'A, B were scheduled.'", () => {
+    // Block scheduled for Ana + Ben; Cy (outsider) logs.
+    const r = annotateLogs(
+      {
+        logs: [{ ...log({ coachId: "c3", coachName: "Cy" }), id: "l1" }],
+        blocks: [
+          block({
+            scheduledCoachId: "c1",
+            scheduledCoachName: "Ana",
+            coaches: [
+              { coachId: "c1", coachName: "Ana" },
+              { coachId: "c2", coachName: "Ben" },
+            ],
+          }),
+        ],
+      },
+      fmt,
+    );
+    expect(r.l1).toBe("Ana, Ben were scheduled.");
   });
 });

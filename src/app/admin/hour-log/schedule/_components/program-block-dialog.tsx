@@ -14,7 +14,7 @@
 // submitted date + start/end times via parsePfaInput.
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, Pencil, Repeat, Trash2, X } from "lucide-react";
+import { ChevronLeft, Pencil, Plus, Repeat, Trash2, X } from "lucide-react";
 import {
   cancelSeriesOccurrenceAction,
   createProgramScheduleBlockFormAction,
@@ -93,6 +93,9 @@ export type ProgramBlockEditInitial = {
   id: string;
   programId: string;
   scheduledCoachId: string;
+  // QA10 W3.2: the FULL scheduled-coach set (first = primary). The form
+  // seeds its multi-coach control from this and submits scheduledCoachIds.
+  scheduledCoachIds: string[];
   startAt: Date;
   endAt: Date;
   note: string | null;
@@ -108,6 +111,8 @@ export type SeriesView = {
   id: string;
   programId: string;
   scheduledCoachId: string;
+  // QA10 W3.2: full scheduled-coach set for the series (first = primary).
+  scheduledCoachIds: string[];
   daysOfWeek: number[];
   startTime: string;
   endTime: string;
@@ -144,6 +149,49 @@ function reconBannerStyles(status: BlockReconciliation["status"]): string {
     default:
       return "border-line bg-surface-2 text-fg-muted";
   }
+}
+
+// QA10 W3.2: reconciliation banner. A single scheduled coach keeps today's
+// one-line banner (aggregate status + detail). With multiple coaches it
+// renders a per-coach breakdown — each coach's name + its own status label
+// and detail, reusing RECON_STATUS_LABELS / reconBannerStyles per coach.
+function ReconBanner({
+  reconciliation,
+}: {
+  reconciliation: BlockReconciliation;
+}) {
+  if (reconciliation.coaches.length > 1) {
+    return (
+      <div role="status" className="space-y-1.5">
+        {reconciliation.coaches.map((c) => (
+          <div
+            key={c.coachId}
+            className={`rounded-md border px-3 py-2 text-xs ${reconBannerStyles(
+              c.status,
+            )}`}
+          >
+            <span className="font-medium uppercase tracking-wider">
+              {c.coachName} · {RECON_STATUS_LABELS[c.status]}
+            </span>
+            <span className="block mt-0.5">{c.detail}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div
+      role="status"
+      className={`rounded-md border px-3 py-2 text-xs ${reconBannerStyles(
+        reconciliation.status,
+      )}`}
+    >
+      <span className="font-medium uppercase tracking-wider">
+        {RECON_STATUS_LABELS[reconciliation.status]}
+      </span>
+      <span className="block mt-0.5">{reconciliation.detail}</span>
+    </div>
+  );
 }
 
 export function ProgramBlockDialog({
@@ -255,6 +303,22 @@ export function ProgramBlockDialog({
       : 3,
   );
 
+  // QA10 W3.2: the multi-coach selection for the BLOCK form (create/edit)
+  // and the SERIES form. Each is a list of selected coach ids; every
+  // <select> submits name="scheduledCoachIds" so the action receives the
+  // full set via getAll. Seed from the initial values on (re)open; create
+  // starts with a single empty row. De-dupe is left to the action.
+  const [blockCoachIds, setBlockCoachIds] = useState<string[]>(() =>
+    isEdit && editInitial?.scheduledCoachIds?.length
+      ? editInitial.scheduledCoachIds
+      : [""],
+  );
+  const [seriesCoachIds, setSeriesCoachIds] = useState<string[]>(() =>
+    editSeriesInitial?.scheduledCoachIds?.length
+      ? editSeriesInitial.scheduledCoachIds
+      : [""],
+  );
+
   if (open !== prevOpen) {
     setPrevOpen(open);
     if (open) {
@@ -281,7 +345,36 @@ export function ProgramBlockDialog({
           ? editSeriesInitial.interval
           : 3,
       );
+      setBlockCoachIds(
+        isEdit && editInitial?.scheduledCoachIds?.length
+          ? editInitial.scheduledCoachIds
+          : [""],
+      );
+      setSeriesCoachIds(
+        editSeriesInitial?.scheduledCoachIds?.length
+          ? editSeriesInitial.scheduledCoachIds
+          : [""],
+      );
       setCancelError(null);
+    }
+  }
+
+  // QA10 W3.2: on an errored block submit, re-seed the coach rows from the
+  // submitted set so the admin's selection survives the round-trip. Tracked
+  // via adjust-during-render keyed on the state object (NOT setState-in-
+  // effect), mirroring the open-reset pattern above.
+  const [prevState, setPrevState] = useState(state);
+  if (state !== prevState) {
+    setPrevState(state);
+    if (!state.ok && state.values.scheduledCoachIds.length > 0) {
+      setBlockCoachIds(state.values.scheduledCoachIds);
+    }
+  }
+  const [prevSeriesState, setPrevSeriesState] = useState(seriesState);
+  if (seriesState !== prevSeriesState) {
+    setPrevSeriesState(seriesState);
+    if (!seriesState.ok && seriesState.values.scheduledCoachIds.length > 0) {
+      setSeriesCoachIds(seriesState.values.scheduledCoachIds);
     }
   }
 
@@ -303,6 +396,29 @@ export function ProgramBlockDialog({
       else next.add(value);
       return next;
     });
+  };
+
+  // QA10 W3.2: mutators for the multi-coach controls. Passing the relevant
+  // setter lets the same helpers serve both the block + series forms.
+  const setCoachAt = (
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+    index: number,
+    value: string,
+  ) => {
+    setter((prev) => prev.map((v, i) => (i === index ? value : v)));
+  };
+  const addCoachRow = (
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+  ) => {
+    setter((prev) => [...prev, ""]);
+  };
+  const removeCoachRow = (
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+    index: number,
+  ) => {
+    setter((prev) =>
+      prev.length > 1 ? prev.filter((_, i) => i !== index) : prev,
+    );
   };
 
   useEffect(() => {
@@ -351,7 +467,6 @@ export function ProgramBlockDialog({
     if (!state.ok && state.values) {
       return {
         programId: state.values.programId,
-        scheduledCoachId: state.values.scheduledCoachId,
         startTime: state.values.startTime,
         endTime: state.values.endTime,
         note: state.values.note,
@@ -360,7 +475,6 @@ export function ProgramBlockDialog({
     if (isEdit && editInitial) {
       return {
         programId: editInitial.programId,
-        scheduledCoachId: editInitial.scheduledCoachId,
         startTime: formatPfaTime(editInitial.startAt),
         endTime: formatPfaTime(editInitial.endAt),
         note: editInitial.note ?? "",
@@ -369,7 +483,6 @@ export function ProgramBlockDialog({
     if (!isEdit && createPrefill) {
       return {
         programId: createPrefill.programId,
-        scheduledCoachId: "",
         startTime: createPrefill.startTime,
         endTime: createPrefill.endTime,
         note: "",
@@ -377,7 +490,6 @@ export function ProgramBlockDialog({
     }
     return {
       programId: "",
-      scheduledCoachId: "",
       startTime: "09:00",
       endTime: "10:00",
       note: "",
@@ -392,10 +504,20 @@ export function ProgramBlockDialog({
     );
   }, [editInitial, programs]);
 
+  // QA10 W3.2: the summary "Coach" row lists every scheduled coach (primary
+  // first), resolved to display names via the coaches list.
   const coachName = useMemo(() => {
     if (!editInitial) return "";
-    const coach = coaches.find((c) => c.id === editInitial.scheduledCoachId);
-    return coach ? (coach.name ?? coach.email) : editInitial.scheduledCoachId;
+    const ids =
+      editInitial.scheduledCoachIds?.length > 0
+        ? editInitial.scheduledCoachIds
+        : [editInitial.scheduledCoachId];
+    return ids
+      .map((id) => {
+        const coach = coaches.find((c) => c.id === id);
+        return coach ? (coach.name ?? coach.email) : id;
+      })
+      .join(", ");
   }, [editInitial, coaches]);
 
   // RECUR-b2: prefill values for the edit-series form. On an errored submit
@@ -404,7 +526,6 @@ export function ProgramBlockDialog({
     if (!seriesState.ok && seriesState.values) {
       return {
         programId: seriesState.values.programId,
-        scheduledCoachId: seriesState.values.scheduledCoachId,
         startTime: seriesState.values.startTime,
         endTime: seriesState.values.endTime,
         note: seriesState.values.note,
@@ -413,7 +534,6 @@ export function ProgramBlockDialog({
     if (editSeriesInitial) {
       return {
         programId: editSeriesInitial.programId,
-        scheduledCoachId: editSeriesInitial.scheduledCoachId,
         startTime: editSeriesInitial.startTime,
         endTime: editSeriesInitial.endTime,
         note: editSeriesInitial.note ?? "",
@@ -421,7 +541,6 @@ export function ProgramBlockDialog({
     }
     return {
       programId: "",
-      scheduledCoachId: "",
       startTime: "09:00",
       endTime: "10:00",
       note: "",
@@ -568,17 +687,7 @@ export function ProgramBlockDialog({
           ) : null}
 
           {reconciliation ? (
-            <div
-              role="status"
-              className={`rounded-md border px-3 py-2 text-xs ${reconBannerStyles(
-                reconciliation.status,
-              )}`}
-            >
-              <span className="font-medium uppercase tracking-wider">
-                {RECON_STATUS_LABELS[reconciliation.status]}
-              </span>
-              <span className="block mt-0.5">{reconciliation.detail}</span>
-            </div>
+            <ReconBanner reconciliation={reconciliation} />
           ) : null}
 
           <dl className="space-y-3">
@@ -711,23 +820,16 @@ export function ProgramBlockDialog({
               </select>
             </Field>
 
-            <Field label="Scheduled coach">
-              <select
-                name="scheduledCoachId"
-                required
-                defaultValue={seriesDefaults.scheduledCoachId}
-                className={selectStyles}
-              >
-                <option value="" disabled>
-                  Choose a coach…
-                </option>
-                {coaches.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name ?? c.email}
-                  </option>
-                ))}
-              </select>
-            </Field>
+            <CoachMultiSelect
+              coachIds={seriesCoachIds}
+              coaches={coaches}
+              onChangeAt={(i, v) => {
+                setCoachAt(setSeriesCoachIds, i, v);
+                setSeriesError(null);
+              }}
+              onAdd={() => addCoachRow(setSeriesCoachIds)}
+              onRemoveAt={(i) => removeCoachRow(setSeriesCoachIds, i)}
+            />
 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Start">
@@ -1003,17 +1105,7 @@ export function ProgramBlockDialog({
         ) : null}
 
         {isEdit && reconciliation ? (
-          <div
-            role="status"
-            className={`rounded-md border px-3 py-2 text-xs ${reconBannerStyles(
-              reconciliation.status,
-            )}`}
-          >
-            <span className="font-medium uppercase tracking-wider">
-              {RECON_STATUS_LABELS[reconciliation.status]}
-            </span>
-            <span className="block mt-0.5">{reconciliation.detail}</span>
-          </div>
+          <ReconBanner reconciliation={reconciliation} />
         ) : null}
 
         <div className="space-y-3">
@@ -1035,23 +1127,13 @@ export function ProgramBlockDialog({
             </select>
           </Field>
 
-          <Field label="Scheduled coach">
-            <select
-              name="scheduledCoachId"
-              required
-              defaultValue={defaults.scheduledCoachId}
-              className={selectStyles}
-            >
-              <option value="" disabled>
-                Choose a coach…
-              </option>
-              {coaches.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name ?? c.email}
-                </option>
-              ))}
-            </select>
-          </Field>
+          <CoachMultiSelect
+            coachIds={blockCoachIds}
+            coaches={coaches}
+            onChangeAt={(i, v) => setCoachAt(setBlockCoachIds, i, v)}
+            onAdd={() => addCoachRow(setBlockCoachIds)}
+            onRemoveAt={(i) => removeCoachRow(setBlockCoachIds, i)}
+          />
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Start">
@@ -1320,6 +1402,71 @@ export function ProgramBlockDialog({
         isPending={cancelling}
       />
     </dialog>
+  );
+}
+
+// QA10 W3.2: a multi-coach picker — a primary <select> plus "+ Add another
+// coach" rows. Every <select> uses name="scheduledCoachIds" so the action
+// receives the full set via getAll. The first row is the primary; extra
+// rows can be removed. De-dupe is left to the action.
+function CoachMultiSelect({
+  coachIds,
+  coaches,
+  onChangeAt,
+  onAdd,
+  onRemoveAt,
+}: {
+  coachIds: string[];
+  coaches: CoachOption[];
+  onChangeAt: (index: number, value: string) => void;
+  onAdd: () => void;
+  onRemoveAt: (index: number) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
+        Scheduled coach{coachIds.length > 1 ? "es" : ""}
+      </span>
+      {coachIds.map((id, index) => (
+        <div key={index} className="flex items-center gap-2">
+          <select
+            name="scheduledCoachIds"
+            required
+            aria-label={index === 0 ? "Scheduled coach" : `Coach ${index + 1}`}
+            value={id}
+            onChange={(e) => onChangeAt(index, e.target.value)}
+            className={selectStyles}
+          >
+            <option value="" disabled>
+              Choose a coach…
+            </option>
+            {coaches.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name ?? c.email}
+              </option>
+            ))}
+          </select>
+          {index > 0 ? (
+            <button
+              type="button"
+              onClick={() => onRemoveAt(index)}
+              aria-label="Remove coach"
+              className="inline-flex items-center justify-center h-9 w-9 shrink-0 rounded-md border border-line text-fg-muted hover:text-danger hover:border-danger/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={onAdd}
+        className="inline-flex items-center gap-1.5 text-xs font-medium text-gold-strong hover:text-gold-hover focus-visible:outline-none focus-visible:underline transition-colors"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        Add another coach
+      </button>
+    </div>
   );
 }
 

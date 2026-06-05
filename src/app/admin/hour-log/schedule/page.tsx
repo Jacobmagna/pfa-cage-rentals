@@ -5,8 +5,10 @@ import { db } from "@/db";
 import {
   hourLogs,
   programs,
+  programScheduleBlockCoaches,
   programScheduleBlocks,
   programScheduleSeries,
+  programScheduleSeriesCoaches,
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
@@ -14,6 +16,7 @@ import { listActiveCoaches } from "@/lib/server/coaches";
 import {
   reconcileBlocks,
   type ReconBlock,
+  type ReconCoach,
   type ReconLog,
 } from "@/lib/server/reconciliation";
 import {
@@ -97,11 +100,49 @@ export default async function ProgramsSchedulePage({
       .where(and(lt(hourLogs.startAt, dayEnd), gt(hourLogs.endAt, dayStart))),
   ]);
 
+  // QA10 W3.2: the FULL scheduled-coach set for this day's blocks, grouped
+  // by block. Query once for all visible block ids, then group → coaches[]
+  // (name = users.name ?? users.email). Primary stays scheduledCoachId/Name.
+  const blockIds = blockRows.map((b) => b.id);
+  const blockCoachRows =
+    blockIds.length > 0
+      ? await db
+          .select({
+            blockId: programScheduleBlockCoaches.blockId,
+            coachId: programScheduleBlockCoaches.coachId,
+            coachName: users.name,
+            coachEmail: users.email,
+          })
+          .from(programScheduleBlockCoaches)
+          .innerJoin(users, eq(programScheduleBlockCoaches.coachId, users.id))
+          .where(inArray(programScheduleBlockCoaches.blockId, blockIds))
+      : [];
+  const coachesByBlock = new Map<string, ReconCoach[]>();
+  for (const r of blockCoachRows) {
+    const list = coachesByBlock.get(r.blockId) ?? [];
+    list.push({ coachId: r.coachId, coachName: r.coachName ?? r.coachEmail });
+    coachesByBlock.set(r.blockId, list);
+  }
+  // Put the primary first within each block's coach list.
+  const coachesFor = (b: (typeof blockRows)[number]): ReconCoach[] => {
+    const primary = {
+      coachId: b.scheduledCoachId,
+      coachName: b.coachName ?? b.coachEmail,
+    };
+    const list = coachesByBlock.get(b.id);
+    if (!list || list.length === 0) return [primary];
+    return [
+      primary,
+      ...list.filter((c) => c.coachId !== b.scheduledCoachId),
+    ];
+  };
+
   const blocks = blockRows.map((b) => ({
     id: b.id,
     programId: b.programId,
     scheduledCoachId: b.scheduledCoachId,
     coachName: b.coachName ?? b.coachEmail,
+    coaches: coachesFor(b).map((c) => ({ id: c.coachId, name: c.coachName })),
     startAt: b.startAt,
     endAt: b.endAt,
     note: b.note,
@@ -140,7 +181,36 @@ export default async function ProgramsSchedulePage({
           .from(programScheduleSeries)
           .where(inArray(programScheduleSeries.id, seriesIds))
       : [];
-  const seriesById = Object.fromEntries(seriesRows.map((s) => [s.id, s]));
+
+  // QA10 W3.2: the full scheduled-coach set per series, so the edit-series
+  // form prefills every coach (primary first). Group by seriesId.
+  const seriesCoachRows =
+    seriesIds.length > 0
+      ? await db
+          .select({
+            seriesId: programScheduleSeriesCoaches.seriesId,
+            coachId: programScheduleSeriesCoaches.coachId,
+          })
+          .from(programScheduleSeriesCoaches)
+          .where(inArray(programScheduleSeriesCoaches.seriesId, seriesIds))
+      : [];
+  const seriesCoachIdsBySeries = new Map<string, string[]>();
+  for (const r of seriesCoachRows) {
+    const list = seriesCoachIdsBySeries.get(r.seriesId) ?? [];
+    list.push(r.coachId);
+    seriesCoachIdsBySeries.set(r.seriesId, list);
+  }
+  const seriesById = Object.fromEntries(
+    seriesRows.map((s) => {
+      const extra = (seriesCoachIdsBySeries.get(s.id) ?? []).filter(
+        (id) => id !== s.scheduledCoachId,
+      );
+      return [
+        s.id,
+        { ...s, scheduledCoachIds: [s.scheduledCoachId, ...extra] },
+      ];
+    }),
+  );
 
   // Reconcile the day's scheduled blocks against the coach hour-logs
   // (FEAT-16). The engine is pure — we inject `now` + the PFA time
@@ -150,6 +220,7 @@ export default async function ProgramsSchedulePage({
     programId: b.programId,
     scheduledCoachId: b.scheduledCoachId,
     scheduledCoachName: b.coachName,
+    coaches: b.coaches.map((c) => ({ coachId: c.id, coachName: c.name })),
     startAt: b.startAt,
     endAt: b.endAt,
   }));

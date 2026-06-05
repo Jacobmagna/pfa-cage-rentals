@@ -23,7 +23,12 @@
 
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { programs, programScheduleBlocks, users } from "@/db/schema";
+import {
+  programs,
+  programScheduleBlockCoaches,
+  programScheduleBlocks,
+  users,
+} from "@/db/schema";
 import type { AuthedSession } from "@/lib/authz";
 import {
   CoachNotFoundError,
@@ -79,19 +84,29 @@ export async function createProgramScheduleBlockInternal(
   const parsed = createProgramScheduleBlockSchema.parse(input);
 
   await assertProgramActive(parsed.programId);
-  await assertScheduledCoach(parsed.scheduledCoachId);
+  // QA10 W3.2: full coach set; primary = [0]. Validate EACH coach, then
+  // dedupe (preserving order) for the join rows.
+  const primaryCoachId = parsed.scheduledCoachIds[0];
+  for (const coachId of parsed.scheduledCoachIds) {
+    await assertScheduledCoach(coachId);
+  }
+  const coachIds = [...new Set(parsed.scheduledCoachIds)];
 
   const [inserted] = await db
     .insert(programScheduleBlocks)
     .values({
       programId: parsed.programId,
-      scheduledCoachId: parsed.scheduledCoachId,
+      scheduledCoachId: primaryCoachId,
       startAt: parsed.startAt,
       endAt: parsed.endAt,
       note: parsed.note ?? null,
       createdBy: actor.id,
     })
     .returning();
+
+  await db
+    .insert(programScheduleBlockCoaches)
+    .values(coachIds.map((coachId) => ({ blockId: inserted.id, coachId })));
 
   await safeLogAudit(db, {
     actorUserId: actor.id,
@@ -123,24 +138,46 @@ export async function updateProgramScheduleBlockInternal(
   // cheap and keeps the row consistent if the program was retired
   // between create and edit).
   const finalProgramId = parsed.programId ?? existing.programId;
-  const finalCoachId = parsed.scheduledCoachId ?? existing.scheduledCoachId;
+  // QA10 W3.2: when scheduledCoachIds is provided, primary = [0] and the
+  // full join set is REPLACED; when omitted, coaches (and the primary
+  // scheduledCoachId) are left untouched.
+  const coachIdsProvided = parsed.scheduledCoachIds !== undefined;
+  const primaryCoachId = coachIdsProvided
+    ? parsed.scheduledCoachIds![0]
+    : existing.scheduledCoachId;
 
   await assertProgramActive(finalProgramId);
-  await assertScheduledCoach(finalCoachId);
+  if (coachIdsProvided) {
+    for (const coachId of parsed.scheduledCoachIds!) {
+      await assertScheduledCoach(coachId);
+    }
+  } else {
+    // Re-validate the unchanged primary, mirroring the program re-check.
+    await assertScheduledCoach(primaryCoachId);
+  }
 
   const [updated] = await db
     .update(programScheduleBlocks)
     .set({
       ...(parsed.programId !== undefined && { programId: parsed.programId }),
-      ...(parsed.scheduledCoachId !== undefined && {
-        scheduledCoachId: parsed.scheduledCoachId,
-      }),
+      ...(coachIdsProvided && { scheduledCoachId: primaryCoachId }),
       ...(parsed.startAt !== undefined && { startAt: parsed.startAt }),
       ...(parsed.endAt !== undefined && { endAt: parsed.endAt }),
       ...(parsed.note !== undefined && { note: parsed.note ?? null }),
     })
     .where(eq(programScheduleBlocks.id, id))
     .returning();
+
+  // Replace the join set only when a new coach list was provided.
+  if (coachIdsProvided) {
+    const coachIds = [...new Set(parsed.scheduledCoachIds!)];
+    await db
+      .delete(programScheduleBlockCoaches)
+      .where(eq(programScheduleBlockCoaches.blockId, id));
+    await db
+      .insert(programScheduleBlockCoaches)
+      .values(coachIds.map((coachId) => ({ blockId: id, coachId })));
+  }
 
   await safeLogAudit(db, {
     actorUserId: actor.id,

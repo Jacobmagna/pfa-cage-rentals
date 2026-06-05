@@ -25,11 +25,15 @@
 const TOLERANCE_MS = 15 * 60_000; // ±15 min — DEC-29 "within ~15 min"
 const NO_SHOW_BUFFER_MS = 60 * 60_000; // 1 hr buffer — SCR-1b
 
+// QA10 W3.2: a scheduled coach on a block. A block can have several.
+export type ReconCoach = { coachId: string; coachName: string };
+
 export type ReconBlock = {
   id: string;
   programId: string;
-  scheduledCoachId: string;
-  scheduledCoachName: string;
+  scheduledCoachId: string; // primary (first) — keep for back-compat
+  scheduledCoachName: string; // primary — keep
+  coaches: ReconCoach[]; // FULL set, includes the primary, length >= 1
   startAt: Date;
   endAt: Date;
 };
@@ -49,7 +53,30 @@ export type BlockStatus =
   | "no_show"
   | "pending";
 
-export type BlockReconciliation = { status: BlockStatus; detail: string };
+// QA10 W3.2: per-scheduled-coach reconciliation result.
+export type CoachReconciliation = {
+  coachId: string;
+  coachName: string;
+  status: BlockStatus;
+  detail: string;
+};
+
+export type BlockReconciliation = {
+  status: BlockStatus; // AGGREGATE — colors the grid bar
+  detail: string; // aggregate detail (see rule)
+  coaches: CoachReconciliation[]; // one per scheduled coach, block.coaches order
+};
+
+// QA10 W3.2: block-level aggregate precedence — the bar is red if ANY
+// coach has a problem, gold if any pending, green only when ALL logged.
+// (Distinct from the single-coach precedence inside the per-coach pass.)
+const AGGREGATE_ORDER: BlockStatus[] = [
+  "no_show",
+  "wrong_time",
+  "wrong_coach",
+  "pending",
+  "logged",
+];
 
 /**
  * Two half-open intervals overlap when each starts before the other ends.
@@ -102,62 +129,104 @@ export function reconcileBlocks(
   const result: Record<string, BlockReconciliation> = {};
 
   for (const b of blocks) {
-    const s = b.scheduledCoachName;
+    // The full set of scheduled coaches on this block. `otherLogs`
+    // (drives wrong_coach) is "logged by someone NOT scheduled here", so
+    // a different scheduled coach's log never counts as a wrong_coach for
+    // anyone. Build the membership set once per block.
+    const coachIdSet = new Set(b.coaches.map((c) => c.coachId));
 
     const overlapping = logs.filter(
       (log) =>
         log.programId === b.programId &&
         overlaps(log.startAt, log.endAt, b.startAt, b.endAt),
     );
-    const sLogs = overlapping
-      .filter((log) => log.coachId === b.scheduledCoachId)
-      .sort(byStartThenCoach);
-    const otherLogs = overlapping
-      .filter((log) => log.coachId !== b.scheduledCoachId)
-      .sort(byStartThenCoach);
 
-    // 1. logged — scheduled coach logged a window within tolerance.
-    const m = sLogs.find((log) => withinTol(log, b));
-    if (m) {
-      result[b.id] = {
-        status: "logged",
-        detail: `On schedule — ${s} logged ${formatTime(m.startAt)}–${formatTime(m.endAt)}.`,
-      };
-      continue;
-    }
+    // Per-coach pass — reuse the existing single-coach precedence
+    // (logged > wrong_time > wrong_coach > no_show/pending) with this
+    // coach as `s` and the two membership-aware predicate changes.
+    const coachResults: CoachReconciliation[] = b.coaches.map((c) => {
+      const s = c.coachName;
+      const sLogs = overlapping
+        .filter((log) => log.coachId === c.coachId)
+        .sort(byStartThenCoach);
+      const otherLogs = overlapping
+        .filter((log) => !coachIdSet.has(log.coachId))
+        .sort(byStartThenCoach);
 
-    // 2. wrong_time — scheduled coach overlapped but none in tolerance.
-    if (sLogs.length > 0) {
-      const x = sLogs[0];
-      result[b.id] = {
-        status: "wrong_time",
-        detail: `${s} logged ${formatTime(x.startAt)}–${formatTime(x.endAt)} instead of the scheduled ${formatTime(b.startAt)}–${formatTime(b.endAt)}.`,
-      };
-      continue;
-    }
+      // 1. logged — this coach logged a window within tolerance.
+      const m = sLogs.find((log) => withinTol(log, b));
+      if (m) {
+        return {
+          coachId: c.coachId,
+          coachName: c.coachName,
+          status: "logged",
+          detail: `On schedule — ${s} logged ${formatTime(m.startAt)}–${formatTime(m.endAt)}.`,
+        };
+      }
 
-    // 3. wrong_coach — only another coach overlapped.
-    if (otherLogs.length > 0) {
-      const o = otherLogs[0];
-      result[b.id] = {
-        status: "wrong_coach",
-        detail: `${o.coachName} logged ${formatTime(o.startAt)}–${formatTime(o.endAt)} instead of ${s}.`,
-      };
-      continue;
-    }
+      // 2. wrong_time — this coach overlapped but none in tolerance.
+      if (sLogs.length > 0) {
+        const x = sLogs[0];
+        return {
+          coachId: c.coachId,
+          coachName: c.coachName,
+          status: "wrong_time",
+          detail: `${s} logged ${formatTime(x.startAt)}–${formatTime(x.endAt)} instead of the scheduled ${formatTime(b.startAt)}–${formatTime(b.endAt)}.`,
+        };
+      }
 
-    // 4. no overlapping log at all → no_show (past end + buffer) or pending.
-    if (now.getTime() >= b.endAt.getTime() + NO_SHOW_BUFFER_MS) {
-      result[b.id] = {
-        status: "no_show",
-        detail: `${s} didn't log anything for this block.`,
-      };
-    } else {
-      result[b.id] = {
+      // 3. wrong_coach — only an UNSCHEDULED coach overlapped.
+      if (otherLogs.length > 0) {
+        const o = otherLogs[0];
+        return {
+          coachId: c.coachId,
+          coachName: c.coachName,
+          status: "wrong_coach",
+          detail: `${o.coachName} logged ${formatTime(o.startAt)}–${formatTime(o.endAt)} instead of ${s}.`,
+        };
+      }
+
+      // 4. no overlapping log → no_show (past end + buffer) or pending.
+      if (now.getTime() >= b.endAt.getTime() + NO_SHOW_BUFFER_MS) {
+        return {
+          coachId: c.coachId,
+          coachName: c.coachName,
+          status: "no_show",
+          detail: `${s} didn't log anything for this block.`,
+        };
+      }
+      return {
+        coachId: c.coachId,
+        coachName: c.coachName,
         status: "pending",
         detail: "Scheduled window hasn't closed yet.",
       };
-    }
+    });
+
+    // Block-level aggregate. status = highest-precedence present across
+    // the per-coach statuses (no_show > wrong_time > wrong_coach >
+    // pending > logged), so the bar is red if ANY coach has a problem,
+    // gold if any pending, green only when ALL logged. With exactly one
+    // coach this equals that coach's status (back-compat).
+    const aggStatus =
+      AGGREGATE_ORDER.find((status) =>
+        coachResults.some((c) => c.status === status),
+      ) ?? "logged";
+
+    // detail: single coach → byte-identical to today's wording. Multiple
+    // coaches → "<name>: <detail>" joined by "  ·  ".
+    const aggDetail =
+      coachResults.length === 1
+        ? coachResults[0].detail
+        : coachResults
+            .map((c) => `${c.coachName}: ${c.detail}`)
+            .join("  ·  ");
+
+    result[b.id] = {
+      status: aggStatus,
+      detail: aggDetail,
+      coaches: coachResults,
+    };
   }
 
   return result;
@@ -198,20 +267,27 @@ export function annotateLogs(
       (a, b) =>
         a.startAt.getTime() - b.startAt.getTime() || a.id.localeCompare(b.id),
     );
+    // QA10 W3.2: same-coach now means "this coach is in the block's
+    // scheduled-coach SET" (not just the primary).
+    const inSet = (block: ReconBlock) =>
+      block.coaches.some((bc) => bc.coachId === c);
     const chosen =
-      sorted.find(
-        (block) => block.scheduledCoachId === c && withinTol(l, block),
-      ) ??
-      sorted.find((block) => block.scheduledCoachId === c) ??
+      sorted.find((block) => inSet(block) && withinTol(l, block)) ??
+      sorted.find((block) => inSet(block)) ??
       sorted[0];
 
-    if (chosen.scheduledCoachId === c && withinTol(l, chosen)) {
+    if (inSet(chosen) && withinTol(l, chosen)) {
       // On schedule — no note.
       result[l.id] = null;
-    } else if (chosen.scheduledCoachId !== c) {
-      result[l.id] = `${chosen.scheduledCoachName} was scheduled.`;
+    } else if (!inSet(chosen)) {
+      // The coach who logged isn't scheduled on the chosen block — name
+      // the scheduled coach(es).
+      result[l.id] =
+        chosen.coaches.length === 1
+          ? `${chosen.scheduledCoachName} was scheduled.`
+          : `${chosen.coaches.map((bc) => bc.coachName).join(", ")} were scheduled.`;
     } else {
-      // Same coach, off-time.
+      // In set, off-time.
       result[l.id] = `Scheduled ${formatTime(chosen.startAt)}–${formatTime(chosen.endAt)}.`;
     }
   }

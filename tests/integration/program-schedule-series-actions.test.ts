@@ -23,8 +23,10 @@ import {
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  programScheduleBlockCoaches,
   programScheduleBlocks,
   programScheduleSeries,
+  programScheduleSeriesCoaches,
   programs,
   users,
 } from "@/db/schema";
@@ -108,6 +110,22 @@ async function blocksForSeries(seriesId: string) {
     .where(eq(programScheduleBlocks.seriesId, seriesId));
 }
 
+// QA10 W3.2: the coach ids in a series' / block's join set.
+async function seriesCoachIds(seriesId: string): Promise<string[]> {
+  const rows = await db
+    .select({ coachId: programScheduleSeriesCoaches.coachId })
+    .from(programScheduleSeriesCoaches)
+    .where(eq(programScheduleSeriesCoaches.seriesId, seriesId));
+  return rows.map((r) => r.coachId);
+}
+async function blockCoachIds(blockId: string): Promise<string[]> {
+  const rows = await db
+    .select({ coachId: programScheduleBlockCoaches.coachId })
+    .from(programScheduleBlockCoaches)
+    .where(eq(programScheduleBlockCoaches.blockId, blockId));
+  return rows.map((r) => r.coachId);
+}
+
 // A far-FUTURE Monday so every generated occurrence is "future" relative
 // to the action's `today`, keeping edit/cancel deterministic. 2099-01-05
 // is a Monday.
@@ -121,7 +139,7 @@ describe("createProgramScheduleSeriesInternal", () => {
 
     const { series, count } = await trackedCreate(fixtures.admin, {
       programId: program.id,
-      scheduledCoachId: coach.id,
+      scheduledCoachIds: [coach.id],
       daysOfWeek: [1],
       startTime: "09:00",
       endTime: "10:00",
@@ -158,7 +176,7 @@ describe("createProgramScheduleSeriesInternal", () => {
     await expect(
       createProgramScheduleSeriesInternal(fixtures.admin, {
         programId: program.id,
-        scheduledCoachId: coach.id,
+        scheduledCoachIds: [coach.id],
         daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
         startTime: "09:00",
         endTime: "10:00",
@@ -173,6 +191,38 @@ describe("createProgramScheduleSeriesInternal", () => {
       .where(eq(programScheduleSeries.programId, program.id));
     expect(series).toHaveLength(0);
   });
+
+  // QA10 W3.2: creating with 2 coaches writes 2 series-coach rows + 2 coach
+  // rows per materialized occurrence block; primary = [0].
+  it("writes the full coach set on the series + every occurrence block", async () => {
+    const program = await createProgram(true);
+    const coach1 = await createCoach();
+    const coach2 = await createCoach();
+
+    const { series } = await trackedCreate(fixtures.admin, {
+      programId: program.id,
+      scheduledCoachIds: [coach1.id, coach2.id],
+      daysOfWeek: [1],
+      startTime: "09:00",
+      endTime: "10:00",
+      startsOn: FUTURE_START,
+      endsOn: FUTURE_END,
+    });
+
+    expect(series.scheduledCoachId).toBe(coach1.id); // primary = [0]
+    expect((await seriesCoachIds(series.id)).sort()).toEqual(
+      [coach1.id, coach2.id].sort(),
+    );
+
+    const blocks = await blocksForSeries(series.id);
+    expect(blocks.length).toBe(4);
+    for (const b of blocks) {
+      expect(b.scheduledCoachId).toBe(coach1.id);
+      expect((await blockCoachIds(b.id)).sort()).toEqual(
+        [coach1.id, coach2.id].sort(),
+      );
+    }
+  });
 });
 
 describe("cancelSeriesOccurrenceInternal", () => {
@@ -181,7 +231,7 @@ describe("cancelSeriesOccurrenceInternal", () => {
     const coach = await createCoach();
     const { series } = await trackedCreate(fixtures.admin, {
       programId: program.id,
-      scheduledCoachId: coach.id,
+      scheduledCoachIds: [coach.id],
       daysOfWeek: [1],
       startTime: "09:00",
       endTime: "10:00",
@@ -261,7 +311,7 @@ describe("editProgramScheduleSeriesInternal", () => {
 
     const { series } = await trackedCreate(fixtures.admin, {
       programId: program.id,
-      scheduledCoachId: coach1.id,
+      scheduledCoachIds: [coach1.id],
       // All weekdays so there is definitely a past + future occurrence.
       daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
       startTime: "09:00",
@@ -291,7 +341,7 @@ describe("editProgramScheduleSeriesInternal", () => {
       series.id,
       {
         programId: program.id,
-        scheduledCoachId: coach2.id,
+        scheduledCoachIds: [coach2.id],
         daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
         startTime: "15:00",
         endTime: "16:00",
@@ -344,7 +394,7 @@ describe("editProgramScheduleSeriesInternal", () => {
         "00000000-0000-0000-0000-000000000000",
         {
           programId: program.id,
-          scheduledCoachId: coach.id,
+          scheduledCoachIds: [coach.id],
           daysOfWeek: [1],
           startTime: "09:00",
           endTime: "10:00",
@@ -353,5 +403,72 @@ describe("editProgramScheduleSeriesInternal", () => {
         },
       ),
     ).rejects.toBeInstanceOf(ProgramScheduleSeriesNotFoundError);
+  });
+
+  // QA10 W3.2: editing to a different coach SET replaces the series-coach
+  // rows and re-applies the new set to FUTURE blocks only; past blocks keep
+  // their original coach rows.
+  it("replaces the coach set on the series + future blocks; past blocks keep theirs", async () => {
+    const program = await createProgram(true);
+    const coach1 = await createCoach();
+    const coach2 = await createCoach();
+    const coach3 = await createCoach();
+
+    const today = formatPfaDate(new Date());
+    const [ty, tm, td] = today.split("-").map(Number);
+    const past = new Date(Date.UTC(ty, tm - 1, td - 28));
+    const future = new Date(Date.UTC(ty, tm - 1, td + 28));
+    const iso = (d: Date) =>
+      `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+
+    const { series } = await trackedCreate(fixtures.admin, {
+      programId: program.id,
+      scheduledCoachIds: [coach1.id, coach2.id],
+      daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+      startTime: "09:00",
+      endTime: "10:00",
+      startsOn: iso(past),
+      endsOn: iso(future),
+    });
+
+    const before = await blocksForSeries(series.id);
+    const pastBlock = before.find((b) => formatPfaDate(b.startAt) < today)!;
+    expect(pastBlock).toBeDefined();
+    const pastCoachesBefore = (await blockCoachIds(pastBlock.id)).sort();
+
+    // Edit to a DIFFERENT coach set.
+    await editProgramScheduleSeriesInternal(fixtures.admin, series.id, {
+      programId: program.id,
+      scheduledCoachIds: [coach3.id, coach1.id],
+      daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+      startTime: "09:00",
+      endTime: "10:00",
+      startsOn: iso(past),
+      endsOn: iso(future),
+    });
+
+    // Series-coach rows replaced.
+    expect((await seriesCoachIds(series.id)).sort()).toEqual(
+      [coach1.id, coach3.id].sort(),
+    );
+
+    const after = await blocksForSeries(series.id);
+    // Past block untouched: same coach rows as before the edit.
+    const afterPast = after.find((b) => b.id === pastBlock.id)!;
+    expect((await blockCoachIds(afterPast.id)).sort()).toEqual(
+      pastCoachesBefore,
+    );
+
+    // Future blocks carry the NEW set.
+    const futureBlocks = after.filter(
+      (b) => formatPfaDate(b.startAt) >= today,
+    );
+    expect(futureBlocks.length).toBeGreaterThan(0);
+    for (const b of futureBlocks) {
+      expect(b.scheduledCoachId).toBe(coach3.id); // new primary
+      expect((await blockCoachIds(b.id)).sort()).toEqual(
+        [coach1.id, coach3.id].sort(),
+      );
+    }
   });
 });

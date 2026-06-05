@@ -2,7 +2,11 @@ import Link from "next/link";
 import { and, asc, eq, gte, lt } from "drizzle-orm";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { db } from "@/db";
-import { programs, programScheduleBlocks } from "@/db/schema";
+import {
+  programs,
+  programScheduleBlockCoaches,
+  programScheduleBlocks,
+} from "@/db/schema";
 import { requireSession } from "@/lib/authz";
 import {
   formatPfaDate,
@@ -62,9 +66,17 @@ export default async function CoachSchedulePage({
     })
     .from(programScheduleBlocks)
     .innerJoin(programs, eq(programScheduleBlocks.programId, programs.id))
+    // QA10 W3.2: a coach sees a block if they're in its scheduled-coach SET
+    // (not only when they're the primary). JOIN the coach set and filter on
+    // membership. One row per block (the join is keyed (block, coach), and
+    // we filter to this coach, so it can't fan out).
+    .innerJoin(
+      programScheduleBlockCoaches,
+      eq(programScheduleBlockCoaches.blockId, programScheduleBlocks.id),
+    )
     .where(
       and(
-        eq(programScheduleBlocks.scheduledCoachId, coachId),
+        eq(programScheduleBlockCoaches.coachId, coachId),
         gte(programScheduleBlocks.startAt, monday),
         lt(programScheduleBlocks.startAt, nextMonday),
       ),

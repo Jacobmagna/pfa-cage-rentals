@@ -11,7 +11,11 @@ import { z } from "zod";
 
 const programScheduleBlockShape = {
   programId: z.string().min(1, "programId is required"),
-  scheduledCoachId: z.string().min(1, "scheduledCoachId is required"),
+  // QA10 W3.2: the FULL set of scheduled coaches (primary = [0]). At least
+  // one is required; the action dedupes + validates each id.
+  scheduledCoachIds: z
+    .array(z.string().min(1))
+    .min(1, "Pick at least one coach"),
   startAt: z.coerce.date(),
   endAt: z.coerce.date(),
   note: z.string().max(200, "Note is at most 200 characters").nullish(),
@@ -69,7 +73,10 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const programScheduleSeriesShape = {
   programId: z.string().min(1, "programId is required"),
-  scheduledCoachId: z.string().min(1, "scheduledCoachId is required"),
+  // QA10 W3.2: full scheduled-coach set (primary = [0]); required on save.
+  scheduledCoachIds: z
+    .array(z.string().min(1))
+    .min(1, "Pick at least one coach"),
   daysOfWeek: z
     .array(z.number().int().min(0).max(6))
     .min(1, "Pick at least one weekday"),

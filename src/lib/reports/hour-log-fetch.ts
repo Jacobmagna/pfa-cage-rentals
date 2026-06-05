@@ -9,12 +9,19 @@
 // toDateExclusive)) plus the optional single coach / program. Ordered
 // by coach name then start so the table reads grouped-by-coach.
 
-import { and, asc, eq, gt, gte, lt } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, lt } from "drizzle-orm";
 import { db } from "@/db";
-import { hourLogs, programScheduleBlocks, programs, users } from "@/db/schema";
+import {
+  hourLogs,
+  programScheduleBlockCoaches,
+  programScheduleBlocks,
+  programs,
+  users,
+} from "@/db/schema";
 import {
   annotateLogs,
   type ReconBlock,
+  type ReconCoach,
   type ReconLog,
 } from "@/lib/server/reconciliation";
 import { formatPfaTime12h } from "@/lib/timezone";
@@ -89,14 +96,50 @@ export async function fetchHourLogRowsWithScheduleNotes(
       ),
     );
 
-  const blocks: ReconBlock[] = blockRows.map((b) => ({
-    id: b.id,
-    programId: b.programId,
-    scheduledCoachId: b.scheduledCoachId,
-    scheduledCoachName: b.coachName ?? b.coachEmail,
-    startAt: b.startAt,
-    endAt: b.endAt,
-  }));
+  // QA10 W3.2: the full scheduled-coach set per block, grouped by block
+  // (primary first), so annotateLogs treats every scheduled coach as
+  // "in set" rather than only the primary.
+  const blockIds = blockRows.map((b) => b.id);
+  const blockCoachRows =
+    blockIds.length > 0
+      ? await db
+          .select({
+            blockId: programScheduleBlockCoaches.blockId,
+            coachId: programScheduleBlockCoaches.coachId,
+            coachName: users.name,
+            coachEmail: users.email,
+          })
+          .from(programScheduleBlockCoaches)
+          .innerJoin(users, eq(programScheduleBlockCoaches.coachId, users.id))
+          .where(inArray(programScheduleBlockCoaches.blockId, blockIds))
+      : [];
+  const coachesByBlock = new Map<string, ReconCoach[]>();
+  for (const r of blockCoachRows) {
+    const list = coachesByBlock.get(r.blockId) ?? [];
+    list.push({ coachId: r.coachId, coachName: r.coachName ?? r.coachEmail });
+    coachesByBlock.set(r.blockId, list);
+  }
+
+  const blocks: ReconBlock[] = blockRows.map((b) => {
+    const primary = {
+      coachId: b.scheduledCoachId,
+      coachName: b.coachName ?? b.coachEmail,
+    };
+    const list = coachesByBlock.get(b.id);
+    const coaches =
+      !list || list.length === 0
+        ? [primary]
+        : [primary, ...list.filter((c) => c.coachId !== b.scheduledCoachId)];
+    return {
+      id: b.id,
+      programId: b.programId,
+      scheduledCoachId: b.scheduledCoachId,
+      scheduledCoachName: b.coachName ?? b.coachEmail,
+      coaches,
+      startAt: b.startAt,
+      endAt: b.endAt,
+    };
+  });
 
   const logs: (ReconLog & { id: string })[] = rows.map((r) => ({
     id: r.id,

@@ -774,6 +774,42 @@ export const programScheduleBlocks = pgTable(
   ],
 );
 
+// QA10 W3.2: the FULL set of scheduled coaches for a program block (the
+// primary scheduledCoachId is also a member). Reconciliation is per-coach.
+export const programScheduleBlockCoaches = pgTable(
+  "program_schedule_block_coaches",
+  {
+    blockId: text("block_id")
+      .notNull()
+      .references(() => programScheduleBlocks.id, { onDelete: "cascade" }),
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id),
+  },
+  (table) => [
+    primaryKey({ columns: [table.blockId, table.coachId] }),
+    index("program_schedule_block_coaches_coach_idx").on(table.coachId),
+  ],
+);
+
+// QA10 W3.2: the full coach set for a recurring series. Materialized
+// occurrences copy this set into program_schedule_block_coaches.
+export const programScheduleSeriesCoaches = pgTable(
+  "program_schedule_series_coaches",
+  {
+    seriesId: text("series_id")
+      .notNull()
+      .references(() => programScheduleSeries.id, { onDelete: "cascade" }),
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id),
+  },
+  (table) => [
+    primaryKey({ columns: [table.seriesId, table.coachId] }),
+    index("program_schedule_series_coaches_coach_idx").on(table.coachId),
+  ],
+);
+
 // Per-athlete present/absent mark within an attendance session. Composite
 // PK enforces one record per (session, athlete). Both FKs cascade: a
 // record has no meaning without its session or athlete.
@@ -848,3 +884,11 @@ export type NewAttendanceRecord = typeof attendanceRecords.$inferInsert;
 export type ProgramScheduleBlock = typeof programScheduleBlocks.$inferSelect;
 export type NewProgramScheduleBlock =
   typeof programScheduleBlocks.$inferInsert;
+export type ProgramScheduleBlockCoach =
+  typeof programScheduleBlockCoaches.$inferSelect;
+export type NewProgramScheduleBlockCoach =
+  typeof programScheduleBlockCoaches.$inferInsert;
+export type ProgramScheduleSeriesCoach =
+  typeof programScheduleSeriesCoaches.$inferSelect;
+export type NewProgramScheduleSeriesCoach =
+  typeof programScheduleSeriesCoaches.$inferInsert;

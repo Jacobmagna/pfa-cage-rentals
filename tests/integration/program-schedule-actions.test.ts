@@ -18,6 +18,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
   auditLog,
+  programScheduleBlockCoaches,
   programScheduleBlocks,
   programs,
   users,
@@ -118,6 +119,15 @@ async function trackedCreate(
   return inserted;
 }
 
+// QA10 W3.2: the coach ids in a block's join set.
+async function blockCoachIds(blockId: string): Promise<string[]> {
+  const rows = await db
+    .select({ coachId: programScheduleBlockCoaches.coachId })
+    .from(programScheduleBlockCoaches)
+    .where(eq(programScheduleBlockCoaches.blockId, blockId));
+  return rows.map((r) => r.coachId);
+}
+
 describe("createProgramScheduleBlockInternal", () => {
   it("inserts a block, returns it, and writes a matching audit row", async () => {
     const program = await createProgram(true);
@@ -125,7 +135,7 @@ describe("createProgramScheduleBlockInternal", () => {
 
     const inserted = await trackedCreate(fixtures.admin, {
       programId: program.id,
-      scheduledCoachId: coach.id,
+      scheduledCoachIds: [coach.id],
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
       note: "bring radar gun",
@@ -167,7 +177,7 @@ describe("createProgramScheduleBlockInternal", () => {
     await expect(
       createProgramScheduleBlockInternal(fixtures.admin, {
         programId: program.id,
-        scheduledCoachId: coach.id,
+        scheduledCoachIds: [coach.id],
         startAt: tomorrowAt(10),
         endAt: tomorrowAt(11),
       }),
@@ -179,7 +189,7 @@ describe("createProgramScheduleBlockInternal", () => {
     await expect(
       createProgramScheduleBlockInternal(fixtures.admin, {
         programId: "00000000-0000-0000-0000-000000000000",
-        scheduledCoachId: coach.id,
+        scheduledCoachIds: [coach.id],
         startAt: tomorrowAt(10),
         endAt: tomorrowAt(11),
       }),
@@ -192,7 +202,7 @@ describe("createProgramScheduleBlockInternal", () => {
     await expect(
       createProgramScheduleBlockInternal(fixtures.admin, {
         programId: program.id,
-        scheduledCoachId: admin.id,
+        scheduledCoachIds: [admin.id],
         startAt: tomorrowAt(10),
         endAt: tomorrowAt(11),
       }),
@@ -205,7 +215,7 @@ describe("createProgramScheduleBlockInternal", () => {
     await expect(
       createProgramScheduleBlockInternal(fixtures.admin, {
         programId: program.id,
-        scheduledCoachId: deleted.id,
+        scheduledCoachIds: [deleted.id],
         startAt: tomorrowAt(10),
         endAt: tomorrowAt(11),
       }),
@@ -217,7 +227,7 @@ describe("createProgramScheduleBlockInternal", () => {
     await expect(
       createProgramScheduleBlockInternal(fixtures.admin, {
         programId: program.id,
-        scheduledCoachId: "00000000-0000-0000-0000-000000000000",
+        scheduledCoachIds: ["00000000-0000-0000-0000-000000000000"],
         startAt: tomorrowAt(10),
         endAt: tomorrowAt(11),
       }),
@@ -231,7 +241,7 @@ describe("createProgramScheduleBlockInternal", () => {
     await expect(
       createProgramScheduleBlockInternal(fixtures.admin, {
         programId: program.id,
-        scheduledCoachId: coach.id,
+        scheduledCoachIds: [coach.id],
         startAt: t,
         endAt: t,
       }),
@@ -243,6 +253,27 @@ describe("createProgramScheduleBlockInternal", () => {
       .where(eq(programScheduleBlocks.programId, program.id));
     expect(rows).toHaveLength(0);
   });
+
+  // QA10 W3.2: multi-coach.
+  it("writes a join row per coach; primary = [0]; dedupes", async () => {
+    const program = await createProgram(true);
+    const coach1 = await createCoach();
+    const coach2 = await createCoach();
+
+    const inserted = await trackedCreate(fixtures.admin, {
+      programId: program.id,
+      // duplicate coach1 to prove the action dedupes the join set.
+      scheduledCoachIds: [coach1.id, coach2.id, coach1.id],
+      startAt: tomorrowAt(10),
+      endAt: tomorrowAt(11),
+    });
+
+    // Primary is the first selected.
+    expect(inserted.scheduledCoachId).toBe(coach1.id);
+
+    const joinRows = await blockCoachIds(inserted.id);
+    expect(joinRows.sort()).toEqual([coach1.id, coach2.id].sort());
+  });
 });
 
 describe("updateProgramScheduleBlockInternal", () => {
@@ -253,7 +284,7 @@ describe("updateProgramScheduleBlockInternal", () => {
 
     const created = await trackedCreate(fixtures.admin, {
       programId: program.id,
-      scheduledCoachId: coach1.id,
+      scheduledCoachIds: [coach1.id],
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
     });
@@ -262,7 +293,7 @@ describe("updateProgramScheduleBlockInternal", () => {
       fixtures.admin,
       created.id,
       {
-        scheduledCoachId: coach2.id,
+        scheduledCoachIds: [coach2.id],
         startAt: tomorrowAt(13),
         endAt: tomorrowAt(14),
       },
@@ -291,6 +322,49 @@ describe("updateProgramScheduleBlockInternal", () => {
     expect("programId" in diff.before).toBe(false);
   });
 
+  // QA10 W3.2: providing scheduledCoachIds replaces the whole join set;
+  // omitting it leaves the coaches (and primary) untouched.
+  it("replaces the coach join set when scheduledCoachIds is provided", async () => {
+    const program = await createProgram(true);
+    const coach1 = await createCoach();
+    const coach2 = await createCoach();
+    const coach3 = await createCoach();
+
+    const created = await trackedCreate(fixtures.admin, {
+      programId: program.id,
+      scheduledCoachIds: [coach1.id, coach2.id],
+      startAt: tomorrowAt(10),
+      endAt: tomorrowAt(11),
+    });
+    expect((await blockCoachIds(created.id)).sort()).toEqual(
+      [coach1.id, coach2.id].sort(),
+    );
+
+    // Replace with a new set; primary becomes the new [0].
+    const updated = await updateProgramScheduleBlockInternal(
+      fixtures.admin,
+      created.id,
+      { scheduledCoachIds: [coach3.id, coach1.id] },
+    );
+    expect(updated.scheduledCoachId).toBe(coach3.id);
+    expect((await blockCoachIds(created.id)).sort()).toEqual(
+      [coach1.id, coach3.id].sort(),
+    );
+
+    // Omitting scheduledCoachIds leaves the set + primary untouched.
+    await updateProgramScheduleBlockInternal(fixtures.admin, created.id, {
+      note: "only the note changed",
+    });
+    const after = await db
+      .select()
+      .from(programScheduleBlocks)
+      .where(eq(programScheduleBlocks.id, created.id));
+    expect(after[0].scheduledCoachId).toBe(coach3.id);
+    expect((await blockCoachIds(created.id)).sort()).toEqual(
+      [coach1.id, coach3.id].sort(),
+    );
+  });
+
   it("rejects updating a non-existent block id (ProgramScheduleBlockNotFoundError)", async () => {
     await expect(
       updateProgramScheduleBlockInternal(
@@ -307,7 +381,7 @@ describe("updateProgramScheduleBlockInternal", () => {
     const coach = await createCoach();
     const created = await trackedCreate(fixtures.admin, {
       programId: program.id,
-      scheduledCoachId: coach.id,
+      scheduledCoachIds: [coach.id],
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
     });
@@ -325,7 +399,7 @@ describe("deleteProgramScheduleBlockInternal", () => {
     const coach = await createCoach();
     const created = await trackedCreate(fixtures.admin, {
       programId: program.id,
-      scheduledCoachId: coach.id,
+      scheduledCoachIds: [coach.id],
       startAt: tomorrowAt(9),
       endAt: tomorrowAt(10),
       note: "to be deleted",

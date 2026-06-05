@@ -38,6 +38,9 @@ export type ProgramScheduleBlockView = {
   programId: string;
   scheduledCoachId: string;
   coachName: string;
+  // QA10 W3.2: the FULL scheduled-coach set (first = primary). The bar
+  // shows the primary name + "+N" when length > 1.
+  coaches: { id: string; name: string }[];
   startAt: Date;
   endAt: Date;
   note: string | null;
@@ -277,7 +280,16 @@ export function ProgramScheduleGrid({
               const timeLabel = `${formatPfaTime(b.startAt)}–${formatPfaTime(
                 b.endAt,
               )}`;
-              const tooltip = [b.coachName, timeLabel, b.note, recon?.detail]
+              // QA10 W3.2: bar shows the primary name + "+N" for extra
+              // scheduled coaches; the tooltip lists all of them.
+              const extraCoaches = Math.max(b.coaches.length - 1, 0);
+              const coachLabel =
+                extraCoaches > 0 ? `${b.coachName} +${extraCoaches}` : b.coachName;
+              const allCoachNames =
+                b.coaches.length > 1
+                  ? b.coaches.map((c) => c.name).join(", ")
+                  : b.coachName;
+              const tooltip = [allCoachNames, timeLabel, b.note, recon?.detail]
                 .filter(Boolean)
                 .join(" · ");
               return (
@@ -298,7 +310,7 @@ export function ProgramScheduleGrid({
                   }}
                   title={`${tooltip} (click to edit)`}
                 >
-                  <span className="truncate font-medium">{b.coachName}</span>
+                  <span className="truncate font-medium">{coachLabel}</span>
                   <span className="truncate text-[9px] uppercase tracking-wider text-fg-subtle">
                     {timeLabel}
                   </span>
@@ -350,6 +362,7 @@ export function ProgramScheduleGrid({
                 id: dialog.block.id,
                 programId: dialog.block.programId,
                 scheduledCoachId: dialog.block.scheduledCoachId,
+                scheduledCoachIds: dialog.block.coaches.map((c) => c.id),
                 startAt: dialog.block.startAt,
                 endAt: dialog.block.endAt,
                 note: dialog.block.note,

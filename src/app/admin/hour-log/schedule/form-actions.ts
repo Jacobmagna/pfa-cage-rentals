@@ -30,7 +30,8 @@ import { parsePfaInput } from "@/lib/timezone";
 
 export type ProgramScheduleFormValues = {
   programId: string;
-  scheduledCoachId: string;
+  // QA10 W3.2: the full submitted scheduled-coach set (primary = [0]).
+  scheduledCoachIds: string[];
   date: string;
   startTime: string;
   endTime: string;
@@ -48,7 +49,10 @@ export type ProgramScheduleActionResult =
 function snapshot(formData: FormData): ProgramScheduleFormValues {
   return {
     programId: formData.get("programId")?.toString() ?? "",
-    scheduledCoachId: formData.get("scheduledCoachId")?.toString() ?? "",
+    scheduledCoachIds: formData
+      .getAll("scheduledCoachIds")
+      .map((v) => v.toString())
+      .filter(Boolean),
     date: formData.get("date")?.toString() ?? "",
     startTime: formData.get("startTime")?.toString() ?? "",
     endTime: formData.get("endTime")?.toString() ?? "",
@@ -66,7 +70,10 @@ function buildInput(formData: FormData) {
   const note = formData.get("note")?.toString().trim() ?? "";
   return {
     programId: formData.get("programId")?.toString() ?? "",
-    scheduledCoachId: formData.get("scheduledCoachId")?.toString() ?? "",
+    scheduledCoachIds: formData
+      .getAll("scheduledCoachIds")
+      .map((v) => v.toString())
+      .filter(Boolean),
     startAt: parsePfaInput(dateStr, startStr),
     endAt: parsePfaInput(dateStr, endStr),
     note: note.length > 0 ? note : null,
@@ -132,7 +139,10 @@ function buildSeriesInput(formData: FormData) {
   const intervalRaw = formData.get("interval")?.toString().trim();
   return {
     programId: formData.get("programId")?.toString() ?? "",
-    scheduledCoachId: formData.get("scheduledCoachId")?.toString() ?? "",
+    scheduledCoachIds: formData
+      .getAll("scheduledCoachIds")
+      .map((v) => v.toString())
+      .filter(Boolean),
     daysOfWeek: formData
       .getAll("daysOfWeek")
       .map((v) => Number(v.toString())),

@@ -29,8 +29,10 @@ import { and, eq, gte, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   programs,
+  programScheduleBlockCoaches,
   programScheduleBlocks,
   programScheduleSeries,
+  programScheduleSeriesCoaches,
   users,
 } from "@/db/schema";
 import type { AuthedSession } from "@/lib/authz";
@@ -97,7 +99,12 @@ export async function createProgramScheduleSeriesInternal(
   const parsed = createProgramScheduleSeriesSchema.parse(input);
 
   await assertProgramActive(parsed.programId);
-  await assertScheduledCoach(parsed.scheduledCoachId);
+  // QA10 W3.2: full coach set; primary = [0]. Validate each, dedupe.
+  const primaryCoachId = parsed.scheduledCoachIds[0];
+  for (const coachId of parsed.scheduledCoachIds) {
+    await assertScheduledCoach(coachId);
+  }
+  const coachIds = [...new Set(parsed.scheduledCoachIds)];
 
   // Generate FIRST so an invalid recurrence (over-cap, etc.) throws
   // before we write the series row — no orphan series on a bad range.
@@ -115,7 +122,7 @@ export async function createProgramScheduleSeriesInternal(
     .insert(programScheduleSeries)
     .values({
       programId: parsed.programId,
-      scheduledCoachId: parsed.scheduledCoachId,
+      scheduledCoachId: primaryCoachId,
       daysOfWeek: parsed.daysOfWeek,
       frequency: parsed.frequency,
       interval: parsed.interval,
@@ -128,6 +135,10 @@ export async function createProgramScheduleSeriesInternal(
     })
     .returning();
 
+  await db
+    .insert(programScheduleSeriesCoaches)
+    .values(coachIds.map((coachId) => ({ seriesId: series.id, coachId })));
+
   let count = 0;
   if (occurrences.length > 0) {
     const inserted = await db
@@ -135,7 +146,7 @@ export async function createProgramScheduleSeriesInternal(
       .values(
         occurrences.map((o) => ({
           programId: parsed.programId,
-          scheduledCoachId: parsed.scheduledCoachId,
+          scheduledCoachId: primaryCoachId,
           startAt: o.startAt,
           endAt: o.endAt,
           note: parsed.note ?? null,
@@ -145,6 +156,13 @@ export async function createProgramScheduleSeriesInternal(
       )
       .returning({ id: programScheduleBlocks.id });
     count = inserted.length;
+
+    // QA10 W3.2: copy the full coach set onto every materialized block.
+    await db.insert(programScheduleBlockCoaches).values(
+      inserted.flatMap((b) =>
+        coachIds.map((coachId) => ({ blockId: b.id, coachId })),
+      ),
+    );
   }
 
   await safeLogAudit(db, {
@@ -176,7 +194,12 @@ export async function editProgramScheduleSeriesInternal(
   const parsed = editProgramScheduleSeriesSchema.parse(input);
 
   await assertProgramActive(parsed.programId);
-  await assertScheduledCoach(parsed.scheduledCoachId);
+  // QA10 W3.2: full coach set; primary = [0]. Validate each, dedupe.
+  const primaryCoachId = parsed.scheduledCoachIds[0];
+  for (const coachId of parsed.scheduledCoachIds) {
+    await assertScheduledCoach(coachId);
+  }
+  const coachIds = [...new Set(parsed.scheduledCoachIds)];
 
   // Edit-WHOLE-series: update the definition, then regenerate FUTURE
   // occurrences only. Past blocks (startAt before today's PFA midnight)
@@ -208,7 +231,7 @@ export async function editProgramScheduleSeriesInternal(
   const [updated] = await db
     .update(programScheduleSeries)
     .set({
-      scheduledCoachId: parsed.scheduledCoachId,
+      scheduledCoachId: primaryCoachId,
       programId: parsed.programId,
       daysOfWeek: parsed.daysOfWeek,
       frequency: parsed.frequency,
@@ -222,8 +245,17 @@ export async function editProgramScheduleSeriesInternal(
     .where(eq(programScheduleSeries.id, seriesId))
     .returning();
 
+  // QA10 W3.2: replace the series' full coach set.
+  await db
+    .delete(programScheduleSeriesCoaches)
+    .where(eq(programScheduleSeriesCoaches.seriesId, seriesId));
+  await db
+    .insert(programScheduleSeriesCoaches)
+    .values(coachIds.map((coachId) => ({ seriesId, coachId })));
+
   // Delete this series' FUTURE blocks (startAt >= start of PFA today),
-  // then re-insert from the new definition. Past blocks untouched.
+  // then re-insert from the new definition. Past blocks untouched. The
+  // deleted blocks' program_schedule_block_coaches rows cascade away.
   await db
     .delete(programScheduleBlocks)
     .where(
@@ -240,7 +272,7 @@ export async function editProgramScheduleSeriesInternal(
       .values(
         futureOccurrences.map((o) => ({
           programId: parsed.programId,
-          scheduledCoachId: parsed.scheduledCoachId,
+          scheduledCoachId: primaryCoachId,
           startAt: o.startAt,
           endAt: o.endAt,
           note: parsed.note ?? null,
@@ -250,6 +282,13 @@ export async function editProgramScheduleSeriesInternal(
       )
       .returning({ id: programScheduleBlocks.id });
     count = inserted.length;
+
+    // QA10 W3.2: re-insert the full coach set for each new future block.
+    await db.insert(programScheduleBlockCoaches).values(
+      inserted.flatMap((b) =>
+        coachIds.map((coachId) => ({ blockId: b.id, coachId })),
+      ),
+    );
   }
 
   await safeLogAudit(db, {

@@ -317,7 +317,8 @@ describe("submitAttendanceSchema", () => {
 describe("createProgramScheduleBlockSchema", () => {
   const base = {
     programId: "prog-1",
-    scheduledCoachId: "coach-1",
+    // QA10 W3.2: the block schema now takes a non-empty coach SET.
+    scheduledCoachIds: ["coach-1"],
     startAt: "2026-06-01T14:00:00.000Z",
     endAt: "2026-06-01T15:00:00.000Z",
   };
@@ -373,6 +374,23 @@ describe("createProgramScheduleBlockSchema", () => {
       programId: "",
     });
     expect(r.success).toBe(false);
+  });
+
+  // QA10 W3.2: at least one scheduled coach is required.
+  it("rejects an empty scheduledCoachIds set", () => {
+    const r = createProgramScheduleBlockSchema.safeParse({
+      ...base,
+      scheduledCoachIds: [],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("accepts multiple scheduled coaches", () => {
+    const r = createProgramScheduleBlockSchema.safeParse({
+      ...base,
+      scheduledCoachIds: ["coach-1", "coach-2"],
+    });
+    expect(r.success).toBe(true);
   });
 });
 

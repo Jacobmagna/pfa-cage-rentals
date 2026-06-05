@@ -5,6 +5,7 @@ import {
   eq,
   gt,
   gte,
+  inArray,
   isNull,
   lt,
   sql as drizzleSql,
@@ -24,6 +25,7 @@ import {
   blockedTimes,
   hourLogs,
   programs,
+  programScheduleBlockCoaches,
   programScheduleBlocks,
   resources,
   sessionsBilling,
@@ -36,6 +38,7 @@ import { formatRelative } from "@/lib/format-relative";
 import {
   reconcileBlocks,
   type ReconBlock,
+  type ReconCoach,
   type ReconLog,
 } from "@/lib/server/reconciliation";
 import {
@@ -343,6 +346,40 @@ export default async function AdminHome({
     name: p.name,
   }));
 
+  // QA10 W3.2: the full scheduled-coach set for the day's program blocks,
+  // grouped by block (name = users.name ?? users.email, primary first).
+  const programBlockIds = programBlockRows.map((b) => b.id);
+  const programBlockCoachRows =
+    programBlockIds.length > 0
+      ? await db
+          .select({
+            blockId: programScheduleBlockCoaches.blockId,
+            coachId: programScheduleBlockCoaches.coachId,
+            coachName: users.name,
+            coachEmail: users.email,
+          })
+          .from(programScheduleBlockCoaches)
+          .innerJoin(users, eq(programScheduleBlockCoaches.coachId, users.id))
+          .where(inArray(programScheduleBlockCoaches.blockId, programBlockIds))
+      : [];
+  const programCoachesByBlock = new Map<string, ReconCoach[]>();
+  for (const r of programBlockCoachRows) {
+    const list = programCoachesByBlock.get(r.blockId) ?? [];
+    list.push({ coachId: r.coachId, coachName: r.coachName ?? r.coachEmail });
+    programCoachesByBlock.set(r.blockId, list);
+  }
+  const coachesForBlock = (
+    b: (typeof programBlockRows)[number],
+  ): ReconCoach[] => {
+    const primary = {
+      coachId: b.scheduledCoachId,
+      coachName: b.coachName ?? b.coachEmail,
+    };
+    const list = programCoachesByBlock.get(b.id);
+    if (!list || list.length === 0) return [primary];
+    return [primary, ...list.filter((c) => c.coachId !== b.scheduledCoachId)];
+  };
+
   // Reconcile the day's scheduled program blocks against coach hour-logs
   // (FEAT-16). The engine is pure — inject `now` + the PFA time formatter.
   const reconBlocks: ReconBlock[] = programBlockRows.map((b) => ({
@@ -350,6 +387,7 @@ export default async function AdminHome({
     programId: b.programId,
     scheduledCoachId: b.scheduledCoachId,
     scheduledCoachName: b.coachName ?? b.coachEmail,
+    coaches: coachesForBlock(b),
     startAt: b.startAt,
     endAt: b.endAt,
   }));

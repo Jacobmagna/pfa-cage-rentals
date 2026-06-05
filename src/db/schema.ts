@@ -376,6 +376,13 @@ export const blockedTimes = pgTable(
     startAt: timestamp("start_at", { mode: "date" }).notNull(),
     endAt: timestamp("end_at", { mode: "date" }).notNull(),
     reason: text("reason").notNull(),
+    // QA10 W3.3: when a scheduled program OCCUPIES this resource, the
+    // blocked_time is linked to the owning program block. ON DELETE CASCADE
+    // so cancelling/regenerating the program block clears its occupancy.
+    programScheduleBlockId: text("program_schedule_block_id").references(
+      () => programScheduleBlocks.id,
+      { onDelete: "cascade" },
+    ),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),
@@ -383,6 +390,7 @@ export const blockedTimes = pgTable(
   },
   (table) => [
     index("blocked_times_resource_start_idx").on(table.resourceId, table.startAt),
+    index("blocked_times_program_block_idx").on(table.programScheduleBlockId),
   ],
 );
 

@@ -88,6 +88,12 @@ export type CoachOption = {
   name: string | null;
   email: string;
 };
+// QA10 W3.3: a cage resource the admin can mark a program block as occupying.
+export type ResourceOption = {
+  id: string;
+  name: string;
+  type: "cage" | "bullpen" | "weight_room";
+};
 
 export type ProgramBlockEditInitial = {
   id: string;
@@ -102,6 +108,8 @@ export type ProgramBlockEditInitial = {
   // RECUR-b2: NULL for one-off blocks; the parent series id for a series
   // occurrence (branches the summary into series-aware actions).
   seriesId: string | null;
+  // QA10 W3.3: the cage resources this block occupies (for edit prefill).
+  resourceIds: string[];
 };
 
 // RECUR-b2: the editable definition of a recurring series, prefilling the
@@ -123,6 +131,8 @@ export type SeriesView = {
   // The edit-series form prefills its frequency control from these.
   frequency: "weekly" | "monthly";
   interval: number;
+  // QA10 W3.3: the cage resources every occurrence occupies (edit prefill).
+  resourceIds: string[];
   note: string | null;
 };
 
@@ -201,6 +211,7 @@ export function ProgramBlockDialog({
   date,
   programs,
   coaches,
+  resources,
   createPrefill,
   editInitial,
   editSeriesInitial,
@@ -212,6 +223,8 @@ export function ProgramBlockDialog({
   date: Date;
   programs: ProgramOption[];
   coaches: CoachOption[];
+  // QA10 W3.3: active cage resources for the occupancy checkbox group.
+  resources: ResourceOption[];
   createPrefill: { programId: string; startTime: string; endTime: string } | null;
   editInitial: ProgramBlockEditInitial | null;
   editSeriesInitial?: SeriesView | null;
@@ -319,6 +332,18 @@ export function ProgramBlockDialog({
       : [""],
   );
 
+  // QA10 W3.3: occupied-resource selection for the BLOCK form (create/edit)
+  // and the SERIES form. Controlled checkbox groups; each checkbox submits
+  // name="resourceIds". Seed from the initial values on (re)open; create
+  // starts empty (no occupancy = today's behavior). Re-seed on errored
+  // submit so the admin's selection survives the round-trip.
+  const [blockResourceIds, setBlockResourceIds] = useState<string[]>(() =>
+    isEdit ? (editInitial?.resourceIds ?? []) : [],
+  );
+  const [seriesResourceIds, setSeriesResourceIds] = useState<string[]>(
+    () => editSeriesInitial?.resourceIds ?? [],
+  );
+
   if (open !== prevOpen) {
     setPrevOpen(open);
     if (open) {
@@ -355,6 +380,8 @@ export function ProgramBlockDialog({
           ? editSeriesInitial.scheduledCoachIds
           : [""],
       );
+      setBlockResourceIds(isEdit ? (editInitial?.resourceIds ?? []) : []);
+      setSeriesResourceIds(editSeriesInitial?.resourceIds ?? []);
       setCancelError(null);
     }
   }
@@ -369,12 +396,19 @@ export function ProgramBlockDialog({
     if (!state.ok && state.values.scheduledCoachIds.length > 0) {
       setBlockCoachIds(state.values.scheduledCoachIds);
     }
+    // QA10 W3.3: re-seed the occupancy selection from the submitted set.
+    if (!state.ok) {
+      setBlockResourceIds(state.values.resourceIds);
+    }
   }
   const [prevSeriesState, setPrevSeriesState] = useState(seriesState);
   if (seriesState !== prevSeriesState) {
     setPrevSeriesState(seriesState);
     if (!seriesState.ok && seriesState.values.scheduledCoachIds.length > 0) {
       setSeriesCoachIds(seriesState.values.scheduledCoachIds);
+    }
+    if (!seriesState.ok) {
+      setSeriesResourceIds(seriesState.values.resourceIds);
     }
   }
 
@@ -418,6 +452,19 @@ export function ProgramBlockDialog({
   ) => {
     setter((prev) =>
       prev.length > 1 ? prev.filter((_, i) => i !== index) : prev,
+    );
+  };
+
+  // QA10 W3.3: toggle a resource in/out of an occupancy selection. The
+  // setter targets either the block or the series resource state.
+  const toggleResource = (
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+    resourceId: string,
+  ) => {
+    setter((prev) =>
+      prev.includes(resourceId)
+        ? prev.filter((id) => id !== resourceId)
+        : [...prev, resourceId],
     );
   };
 
@@ -519,6 +566,17 @@ export function ProgramBlockDialog({
       })
       .join(", ");
   }, [editInitial, coaches]);
+
+  // QA10 W3.3: the summary "Occupies" row — the names of the cage resources
+  // this block occupies (its linked blocked_times), or "—" when none.
+  const occupiesLabel = useMemo(() => {
+    const ids = editInitial?.resourceIds ?? [];
+    if (ids.length === 0) return "—";
+    const names = ids
+      .map((id) => resources.find((r) => r.id === id)?.name ?? id)
+      .sort();
+    return names.join(", ");
+  }, [editInitial, resources]);
 
   // RECUR-b2: prefill values for the edit-series form. On an errored submit
   // echo what was submitted; otherwise seed from the parent series.
@@ -704,6 +762,7 @@ export function ProgramBlockDialog({
               tnum
             />
             <DetailRow label="Note" value={editInitial.note ?? "—"} />
+            <DetailRow label="Occupies" value={occupiesLabel} />
           </dl>
 
           <div className="flex items-center justify-between gap-2 pt-2">
@@ -829,6 +888,15 @@ export function ProgramBlockDialog({
               }}
               onAdd={() => addCoachRow(setSeriesCoachIds)}
               onRemoveAt={(i) => removeCoachRow(setSeriesCoachIds, i)}
+            />
+
+            <OccupiesResources
+              resources={resources}
+              selected={seriesResourceIds}
+              onToggle={(id) => {
+                toggleResource(setSeriesResourceIds, id);
+                setSeriesError(null);
+              }}
             />
 
             <div className="grid grid-cols-2 gap-3">
@@ -1133,6 +1201,12 @@ export function ProgramBlockDialog({
             onChangeAt={(i, v) => setCoachAt(setBlockCoachIds, i, v)}
             onAdd={() => addCoachRow(setBlockCoachIds)}
             onRemoveAt={(i) => removeCoachRow(setBlockCoachIds, i)}
+          />
+
+          <OccupiesResources
+            resources={resources}
+            selected={blockResourceIds}
+            onToggle={(id) => toggleResource(setBlockResourceIds, id)}
           />
 
           <div className="grid grid-cols-2 gap-3">
@@ -1466,6 +1540,85 @@ function CoachMultiSelect({
         <Plus className="h-3.5 w-3.5" />
         Add another coach
       </button>
+    </div>
+  );
+}
+
+// QA10 W3.3: a checkbox group of cage resources a program block occupies.
+// Each checkbox submits name="resourceIds" value=resource.id so the action
+// receives the full set via getAll. Controlled by the parent's selection
+// state. Leaving all unchecked = no occupancy (today's behavior). Resources
+// are grouped by type for readability.
+const RESOURCE_TYPE_LABELS: Record<ResourceOption["type"], string> = {
+  cage: "Cages",
+  bullpen: "Bullpens",
+  weight_room: "Weight room",
+};
+const RESOURCE_TYPE_ORDER: ResourceOption["type"][] = [
+  "cage",
+  "bullpen",
+  "weight_room",
+];
+
+function OccupiesResources({
+  resources,
+  selected,
+  onToggle,
+}: {
+  resources: ResourceOption[];
+  selected: string[];
+  onToggle: (resourceId: string) => void;
+}) {
+  if (resources.length === 0) return null;
+  const selectedSet = new Set(selected);
+  const groups = RESOURCE_TYPE_ORDER.map((type) => ({
+    type,
+    items: resources.filter((r) => r.type === type),
+  })).filter((g) => g.items.length > 0);
+
+  return (
+    <div>
+      <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
+        Occupies cage resources
+      </span>
+      <div className="space-y-2.5 rounded-md border border-line bg-surface-2/40 p-3">
+        {groups.map((g) => (
+          <div key={g.type}>
+            <span className="text-[10px] uppercase tracking-wider text-fg-subtle block mb-1">
+              {RESOURCE_TYPE_LABELS[g.type]}
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {g.items.map((r) => {
+                const active = selectedSet.has(r.id);
+                return (
+                  <label
+                    key={r.id}
+                    className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-xs font-medium cursor-pointer select-none transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-gold/40 ${
+                      active
+                        ? "bg-gold/10 border-gold/40 text-gold-strong"
+                        : "border-line text-fg-muted hover:text-fg hover:border-line-strong"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      name="resourceIds"
+                      value={r.id}
+                      checked={active}
+                      onChange={() => onToggle(r.id)}
+                      className="sr-only"
+                    />
+                    {r.name}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <span className="block text-[11px] text-fg-subtle mt-1 leading-snug">
+        Optional — ticked resources are blocked for coach booking during this
+        block&apos;s time.
+      </span>
     </div>
   );
 }

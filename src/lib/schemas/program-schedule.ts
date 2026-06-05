@@ -18,6 +18,10 @@ const programScheduleBlockShape = {
     .min(1, "Pick at least one coach"),
   startAt: z.coerce.date(),
   endAt: z.coerce.date(),
+  // QA10 W3.3: the cage resources this program block OCCUPIES. CREATE
+  // treats `resourceIds ?? []`; UPDATE treats `undefined` = "leave
+  // occupancy untouched" and a present array (incl. []) = "replace the set".
+  resourceIds: z.array(z.string().min(1)).optional(),
   note: z.string().max(200, "Note is at most 200 characters").nullish(),
 };
 
@@ -94,6 +98,9 @@ const programScheduleSeriesShape = {
     .int("interval must be a whole number")
     .min(1, "interval must be at least 1")
     .default(1),
+  // QA10 W3.3: the cage resources every occurrence of this series OCCUPIES.
+  // The series form sends the full set on each save; [] = no occupancy.
+  resourceIds: z.array(z.string().min(1)).default([]),
   note: z.string().max(200, "Note is at most 200 characters").nullish(),
 };
 

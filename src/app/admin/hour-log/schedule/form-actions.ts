@@ -19,6 +19,8 @@ import {
   updateProgramScheduleBlock,
 } from "./actions";
 import {
+  BlockConflictsWithSessionError,
+  BlockOverlapError,
   CoachNotFoundError,
   NotASeriesOccurrenceError,
   ProgramInactiveError,
@@ -32,6 +34,8 @@ export type ProgramScheduleFormValues = {
   programId: string;
   // QA10 W3.2: the full submitted scheduled-coach set (primary = [0]).
   scheduledCoachIds: string[];
+  // QA10 W3.3: the cage resources the block/series occupies.
+  resourceIds: string[];
   date: string;
   startTime: string;
   endTime: string;
@@ -53,6 +57,7 @@ function snapshot(formData: FormData): ProgramScheduleFormValues {
       .getAll("scheduledCoachIds")
       .map((v) => v.toString())
       .filter(Boolean),
+    resourceIds: formData.getAll("resourceIds").map(String).filter(Boolean),
     date: formData.get("date")?.toString() ?? "",
     startTime: formData.get("startTime")?.toString() ?? "",
     endTime: formData.get("endTime")?.toString() ?? "",
@@ -74,6 +79,7 @@ function buildInput(formData: FormData) {
       .getAll("scheduledCoachIds")
       .map((v) => v.toString())
       .filter(Boolean),
+    resourceIds: formData.getAll("resourceIds").map(String).filter(Boolean),
     startAt: parsePfaInput(dateStr, startStr),
     endAt: parsePfaInput(dateStr, endStr),
     note: note.length > 0 ? note : null,
@@ -90,7 +96,10 @@ function translate(
     err instanceof CoachNotFoundError ||
     err instanceof ProgramScheduleBlockNotFoundError ||
     err instanceof ProgramScheduleSeriesNotFoundError ||
-    err instanceof NotASeriesOccurrenceError
+    err instanceof NotASeriesOccurrenceError ||
+    // QA10 W3.3: occupying a busy cage resource → inline red banner.
+    err instanceof BlockConflictsWithSessionError ||
+    err instanceof BlockOverlapError
   ) {
     return {
       ok: false,
@@ -143,6 +152,7 @@ function buildSeriesInput(formData: FormData) {
       .getAll("scheduledCoachIds")
       .map((v) => v.toString())
       .filter(Boolean),
+    resourceIds: formData.getAll("resourceIds").map(String).filter(Boolean),
     daysOfWeek: formData
       .getAll("daysOfWeek")
       .map((v) => Number(v.toString())),

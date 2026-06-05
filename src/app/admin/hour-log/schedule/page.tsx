@@ -3,12 +3,14 @@ import { and, asc, eq, gt, gte, inArray, lt } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import {
+  blockedTimes,
   hourLogs,
   programs,
   programScheduleBlockCoaches,
   programScheduleBlocks,
   programScheduleSeries,
   programScheduleSeriesCoaches,
+  resources,
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
@@ -55,7 +57,8 @@ export default async function ProgramsSchedulePage({
   const dayStart = pfaDayStart(selectedDate);
   const dayEnd = pfaDayEnd(selectedDate);
 
-  const [activePrograms, blockRows, coachRows, logRows] = await Promise.all([
+  const [activePrograms, blockRows, coachRows, logRows, resourceRows] =
+    await Promise.all([
     db
       .select({ id: programs.id, name: programs.name })
       .from(programs)
@@ -98,6 +101,16 @@ export default async function ProgramsSchedulePage({
       .from(hourLogs)
       .innerJoin(users, eq(hourLogs.coachId, users.id))
       .where(and(lt(hourLogs.startAt, dayEnd), gt(hourLogs.endAt, dayStart))),
+    // QA10 W3.3: active cage resources, ordered, for the occupancy picker.
+    db
+      .select({
+        id: resources.id,
+        name: resources.name,
+        type: resources.type,
+      })
+      .from(resources)
+      .where(eq(resources.active, true))
+      .orderBy(asc(resources.sortOrder)),
   ]);
 
   // QA10 W3.2: the FULL scheduled-coach set for this day's blocks, grouped
@@ -123,6 +136,27 @@ export default async function ProgramsSchedulePage({
     list.push({ coachId: r.coachId, coachName: r.coachName ?? r.coachEmail });
     coachesByBlock.set(r.blockId, list);
   }
+
+  // QA10 W3.3: the occupied-resource ids for each visible block, derived from
+  // its LINKED blocked_times (program_schedule_block_id). Group by block id so
+  // the edit dialog can prefill the occupancy checkboxes.
+  const blockOccupancyRows =
+    blockIds.length > 0
+      ? await db
+          .select({
+            programScheduleBlockId: blockedTimes.programScheduleBlockId,
+            resourceId: blockedTimes.resourceId,
+          })
+          .from(blockedTimes)
+          .where(inArray(blockedTimes.programScheduleBlockId, blockIds))
+      : [];
+  const resourceIdsByBlock = new Map<string, string[]>();
+  for (const r of blockOccupancyRows) {
+    if (!r.programScheduleBlockId) continue;
+    const list = resourceIdsByBlock.get(r.programScheduleBlockId) ?? [];
+    if (!list.includes(r.resourceId)) list.push(r.resourceId);
+    resourceIdsByBlock.set(r.programScheduleBlockId, list);
+  }
   // Put the primary first within each block's coach list.
   const coachesFor = (b: (typeof blockRows)[number]): ReconCoach[] => {
     const primary = {
@@ -147,6 +181,8 @@ export default async function ProgramsSchedulePage({
     endAt: b.endAt,
     note: b.note,
     seriesId: b.seriesId,
+    // QA10 W3.3: occupied-resource ids for edit prefill.
+    resourceIds: resourceIdsByBlock.get(b.id) ?? [],
   }));
 
   // RECUR-b2: for any block that is a series occurrence, fetch its parent
@@ -200,6 +236,34 @@ export default async function ProgramsSchedulePage({
     list.push(r.coachId);
     seriesCoachIdsBySeries.set(r.seriesId, list);
   }
+
+  // QA10 W3.3: derive each series' occupied-resource set from ITS OCCURRENCE
+  // BLOCKS' linked blocked_times (no separate series-resources table). Pull
+  // every block id belonging to these series (including blocks not visible
+  // today), then the distinct resource ids among their linked blocked_times,
+  // joined through blocked_times.program_schedule_block_id → blocks.seriesId.
+  const seriesResourceRows =
+    seriesIds.length > 0
+      ? await db
+          .selectDistinct({
+            seriesId: programScheduleBlocks.seriesId,
+            resourceId: blockedTimes.resourceId,
+          })
+          .from(blockedTimes)
+          .innerJoin(
+            programScheduleBlocks,
+            eq(blockedTimes.programScheduleBlockId, programScheduleBlocks.id),
+          )
+          .where(inArray(programScheduleBlocks.seriesId, seriesIds))
+      : [];
+  const resourceIdsBySeries = new Map<string, string[]>();
+  for (const r of seriesResourceRows) {
+    if (!r.seriesId) continue;
+    const list = resourceIdsBySeries.get(r.seriesId) ?? [];
+    if (!list.includes(r.resourceId)) list.push(r.resourceId);
+    resourceIdsBySeries.set(r.seriesId, list);
+  }
+
   const seriesById = Object.fromEntries(
     seriesRows.map((s) => {
       const extra = (seriesCoachIdsBySeries.get(s.id) ?? []).filter(
@@ -207,7 +271,11 @@ export default async function ProgramsSchedulePage({
       );
       return [
         s.id,
-        { ...s, scheduledCoachIds: [s.scheduledCoachId, ...extra] },
+        {
+          ...s,
+          scheduledCoachIds: [s.scheduledCoachId, ...extra],
+          resourceIds: resourceIdsBySeries.get(s.id) ?? [],
+        },
       ];
     }),
   );
@@ -270,6 +338,7 @@ export default async function ProgramsSchedulePage({
       <ProgramScheduleGrid
         programs={activePrograms}
         coaches={coachRows}
+        resources={resourceRows}
         blocks={blocks}
         seriesById={seriesById}
         selectedDate={selectedDate}

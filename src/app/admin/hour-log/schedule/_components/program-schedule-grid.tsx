@@ -26,6 +26,7 @@ import {
   ProgramBlockDialog,
   type CoachOption,
   type ProgramOption,
+  type ResourceOption,
   type SeriesView,
 } from "./program-block-dialog";
 
@@ -47,6 +48,8 @@ export type ProgramScheduleBlockView = {
   // RECUR-b2: NULL for one-off blocks; the parent series id for a
   // materialized recurring occurrence.
   seriesId: string | null;
+  // QA10 W3.3: the cage resources this block occupies (linked blocked_times).
+  resourceIds: string[];
 };
 
 type CreatePrefill = {
@@ -100,6 +103,7 @@ function statusTextColor(status: BlockStatus | undefined): string {
 export function ProgramScheduleGrid({
   programs,
   coaches,
+  resources,
   blocks,
   seriesById,
   selectedDate,
@@ -107,6 +111,8 @@ export function ProgramScheduleGrid({
 }: {
   programs: ProgramOption[];
   coaches: CoachOption[];
+  // QA10 W3.3: active cage resources for the occupancy picker.
+  resources: ResourceOption[];
   blocks: ProgramScheduleBlockView[];
   // RECUR-b2: editable series definitions keyed by series id, for any
   // occurrence visible on this day.
@@ -352,6 +358,7 @@ export function ProgramScheduleGrid({
         date={selectedDate}
         programs={programs}
         coaches={coaches}
+        resources={resources}
         createPrefill={dialog.kind === "create" ? dialog.prefill : null}
         reconciliation={
           dialog.kind === "edit" ? (statuses[dialog.block.id] ?? null) : null
@@ -367,6 +374,7 @@ export function ProgramScheduleGrid({
                 endAt: dialog.block.endAt,
                 note: dialog.block.note,
                 seriesId: dialog.block.seriesId,
+                resourceIds: dialog.block.resourceIds,
               }
             : null
         }

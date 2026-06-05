@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import { resources } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
-import { LogSessionForm } from "./_components/log-session-form";
+import { LogSessionExperience } from "./_components/log-session-experience";
 import type { ResourceOption } from "../_components/types";
 
 // Coach session log page. Server component — auths the user,
@@ -25,11 +25,14 @@ export default async function NewSessionPage() {
     .where(eq(resources.active, true))
     .orderBy(resources.sortOrder);
 
-  const displayName = session.user.name ?? session.user.email;
+  const displayName = session.user.name ?? session.user.email ?? "Coach";
 
   return (
     <>
-      <div className="max-w-md mx-auto">
+      {/* Calendar view is wider than the form; the experience component
+          manages each view's own width. Cap the whole page at max-w-5xl
+          so the calendar grid has room. */}
+      <div className="max-w-5xl mx-auto">
         <Link
           href="/coach"
           className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
@@ -51,7 +54,11 @@ export default async function NewSessionPage() {
           </p>
         </div>
 
-        <LogSessionForm resources={resourceOptions} />
+        <LogSessionExperience
+          resources={resourceOptions}
+          coachId={session.user.id ?? ""}
+          coachName={displayName}
+        />
       </div>
     </>
   );

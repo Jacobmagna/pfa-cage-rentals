@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { and, asc, eq, gte, isNull, lt, sql as drizzleSql } from "drizzle-orm";
+import { and, asc, eq, gte, lt, sql as drizzleSql } from "drizzle-orm";
 import { ArrowLeft, CalendarDays, Clock, Download, Wallet } from "lucide-react";
 import { db } from "@/db";
-import { hourLogs, programScheduleBlocks, programs, users } from "@/db/schema";
+import { hourLogs, programScheduleBlocks, programs } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
+import { listActiveCoaches } from "@/lib/server/coaches";
 import {
   hourLogFiltersToQueryString,
   normalizeHourLogFilters,
@@ -65,11 +66,7 @@ export default async function AdminHourLogPage({
   ] = await Promise.all([
     fetchHourLogRowsWithScheduleNotes(filters),
     // Filter dropdown — coaches role only, active only.
-    db
-      .select({ id: users.id, name: users.name, email: users.email })
-      .from(users)
-      .where(and(eq(users.role, "coach"), isNull(users.deletedAt)))
-      .orderBy(asc(users.name), asc(users.email)),
+    listActiveCoaches(),
     db
       .select({ id: programs.id, name: programs.name })
       .from(programs)

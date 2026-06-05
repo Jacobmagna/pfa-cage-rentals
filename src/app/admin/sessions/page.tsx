@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { and, asc, desc, eq, gte, inArray, isNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import { resources, sessionsBilling, users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
+import { listActiveCoaches } from "@/lib/server/coaches";
 import { parsePfaInput, pfaDayEnd } from "@/lib/timezone";
 import { FiltersForm } from "./_components/filters-form";
 import { defaultSessionsRange, DEFAULT_RANGE_DAYS } from "./filters.logic";
@@ -102,11 +103,7 @@ export default async function AdminSessionsPage({
       .orderBy(desc(sessionsBilling.startAt))
       .limit(MAX_ROWS + 1),
     // Dialog dropdown — only active coaches can have new sessions assigned.
-    db
-      .select({ id: users.id, name: users.name, email: users.email })
-      .from(users)
-      .where(isNull(users.deletedAt))
-      .orderBy(asc(users.name)),
+    listActiveCoaches(),
     db
       .select({
         id: resources.id,
@@ -117,13 +114,8 @@ export default async function AdminSessionsPage({
       .from(resources)
       .where(eq(resources.active, true))
       .orderBy(asc(resources.sortOrder)),
-    // Filter dropdown — coaches role only, active only. (Dialog dropdown
-    // above allows admin too, since admins can also be booked.)
-    db
-      .select({ id: users.id, name: users.name, email: users.email })
-      .from(users)
-      .where(and(eq(users.role, "coach"), isNull(users.deletedAt)))
-      .orderBy(asc(users.name), asc(users.email)),
+    // Filter dropdown — active coaches only.
+    listActiveCoaches(),
   ]);
 
   const truncated = rows.length > MAX_ROWS;

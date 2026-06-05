@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, asc, eq, gte, isNull, lt } from "drizzle-orm";
+import { and, asc, eq, gte, lt } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import {
@@ -9,6 +9,7 @@ import {
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
+import { listActiveCoaches } from "@/lib/server/coaches";
 import { formatPfaDateLong, parsePfaInput, pfaDayEnd, pfaDayStart } from "@/lib/timezone";
 import { AutoRefresh } from "./_components/auto-refresh";
 import { ScheduleGrid } from "./_components/schedule-grid";
@@ -81,11 +82,7 @@ export default async function AdminSchedulePage({
           lt(blockedTimes.startAt, dayEnd),
         ),
       ),
-    db
-      .select({ id: users.id, name: users.name, email: users.email })
-      .from(users)
-      .where(and(eq(users.role, "coach"), isNull(users.deletedAt)))
-      .orderBy(asc(users.name), asc(users.email)),
+    listActiveCoaches(),
   ]);
 
   const sessions = sessionRows.map((r) => ({

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, asc, eq, gt, gte, inArray, isNull, lt } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, lt } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import {
@@ -10,6 +10,7 @@ import {
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
+import { listActiveCoaches } from "@/lib/server/coaches";
 import {
   reconcileBlocks,
   type ReconBlock,
@@ -78,11 +79,7 @@ export default async function ProgramsSchedulePage({
         ),
       )
       .orderBy(asc(programScheduleBlocks.startAt)),
-    db
-      .select({ id: users.id, name: users.name, email: users.email })
-      .from(users)
-      .where(and(eq(users.role, "coach"), isNull(users.deletedAt)))
-      .orderBy(asc(users.name), asc(users.email)),
+    listActiveCoaches(),
     // Hour-logs that overlap the selected day, for reconciliation
     // (FEAT-16). Overlap = log starts before the day ends AND ends after
     // the day starts.

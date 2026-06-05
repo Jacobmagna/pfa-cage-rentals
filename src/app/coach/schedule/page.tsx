@@ -6,26 +6,34 @@ import {
   programs,
   programScheduleBlockCoaches,
   programScheduleBlocks,
+  resources,
+  sessionsBilling,
 } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
 import {
   formatPfaDate,
   formatPfaDateMedium,
-  formatPfaTime,
   formatPfaWeekday,
   parsePfaInput,
   pfaDayStart,
   pfaParts,
 } from "@/lib/timezone";
+import {
+  CoachWeekGrid,
+  type CoachGridDay,
+  type CoachGridProgramBlock,
+  type CoachGridSession,
+} from "./_components/coach-week-grid";
 
-// Coach Schedule page (SCR-2). Read-only weekly agenda of the
-// program-schedule blocks the admin set for THIS coach only. No editing,
-// no reconciliation green/red — just the coach's own scheduled blocks,
-// navigable by week. Pure server component.
+// Coach Schedule page (SCR-2). Read-only WEEK time-grid (QA10 W3.4): days
+// across the top, time of day down the rows. Shows, for THIS coach only,
+// both the program-schedule blocks the admin set for them AND their own
+// cage-rental sessions. No editing, no reconciliation green/red — just the
+// coach's own week, navigable by week. Pure server component.
 //
-// Security: scoped to the signed-in coach via
-// `scheduledCoachId === session.user.id`. A coach sees ONLY their own
-// blocks, never another coach's.
+// Security: scoped to the signed-in coach. Program blocks are filtered by
+// scheduled-coach membership; cage sessions by `coachId === session.user.id`.
+// A coach sees ONLY their own blocks and sessions, never another coach's.
 //
 // URL state: ?date=YYYY-MM-DD (defaults to today).
 
@@ -55,48 +63,111 @@ export default async function CoachSchedulePage({
   const nextMonday = pfaDayStart(new Date(monday.getTime() + 7.5 * DAY_MS));
   const prevMonday = pfaDayStart(new Date(monday.getTime() - 6.5 * DAY_MS));
 
-  const blockRows = await db
-    .select({
-      id: programScheduleBlocks.id,
-      programId: programScheduleBlocks.programId,
-      programName: programs.name,
-      startAt: programScheduleBlocks.startAt,
-      endAt: programScheduleBlocks.endAt,
-      note: programScheduleBlocks.note,
-    })
-    .from(programScheduleBlocks)
-    .innerJoin(programs, eq(programScheduleBlocks.programId, programs.id))
-    // QA10 W3.2: a coach sees a block if they're in its scheduled-coach SET
-    // (not only when they're the primary). JOIN the coach set and filter on
-    // membership. One row per block (the join is keyed (block, coach), and
-    // we filter to this coach, so it can't fan out).
-    .innerJoin(
-      programScheduleBlockCoaches,
-      eq(programScheduleBlockCoaches.blockId, programScheduleBlocks.id),
-    )
-    .where(
-      and(
-        eq(programScheduleBlockCoaches.coachId, coachId),
-        gte(programScheduleBlocks.startAt, monday),
-        lt(programScheduleBlocks.startAt, nextMonday),
-      ),
-    )
-    .orderBy(asc(programScheduleBlocks.startAt));
+  const [blockRows, sessionRows] = await Promise.all([
+    db
+      .select({
+        id: programScheduleBlocks.id,
+        programId: programScheduleBlocks.programId,
+        programName: programs.name,
+        startAt: programScheduleBlocks.startAt,
+        endAt: programScheduleBlocks.endAt,
+        note: programScheduleBlocks.note,
+      })
+      .from(programScheduleBlocks)
+      .innerJoin(programs, eq(programScheduleBlocks.programId, programs.id))
+      // QA10 W3.2: a coach sees a block if they're in its scheduled-coach SET
+      // (not only when they're the primary). JOIN the coach set and filter on
+      // membership. One row per block (the join is keyed (block, coach), and
+      // we filter to this coach, so it can't fan out).
+      .innerJoin(
+        programScheduleBlockCoaches,
+        eq(programScheduleBlockCoaches.blockId, programScheduleBlocks.id),
+      )
+      .where(
+        and(
+          eq(programScheduleBlockCoaches.coachId, coachId),
+          gte(programScheduleBlocks.startAt, monday),
+          lt(programScheduleBlocks.startAt, nextMonday),
+        ),
+      )
+      .orderBy(asc(programScheduleBlocks.startAt)),
+    // QA10 W3.4: this coach's own cage-rental sessions for the same week.
+    db
+      .select({
+        id: sessionsBilling.id,
+        resourceName: resources.name,
+        resourceType: resources.type,
+        startAt: sessionsBilling.startAt,
+        endAt: sessionsBilling.endAt,
+        useType: sessionsBilling.useType,
+        isTeamRental: sessionsBilling.isTeamRental,
+        isOnline: sessionsBilling.isOnline,
+      })
+      .from(sessionsBilling)
+      .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
+      .where(
+        and(
+          eq(sessionsBilling.coachId, coachId),
+          gte(sessionsBilling.startAt, monday),
+          lt(sessionsBilling.startAt, nextMonday),
+        ),
+      )
+      .orderBy(asc(sessionsBilling.startAt)),
+  ]);
 
-  // Group blocks by their PFA calendar date.
-  const byDay = new Map<string, typeof blockRows>();
-  for (const b of blockRows) {
-    const key = formatPfaDate(b.startAt);
-    const list = byDay.get(key);
-    if (list) list.push(b);
-    else byDay.set(key, [b]);
-  }
+  // Map each item to its 0–6 day index within the visible week by matching
+  // its PFA calendar date against the days[] array. Items whose date isn't
+  // one of the 7 are dropped (shouldn't happen given the where-clauses).
+  const dayIndexByDate = new Map<string, number>();
+  days.forEach((d, i) => dayIndexByDate.set(formatPfaDate(d), i));
 
-  const todayKey = formatPfaDate(new Date());
-  const weekIsEmpty = blockRows.length === 0;
+  const gridDays: CoachGridDay[] = days.map((d) => {
+    const parts = pfaParts(d);
+    return {
+      date: d,
+      weekdayLabel: formatPfaWeekday(d),
+      dayLabel: `${parts.month}/${parts.day}`,
+      isToday: formatPfaDate(d) === formatPfaDate(new Date()),
+    };
+  });
+
+  const gridProgramBlocks: CoachGridProgramBlock[] = blockRows.flatMap((b) => {
+    const dayIndex = dayIndexByDate.get(formatPfaDate(b.startAt));
+    if (dayIndex === undefined) return [];
+    return [
+      {
+        id: b.id,
+        dayIndex,
+        programName: b.programName,
+        startAt: b.startAt,
+        endAt: b.endAt,
+        note: b.note,
+      },
+    ];
+  });
+
+  const gridSessions: CoachGridSession[] = sessionRows.flatMap((s) => {
+    const dayIndex = dayIndexByDate.get(formatPfaDate(s.startAt));
+    if (dayIndex === undefined) return [];
+    return [
+      {
+        id: s.id,
+        dayIndex,
+        resourceName: s.resourceName,
+        resourceType: s.resourceType,
+        useType: s.useType,
+        isTeamRental: s.isTeamRental,
+        isOnline: s.isOnline,
+        startAt: s.startAt,
+        endAt: s.endAt,
+      },
+    ];
+  });
+
+  const weekIsEmpty = blockRows.length === 0 && sessionRows.length === 0;
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="max-w-6xl mx-auto">
       <header className="mb-6">
         <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
           Schedule
@@ -104,6 +175,10 @@ export default async function CoachSchedulePage({
         <h1 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight">
           Week of {formatPfaDateMedium(monday)} – {formatPfaDateMedium(sunday)}
         </h1>
+        <p className="mt-1 text-xs italic text-fg-subtle md:hidden">
+          This page is designed for desktop. Rotate your device or use a laptop
+          for the full experience.
+        </p>
       </header>
 
       <nav
@@ -131,55 +206,11 @@ export default async function CoachSchedulePage({
           <p className="text-fg-muted">Nothing scheduled this week.</p>
         </div>
       ) : (
-        <ul className="space-y-5">
-          {days.map((d) => {
-            const key = formatPfaDate(d);
-            const dayBlocks = byDay.get(key) ?? [];
-            const isToday = key === todayKey;
-            const parts = pfaParts(d);
-            return (
-              <li key={key}>
-                <div className="mb-2 flex items-baseline gap-2">
-                  <p className="text-[11px] uppercase tracking-[0.14em] text-fg-muted">
-                    {formatPfaWeekday(d)}
-                  </p>
-                  <p className="text-sm font-semibold tabular-nums text-fg">
-                    {parts.month}/{parts.day}
-                  </p>
-                  {isToday ? (
-                    <span className="text-[10px] uppercase tracking-[0.14em] text-gold-strong">
-                      Today
-                    </span>
-                  ) : null}
-                </div>
-
-                {dayBlocks.length === 0 ? (
-                  <p className="text-sm text-fg-subtle">No blocks.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {dayBlocks.map((b) => (
-                      <li
-                        key={b.id}
-                        className="rounded-md border border-line border-l-2 border-l-gold bg-surface px-4 py-3 shadow-[var(--shadow-sm)] transition hover:bg-surface-2 hover:shadow-[var(--shadow-md)]"
-                      >
-                        <p className="text-sm font-medium text-fg tabular-nums">
-                          {formatPfaTime(b.startAt)}–{formatPfaTime(b.endAt)}
-                          <span className="text-fg-muted font-normal">
-                            {" "}
-                            · {b.programName}
-                          </span>
-                        </p>
-                        {b.note ? (
-                          <p className="mt-1 text-xs text-fg-muted">{b.note}</p>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+        <CoachWeekGrid
+          days={gridDays}
+          programBlocks={gridProgramBlocks}
+          sessions={gridSessions}
+        />
       )}
     </div>
   );

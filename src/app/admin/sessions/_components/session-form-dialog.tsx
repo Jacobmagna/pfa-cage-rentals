@@ -30,6 +30,7 @@ import {
   formatPfaTime,
   parsePfaInput,
 } from "@/lib/timezone";
+import { cageUseTypeError } from "@/lib/use-type-validation";
 
 export type SessionFormInitialValues = {
   id: string;
@@ -236,6 +237,27 @@ export function SessionFormDialog({
     if (!isMultiSlot) return; // let form-action handle it
     e.preventDefault();
     if (slotCount === 0 || divisibilityError || slots.length === 0) return;
+
+    // Cage use-type guard BEFORE the batch action. The server still
+    // enforces it (createSessionsBatchInternal throws), but an uncaught
+    // server-action throw is redacted to a generic message in
+    // production, so we surface the friendly inline copy here through
+    // the existing batchError channel.
+    const selectedResource = resourceOptions.find(
+      (r) => r.id === live.resourceId,
+    );
+    const cageError = selectedResource
+      ? cageUseTypeError(
+          selectedResource.type,
+          live.useType === "hitting" || live.useType === "pitching"
+            ? live.useType
+            : null,
+        )
+      : null;
+    if (cageError) {
+      setBatchError(cageError);
+      return;
+    }
 
     setBatchError(null);
     startBatchTransition(async () => {

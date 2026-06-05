@@ -21,7 +21,7 @@
 // DERIVED state, not for real fetches).
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
 import type { ResourceOption } from "../../_components/types";
 import {
   getDayAvailability,
@@ -47,6 +47,7 @@ import {
   pfaWallClockAt,
 } from "@/lib/timezone";
 import { CageSlotBooking } from "./cage-slot-booking";
+import { CageBatchBooking } from "./cage-batch-booking";
 
 // Local copies of the schedule-grid type-stripe helper — duplicated per
 // the prompt (don't import from the interactive admin grid).
@@ -97,6 +98,18 @@ export function CageCalendar({
   const [revealed, setRevealed] = useState<SelectedSlot | null>(null);
   const [confirmation, setConfirmation] = useState<string | null>(null);
 
+  // ── Batch multi-select (W3.5b) ───────────────────────────────────
+  // When ON, tapping green slots builds a selection scoped to ONE
+  // resource row (the batch action is single-resource + shared useType).
+  // A cross-resource tap RESETS the selection to that new resource.
+  const [multiSelect, setMultiSelect] = useState(false);
+  const [selection, setSelection] = useState<{
+    resourceId: string | null;
+    slotIndexes: Set<number>;
+  }>({ resourceId: null, slotIndexes: new Set() });
+  // Whether the batch booking form is open for the current selection.
+  const [batchOpen, setBatchOpen] = useState(false);
+
   const dateStr = formatPfaDate(selectedDate);
 
   const refresh = useCallback((date: string) => {
@@ -118,22 +131,28 @@ export function CageCalendar({
     refresh(dateStr);
   }, [refresh, dateStr]);
 
-  const goPrevDay = () => {
+  const clearSelection = () => {
+    setSelection({ resourceId: null, slotIndexes: new Set() });
+    setBatchOpen(false);
+  };
+
+  const resetTransient = () => {
     setSelected(null);
     setRevealed(null);
     setConfirmation(null);
+    clearSelection();
+  };
+
+  const goPrevDay = () => {
+    resetTransient();
     setSelectedDate((d) => pfaDayStart(new Date(d.getTime() - 12 * 60 * 60 * 1000)));
   };
   const goNextDay = () => {
-    setSelected(null);
-    setRevealed(null);
-    setConfirmation(null);
+    resetTransient();
     setSelectedDate((d) => pfaDayStart(new Date(d.getTime() + 36 * 60 * 60 * 1000)));
   };
   const goToday = () => {
-    setSelected(null);
-    setRevealed(null);
-    setConfirmation(null);
+    resetTransient();
     setSelectedDate(pfaDayStart(new Date()));
   };
 
@@ -188,6 +207,12 @@ export function CageCalendar({
     ? resources.find((r) => r.id === selected.resourceId) ?? null
     : null;
 
+  // Active batch-selection resource + count (derived during render).
+  const selectionResource = selection.resourceId
+    ? resources.find((r) => r.id === selection.resourceId) ?? null
+    : null;
+  const selectionCount = selection.slotIndexes.size;
+
   // Whether the selected slot can be booked for a full hour (this slot
   // free AND next free AND next in-window).
   const selectedCanBookHour =
@@ -205,12 +230,75 @@ export function CageCalendar({
     refresh(dateStr);
   };
 
+  // Batch submit succeeded → clear the selection, confirm, re-fetch so
+  // the booked slots flip to gold. Stays in multi-select mode.
+  const handleBatchBooked = (count: number) => {
+    clearSelection();
+    setConfirmation(
+      `${count} ${count === 1 ? "session" : "sessions"} logged. Those slots are now yours (gold).`,
+    );
+    refresh(dateStr);
+  };
+
+  // Toggle multi-select. Turning it OFF clears any in-progress selection;
+  // turning it ON closes any open single-slot panel / reveal.
+  const toggleMultiSelect = () => {
+    setConfirmation(null);
+    setMultiSelect((on) => {
+      if (on) {
+        // turning OFF
+        clearSelection();
+      } else {
+        // turning ON
+        setSelected(null);
+        setRevealed(null);
+      }
+      return !on;
+    });
+  };
+
+  // Toggle a green slot in the batch selection. A tap on a slot whose
+  // resource differs from the active one (with a non-empty set) RESETS
+  // the selection to that new resource — one active resource at a time.
+  const toggleSelectSlot = (resourceId: string, slotIndex: number) => {
+    setBatchOpen(false);
+    setSelection((prev) => {
+      // Different resource than the active selection → reset to the new
+      // resource with just this slot.
+      if (prev.resourceId !== null && prev.resourceId !== resourceId) {
+        return { resourceId, slotIndexes: new Set([slotIndex]) };
+      }
+      const next = new Set(prev.slotIndexes);
+      if (next.has(slotIndex)) next.delete(slotIndex);
+      else next.add(slotIndex);
+      return {
+        resourceId: next.size === 0 ? null : resourceId,
+        slotIndexes: next,
+      };
+    });
+  };
+
   const handleSlotClick = (
     resourceId: string,
     slotIndex: number,
     state: SlotState,
   ) => {
     setConfirmation(null);
+    // Batch mode: green slots build the multi-selection; red/gold still
+    // reveal their occupant label (no selection).
+    if (multiSelect) {
+      if (state === "free") {
+        setRevealed(null);
+        toggleSelectSlot(resourceId, slotIndex);
+        return;
+      }
+      setRevealed((prev) =>
+        prev && prev.resourceId === resourceId && prev.slotIndex === slotIndex
+          ? null
+          : { resourceId, slotIndex },
+      );
+      return;
+    }
     if (state === "free") {
       setRevealed(null);
       setSelected({ resourceId, slotIndex });
@@ -265,6 +353,39 @@ export function CageCalendar({
         >
           Today
         </button>
+      </div>
+
+      {/* Multi-select toggle. ON → tap several green slots → one batch. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={toggleMultiSelect}
+          aria-pressed={multiSelect}
+          className={[
+            "inline-flex items-center gap-2 rounded-lg border px-3 h-9 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40",
+            multiSelect
+              ? "border-gold/50 bg-gold/10 text-gold-strong"
+              : "border-line bg-surface text-fg-muted hover:text-fg hover:border-line-strong",
+          ].join(" ")}
+        >
+          <span
+            aria-hidden
+            className={[
+              "inline-flex h-4 w-4 items-center justify-center rounded border",
+              multiSelect
+                ? "border-gold bg-gold text-gold-ink"
+                : "border-line-strong bg-surface",
+            ].join(" ")}
+          >
+            {multiSelect ? <Check className="h-3 w-3" /> : null}
+          </span>
+          Select multiple slots
+        </button>
+        {multiSelect ? (
+          <p className="text-[11px] text-fg-subtle">
+            Tap green slots in one row, then book them together.
+          </p>
+        ) : null}
       </div>
 
       {confirmation ? (
@@ -327,6 +448,10 @@ export function CageCalendar({
                 revealed?.resourceId === r.id && revealed.slotIndex === slotIdx;
               const isSelected =
                 selected?.resourceId === r.id && selected.slotIndex === slotIdx;
+              const isBatchSelected =
+                multiSelect &&
+                selection.resourceId === r.id &&
+                selection.slotIndexes.has(slotIdx);
               const { hour, minute } = slotHourMinute(slotIdx);
               return (
                 <SlotCell
@@ -337,6 +462,7 @@ export function CageCalendar({
                   occupant={occupant}
                   isRevealed={isRevealed}
                   isSelected={isSelected}
+                  isBatchSelected={isBatchSelected}
                   resourceName={r.name}
                   ownName={coachName}
                   hour={hour}
@@ -357,13 +483,42 @@ export function CageCalendar({
           <LegendDot className="bg-gold/25 border border-gold/60" label="Your booking" />
         </div>
         <p className="text-fg-subtle">
-          Tap a green slot to book it. Tap a red slot to see who has it.
+          {multiSelect
+            ? "Tap green slots in a single row to select them, then book the batch. Tapping a slot in a different row starts a new selection."
+            : "Tap a green slot to book it. Tap a red slot to see who has it."}{" "}
           Rotate your phone or scroll sideways to see the full day.
         </p>
       </div>
 
-      {/* Booking panel for the selected green slot. */}
-      {selected && selectedResource ? (
+      {/* Selection action bar — visible whenever ≥1 slot is selected. */}
+      {multiSelect && selectionCount > 0 && selectionResource ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gold/40 bg-gold/5 px-4 py-3">
+          <p className="text-sm font-medium text-fg">
+            {selectionCount} {selectionCount === 1 ? "slot" : "slots"} ·{" "}
+            <span className="text-fg-muted">{selectionResource.name}</span>
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 h-9 text-xs font-medium text-fg-muted hover:text-fg hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            >
+              <X className="h-3.5 w-3.5" />
+              Clear
+            </button>
+            <button
+              type="button"
+              onClick={() => setBatchOpen(true)}
+              className="rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            >
+              Book {selectionCount} {selectionCount === 1 ? "slot" : "slots"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Booking panel for the selected green slot (single-slot path). */}
+      {!multiSelect && selected && selectedResource ? (
         <CageSlotBooking
           resource={selectedResource}
           selectedDate={selectedDate}
@@ -371,6 +526,17 @@ export function CageCalendar({
           canBookOneHour={selectedCanBookHour}
           onBooked={handleBooked}
           onCancel={() => setSelected(null)}
+        />
+      ) : null}
+
+      {/* Batch booking form — one shared form for the whole selection. */}
+      {multiSelect && batchOpen && selectionResource && selectionCount > 0 ? (
+        <CageBatchBooking
+          resource={selectionResource}
+          selectedDate={selectedDate}
+          slotIndexes={selection.slotIndexes}
+          onBooked={handleBatchBooked}
+          onCancel={() => setBatchOpen(false)}
         />
       ) : null}
 
@@ -385,6 +551,7 @@ function SlotCell({
   occupant,
   isRevealed,
   isSelected,
+  isBatchSelected,
   resourceName,
   ownName,
   hour,
@@ -397,6 +564,8 @@ function SlotCell({
   occupant: SlotOccupant;
   isRevealed: boolean;
   isSelected: boolean;
+  /** True when this slot is part of the batch multi-selection. */
+  isBatchSelected: boolean;
   resourceName: string;
   /** The current coach's display name — shown on their own slots. */
   ownName: string;
@@ -423,7 +592,10 @@ function SlotCell({
         : "bg-danger/20 hover:bg-danger/30"; // taken or blocked
 
   const ariaLabel = (() => {
-    if (state === "free") return `Book ${resourceName} at ${time12}`;
+    if (state === "free")
+      return isBatchSelected
+        ? `Selected — ${resourceName} at ${time12}. Tap to deselect.`
+        : `Book ${resourceName} at ${time12}`;
     if (state === "own") return `Your booking on ${resourceName} at ${time12}`;
     if (occupant?.kind === "session")
       return `${resourceName} at ${time12} — taken`;
@@ -449,14 +621,22 @@ function SlotCell({
         type="button"
         onClick={onClick}
         aria-label={ariaLabel}
+        aria-pressed={isBatchSelected || undefined}
         className={[
-          "h-full w-full border-b border-line text-left transition-colors",
+          "relative h-full w-full border-b border-line text-left transition-colors",
           baseBorders,
-          tone,
-          isSelected ? "ring-2 ring-inset ring-gold" : "",
+          isBatchSelected ? "bg-gold/35 hover:bg-gold/45" : tone,
+          isSelected || isBatchSelected ? "ring-2 ring-inset ring-gold" : "",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gold/60",
         ].join(" ")}
-      />
+      >
+        {isBatchSelected ? (
+          <Check
+            aria-hidden
+            className="absolute left-1/2 top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 text-gold-strong"
+          />
+        ) : null}
+      </button>
       {isRevealed && occupantLabel ? (
         <span
           role="status"

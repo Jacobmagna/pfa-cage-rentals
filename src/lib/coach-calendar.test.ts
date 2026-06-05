@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canBookOneHour,
   computeSlotState,
+  selectionToSortedRanges,
   type SlotBlock,
   type SlotSession,
   type SlotState,
@@ -205,5 +206,35 @@ describe("canBookOneHour", () => {
         slotState: accessor({}),
       }),
     ).toBe(true);
+  });
+});
+
+describe("selectionToSortedRanges", () => {
+  const FIRST_HOUR = 8; // grid starts at 8 AM
+
+  it("returns an empty list for an empty selection", () => {
+    expect(selectionToSortedRanges(new Set<number>(), FIRST_HOUR)).toEqual([]);
+  });
+
+  it("sorts by slot index (== by time), independent of insertion order", () => {
+    // Inserted out of order: 5, 0, 2.
+    const set = new Set<number>();
+    set.add(5);
+    set.add(0);
+    set.add(2);
+    expect(selectionToSortedRanges(set, FIRST_HOUR)).toEqual([
+      { slotIndex: 0, hour: 8, minute: 0 },
+      { slotIndex: 2, hour: 9, minute: 0 },
+      { slotIndex: 5, hour: 10, minute: 30 },
+    ]);
+  });
+
+  it("maps even indices to :00 and odd indices to :30, with hour from floor(i/2)", () => {
+    expect(selectionToSortedRanges([0, 1, 2, 3], FIRST_HOUR)).toEqual([
+      { slotIndex: 0, hour: 8, minute: 0 },
+      { slotIndex: 1, hour: 8, minute: 30 },
+      { slotIndex: 2, hour: 9, minute: 0 },
+      { slotIndex: 3, hour: 9, minute: 30 },
+    ]);
   });
 });

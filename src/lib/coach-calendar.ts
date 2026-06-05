@@ -128,3 +128,36 @@ export function canBookOneHour(args: {
   if (slotState(nextIndex) !== "free") return false;
   return true;
 }
+
+// A single selected slot resolved to its [startHour, startMinute] +
+// the 30-min [startMs, endMs) range, derived from a slot index. Used by
+// the W3.5b batch booking flow — one selected slot = one 30-min session.
+export type SelectedSlotRange = {
+  slotIndex: number;
+  hour: number;
+  minute: number;
+};
+
+/**
+ * Map a Set of selected slot indices → a time-sorted list of slot
+ * descriptors (index + start hour/minute). The grid runs 30-min slots
+ * starting at `firstHour`; slot i starts at firstHour + floor(i/2) hours,
+ * minute (i % 2) * 30. The result is sorted ascending by slot index
+ * (== ascending by time) so both the batch UI and the batch submit are
+ * deterministic regardless of click order.
+ *
+ * Pure + React-free so the selection→ranges mapping is unit-testable
+ * without rendering the calendar.
+ */
+export function selectionToSortedRanges(
+  slotIndexes: Iterable<number>,
+  firstHour: number,
+): SelectedSlotRange[] {
+  return Array.from(slotIndexes)
+    .sort((a, b) => a - b)
+    .map((slotIndex) => ({
+      slotIndex,
+      hour: firstHour + Math.floor(slotIndex / 2),
+      minute: (slotIndex % 2) * 30,
+    }));
+}

@@ -50,17 +50,21 @@ const assignCapCoRequiredError = {
   path: ["cap"],
 };
 
-// Assign one or more athletes to a single program.
-//   - "add"  — insert (athleteId, programId) idempotently; keeps any
-//     existing assignments the athlete already has.
-//   - "move" — clear ALL the athlete's program assignments, then insert
-//     the one; net effect is the athlete belongs to exactly this program.
+// Assign one or more athletes to one OR MORE programs in one submit.
+//   - "add"  — upsert (athleteId, programId) idempotently for each selected
+//     program; keeps any existing assignments the athlete already has.
+//   - "move" — clear ALL the athlete's program assignments, then insert the
+//     selected program(s); net effect is the athlete belongs to exactly the
+//     selected set.
 // cap/capPeriod set the per-enrollment session cap for the assigned
-// athlete(s) (both present = cap; both absent = no cap / clear it).
+// athlete(s) (both present = cap; both absent = no cap / clear it). The cap
+// (when present) applies to EVERY selected (athlete × program) enrollment.
 export const assignAthletesToProgramSchema = z
   .object({
     athleteIds: z.array(z.string().min(1)).min(1, "at least one athlete"),
-    programId: z.string().min(1, "programId is required"),
+    programIds: z
+      .array(z.string().min(1))
+      .min(1, "at least one program"),
     mode: z.enum(["add", "move"]).default("add"),
     // Coerce from the form string; a positive whole number of sessions.
     cap: z.coerce.number().int().positive().nullish(),

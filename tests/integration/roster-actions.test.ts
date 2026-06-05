@@ -14,6 +14,7 @@
 // to the created ids. audit_log IS truncated between tests.
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ZodError } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -241,14 +242,14 @@ describe("assignAthletesToProgramInternal", () => {
 
     const first = await assignAthletesToProgramInternal(fixtures.admin, {
       athleteIds: [athlete.id],
-      programId: program.id,
+      programIds: [program.id],
       mode: "add",
     });
     expect(first.added).toBe(1);
 
     const second = await assignAthletesToProgramInternal(fixtures.admin, {
       athleteIds: [athlete.id],
-      programId: program.id,
+      programIds: [program.id],
       mode: "add",
     });
     expect(second.added).toBe(0);
@@ -287,14 +288,14 @@ describe("assignAthletesToProgramInternal", () => {
     // Start in program A.
     await assignAthletesToProgramInternal(fixtures.admin, {
       athleteIds: [athlete.id],
-      programId: programA.id,
+      programIds: [programA.id],
       mode: "add",
     });
 
     // Move to program B.
     const summary = await assignAthletesToProgramInternal(fixtures.admin, {
       athleteIds: [athlete.id],
-      programId: programB.id,
+      programIds: [programB.id],
       mode: "move",
     });
     expect(summary.removed).toBe(1);
@@ -337,7 +338,7 @@ describe("assignAthletesToProgramInternal", () => {
     // Assign WITH a cap: 2 sessions total per program.
     await assignAthletesToProgramInternal(fixtures.admin, {
       athleteIds: [athlete.id],
-      programId: program.id,
+      programIds: [program.id],
       mode: "add",
       cap: 2,
       capPeriod: "total",
@@ -358,7 +359,7 @@ describe("assignAthletesToProgramInternal", () => {
     // Re-assign the same athlete to the same program with NO cap → cleared.
     await assignAthletesToProgramInternal(fixtures.admin, {
       athleteIds: [athlete.id],
-      programId: program.id,
+      programIds: [program.id],
       mode: "add",
     });
 
@@ -388,7 +389,7 @@ describe("assignAthletesToProgramInternal", () => {
     await expect(
       assignAthletesToProgramInternal(fixtures.admin, {
         athleteIds: [athlete.id],
-        programId: "does-not-exist",
+        programIds: ["does-not-exist"],
         mode: "add",
       }),
     ).rejects.toBeInstanceOf(ProgramNotFoundError);
@@ -404,10 +405,135 @@ describe("assignAthletesToProgramInternal", () => {
     await expect(
       assignAthletesToProgramInternal(fixtures.admin, {
         athleteIds: [athlete.id],
-        programId: program.id,
+        programIds: [program.id],
         mode: "add",
       }),
     ).rejects.toBeInstanceOf(ProgramInactiveError);
+    await db.delete(athletes).where(eq(athletes.id, athlete.id));
+  });
+
+  it("add mode enrolls into MULTIPLE programs in one submit, keeping existing", async () => {
+    const programA = await createProgram();
+    const programB = await createProgram();
+    const programC = await createProgram();
+    const athlete = await createAthleteInternal(fixtures.admin, {
+      firstName: "Multi",
+      lastName: `Add-${uniqueSuffix()}`,
+    });
+
+    // Start in program A (existing enrollment that must survive the add).
+    await assignAthletesToProgramInternal(fixtures.admin, {
+      athleteIds: [athlete.id],
+      programIds: [programA.id],
+      mode: "add",
+    });
+
+    // Add B and C in one submit.
+    const summary = await assignAthletesToProgramInternal(fixtures.admin, {
+      athleteIds: [athlete.id],
+      programIds: [programB.id, programC.id],
+      mode: "add",
+    });
+    expect(summary.added).toBe(2);
+    expect(summary.removed).toBe(0);
+
+    const rows = await db
+      .select()
+      .from(athletePrograms)
+      .where(eq(athletePrograms.athleteId, athlete.id));
+    expect(rows.map((r) => r.programId).sort()).toEqual(
+      [programA.id, programB.id, programC.id].sort(),
+    );
+
+    await db
+      .delete(athletePrograms)
+      .where(eq(athletePrograms.athleteId, athlete.id));
+    await db.delete(athletes).where(eq(athletes.id, athlete.id));
+  });
+
+  it("move mode replaces existing with the full SELECTED set of programs", async () => {
+    const programA = await createProgram();
+    const programB = await createProgram();
+    const programC = await createProgram();
+    const athlete = await createAthleteInternal(fixtures.admin, {
+      firstName: "Multi",
+      lastName: `Move-${uniqueSuffix()}`,
+    });
+
+    // Start in program A.
+    await assignAthletesToProgramInternal(fixtures.admin, {
+      athleteIds: [athlete.id],
+      programIds: [programA.id],
+      mode: "add",
+    });
+
+    // Move to B + C (A is dropped, both selected are added).
+    const summary = await assignAthletesToProgramInternal(fixtures.admin, {
+      athleteIds: [athlete.id],
+      programIds: [programB.id, programC.id],
+      mode: "move",
+    });
+    expect(summary.removed).toBe(1);
+    expect(summary.added).toBe(2);
+
+    const rows = await db
+      .select()
+      .from(athletePrograms)
+      .where(eq(athletePrograms.athleteId, athlete.id));
+    expect(rows.map((r) => r.programId).sort()).toEqual(
+      [programB.id, programC.id].sort(),
+    );
+
+    await db
+      .delete(athletePrograms)
+      .where(eq(athletePrograms.athleteId, athlete.id));
+    await db.delete(athletes).where(eq(athletes.id, athlete.id));
+  });
+
+  it("applies the cap to EVERY selected program enrollment", async () => {
+    const programA = await createProgram();
+    const programB = await createProgram();
+    const athlete = await createAthleteInternal(fixtures.admin, {
+      firstName: "Multi",
+      lastName: `Cap-${uniqueSuffix()}`,
+    });
+
+    await assignAthletesToProgramInternal(fixtures.admin, {
+      athleteIds: [athlete.id],
+      programIds: [programA.id, programB.id],
+      mode: "add",
+      cap: 3,
+      capPeriod: "week",
+    });
+
+    const rows = await db
+      .select()
+      .from(athletePrograms)
+      .where(eq(athletePrograms.athleteId, athlete.id));
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.cap).toBe(3);
+      expect(row.capPeriod).toBe("week");
+    }
+
+    await db
+      .delete(athletePrograms)
+      .where(eq(athletePrograms.athleteId, athlete.id));
+    await db.delete(athletes).where(eq(athletes.id, athlete.id));
+  });
+
+  it("rejects an empty programIds list (zod validation)", async () => {
+    const athlete = await createAthleteInternal(fixtures.admin, {
+      firstName: "Empty",
+      lastName: `Programs-${uniqueSuffix()}`,
+    });
+    await expect(
+      assignAthletesToProgramInternal(fixtures.admin, {
+        athleteIds: [athlete.id],
+        programIds: [],
+        mode: "add",
+      }),
+    ).rejects.toBeInstanceOf(ZodError);
     await db.delete(athletes).where(eq(athletes.id, athlete.id));
   });
 });

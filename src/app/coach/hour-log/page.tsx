@@ -35,7 +35,7 @@ export default async function CoachHourLogPage() {
           </p>
         </div>
       ) : (
-        <div className="max-w-md">
+        <div className="max-w-md mx-auto">
           <div className="space-y-1.5 mb-7">
             <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
               Log your hours

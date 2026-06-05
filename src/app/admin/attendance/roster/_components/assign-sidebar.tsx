@@ -47,7 +47,7 @@ export function AssignSidebar({
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const [mode, setMode] = useState<"add" | "move">("add");
-  const [programId, setProgramId] = useState("");
+  const [programIds, setProgramIds] = useState<string[]>([]);
   const [capEnabled, setCapEnabled] = useState(false);
   const [cap, setCap] = useState("");
   const [capPeriod, setCapPeriod] = useState<"week" | "month" | "total">(
@@ -73,7 +73,7 @@ export function AssignSidebar({
     if (open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setMode("add");
-      setProgramId("");
+      setProgramIds([]);
       setCapEnabled(false);
       setCap("");
       setCapPeriod("week");
@@ -197,7 +197,9 @@ export function AssignSidebar({
           {athleteIds.map((id) => (
             <input key={id} type="hidden" name="athleteId" value={id} />
           ))}
-          <input type="hidden" name="programId" value={programId} />
+          {programIds.map((id) => (
+            <input key={id} type="hidden" name="programId" value={id} />
+          ))}
           <input type="hidden" name="mode" value={mode} />
           {/* Only submit cap fields when the box is checked; otherwise
               they're absent and the action clears the cap. */}
@@ -238,14 +240,14 @@ export function AssignSidebar({
               </div>
               <p className="mt-2 text-[11px] text-fg-subtle">
                 {mode === "add"
-                  ? "Adds the program; any current assignments stay."
-                  : "Removes all current assignments, then adds this one."}
+                  ? "Adds the selected program(s); any current assignments stay."
+                  : "Removes all current assignments, then adds the selected program(s)."}
               </p>
             </fieldset>
 
             <fieldset>
               <legend className="mb-2 text-xs uppercase tracking-wider text-fg-muted">
-                Program
+                Programs
               </legend>
               {programs.length === 0 ? (
                 <p className="text-sm text-fg-muted">
@@ -259,11 +261,17 @@ export function AssignSidebar({
                       className="flex cursor-pointer items-center gap-2.5 rounded-md border border-line bg-page px-3 py-2.5 text-sm text-fg transition-colors hover:border-line-strong has-[:checked]:border-gold has-[:checked]:bg-gold/10"
                     >
                       <input
-                        type="radio"
+                        type="checkbox"
                         name="programChoice"
                         value={p.id}
-                        checked={programId === p.id}
-                        onChange={() => setProgramId(p.id)}
+                        checked={programIds.includes(p.id)}
+                        onChange={(e) =>
+                          setProgramIds((prev) =>
+                            e.target.checked
+                              ? [...prev, p.id]
+                              : prev.filter((id) => id !== p.id),
+                          )
+                        }
                         className="h-4 w-4 accent-gold"
                       />
                       <span>{p.name}</span>
@@ -338,14 +346,18 @@ export function AssignSidebar({
             </button>
             <button
               type="submit"
-              disabled={pending || !programId || count === 0}
+              disabled={pending || programIds.length === 0 || count === 0}
               className="h-9 rounded-md bg-gold px-4 text-sm font-semibold text-gold-ink shadow-[var(--shadow-sm)] transition-colors hover:bg-gold-hover disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
             >
               {pending
                 ? "Saving…"
                 : mode === "add"
-                  ? "Add to program"
-                  : "Move to program"}
+                  ? programIds.length > 1
+                    ? "Add to programs"
+                    : "Add to program"
+                  : programIds.length > 1
+                    ? "Move to programs"
+                    : "Move to program"}
             </button>
           </div>
         </form>

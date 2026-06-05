@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { ArrowLeft, CalendarPlus } from "lucide-react";
 import { db } from "@/db";
 import { resources, sessionsBilling } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
+import { parsePfaInput, pfaDayEnd } from "@/lib/timezone";
 import { SessionsHistoryClient, type HistoryRow } from "./_components/sessions-history-client";
 import type { ResourceOption } from "./_components/types";
+import { parseHistoryFilters } from "./filters.logic";
 
 const PAGE_SIZE = 20;
 
@@ -20,7 +22,13 @@ const PAGE_SIZE = 20;
 // invoice section (rates are variable per coach and Dad invoices
 // manually). Coaches see what they booked, not what they earned.
 
-type SearchParams = Promise<{ page?: string }>;
+type SearchParams = Promise<{
+  page?: string;
+  from?: string | string[];
+  to?: string | string[];
+  resourceId?: string | string[];
+  useType?: string | string[];
+}>;
 
 export default async function CoachSessionsPage({
   searchParams,
@@ -28,22 +36,69 @@ export default async function CoachSessionsPage({
   searchParams: SearchParams;
 }) {
   const session = await requireSession();
+  const coachId = session.user.id;
   const params = await searchParams;
   const page = Math.max(1, parseInt(params.page ?? "1", 10) || 1);
 
-  // Total count for pagination + empty-state branching.
-  const [{ count }] = await db
+  // Active resources drive the filter dropdown AND validate the URL's
+  // resourceId (a stale/unknown id is dropped, not turned into an empty
+  // result). Fetched up front so it's available for both the empty state
+  // and the filtered query.
+  const activeResources = await db
+    .select({
+      id: resources.id,
+      name: resources.name,
+      type: resources.type,
+    })
+    .from(resources)
+    .where(eq(resources.active, true))
+    .orderBy(resources.sortOrder);
+
+  const resourceOptions: ResourceOption[] = activeResources;
+  const validResourceIds = new Set(activeResources.map((r) => r.id));
+
+  // Validate + normalize the URL filters (facility-TZ date strings stay as
+  // "YYYY-MM-DD" here; converted to UTC instants below). Default = all.
+  const filters = parseHistoryFilters(params, validResourceIds);
+
+  // Same WHERE for BOTH the count and the rows queries, so pagination + the
+  // "N sessions" label reflect the FILTERED set. coachId is always pinned
+  // server-side — a client-supplied coachId is never trusted.
+  const whereClauses = [eq(sessionsBilling.coachId, coachId)];
+  if (filters.from) {
+    whereClauses.push(
+      gte(sessionsBilling.startAt, parsePfaInput(filters.from, "00:00")),
+    );
+  }
+  if (filters.to) {
+    // `to` is an inclusive day — convert to the exclusive next-PFA-midnight
+    // bound (facility TZ, DST-safe) so sessions on the To date are included.
+    whereClauses.push(
+      lt(sessionsBilling.startAt, pfaDayEnd(parsePfaInput(filters.to, "00:00"))),
+    );
+  }
+  if (filters.resourceId) {
+    whereClauses.push(eq(sessionsBilling.resourceId, filters.resourceId));
+  }
+  if (filters.useType) {
+    whereClauses.push(eq(sessionsBilling.useType, filters.useType));
+  }
+  const where = and(...whereClauses);
+
+  // Unfiltered "does this coach have ANY sessions?" check — decides whether
+  // to show the first-run CTA vs the filter bar. Kept separate from the
+  // filtered count so an empty filter result still shows the bar (to clear).
+  const [{ count: lifetimeCount }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(sessionsBilling)
-    .where(eq(sessionsBilling.coachId, session.user.id));
-  const totalCount = count;
-  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+    .where(eq(sessionsBilling.coachId, coachId));
 
-  // Empty path skips the rest — render the friendly CTA card and exit.
-  if (totalCount === 0) {
+  // First-run path: this coach has never logged a session. Skip filters
+  // entirely and show the friendly CTA.
+  if (lifetimeCount === 0) {
     return (
       <>
-        <div className="max-w-2xl">
+        <div className="max-w-2xl mx-auto">
           <BackLink />
           <PageHeader />
           <EmptyState />
@@ -52,7 +107,11 @@ export default async function CoachSessionsPage({
     );
   }
 
-  const [rawRows, activeResources] = await Promise.all([
+  const [[{ count }], rawRows] = await Promise.all([
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(sessionsBilling)
+      .where(where),
     db
       .select({
         id: sessionsBilling.id,
@@ -69,20 +128,14 @@ export default async function CoachSessionsPage({
       })
       .from(sessionsBilling)
       .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
-      .where(eq(sessionsBilling.coachId, session.user.id))
+      .where(where)
       .orderBy(desc(sessionsBilling.startAt))
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
-    db
-      .select({
-        id: resources.id,
-        name: resources.name,
-        type: resources.type,
-      })
-      .from(resources)
-      .where(eq(resources.active, true))
-      .orderBy(resources.sortOrder),
   ]);
+
+  const totalCount = count;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   const rows: HistoryRow[] = rawRows.map((r) => ({
     id: r.id,
@@ -98,11 +151,9 @@ export default async function CoachSessionsPage({
     isOnline: r.isOnline,
   }));
 
-  const resourceOptions: ResourceOption[] = activeResources;
-
   return (
     <>
-      <div className="max-w-2xl">
+      <div className="max-w-2xl mx-auto">
         <BackLink />
         <PageHeader />
         <SessionsHistoryClient
@@ -111,6 +162,7 @@ export default async function CoachSessionsPage({
           page={page}
           totalPages={totalPages}
           totalCount={totalCount}
+          filters={filters}
         />
       </div>
     </>

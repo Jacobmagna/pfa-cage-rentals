@@ -9,16 +9,18 @@ import {
   EditSessionDialog,
   type SessionInitial,
 } from "./edit-session-dialog";
+import { HistoryFilters } from "./history-filters";
 import type { ResourceOption } from "./types";
+import { buildHistoryQuery, type HistoryFilters as HistoryFilterSet } from "../filters.logic";
 import { TeamRentalBadge } from "@/app/_components/team-rental-badge";
 import { PfaReferredBadge } from "@/app/_components/pfa-referred-badge";
 import { OnlineBadge } from "@/app/_components/online-badge";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 
 // Renders the history list, owns the edit-dialog open/close + the
-// row delete pending state. Pagination links are server-side
-// (?page=N) so the URL is shareable; we just style the prev/next
-// affordances.
+// row delete pending state. Pagination links are server-side and
+// PRESERVE the active filters (built via buildHistoryQuery) so the
+// URL is shareable; we just style the prev/next affordances.
 
 export type HistoryRow = {
   id: string;
@@ -40,12 +42,14 @@ export function SessionsHistoryClient({
   page,
   totalPages,
   totalCount,
+  filters,
 }: {
   rows: HistoryRow[];
   resources: ResourceOption[];
   page: number;
   totalPages: number;
   totalCount: number;
+  filters: HistoryFilterSet;
 }) {
   const [editingRow, setEditingRow] = useState<HistoryRow | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -99,91 +103,102 @@ export function SessionsHistoryClient({
         </Link>
       </div>
 
-      <ul className="space-y-2.5">
-        {rows.map((row) => {
-          const isPendingDelete = pendingDeleteId === row.id;
-          return (
-            <li
-              key={row.id}
-              className={`rounded-xl border border-line bg-surface p-4 shadow-[var(--shadow-sm)] transition hover:shadow-[var(--shadow-md)] ${
-                isPendingDelete ? "opacity-50" : ""
-              }`}
-            >
-              <div className="flex items-start justify-between gap-3">
+      <HistoryFilters
+        resources={resources}
+        values={{
+          from: filters.from,
+          to: filters.to,
+          resourceId: filters.resourceId,
+          useType: filters.useType,
+        }}
+        isFiltered={filters.isFiltered}
+      />
+
+      {rows.length === 0 ? (
+        <div className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] p-8 text-center">
+          <p className="text-sm text-fg-muted">
+            No sessions match these filters.
+          </p>
+          <Link
+            href="/coach/sessions"
+            className="mt-3 inline-flex items-center justify-center rounded-lg border border-line bg-surface-2 px-4 h-9 text-sm font-medium text-fg hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          >
+            Clear filters
+          </Link>
+        </div>
+      ) : (
+        <ul className="divide-y divide-line rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] overflow-hidden">
+          {rows.map((row) => {
+            const isPendingDelete = pendingDeleteId === row.id;
+            return (
+              <li
+                key={row.id}
+                className={`flex items-center gap-3 px-3.5 py-2.5 transition hover:bg-surface-2 ${
+                  isPendingDelete ? "opacity-50" : ""
+                }`}
+              >
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs uppercase tracking-wider text-fg-muted">
-                    {formatDate(row.startAt)}
-                  </p>
-                  <p className="mt-0.5 text-sm font-medium tabular-nums text-fg">
-                    {formatTimeRange(row.startAt, row.endAt)}
-                  </p>
-                  <p className="mt-1.5 text-sm text-fg-muted">
-                    {row.resourceName}
-                    {row.useType ? (
-                      <>
-                        {" · "}
-                        <span className="capitalize">{row.useType}</span>
-                      </>
-                    ) : null}
-                    {row.isTeamRental ? (
-                      <>
-                        {" · "}
-                        <TeamRentalBadge />
-                      </>
-                    ) : null}
-                    {row.pfaReferred ? (
-                      <>
-                        {" · "}
-                        <PfaReferredBadge />
-                      </>
-                    ) : null}
-                    {row.isOnline ? (
-                      <>
-                        {" · "}
-                        <OnlineBadge />
-                      </>
-                    ) : null}
-                  </p>
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className="text-xs font-medium uppercase tracking-wider text-fg-muted whitespace-nowrap">
+                      {formatDate(row.startAt)}
+                    </span>
+                    <span className="text-sm font-medium tabular-nums text-fg whitespace-nowrap">
+                      {formatTimeRange(row.startAt, row.endAt)}
+                    </span>
+                    <span className="text-sm text-fg-muted truncate">
+                      {row.resourceName}
+                      {row.useType ? (
+                        <>
+                          {" · "}
+                          <span className="capitalize">{row.useType}</span>
+                        </>
+                      ) : null}
+                    </span>
+                    {row.isTeamRental ? <TeamRentalBadge /> : null}
+                    {row.pfaReferred ? <PfaReferredBadge /> : null}
+                    {row.isOnline ? <OnlineBadge /> : null}
+                  </div>
                   {row.note ? (
-                    <p className="mt-1.5 text-xs text-fg-subtle leading-snug">
+                    <p
+                      className="mt-0.5 text-xs text-fg-subtle leading-snug truncate"
+                      title={row.note}
+                    >
                       {row.note}
                     </p>
                   ) : null}
                 </div>
 
-                <div className="text-right whitespace-nowrap">
-                  <p className="text-sm font-mono tabular-nums text-fg-muted">
-                    {formatDuration(row.startAt, row.endAt)}
-                  </p>
-                </div>
-              </div>
+                <span className="text-xs font-mono tabular-nums text-fg-muted whitespace-nowrap">
+                  {formatDuration(row.startAt, row.endAt)}
+                </span>
 
-              <div className="mt-3 flex items-center justify-end gap-1">
-                <button
-                  type="button"
-                  onClick={() => setEditingRow(row)}
-                  disabled={isPendingDelete}
-                  className="inline-flex items-center justify-center h-10 w-10 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
-                  aria-label="Edit session"
-                  title="Edit"
-                >
-                  <Pencil className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onDelete(row)}
-                  disabled={isPendingDelete}
-                  className="inline-flex items-center justify-center h-10 w-10 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors disabled:opacity-40"
-                  aria-label="Delete session"
-                  title="Delete"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+                <div className="flex items-center gap-0.5 whitespace-nowrap">
+                  <button
+                    type="button"
+                    onClick={() => setEditingRow(row)}
+                    disabled={isPendingDelete}
+                    className="inline-flex items-center justify-center h-9 w-9 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
+                    aria-label="Edit session"
+                    title="Edit"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(row)}
+                    disabled={isPendingDelete}
+                    className="inline-flex items-center justify-center h-9 w-9 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors disabled:opacity-40"
+                    aria-label="Delete session"
+                    title="Delete"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
 
       {totalPages > 1 ? (
         <nav
@@ -191,7 +206,11 @@ export function SessionsHistoryClient({
           aria-label="Pagination"
         >
           <PaginationLink
-            href={page > 1 ? `/coach/sessions?page=${page - 1}` : null}
+            href={
+              page > 1
+                ? buildHistoryQuery({ ...filters, page: page - 1 })
+                : null
+            }
             label="Previous"
             icon="left"
           />
@@ -200,7 +219,9 @@ export function SessionsHistoryClient({
           </span>
           <PaginationLink
             href={
-              page < totalPages ? `/coach/sessions?page=${page + 1}` : null
+              page < totalPages
+                ? buildHistoryQuery({ ...filters, page: page + 1 })
+                : null
             }
             label="Next"
             icon="right"

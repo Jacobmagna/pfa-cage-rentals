@@ -124,6 +124,12 @@ function buildSeriesInput(formData: FormData) {
     explicitStartsOn && explicitStartsOn.length > 0
       ? explicitStartsOn
       : (formData.get("date")?.toString().trim() ?? "");
+  // QA10 W3.1b: recurrence pattern. The dialog submits hidden `frequency`
+  // ("weekly"|"monthly") + `interval` (≥1) fields. Forward them only when
+  // present so a payload omitting them falls back to the zod defaults
+  // (weekly/1) — preserving today's every-week behavior for old callers.
+  const frequencyRaw = formData.get("frequency")?.toString().trim();
+  const intervalRaw = formData.get("interval")?.toString().trim();
   return {
     programId: formData.get("programId")?.toString() ?? "",
     scheduledCoachId: formData.get("scheduledCoachId")?.toString() ?? "",
@@ -134,6 +140,8 @@ function buildSeriesInput(formData: FormData) {
     endTime: formData.get("endTime")?.toString().trim() ?? "",
     startsOn,
     endsOn: formData.get("endsOn")?.toString().trim() ?? "",
+    ...(frequencyRaw ? { frequency: frequencyRaw } : {}),
+    ...(intervalRaw ? { interval: intervalRaw } : {}),
     note: note.length > 0 ? note : null,
   };
 }

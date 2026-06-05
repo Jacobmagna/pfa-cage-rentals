@@ -131,6 +131,10 @@ export default async function ProgramsSchedulePage({
             endTime: programScheduleSeries.endTime,
             startsOn: programScheduleSeries.startsOn,
             endsOn: programScheduleSeries.endsOn,
+            // QA10 W3.1b: recurrence pattern, so the edit-series form opens
+            // on the series' current frequency/interval.
+            frequency: programScheduleSeries.frequency,
+            interval: programScheduleSeries.interval,
             note: programScheduleSeries.note,
           })
           .from(programScheduleSeries)

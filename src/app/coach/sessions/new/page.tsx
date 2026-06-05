@@ -29,7 +29,7 @@ export default async function NewSessionPage() {
 
   return (
     <>
-      <div className="max-w-md">
+      <div className="max-w-md mx-auto">
         <Link
           href="/coach"
           className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"

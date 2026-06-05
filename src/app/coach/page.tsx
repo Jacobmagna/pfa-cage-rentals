@@ -64,7 +64,7 @@ export default async function CoachHome() {
   );
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-2xl mx-auto">
       <header className="mb-10">
         <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
           {formatPfaDateLong(now)}

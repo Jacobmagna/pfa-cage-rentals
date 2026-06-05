@@ -98,7 +98,7 @@ export default async function CoachSessionsPage({
   if (lifetimeCount === 0) {
     return (
       <>
-        <div className="max-w-2xl">
+        <div className="max-w-2xl mx-auto">
           <BackLink />
           <PageHeader />
           <EmptyState />
@@ -153,7 +153,7 @@ export default async function CoachSessionsPage({
 
   return (
     <>
-      <div className="max-w-2xl">
+      <div className="max-w-2xl mx-auto">
         <BackLink />
         <PageHeader />
         <SessionsHistoryClient

@@ -22,11 +22,11 @@ export default async function AdminImportPage() {
   return (
     <>
       <Link
-        href="/admin"
+        href="/admin/records"
         className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
-        Back
+        Back to Billing &amp; Records
       </Link>
 
       <div className="space-y-2 mb-8">

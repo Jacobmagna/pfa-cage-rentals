@@ -170,11 +170,11 @@ export default async function ProgramsSchedulePage({
   return (
     <>
       <Link
-        href="/admin"
+        href="/admin/hour-log"
         className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
-        Back
+        Back to Hour Log
       </Link>
 
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">

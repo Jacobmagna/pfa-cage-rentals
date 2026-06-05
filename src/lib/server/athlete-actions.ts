@@ -133,35 +133,43 @@ export async function deleteAthleteInternal(
 
 export type AssignAthletesSummary = {
   mode: "add" | "move";
-  programId: string;
+  programIds: string[];
   added: number;
   removed: number;
 };
 
-// Assign selected athletes to one program (DEC-21). The program must
-// exist + be active. Neon-http has no transactions, so we issue
-// sequential statements (repo convention) and audit each *effective*
-// change as an "athlete_program" row keyed `${athleteId}:${programId}`.
+// Assign selected athletes to one OR MORE programs (DEC-21; QA10 W2.2).
+// Every selected program must exist + be active. Neon-http has no
+// transactions, so we issue sequential statements (repo convention) and
+// audit each *effective* change as an "athlete_program" row keyed
+// `${athleteId}:${programId}`.
 //
-//   add  — onConflictDoNothing insert per athlete; we re-read the PK to
-//          tell a real insert from a no-op so we only audit + count the
-//          assignments that actually landed (idempotent).
+//   add  — for each selected program, onConflictDoNothing insert per
+//          athlete; we re-read the PK to tell a real insert from a no-op so
+//          we only audit + count the assignments that actually landed
+//          (idempotent). Keeps any existing (unselected) assignments.
 //   move — delete ALL the athlete's athlete_programs rows (auditing each
-//          removal), then insert the single target row.
+//          removal), then insert the selected target rows.
+//
+// The cap (when enabled) applies to EVERY selected (athlete × program)
+// enrollment created/updated in this submit.
 export async function assignAthletesToProgramInternal(
   actor: AuthedSession["user"],
   input: unknown,
 ): Promise<AssignAthletesSummary> {
   const parsed = assignAthletesToProgramSchema.parse(input);
 
-  const [program] = await db
-    .select()
-    .from(programs)
-    .where(eq(programs.id, parsed.programId))
-    .limit(1);
-  if (!program) throw new ProgramNotFoundError(parsed.programId);
-  if (!program.active) {
-    throw new ProgramInactiveError(program.id, program.name);
+  // Validate every selected program exists + is active before any write.
+  for (const programId of parsed.programIds) {
+    const [program] = await db
+      .select()
+      .from(programs)
+      .where(eq(programs.id, programId))
+      .limit(1);
+    if (!program) throw new ProgramNotFoundError(programId);
+    if (!program.active) {
+      throw new ProgramInactiveError(program.id, program.name);
+    }
   }
 
   let added = 0;
@@ -194,21 +202,23 @@ export async function assignAthletesToProgramInternal(
       }
     }
 
-    // Insert the target assignment idempotently (composite PK).
-    const inserted = await db
-      .insert(athletePrograms)
-      .values({ athleteId, programId: parsed.programId })
-      .onConflictDoNothing()
-      .returning();
-    if (inserted.length > 0) {
-      added += 1;
-      await safeLogAudit(db, {
-        actorUserId: actor.id,
-        entityType: "athlete_program",
-        entityId: `${athleteId}:${parsed.programId}`,
-        action: "create",
-        after: inserted[0] as unknown as Record<string, unknown>,
-      });
+    // Insert each selected target assignment idempotently (composite PK).
+    for (const programId of parsed.programIds) {
+      const inserted = await db
+        .insert(athletePrograms)
+        .values({ athleteId, programId })
+        .onConflictDoNothing()
+        .returning();
+      if (inserted.length > 0) {
+        added += 1;
+        await safeLogAudit(db, {
+          actorUserId: actor.id,
+          entityType: "athlete_program",
+          entityId: `${athleteId}:${programId}`,
+          action: "create",
+          after: inserted[0] as unknown as Record<string, unknown>,
+        });
+      }
     }
   }
 
@@ -216,9 +226,10 @@ export async function assignAthletesToProgramInternal(
   // The assign form is the single source of an enrollment's cap: when the
   // box is checked we have both cap + capPeriod and write them; when it's
   // unchecked both are absent and we clear them to NULL. This UPDATE runs
-  // unconditionally over the assigned athletes so the form can set, change,
-  // OR clear the cap on every submit (idempotent for already-enrolled
-  // athletes in "add" mode too).
+  // unconditionally over the assigned athletes × selected programs so the
+  // form can set, change, OR clear the cap on every submit (idempotent for
+  // already-enrolled athletes in "add" mode too). The same cap applies to
+  // every selected program (per-program caps are out of scope — follow-up).
   const cap = parsed.cap ?? null;
   const capPeriod = parsed.capPeriod ?? null;
   await db
@@ -226,12 +237,12 @@ export async function assignAthletesToProgramInternal(
     .set({ cap, capPeriod })
     .where(
       and(
-        eq(athletePrograms.programId, parsed.programId),
+        inArray(athletePrograms.programId, parsed.programIds),
         inArray(athletePrograms.athleteId, parsed.athleteIds),
       ),
     );
 
-  return { mode: parsed.mode, programId: parsed.programId, added, removed };
+  return { mode: parsed.mode, programIds: parsed.programIds, added, removed };
 }
 
 export type ArchiveAthletesSummary = { changed: number };

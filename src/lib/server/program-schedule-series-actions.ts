@@ -107,6 +107,8 @@ export async function createProgramScheduleSeriesInternal(
     endTime: parsed.endTime,
     startsOn: parsed.startsOn,
     endsOn: parsed.endsOn,
+    frequency: parsed.frequency,
+    interval: parsed.interval,
   });
 
   const [series] = await db
@@ -115,6 +117,8 @@ export async function createProgramScheduleSeriesInternal(
       programId: parsed.programId,
       scheduledCoachId: parsed.scheduledCoachId,
       daysOfWeek: parsed.daysOfWeek,
+      frequency: parsed.frequency,
+      interval: parsed.interval,
       startTime: parsed.startTime,
       endTime: parsed.endTime,
       startsOn: parsed.startsOn,
@@ -195,6 +199,8 @@ export async function editProgramScheduleSeriesInternal(
     endTime: parsed.endTime,
     startsOn: parsed.startsOn,
     endsOn: parsed.endsOn,
+    frequency: parsed.frequency,
+    interval: parsed.interval,
     skipDates: existing.skipDates,
   });
   const futureOccurrences = allOccurrences.filter((o) => o.date >= today);
@@ -205,6 +211,8 @@ export async function editProgramScheduleSeriesInternal(
       scheduledCoachId: parsed.scheduledCoachId,
       programId: parsed.programId,
       daysOfWeek: parsed.daysOfWeek,
+      frequency: parsed.frequency,
+      interval: parsed.interval,
       startTime: parsed.startTime,
       endTime: parsed.endTime,
       startsOn: parsed.startsOn,

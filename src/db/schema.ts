@@ -38,6 +38,17 @@ export const enrollmentCapPeriod = pgEnum("enrollment_cap_period", [
   "total",
 ]);
 
+// RECUR-a recurrence frequency for program_schedule_series.frequency.
+// "weekly" = the original every-N-weeks model (daysOfWeek expanded each
+// week whose index is a multiple of `interval`); "monthly" = same-weekday
+// monthly (e.g. "2nd Tuesday each month", weekday + ordinal derived from
+// startsOn, stepping by `interval` months). Defaults to "weekly" so every
+// pre-existing series row keeps today's behavior unchanged.
+export const recurrenceFrequency = pgEnum("recurrence_frequency", [
+  "weekly",
+  "monthly",
+]);
+
 // `deletedAt`: soft-delete timestamp for the J9 GDPR-style account-
 // removal flow. NULL = active. When set, the row is anonymized:
 // `name` becomes "Former coach" and `email` becomes
@@ -693,6 +704,13 @@ export const programScheduleSeries = pgTable("program_schedule_series", {
     .notNull()
     .references(() => users.id),
   daysOfWeek: integer("days_of_week").array().notNull(),
+  // RECUR-a frequency + interval. "weekly" with interval N = every N
+  // weeks; "monthly" with interval N = the same weekday/ordinal every N
+  // months. Both default to weekly/1 so existing rows are unchanged.
+  // interval >= 1 is enforced in the zod schema + the pure generator
+  // (no DB CHECK; the codebase enforces such invariants in app code).
+  frequency: recurrenceFrequency("frequency").notNull().default("weekly"),
+  interval: integer("recurrence_interval").notNull().default(1),
   startTime: text("start_time").notNull(),
   endTime: text("end_time").notNull(),
   startsOn: text("starts_on").notNull(),

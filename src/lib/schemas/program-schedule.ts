@@ -77,6 +77,16 @@ const programScheduleSeriesShape = {
   endTime: z.string().regex(TIME_RE, "endTime must be HH:MM (24h)"),
   startsOn: z.string().regex(DATE_RE, "startsOn must be YYYY-MM-DD"),
   endsOn: z.string().regex(DATE_RE, "endsOn must be YYYY-MM-DD"),
+  // RECUR-a recurrence frequency + interval. Both default to weekly/1 so
+  // a payload omitting them reproduces today's weekly-every-week
+  // behavior (back-compat). interval is coerced to an integer ≥ 1 (the
+  // generator enforces the same invariant).
+  frequency: z.enum(["weekly", "monthly"]).default("weekly"),
+  interval: z.coerce
+    .number()
+    .int("interval must be a whole number")
+    .min(1, "interval must be at least 1")
+    .default(1),
   note: z.string().max(200, "Note is at most 200 characters").nullish(),
 };
 

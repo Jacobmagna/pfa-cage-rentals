@@ -1,7 +1,15 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Archive, Pencil, Trash2, Users } from "lucide-react";
+import {
+  Archive,
+  ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
+  Pencil,
+  Trash2,
+  Users,
+} from "lucide-react";
 import {
   AthleteEditDialog,
   type AthleteEditInitialValues,
@@ -11,6 +19,11 @@ import { archiveAthletesAction, deleteAthleteAction } from "../form-actions";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 import { ListSearch } from "@/app/_components/list-search";
 import { nameFields, nameMatchesQuery } from "@/app/_components/list-search.logic";
+import {
+  sortAthletes,
+  type SortDir,
+  type SortKey,
+} from "./roster-sort.logic";
 
 export type ProgramOption = {
   id: string;
@@ -49,6 +62,8 @@ export function RosterClient({
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [isArchiving, startArchiveTransition] = useTransition();
   const [query, setQuery] = useState("");
+  // null = no header clicked yet → keep the incoming order.
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir } | null>(null);
 
   // Client-side name filter over the already-loaded rows. Composes with
   // the server-side term filter (?term=): the term narrows what the
@@ -60,6 +75,23 @@ export function RosterClient({
       ),
     [athletes, query],
   );
+
+  // Apply the column sort AFTER the name search: search narrows, sort
+  // orders. With no active sort we display the incoming order untouched.
+  const sorted = useMemo(
+    () => (sort ? sortAthletes(filtered, sort.key, sort.dir) : filtered),
+    [filtered, sort],
+  );
+
+  // Click a sortable header: activate it (asc), or toggle asc⇄desc if it
+  // is already the active column.
+  const toggleSort = (key: SortKey) => {
+    setSort((prev) =>
+      prev && prev.key === key
+        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "asc" },
+    );
+  };
 
   // Drop any selected ids that no longer exist after a revalidation
   // (e.g. an athlete was deleted). Keeps the bulk bar honest.
@@ -221,15 +253,24 @@ export function RosterClient({
                   className="h-4 w-4 accent-gold"
                 />
               </th>
-              <th scope="col" className="px-4 py-3 text-left font-semibold">
-                First
-              </th>
-              <th scope="col" className="px-4 py-3 text-left font-semibold">
-                Last
-              </th>
-              <th scope="col" className="px-4 py-3 text-left font-semibold">
-                Birthday
-              </th>
+              <SortableTh
+                label="First"
+                sortKey="firstName"
+                sort={sort}
+                onToggle={toggleSort}
+              />
+              <SortableTh
+                label="Last"
+                sortKey="lastName"
+                sort={sort}
+                onToggle={toggleSort}
+              />
+              <SortableTh
+                label="Birthday"
+                sortKey="birthday"
+                sort={sort}
+                onToggle={toggleSort}
+              />
               <th scope="col" className="px-4 py-3 text-left font-semibold">
                 Term
               </th>
@@ -245,7 +286,7 @@ export function RosterClient({
             </tr>
           </thead>
           <tbody>
-            {filtered.map((row) => {
+            {sorted.map((row) => {
               const isPendingDelete = pendingDeleteId === row.id;
               const isSelected = selectedIds.includes(row.id);
               return (
@@ -392,6 +433,51 @@ export function RosterClient({
         isPending={isArchiving}
       />
     </>
+  );
+}
+
+// A sortable column header: a keyboard-accessible <button> inside the
+// <th> that toggles the sort, with an arrow showing the active direction
+// and aria-sort on the active column for screen readers.
+function SortableTh({
+  label,
+  sortKey,
+  sort,
+  onToggle,
+}: {
+  label: string;
+  sortKey: SortKey;
+  sort: { key: SortKey; dir: SortDir } | null;
+  onToggle: (key: SortKey) => void;
+}) {
+  const active = sort?.key === sortKey;
+  const dir = active ? sort.dir : null;
+  return (
+    <th
+      scope="col"
+      aria-sort={
+        dir === "asc" ? "ascending" : dir === "desc" ? "descending" : "none"
+      }
+      className="px-4 py-3 text-left font-semibold"
+    >
+      <button
+        type="button"
+        onClick={() => onToggle(sortKey)}
+        className="-mx-1 inline-flex items-center gap-1 rounded px-1 py-0.5 font-semibold uppercase tracking-wider transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+      >
+        {label}
+        {dir === "asc" ? (
+          <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+        ) : dir === "desc" ? (
+          <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+        ) : (
+          <ChevronsUpDown
+            className="h-3.5 w-3.5 text-fg-subtle"
+            aria-hidden="true"
+          />
+        )}
+      </button>
+    </th>
   );
 }
 

@@ -456,7 +456,7 @@ export function SessionFormDialog({
                   name="note"
                   defaultValue={defaults.note}
                   maxLength={500}
-                  placeholder="Optional context (e.g. JP De La Cruz)"
+                  placeholder="Optional context"
                   className={inputStyles}
                 />
               </Field>

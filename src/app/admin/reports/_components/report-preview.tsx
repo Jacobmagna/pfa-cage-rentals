@@ -62,7 +62,7 @@ export function ReportPreview({
                 ) : null}
                 <th scope="col" className="px-4 py-3 text-right font-semibold">Total</th>
                 {includeCageSessions ? (
-                  <th scope="col" className="px-4 py-3 text-center font-semibold">Online</th>
+                  <th scope="col" className="px-4 py-3 text-center font-semibold">Prepaid online</th>
                 ) : null}
               </tr>
             </thead>

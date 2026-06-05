@@ -31,7 +31,7 @@ export function OnlineBadge({
       className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success"
     >
       <Wifi className="h-2.5 w-2.5" strokeWidth={2.5} />
-      Online
+      Prepaid online
     </span>
   );
 }

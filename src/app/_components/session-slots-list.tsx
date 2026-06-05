@@ -221,7 +221,7 @@ export function SessionSlotsList({
                 <SlotPill
                   checked={slot.isOnline}
                   onChange={(v) => updateOnline(i, v)}
-                  label="Online"
+                  label="Prepaid online"
                 />
                 <SlotPill
                   checked={slot.pfaReferred}

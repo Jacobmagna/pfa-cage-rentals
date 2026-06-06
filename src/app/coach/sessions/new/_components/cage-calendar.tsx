@@ -43,11 +43,13 @@ import {
 import {
   formatPfaDate,
   formatPfaDateLong,
+  formatPfaTime12h,
   pfaDayStart,
   pfaWallClockAt,
 } from "@/lib/timezone";
 import { CageSlotBooking } from "./cage-slot-booking";
 import { CageBatchBooking } from "./cage-batch-booking";
+import { Modal } from "@/app/_components/modal";
 
 // Local copies of the schedule-grid type-stripe helper — duplicated per
 // the prompt (don't import from the interactive admin grid).
@@ -107,8 +109,9 @@ export function CageCalendar({
     resourceId: string | null;
     slotIndexes: Set<number>;
   }>({ resourceId: null, slotIndexes: new Set() });
-  // Whether the batch booking form is open for the current selection.
-  const [batchOpen, setBatchOpen] = useState(false);
+  // Whether the booking form modal is open for the current selection
+  // (serves both the single-slot and batch paths).
+  const [formOpen, setFormOpen] = useState(false);
 
   const dateStr = formatPfaDate(selectedDate);
 
@@ -133,13 +136,14 @@ export function CageCalendar({
 
   const clearSelection = () => {
     setSelection({ resourceId: null, slotIndexes: new Set() });
-    setBatchOpen(false);
+    setFormOpen(false);
   };
 
   const resetTransient = () => {
     setSelected(null);
     setRevealed(null);
     setConfirmation(null);
+    setFormOpen(false);
     clearSelection();
   };
 
@@ -224,8 +228,20 @@ export function CageCalendar({
         })
       : false;
 
+  // 12h start time of the single selected slot, for the sticky bar.
+  const selectedStartLabel = selected
+    ? formatPfaTime12h(
+        pfaWallClockAt(
+          selectedDate,
+          slotHourMinute(selected.slotIndex).hour,
+          slotHourMinute(selected.slotIndex).minute,
+        ),
+      )
+    : "";
+
   const handleBooked = () => {
     setSelected(null);
+    setFormOpen(false);
     setConfirmation("Session logged. The slot is now yours (gold).");
     refresh(dateStr);
   };
@@ -234,6 +250,7 @@ export function CageCalendar({
   // the booked slots flip to gold. Stays in multi-select mode.
   const handleBatchBooked = (count: number) => {
     clearSelection();
+    setFormOpen(false);
     setConfirmation(
       `${count} ${count === 1 ? "session" : "sessions"} logged. Those slots are now yours (gold).`,
     );
@@ -244,6 +261,7 @@ export function CageCalendar({
   // turning it ON closes any open single-slot panel / reveal.
   const toggleMultiSelect = () => {
     setConfirmation(null);
+    setFormOpen(false);
     setMultiSelect((on) => {
       if (on) {
         // turning OFF
@@ -261,7 +279,7 @@ export function CageCalendar({
   // resource differs from the active one (with a non-empty set) RESETS
   // the selection to that new resource — one active resource at a time.
   const toggleSelectSlot = (resourceId: string, slotIndex: number) => {
-    setBatchOpen(false);
+    setFormOpen(false);
     setSelection((prev) => {
       // Different resource than the active selection → reset to the new
       // resource with just this slot.
@@ -397,6 +415,48 @@ export function CageCalendar({
         </div>
       ) : null}
 
+      {/* Sticky selection bar — pinned to the top of the viewport as the
+          page scrolls, so a selection always gives instant feedback + a
+          clear "Schedule" action without hunting below the grid. Serves
+          BOTH the single-slot and batch paths. */}
+      {(!multiSelect && selected && selectedResource) ||
+      (multiSelect && selectionCount > 0 && selectionResource) ? (
+        <div className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gold/40 bg-gold/5 px-4 py-3 shadow-[var(--shadow-sm)] backdrop-blur supports-[backdrop-filter]:bg-page/80">
+          <p className="text-sm font-medium text-fg">
+            {multiSelect && selectionResource ? (
+              <>
+                {selectionCount} {selectionCount === 1 ? "slot" : "slots"}{" "}
+                selected ·{" "}
+                <span className="text-fg-muted">{selectionResource.name}</span>
+              </>
+            ) : selectedResource ? (
+              <>
+                1 slot selected ·{" "}
+                <span className="text-fg-muted">{selectedResource.name}</span> ·{" "}
+                <span className="text-fg-muted">{selectedStartLabel}</span>
+              </>
+            ) : null}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => (multiSelect ? clearSelection() : setSelected(null))}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 h-9 text-xs font-medium text-fg-muted hover:text-fg hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            >
+              <X className="h-3.5 w-3.5" />
+              Clear
+            </button>
+            <button
+              type="button"
+              onClick={() => setFormOpen(true)}
+              className="rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            >
+              Schedule
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {/* Grid. */}
       <div className="overflow-x-auto rounded-xl border border-line shadow-[var(--shadow-sm)]">
         <div className="grid bg-surface min-w-fit" style={gridStyle}>
@@ -490,56 +550,38 @@ export function CageCalendar({
         </p>
       </div>
 
-      {/* Selection action bar — visible whenever ≥1 slot is selected. */}
-      {multiSelect && selectionCount > 0 && selectionResource ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gold/40 bg-gold/5 px-4 py-3">
-          <p className="text-sm font-medium text-fg">
-            {selectionCount} {selectionCount === 1 ? "slot" : "slots"} ·{" "}
-            <span className="text-fg-muted">{selectionResource.name}</span>
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={clearSelection}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 h-9 text-xs font-medium text-fg-muted hover:text-fg hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
-            >
-              <X className="h-3.5 w-3.5" />
-              Clear
-            </button>
-            <button
-              type="button"
-              onClick={() => setBatchOpen(true)}
-              className="rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
-            >
-              Book {selectionCount} {selectionCount === 1 ? "slot" : "slots"}
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Booking panel for the selected green slot (single-slot path). */}
-      {!multiSelect && selected && selectedResource ? (
-        <CageSlotBooking
-          resource={selectedResource}
-          selectedDate={selectedDate}
-          slotIndex={selected.slotIndex}
-          canBookOneHour={selectedCanBookHour}
-          onBooked={handleBooked}
-          onCancel={() => setSelected(null)}
-        />
-      ) : null}
-
-      {/* Batch booking form — one shared form for the whole selection. */}
-      {multiSelect && batchOpen && selectionResource && selectionCount > 0 ? (
-        <CageBatchBooking
-          resource={selectionResource}
-          selectedDate={selectedDate}
-          slotIndexes={selection.slotIndexes}
-          onBooked={handleBatchBooked}
-          onCancel={() => setBatchOpen(false)}
-        />
-      ) : null}
-
+      {/* Booking form — surfaced in a centered, backdrop-blurred modal
+          when "Schedule" is pressed. The form components supply their own
+          card chrome (and X / Cancel via onCancel), so the modal renders
+          them unchanged. onCancel closes the modal but KEEPS the selection
+          so the sticky bar stays and they can reopen. */}
+      <Modal
+        open={
+          formOpen &&
+          ((!multiSelect && !!selected && !!selectedResource) ||
+            (multiSelect && selectionCount > 0 && !!selectionResource))
+        }
+        onClose={() => setFormOpen(false)}
+      >
+        {!multiSelect && selected && selectedResource ? (
+          <CageSlotBooking
+            resource={selectedResource}
+            selectedDate={selectedDate}
+            slotIndex={selected.slotIndex}
+            canBookOneHour={selectedCanBookHour}
+            onBooked={handleBooked}
+            onCancel={() => setFormOpen(false)}
+          />
+        ) : multiSelect && selectionResource && selectionCount > 0 ? (
+          <CageBatchBooking
+            resource={selectionResource}
+            selectedDate={selectedDate}
+            slotIndexes={selection.slotIndexes}
+            onBooked={handleBatchBooked}
+            onCancel={() => setFormOpen(false)}
+          />
+        ) : null}
+      </Modal>
     </div>
   );
 }

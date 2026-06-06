@@ -26,7 +26,7 @@ export async function AppShell({
 
   return (
     <>
-      <header className="sticky top-0 z-40 h-16 border-b border-line bg-page/80 backdrop-blur-md">
+      <header className="sticky top-0 z-40 h-16 border-b border-white/10 bg-black backdrop-blur-md">
         <div className="mx-auto flex h-full items-center justify-between gap-4 px-6 lg:px-8 2xl:px-12">
           <div className="flex min-w-0 items-center gap-3">
             <Link
@@ -42,10 +42,9 @@ export async function AppShell({
                 className="h-7 w-7 object-contain"
               />
               <span className="font-semibold tracking-tight text-[17px]">
-                <span className="text-fg">PFA</span>{" "}
-                <span className="text-gold-strong">Engine</span>
+                <span className="text-yellow">Engine</span>
               </span>
-              <span className="hidden sm:inline text-[10px] uppercase tracking-[0.18em] text-fg-subtle border-l border-line pl-2">
+              <span className="hidden sm:inline text-[10px] uppercase tracking-[0.18em] text-white/55 border-l border-white/20 pl-2">
                 {role}
               </span>
             </Link>
@@ -56,7 +55,7 @@ export async function AppShell({
           </div>
 
           <div className="flex shrink-0 items-center gap-4">
-            <span className="hidden sm:inline text-xs text-fg-muted">
+            <span className="hidden sm:inline text-xs text-white/70">
               {displayName}
             </span>
             <form
@@ -67,7 +66,7 @@ export async function AppShell({
             >
               <button
                 type="submit"
-                className="rounded-lg border border-line-strong bg-surface text-fg-muted hover:text-fg hover:-translate-y-px shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] h-9 px-3.5 text-[13px] font-medium"
+                className="rounded-lg border border-white/20 bg-white/5 text-white/80 hover:text-white hover:bg-white/10 h-9 px-3.5 text-[13px] font-medium"
               >
                 Sign out
               </button>

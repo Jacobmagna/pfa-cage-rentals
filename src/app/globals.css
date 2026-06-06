@@ -52,6 +52,11 @@
   --color-gold-ink: #0a0a0a;
   --color-gold-strong: #8a6206;
 
+  /* Brand yellow (W3-polish14): bright golden-yellow used ONLY on the
+   * black-backed nav + sign-in surfaces. Exposes text-yellow / bg-yellow /
+   * bg-yellow/15 / ring-yellow utilities. Additive — does not touch gold. */
+  --color-yellow: #FFC400;
+
   /* Status colors darkened from the dark-theme values so they read on
    * white. AA 4.5:1 on page/surface (and ~surface-2); status pills use
    * far-lighter /10 tints, so real pill backgrounds are safer still:

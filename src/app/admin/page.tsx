@@ -27,6 +27,8 @@ import {
   programs,
   programScheduleBlockCoaches,
   programScheduleBlocks,
+  programScheduleSeries,
+  programScheduleSeriesCoaches,
   resources,
   sessionsBilling,
   users,
@@ -64,6 +66,12 @@ import {
   type MasterSession,
 } from "@/app/admin/_components/master-schedule-grid";
 import { EditableMasterSchedule } from "@/app/admin/_components/editable-master-schedule";
+import type { SessionFormInitialValues } from "@/app/admin/sessions/_components/session-form-dialog";
+import type { BlockEditInitialValues } from "@/app/admin/schedule/_components/block-edit-dialog";
+import type {
+  ProgramBlockEditInitial,
+  SeriesView,
+} from "@/app/admin/hour-log/schedule/_components/program-block-dialog";
 import { AutoRefresh } from "@/app/admin/schedule/_components/auto-refresh";
 import { WeekNav } from "@/app/admin/schedule/_components/week-nav";
 
@@ -198,12 +206,16 @@ export default async function AdminHome({
       .select({
         id: sessionsBilling.id,
         resourceId: sessionsBilling.resourceId,
+        coachId: sessionsBilling.coachId,
         coachName: users.name,
         coachEmail: users.email,
         startAt: sessionsBilling.startAt,
         endAt: sessionsBilling.endAt,
         useType: sessionsBilling.useType,
+        note: sessionsBilling.note,
         isTeamRental: sessionsBilling.isTeamRental,
+        pfaReferred: sessionsBilling.pfaReferred,
+        isOnline: sessionsBilling.isOnline,
       })
       .from(sessionsBilling)
       .innerJoin(users, eq(sessionsBilling.coachId, users.id))
@@ -243,6 +255,7 @@ export default async function AdminHome({
         coachEmail: users.email,
         startAt: programScheduleBlocks.startAt,
         endAt: programScheduleBlocks.endAt,
+        note: programScheduleBlocks.note,
         seriesId: programScheduleBlocks.seriesId,
       })
       .from(programScheduleBlocks)
@@ -352,6 +365,45 @@ export default async function AdminHome({
     name: p.name,
   }));
 
+  // QA10 W3.9: SessionFormInitialValues for each visible cage session, keyed
+  // by id. Feeds SessionFormDialog (mode="edit") when a session bar is clicked
+  // on the Home Master Schedule. Shape mirrors the standalone schedule's edit.
+  const sessionEditById: Record<string, SessionFormInitialValues> =
+    Object.fromEntries(
+      sessionRows.map((s) => [
+        s.id,
+        {
+          id: s.id,
+          coachId: s.coachId,
+          resourceId: s.resourceId,
+          startAt: s.startAt,
+          endAt: s.endAt,
+          useType: s.useType,
+          note: s.note,
+          isTeamRental: s.isTeamRental,
+          pfaReferred: s.pfaReferred,
+          isOnline: s.isOnline,
+        },
+      ]),
+    );
+
+  // QA10 W3.9: BlockEditInitialValues for each visible blocked-time, keyed by
+  // id. Feeds BlockEditDialog when a blocked-time bar is clicked. The master
+  // blocked rows already carry everything the dialog needs.
+  const blockEditById: Record<string, BlockEditInitialValues> =
+    Object.fromEntries(
+      blockRows.map((b) => [
+        b.id,
+        {
+          id: b.id,
+          resourceId: b.resourceId,
+          startAt: b.startAt,
+          endAt: b.endAt,
+          reason: b.reason,
+        },
+      ]),
+    );
+
   // QA10 W3.6: dialog option lists for the editable Home grid. Shapes MIRROR
   // the standalone pages exactly:
   //   - cage dialog (ScheduleCreateDialog): sessions-client CoachOption +
@@ -404,6 +456,136 @@ export default async function AdminHome({
     if (!list || list.length === 0) return [primary];
     return [primary, ...list.filter((c) => c.coachId !== b.scheduledCoachId)];
   };
+
+  // QA10 W3.9: occupied-resource ids per visible block, from its LINKED
+  // blocked_times (program_schedule_block_id), so the edit dialog can prefill
+  // the occupancy checkboxes. Mirrors /admin/hour-log/schedule/page.tsx.
+  const blockOccupancyRows =
+    programBlockIds.length > 0
+      ? await db
+          .select({
+            programScheduleBlockId: blockedTimes.programScheduleBlockId,
+            resourceId: blockedTimes.resourceId,
+          })
+          .from(blockedTimes)
+          .where(
+            inArray(blockedTimes.programScheduleBlockId, programBlockIds),
+          )
+      : [];
+  const resourceIdsByBlock = new Map<string, string[]>();
+  for (const r of blockOccupancyRows) {
+    if (!r.programScheduleBlockId) continue;
+    const list = resourceIdsByBlock.get(r.programScheduleBlockId) ?? [];
+    if (!list.includes(r.resourceId)) list.push(r.resourceId);
+    resourceIdsByBlock.set(r.programScheduleBlockId, list);
+  }
+
+  // QA10 W3.9: for any block that is a series occurrence, fetch its parent
+  // series + coach set + occupied resources so ProgramBlockDialog can show the
+  // recurrence summary and prefill the "Edit series" form. Query only the
+  // distinct non-null seriesIds present today. Mirrors the program-schedule
+  // page's seriesById build.
+  const seriesIds = [
+    ...new Set(
+      programBlockRows
+        .map((b) => b.seriesId)
+        .filter((id): id is string => id !== null),
+    ),
+  ];
+  const seriesRows =
+    seriesIds.length > 0
+      ? await db
+          .select({
+            id: programScheduleSeries.id,
+            programId: programScheduleSeries.programId,
+            scheduledCoachId: programScheduleSeries.scheduledCoachId,
+            daysOfWeek: programScheduleSeries.daysOfWeek,
+            startTime: programScheduleSeries.startTime,
+            endTime: programScheduleSeries.endTime,
+            startsOn: programScheduleSeries.startsOn,
+            endsOn: programScheduleSeries.endsOn,
+            frequency: programScheduleSeries.frequency,
+            interval: programScheduleSeries.interval,
+            note: programScheduleSeries.note,
+          })
+          .from(programScheduleSeries)
+          .where(inArray(programScheduleSeries.id, seriesIds))
+      : [];
+  const seriesCoachRows =
+    seriesIds.length > 0
+      ? await db
+          .select({
+            seriesId: programScheduleSeriesCoaches.seriesId,
+            coachId: programScheduleSeriesCoaches.coachId,
+          })
+          .from(programScheduleSeriesCoaches)
+          .where(inArray(programScheduleSeriesCoaches.seriesId, seriesIds))
+      : [];
+  const seriesCoachIdsBySeries = new Map<string, string[]>();
+  for (const r of seriesCoachRows) {
+    const list = seriesCoachIdsBySeries.get(r.seriesId) ?? [];
+    list.push(r.coachId);
+    seriesCoachIdsBySeries.set(r.seriesId, list);
+  }
+  // Each series' occupied-resource set from ITS OCCURRENCE BLOCKS' linked
+  // blocked_times (no separate series-resources table).
+  const seriesResourceRows =
+    seriesIds.length > 0
+      ? await db
+          .selectDistinct({
+            seriesId: programScheduleBlocks.seriesId,
+            resourceId: blockedTimes.resourceId,
+          })
+          .from(blockedTimes)
+          .innerJoin(
+            programScheduleBlocks,
+            eq(blockedTimes.programScheduleBlockId, programScheduleBlocks.id),
+          )
+          .where(inArray(programScheduleBlocks.seriesId, seriesIds))
+      : [];
+  const resourceIdsBySeries = new Map<string, string[]>();
+  for (const r of seriesResourceRows) {
+    if (!r.seriesId) continue;
+    const list = resourceIdsBySeries.get(r.seriesId) ?? [];
+    if (!list.includes(r.resourceId)) list.push(r.resourceId);
+    resourceIdsBySeries.set(r.seriesId, list);
+  }
+  const seriesById: Record<string, SeriesView> = Object.fromEntries(
+    seriesRows.map((s) => {
+      const extra = (seriesCoachIdsBySeries.get(s.id) ?? []).filter(
+        (id) => id !== s.scheduledCoachId,
+      );
+      return [
+        s.id,
+        {
+          ...s,
+          scheduledCoachIds: [s.scheduledCoachId, ...extra],
+          resourceIds: resourceIdsBySeries.get(s.id) ?? [],
+        },
+      ];
+    }),
+  );
+
+  // QA10 W3.9: ProgramBlockEditInitial for each visible block, keyed by id.
+  // Feeds ProgramBlockDialog (mode="edit"). scheduledCoachIds is primary-first
+  // (reuses coachesForBlock); resourceIds from the occupancy map above.
+  const programEditById: Record<string, ProgramBlockEditInitial> =
+    Object.fromEntries(
+      programBlockRows.map((b) => [
+        b.id,
+        {
+          id: b.id,
+          programId: b.programId,
+          scheduledCoachId: b.scheduledCoachId,
+          scheduledCoachIds: coachesForBlock(b).map((c) => c.coachId),
+          startAt: b.startAt,
+          endAt: b.endAt,
+          note: b.note,
+          seriesId: b.seriesId,
+          resourceIds: resourceIdsByBlock.get(b.id) ?? [],
+        },
+      ]),
+    );
 
   // Reconcile the day's scheduled program blocks against coach hour-logs
   // (FEAT-16). The engine is pure — inject `now` + the PFA time formatter.
@@ -572,6 +754,11 @@ export default async function AdminHome({
               programOptions={masterPrograms}
               programCoaches={activeCoaches}
               programResources={programResourceOptions}
+              sessionEditById={sessionEditById}
+              blockEditById={blockEditById}
+              programEditById={programEditById}
+              seriesById={seriesById}
+              reconciliation={reconciliation}
             />
           </div>
         ) : null}

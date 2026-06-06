@@ -129,6 +129,19 @@ export type EmptyCellClick = (args: {
   slotIndex: number;
 }) => void;
 
+// QA10 W3.9: optional click-to-VIEW/EDIT hook for the existing bars. When
+// provided (by the editable Home wrapper) each session / blocked-time /
+// program-block bar becomes a <button> that reports which kind + id was
+// clicked, so the parent can open the matching edit dialog. When ABSENT the
+// bars stay exactly the read-only <div>s they are today (other read-only /
+// print usages, + the existing tests, are unaffected). Mirrors the
+// onEmptyCellClick pattern: this file imports no dialogs — the handler is
+// owned by the parent.
+export type BlockClick = (b: {
+  kind: "session" | "block" | "program";
+  id: string;
+}) => void;
+
 export function MasterScheduleGrid({
   resources,
   sessions,
@@ -136,6 +149,7 @@ export function MasterScheduleGrid({
   programs,
   programBlocks,
   onEmptyCellClick,
+  onBlockClick,
 }: {
   resources: MasterResourceRow[];
   sessions: MasterSession[];
@@ -143,6 +157,7 @@ export function MasterScheduleGrid({
   programs: MasterProgramRow[];
   programBlocks: MasterProgramBlock[];
   onEmptyCellClick?: EmptyCellClick;
+  onBlockClick?: BlockClick;
 }): React.JSX.Element {
   // Row index per resource / program. Row 1 is the time header; section
   // label rows are inserted between, so we lay each section out in its
@@ -168,6 +183,7 @@ export function MasterScheduleGrid({
             sessions={visibleSessions}
             blocks={visibleBlocks}
             onEmptyCellClick={onEmptyCellClick}
+            onBlockClick={onBlockClick}
           />
         )}
 
@@ -180,6 +196,7 @@ export function MasterScheduleGrid({
             programs={programs}
             blocks={visibleProgramBlocks}
             onEmptyCellClick={onEmptyCellClick}
+            onBlockClick={onBlockClick}
           />
         )}
 
@@ -235,11 +252,13 @@ function ResourceGrid({
   sessions,
   blocks,
   onEmptyCellClick,
+  onBlockClick,
 }: {
   resources: MasterResourceRow[];
   sessions: MasterSession[];
   blocks: MasterBlockedTime[];
   onEmptyCellClick?: EmptyCellClick;
+  onBlockClick?: BlockClick;
 }): React.JSX.Element {
   const rowOf = new Map<string, number>();
   resources.forEach((r, i) => rowOf.set(r.id, i + 1));
@@ -317,18 +336,34 @@ function ResourceGrid({
         const timeLabel = `${formatPfaTime12h(b.startAt)}–${formatPfaTime12h(
           b.endAt,
         )}`;
+        const barClass = [
+          "m-0.5 rounded-md border border-dashed border-danger/60 bg-danger/10 px-2 py-1 text-[11px] text-danger shadow-[var(--shadow-sm)]",
+          "flex items-center min-w-0",
+        ].join(" ");
+        const barStyle = {
+          gridRow: row,
+          gridColumn: `${placement.col} / span ${placement.span}`,
+          zIndex: 1,
+        };
+        if (onBlockClick) {
+          return (
+            <button
+              key={`block-${b.id}`}
+              type="button"
+              onClick={() => onBlockClick({ kind: "block", id: b.id })}
+              className={`${barClass} text-left cursor-pointer transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/50`}
+              style={barStyle}
+              title={`Blocked: ${b.reason} · ${timeLabel} (click for details)`}
+            >
+              <span className="truncate font-medium">{b.reason}</span>
+            </button>
+          );
+        }
         return (
           <div
             key={`block-${b.id}`}
-            className={[
-              "m-0.5 rounded-md border border-dashed border-danger/60 bg-danger/10 px-2 py-1 text-[11px] text-danger shadow-[var(--shadow-sm)]",
-              "flex items-center min-w-0",
-            ].join(" ")}
-            style={{
-              gridRow: row,
-              gridColumn: `${placement.col} / span ${placement.span}`,
-              zIndex: 1,
-            }}
+            className={barClass}
+            style={barStyle}
             title={`Blocked: ${b.reason} · ${timeLabel}`}
           >
             <span className="truncate font-medium">{b.reason}</span>
@@ -355,21 +390,18 @@ function ResourceGrid({
         ]
           .filter(Boolean)
           .join(" · ");
-        return (
-          <div
-            key={`s-${s.id}`}
-            className={[
-              "m-0.5 rounded-md border border-line bg-surface-2 px-2 py-1 text-[11px] text-fg shadow-[var(--shadow-sm)]",
-              "flex items-center gap-1.5 min-w-0",
-              accent,
-            ].join(" ")}
-            style={{
-              gridRow: row,
-              gridColumn: `${placement.col} / span ${placement.span}`,
-              zIndex: 2,
-            }}
-            title={tooltip}
-          >
+        const barClass = [
+          "m-0.5 rounded-md border border-line bg-surface-2 px-2 py-1 text-[11px] text-fg shadow-[var(--shadow-sm)]",
+          "flex items-center gap-1.5 min-w-0",
+          accent,
+        ].join(" ");
+        const barStyle = {
+          gridRow: row,
+          gridColumn: `${placement.col} / span ${placement.span}`,
+          zIndex: 2,
+        };
+        const inner = (
+          <>
             <span className="truncate font-medium">{s.coachName}</span>
             {s.isTeamRental ? (
               <span className="text-[9px] uppercase tracking-wider text-gold-strong shrink-0">
@@ -381,6 +413,30 @@ function ResourceGrid({
                 {s.useType[0]}
               </span>
             ) : null}
+          </>
+        );
+        if (onBlockClick) {
+          return (
+            <button
+              key={`s-${s.id}`}
+              type="button"
+              onClick={() => onBlockClick({ kind: "session", id: s.id })}
+              className={`${barClass} text-left cursor-pointer transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50`}
+              style={barStyle}
+              title={`${tooltip} (click for details)`}
+            >
+              {inner}
+            </button>
+          );
+        }
+        return (
+          <div
+            key={`s-${s.id}`}
+            className={barClass}
+            style={barStyle}
+            title={tooltip}
+          >
+            {inner}
           </div>
         );
       })}
@@ -399,10 +455,12 @@ function ProgramGrid({
   programs,
   blocks,
   onEmptyCellClick,
+  onBlockClick,
 }: {
   programs: MasterProgramRow[];
   blocks: MasterProgramBlock[];
   onEmptyCellClick?: EmptyCellClick;
+  onBlockClick?: BlockClick;
 }): React.JSX.Element {
   const programNameById = new Map(programs.map((p) => [p.id, p.name]));
 
@@ -510,25 +568,46 @@ function ProgramGrid({
         const tooltip = [programLabel, b.coachName, timeLabel]
           .filter(Boolean)
           .join(" · ");
-        return (
-          <div
-            key={`pb-${b.id}`}
-            className={[
-              "m-0.5 rounded-md border border-line px-2 py-1 text-[11px] text-fg shadow-[var(--shadow-sm)]",
-              "flex flex-col justify-center min-w-0 border-l-4",
-              statusAccent(b.status),
-            ].join(" ")}
-            style={{
-              gridRow: lane + 1,
-              gridColumn: `${placement.col} / span ${placement.span}`,
-              zIndex: 2,
-            }}
-            title={tooltip}
-          >
+        const barClass = [
+          "m-0.5 rounded-md border border-line px-2 py-1 text-[11px] text-fg shadow-[var(--shadow-sm)]",
+          "flex flex-col justify-center min-w-0 border-l-4",
+          statusAccent(b.status),
+        ].join(" ");
+        const barStyle = {
+          gridRow: lane + 1,
+          gridColumn: `${placement.col} / span ${placement.span}`,
+          zIndex: 2,
+        };
+        const inner = (
+          <>
             <span className="truncate font-medium">{programLabel}</span>
             <span className="truncate text-[9px] uppercase tracking-wider text-fg-subtle">
               {timeLabel}
             </span>
+          </>
+        );
+        if (onBlockClick) {
+          return (
+            <button
+              key={`pb-${b.id}`}
+              type="button"
+              onClick={() => onBlockClick({ kind: "program", id: b.id })}
+              className={`${barClass} text-left cursor-pointer transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50`}
+              style={barStyle}
+              title={`${tooltip} (click for details)`}
+            >
+              {inner}
+            </button>
+          );
+        }
+        return (
+          <div
+            key={`pb-${b.id}`}
+            className={barClass}
+            style={barStyle}
+            title={tooltip}
+          >
+            {inner}
           </div>
         );
       })}

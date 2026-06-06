@@ -16,6 +16,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   MasterScheduleGrid,
+  type BlockClick,
   type EmptyCellClick,
   type MasterBlockedTime,
   type MasterProgramBlock,
@@ -32,11 +33,22 @@ import type {
   ResourceOption as CageResourceOption,
 } from "@/app/admin/sessions/_components/sessions-client";
 import {
+  SessionFormDialog,
+  type SessionFormInitialValues,
+} from "@/app/admin/sessions/_components/session-form-dialog";
+import {
+  BlockEditDialog,
+  type BlockEditInitialValues,
+} from "@/app/admin/schedule/_components/block-edit-dialog";
+import {
   ProgramBlockDialog,
   type CoachOption as ProgramCoachOption,
+  type ProgramBlockEditInitial,
   type ProgramOption,
   type ResourceOption as ProgramResourceOption,
+  type SeriesView,
 } from "@/app/admin/hour-log/schedule/_components/program-block-dialog";
+import type { BlockReconciliation } from "@/lib/server/reconciliation";
 import { slotStartAt } from "@/lib/schedule-grid-utils";
 import { formatPfaTime, pfaHour, pfaMinute, pfaWallClockAt } from "@/lib/timezone";
 
@@ -49,7 +61,12 @@ type ProgramCreatePrefill = {
 type DialogState =
   | { kind: "closed" }
   | { kind: "cage"; prefill: CreatePrefill }
-  | { kind: "program"; prefill: ProgramCreatePrefill };
+  | { kind: "program"; prefill: ProgramCreatePrefill }
+  // QA10 W3.9: click an existing bar → open its edit dialog, seeded by id
+  // from the enriched maps below.
+  | { kind: "edit-session"; id: string }
+  | { kind: "edit-block"; id: string }
+  | { kind: "edit-program"; id: string };
 
 export function EditableMasterSchedule({
   // Grid data (same as the read-only grid).
@@ -67,6 +84,12 @@ export function EditableMasterSchedule({
   programOptions,
   programCoaches,
   programResources,
+  // QA10 W3.9: edit-dialog seed data, keyed by entity id.
+  sessionEditById,
+  blockEditById,
+  programEditById,
+  seriesById,
+  reconciliation,
 }: {
   resources: MasterResourceRow[];
   sessions: MasterSession[];
@@ -79,6 +102,11 @@ export function EditableMasterSchedule({
   programOptions: ProgramOption[];
   programCoaches: ProgramCoachOption[];
   programResources: ProgramResourceOption[];
+  sessionEditById: Record<string, SessionFormInitialValues>;
+  blockEditById: Record<string, BlockEditInitialValues>;
+  programEditById: Record<string, ProgramBlockEditInitial>;
+  seriesById: Record<string, SeriesView>;
+  reconciliation: Record<string, BlockReconciliation>;
 }): React.JSX.Element {
   const router = useRouter();
   const [dialog, setDialog] = useState<DialogState>({ kind: "closed" });
@@ -112,6 +140,20 @@ export function EditableMasterSchedule({
     }
   };
 
+  // QA10 W3.9: click an existing bar → open its edit dialog by id. The grid
+  // only calls this for bars whose id is present in the matching map (the
+  // maps are built from the same rows the grid renders), so a lookup miss is
+  // defensive only.
+  const handleBlockClick: BlockClick = ({ kind, id }) => {
+    if (kind === "session") {
+      setDialog({ kind: "edit-session", id });
+    } else if (kind === "block") {
+      setDialog({ kind: "edit-block", id });
+    } else {
+      setDialog({ kind: "edit-program", id });
+    }
+  };
+
   // On close, re-pull the server component so a just-created session / block /
   // program-block shows up on the Home grid. The dialogs' own actions already
   // revalidate their paths; router.refresh() re-renders this server route.
@@ -120,10 +162,29 @@ export function EditableMasterSchedule({
     router.refresh();
   };
 
+  // Seed values for whichever edit dialog is currently open (null otherwise).
+  const editSession =
+    dialog.kind === "edit-session"
+      ? (sessionEditById[dialog.id] ?? null)
+      : null;
+  const editBlock =
+    dialog.kind === "edit-block" ? (blockEditById[dialog.id] ?? null) : null;
+  const editProgram =
+    dialog.kind === "edit-program"
+      ? (programEditById[dialog.id] ?? null)
+      : null;
+  const editProgramSeries =
+    editProgram && editProgram.seriesId
+      ? (seriesById[editProgram.seriesId] ?? null)
+      : null;
+  const editProgramRecon = editProgram
+    ? (reconciliation[editProgram.id] ?? null)
+    : null;
+
   return (
     <>
       <p className="mb-2 text-xs text-fg-subtle">
-        Click an empty slot to add a cage rental or program block.
+        Click an empty slot to add, or a block to view/edit.
       </p>
 
       <MasterScheduleGrid
@@ -133,6 +194,7 @@ export function EditableMasterSchedule({
         programs={programs}
         programBlocks={programBlocks}
         onEmptyCellClick={handleEmptyCellClick}
+        onBlockClick={handleBlockClick}
       />
 
       <ScheduleCreateDialog
@@ -155,6 +217,39 @@ export function EditableMasterSchedule({
         createPrefill={dialog.kind === "program" ? dialog.prefill : null}
         editInitial={null}
         editSeriesInitial={null}
+      />
+
+      {/* QA10 W3.9: edit dialogs, reusing the EXACT standalone-schedule
+          dialogs, seeded by id from the enriched maps. router.refresh() on
+          close so edits/deletes reflect on the server-rendered Home grid. */}
+      <SessionFormDialog
+        open={dialog.kind === "edit-session" && editSession !== null}
+        mode="edit"
+        onClose={close}
+        coachOptions={cageCoaches}
+        resourceOptions={cageResources}
+        initial={editSession ?? undefined}
+      />
+
+      <BlockEditDialog
+        open={dialog.kind === "edit-block" && editBlock !== null}
+        onClose={close}
+        resources={cageResources}
+        initial={editBlock ?? undefined}
+      />
+
+      <ProgramBlockDialog
+        open={dialog.kind === "edit-program" && editProgram !== null}
+        mode="edit"
+        onClose={close}
+        date={selectedDate}
+        programs={programOptions}
+        coaches={programCoaches}
+        resources={programResources}
+        createPrefill={null}
+        editInitial={editProgram}
+        editSeriesInitial={editProgramSeries}
+        reconciliation={editProgramRecon}
       />
     </>
   );

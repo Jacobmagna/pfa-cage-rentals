@@ -383,7 +383,7 @@ export function CageCalendar({
         </button>
         {multiSelect ? (
           <p className="text-[11px] text-fg-subtle">
-            Tap green slots in one row, then book them together.
+            Tap open slots in one row, then book them together.
           </p>
         ) : null}
       </div>
@@ -484,8 +484,8 @@ export function CageCalendar({
         </div>
         <p className="text-fg-subtle">
           {multiSelect
-            ? "Tap green slots in a single row to select them, then book the batch. Tapping a slot in a different row starts a new selection."
-            : "Tap a green slot to book it. Tap a red slot to see who has it."}{" "}
+            ? "Tap open slots in a single row to select them, then book the batch. Tapping a slot in a different row starts a new selection."
+            : "Tap an open slot to book it. Tap a red slot to see who has it."}{" "}
           Rotate your phone or scroll sideways to see the full day.
         </p>
       </div>

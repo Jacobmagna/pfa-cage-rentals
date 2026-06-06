@@ -37,7 +37,7 @@ import {
   type AvailabilitySession,
   type DayAvailability,
 } from "../availability-actions";
-import { parsePfaInput } from "@/lib/timezone";
+import { parsePfaInput, PFA_TIMEZONE } from "@/lib/timezone";
 
 const FIRST_HOUR = 8;
 const LAST_HOUR = 22;
@@ -333,7 +333,7 @@ function utcToPfaMinutesFromFirstHour(d: Date): number {
   // sidesteps having to import pfaHour/pfaMinute (which are not
   // exported individually as plain helpers everywhere).
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
+    timeZone: PFA_TIMEZONE,
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,

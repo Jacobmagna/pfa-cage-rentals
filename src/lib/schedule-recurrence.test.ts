@@ -79,15 +79,15 @@ describe("generateOccurrences", () => {
     expect(occ).toHaveLength(0);
   });
 
-  it("produces DST-correct wall-clock times (EST in March, EDT in November)", () => {
-    // A Wednesday before the spring-forward (2026-03-04, still EST) and a
-    // Wednesday after fall-back (2026-11-04, EST again). The wall-clock
+  it("produces DST-correct wall-clock times (PDT in March, PST in November)", () => {
+    // A Wednesday after the spring-forward (2026-03-11, PDT) and a
+    // Wednesday after fall-back (2026-11-04, PST). The wall-clock
     // 09:00–10:00 PFA time must round-trip regardless of the UTC offset.
     const occ = generateOccurrences({
       daysOfWeek: [3],
       startTime: "09:00",
       endTime: "10:00",
-      // 2026-03-11 is a Wed (EDT), 2026-11-04 is a Wed (EST). Range spans
+      // 2026-03-11 is a Wed (PDT), 2026-11-04 is a Wed (PST). Range spans
       // both DST transitions.
       startsOn: "2026-03-11",
       endsOn: "2026-11-04",
@@ -98,15 +98,15 @@ describe("generateOccurrences", () => {
       expect(formatPfaTime(o.endAt)).toBe("10:00");
       expect(formatPfaDate(o.startAt)).toBe(o.date);
     }
-    // Sanity: the March (EDT) occurrence and the November (EST)
+    // Sanity: the March (PDT) occurrence and the November (PST)
     // occurrence have different UTC hours despite identical wall-clock.
     const march = occ.find((o) => o.date === "2026-03-11");
     const november = occ.find((o) => o.date === "2026-11-04");
     expect(march).toBeDefined();
     expect(november).toBeDefined();
-    // EDT is UTC-4 → 09:00 EDT = 13:00Z; EST is UTC-5 → 09:00 EST = 14:00Z.
-    expect(march!.startAt.getUTCHours()).toBe(13);
-    expect(november!.startAt.getUTCHours()).toBe(14);
+    // PDT is UTC-7 → 09:00 PDT = 16:00Z; PST is UTC-8 → 09:00 PST = 17:00Z.
+    expect(march!.startAt.getUTCHours()).toBe(16);
+    expect(november!.startAt.getUTCHours()).toBe(17);
   });
 
   it("throws on an empty daysOfWeek array", () => {
@@ -334,7 +334,7 @@ describe("generateOccurrences — monthly same-weekday", () => {
       "2026-05-12", // 2nd Tue May
       "2026-06-09", // 2nd Tue Jun
     ]);
-    // DST sanity: Jan is EST, Jun is EDT — wall-clock must round-trip.
+    // DST sanity: Jan is PST, Jun is PDT — wall-clock must round-trip.
     for (const o of occ) {
       expect(formatPfaTime(o.startAt)).toBe("18:00");
       expect(formatPfaDate(o.startAt)).toBe(o.date);

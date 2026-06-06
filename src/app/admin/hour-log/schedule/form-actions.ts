@@ -19,6 +19,8 @@ import {
   updateProgramScheduleBlock,
 } from "./actions";
 import {
+  BlockConflictsWithSessionError,
+  BlockOverlapError,
   CoachNotFoundError,
   NotASeriesOccurrenceError,
   ProgramInactiveError,
@@ -30,7 +32,10 @@ import { parsePfaInput } from "@/lib/timezone";
 
 export type ProgramScheduleFormValues = {
   programId: string;
-  scheduledCoachId: string;
+  // QA10 W3.2: the full submitted scheduled-coach set (primary = [0]).
+  scheduledCoachIds: string[];
+  // QA10 W3.3: the cage resources the block/series occupies.
+  resourceIds: string[];
   date: string;
   startTime: string;
   endTime: string;
@@ -48,7 +53,11 @@ export type ProgramScheduleActionResult =
 function snapshot(formData: FormData): ProgramScheduleFormValues {
   return {
     programId: formData.get("programId")?.toString() ?? "",
-    scheduledCoachId: formData.get("scheduledCoachId")?.toString() ?? "",
+    scheduledCoachIds: formData
+      .getAll("scheduledCoachIds")
+      .map((v) => v.toString())
+      .filter(Boolean),
+    resourceIds: formData.getAll("resourceIds").map(String).filter(Boolean),
     date: formData.get("date")?.toString() ?? "",
     startTime: formData.get("startTime")?.toString() ?? "",
     endTime: formData.get("endTime")?.toString() ?? "",
@@ -66,7 +75,11 @@ function buildInput(formData: FormData) {
   const note = formData.get("note")?.toString().trim() ?? "";
   return {
     programId: formData.get("programId")?.toString() ?? "",
-    scheduledCoachId: formData.get("scheduledCoachId")?.toString() ?? "",
+    scheduledCoachIds: formData
+      .getAll("scheduledCoachIds")
+      .map((v) => v.toString())
+      .filter(Boolean),
+    resourceIds: formData.getAll("resourceIds").map(String).filter(Boolean),
     startAt: parsePfaInput(dateStr, startStr),
     endAt: parsePfaInput(dateStr, endStr),
     note: note.length > 0 ? note : null,
@@ -83,7 +96,10 @@ function translate(
     err instanceof CoachNotFoundError ||
     err instanceof ProgramScheduleBlockNotFoundError ||
     err instanceof ProgramScheduleSeriesNotFoundError ||
-    err instanceof NotASeriesOccurrenceError
+    err instanceof NotASeriesOccurrenceError ||
+    // QA10 W3.3: occupying a busy cage resource → inline red banner.
+    err instanceof BlockConflictsWithSessionError ||
+    err instanceof BlockOverlapError
   ) {
     return {
       ok: false,
@@ -124,9 +140,19 @@ function buildSeriesInput(formData: FormData) {
     explicitStartsOn && explicitStartsOn.length > 0
       ? explicitStartsOn
       : (formData.get("date")?.toString().trim() ?? "");
+  // QA10 W3.1b: recurrence pattern. The dialog submits hidden `frequency`
+  // ("weekly"|"monthly") + `interval` (≥1) fields. Forward them only when
+  // present so a payload omitting them falls back to the zod defaults
+  // (weekly/1) — preserving today's every-week behavior for old callers.
+  const frequencyRaw = formData.get("frequency")?.toString().trim();
+  const intervalRaw = formData.get("interval")?.toString().trim();
   return {
     programId: formData.get("programId")?.toString() ?? "",
-    scheduledCoachId: formData.get("scheduledCoachId")?.toString() ?? "",
+    scheduledCoachIds: formData
+      .getAll("scheduledCoachIds")
+      .map((v) => v.toString())
+      .filter(Boolean),
+    resourceIds: formData.getAll("resourceIds").map(String).filter(Boolean),
     daysOfWeek: formData
       .getAll("daysOfWeek")
       .map((v) => Number(v.toString())),
@@ -134,6 +160,8 @@ function buildSeriesInput(formData: FormData) {
     endTime: formData.get("endTime")?.toString().trim() ?? "",
     startsOn,
     endsOn: formData.get("endsOn")?.toString().trim() ?? "",
+    ...(frequencyRaw ? { frequency: frequencyRaw } : {}),
+    ...(intervalRaw ? { interval: intervalRaw } : {}),
     note: note.length > 0 ? note : null,
   };
 }

@@ -14,7 +14,7 @@
 // submitted date + start/end times via parsePfaInput.
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, Pencil, Repeat, Trash2, X } from "lucide-react";
+import { ChevronLeft, Pencil, Plus, Repeat, Trash2, X } from "lucide-react";
 import {
   cancelSeriesOccurrenceAction,
   createProgramScheduleBlockFormAction,
@@ -35,6 +35,14 @@ import {
   formatPfaWeekday,
   parsePfaInput,
 } from "@/lib/timezone";
+import {
+  FREQUENCY_OPTIONS,
+  type FrequencyKind,
+  freqIntervalForKind,
+  kindForFreqInterval,
+  monthlyHint,
+  weekdayFromIso,
+} from "./recurrence-frequency.logic";
 
 // Day pills for the recurring CREATE path (RECUR-b1). 0=Sun..6=Sat,
 // matching createProgramScheduleSeriesSchema / generateOccurrences.
@@ -80,17 +88,28 @@ export type CoachOption = {
   name: string | null;
   email: string;
 };
+// QA10 W3.3: a cage resource the admin can mark a program block as occupying.
+export type ResourceOption = {
+  id: string;
+  name: string;
+  type: "cage" | "bullpen" | "weight_room";
+};
 
 export type ProgramBlockEditInitial = {
   id: string;
   programId: string;
   scheduledCoachId: string;
+  // QA10 W3.2: the FULL scheduled-coach set (first = primary). The form
+  // seeds its multi-coach control from this and submits scheduledCoachIds.
+  scheduledCoachIds: string[];
   startAt: Date;
   endAt: Date;
   note: string | null;
   // RECUR-b2: NULL for one-off blocks; the parent series id for a series
   // occurrence (branches the summary into series-aware actions).
   seriesId: string | null;
+  // QA10 W3.3: the cage resources this block occupies (for edit prefill).
+  resourceIds: string[];
 };
 
 // RECUR-b2: the editable definition of a recurring series, prefilling the
@@ -100,11 +119,20 @@ export type SeriesView = {
   id: string;
   programId: string;
   scheduledCoachId: string;
+  // QA10 W3.2: full scheduled-coach set for the series (first = primary).
+  scheduledCoachIds: string[];
   daysOfWeek: number[];
   startTime: string;
   endTime: string;
   startsOn: string;
   endsOn: string;
+  // QA10 W3.1b: recurrence pattern. "weekly" with interval N = every N
+  // weeks; "monthly" with interval 1 = same weekday/ordinal each month.
+  // The edit-series form prefills its frequency control from these.
+  frequency: "weekly" | "monthly";
+  interval: number;
+  // QA10 W3.3: the cage resources every occurrence occupies (edit prefill).
+  resourceIds: string[];
   note: string | null;
 };
 
@@ -133,6 +161,49 @@ function reconBannerStyles(status: BlockReconciliation["status"]): string {
   }
 }
 
+// QA10 W3.2: reconciliation banner. A single scheduled coach keeps today's
+// one-line banner (aggregate status + detail). With multiple coaches it
+// renders a per-coach breakdown — each coach's name + its own status label
+// and detail, reusing RECON_STATUS_LABELS / reconBannerStyles per coach.
+function ReconBanner({
+  reconciliation,
+}: {
+  reconciliation: BlockReconciliation;
+}) {
+  if (reconciliation.coaches.length > 1) {
+    return (
+      <div role="status" className="space-y-1.5">
+        {reconciliation.coaches.map((c) => (
+          <div
+            key={c.coachId}
+            className={`rounded-md border px-3 py-2 text-xs ${reconBannerStyles(
+              c.status,
+            )}`}
+          >
+            <span className="font-medium uppercase tracking-wider">
+              {c.coachName} · {RECON_STATUS_LABELS[c.status]}
+            </span>
+            <span className="block mt-0.5">{c.detail}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div
+      role="status"
+      className={`rounded-md border px-3 py-2 text-xs ${reconBannerStyles(
+        reconciliation.status,
+      )}`}
+    >
+      <span className="font-medium uppercase tracking-wider">
+        {RECON_STATUS_LABELS[reconciliation.status]}
+      </span>
+      <span className="block mt-0.5">{reconciliation.detail}</span>
+    </div>
+  );
+}
+
 export function ProgramBlockDialog({
   open,
   mode,
@@ -140,6 +211,7 @@ export function ProgramBlockDialog({
   date,
   programs,
   coaches,
+  resources,
   createPrefill,
   editInitial,
   editSeriesInitial,
@@ -151,6 +223,8 @@ export function ProgramBlockDialog({
   date: Date;
   programs: ProgramOption[];
   coaches: CoachOption[];
+  // QA10 W3.3: active cage resources for the occupancy checkbox group.
+  resources: ResourceOption[];
   createPrefill: { programId: string; startTime: string; endTime: string } | null;
   editInitial: ProgramBlockEditInitial | null;
   editSeriesInitial?: SeriesView | null;
@@ -207,6 +281,11 @@ export function ProgramBlockDialog({
   );
   const [endsOn, setEndsOn] = useState("");
   const [recurError, setRecurError] = useState<string | null>(null);
+  // QA10 W3.1b: recurrence pattern for the CREATE-recurring path. Default
+  // "Every week" (→ weekly/interval 1) reproduces today's behavior. The
+  // "Every N weeks" number lives in its own state, only read for that kind.
+  const [freqKind, setFreqKind] = useState<FrequencyKind>("weekly");
+  const [everyNWeeks, setEveryNWeeks] = useState(3);
 
   // RECUR-b2: edit-series form state — weekday pills + season start/end
   // dates, seeded from the parent series. Kept separate from the create
@@ -221,6 +300,49 @@ export function ProgramBlockDialog({
     editSeriesInitial?.endsOn ?? "",
   );
   const [seriesError, setSeriesError] = useState<string | null>(null);
+  // QA10 W3.1b: recurrence pattern for the EDIT-series form, recovered from
+  // the series' stored (frequency, interval) so the form opens on its
+  // current pattern. Defaults to weekly/1 if a row predates the columns.
+  const [seriesFreqKind, setSeriesFreqKind] = useState<FrequencyKind>(() =>
+    kindForFreqInterval(
+      editSeriesInitial?.frequency ?? "weekly",
+      editSeriesInitial?.interval ?? 1,
+    ),
+  );
+  const [seriesEveryNWeeks, setSeriesEveryNWeeks] = useState(() =>
+    editSeriesInitial?.frequency === "weekly" &&
+    (editSeriesInitial?.interval ?? 1) >= 3
+      ? editSeriesInitial.interval
+      : 3,
+  );
+
+  // QA10 W3.2: the multi-coach selection for the BLOCK form (create/edit)
+  // and the SERIES form. Each is a list of selected coach ids; every
+  // <select> submits name="scheduledCoachIds" so the action receives the
+  // full set via getAll. Seed from the initial values on (re)open; create
+  // starts with a single empty row. De-dupe is left to the action.
+  const [blockCoachIds, setBlockCoachIds] = useState<string[]>(() =>
+    isEdit && editInitial?.scheduledCoachIds?.length
+      ? editInitial.scheduledCoachIds
+      : [""],
+  );
+  const [seriesCoachIds, setSeriesCoachIds] = useState<string[]>(() =>
+    editSeriesInitial?.scheduledCoachIds?.length
+      ? editSeriesInitial.scheduledCoachIds
+      : [""],
+  );
+
+  // QA10 W3.3: occupied-resource selection for the BLOCK form (create/edit)
+  // and the SERIES form. Controlled checkbox groups; each checkbox submits
+  // name="resourceIds". Seed from the initial values on (re)open; create
+  // starts empty (no occupancy = today's behavior). Re-seed on errored
+  // submit so the admin's selection survives the round-trip.
+  const [blockResourceIds, setBlockResourceIds] = useState<string[]>(() =>
+    isEdit ? (editInitial?.resourceIds ?? []) : [],
+  );
+  const [seriesResourceIds, setSeriesResourceIds] = useState<string[]>(
+    () => editSeriesInitial?.resourceIds ?? [],
+  );
 
   if (open !== prevOpen) {
     setPrevOpen(open);
@@ -230,11 +352,63 @@ export function ProgramBlockDialog({
       setSelectedDays(new Set([selectedWeekday]));
       setEndsOn("");
       setRecurError(null);
+      setFreqKind("weekly");
+      setEveryNWeeks(3);
       setSeriesDays(new Set(editSeriesInitial?.daysOfWeek ?? []));
       setSeriesStartsOn(editSeriesInitial?.startsOn ?? "");
       setSeriesEndsOn(editSeriesInitial?.endsOn ?? "");
       setSeriesError(null);
+      setSeriesFreqKind(
+        kindForFreqInterval(
+          editSeriesInitial?.frequency ?? "weekly",
+          editSeriesInitial?.interval ?? 1,
+        ),
+      );
+      setSeriesEveryNWeeks(
+        editSeriesInitial?.frequency === "weekly" &&
+          (editSeriesInitial?.interval ?? 1) >= 3
+          ? editSeriesInitial.interval
+          : 3,
+      );
+      setBlockCoachIds(
+        isEdit && editInitial?.scheduledCoachIds?.length
+          ? editInitial.scheduledCoachIds
+          : [""],
+      );
+      setSeriesCoachIds(
+        editSeriesInitial?.scheduledCoachIds?.length
+          ? editSeriesInitial.scheduledCoachIds
+          : [""],
+      );
+      setBlockResourceIds(isEdit ? (editInitial?.resourceIds ?? []) : []);
+      setSeriesResourceIds(editSeriesInitial?.resourceIds ?? []);
       setCancelError(null);
+    }
+  }
+
+  // QA10 W3.2: on an errored block submit, re-seed the coach rows from the
+  // submitted set so the admin's selection survives the round-trip. Tracked
+  // via adjust-during-render keyed on the state object (NOT setState-in-
+  // effect), mirroring the open-reset pattern above.
+  const [prevState, setPrevState] = useState(state);
+  if (state !== prevState) {
+    setPrevState(state);
+    if (!state.ok && state.values.scheduledCoachIds.length > 0) {
+      setBlockCoachIds(state.values.scheduledCoachIds);
+    }
+    // QA10 W3.3: re-seed the occupancy selection from the submitted set.
+    if (!state.ok) {
+      setBlockResourceIds(state.values.resourceIds);
+    }
+  }
+  const [prevSeriesState, setPrevSeriesState] = useState(seriesState);
+  if (seriesState !== prevSeriesState) {
+    setPrevSeriesState(seriesState);
+    if (!seriesState.ok && seriesState.values.scheduledCoachIds.length > 0) {
+      setSeriesCoachIds(seriesState.values.scheduledCoachIds);
+    }
+    if (!seriesState.ok) {
+      setSeriesResourceIds(seriesState.values.resourceIds);
     }
   }
 
@@ -256,6 +430,42 @@ export function ProgramBlockDialog({
       else next.add(value);
       return next;
     });
+  };
+
+  // QA10 W3.2: mutators for the multi-coach controls. Passing the relevant
+  // setter lets the same helpers serve both the block + series forms.
+  const setCoachAt = (
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+    index: number,
+    value: string,
+  ) => {
+    setter((prev) => prev.map((v, i) => (i === index ? value : v)));
+  };
+  const addCoachRow = (
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+  ) => {
+    setter((prev) => [...prev, ""]);
+  };
+  const removeCoachRow = (
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+    index: number,
+  ) => {
+    setter((prev) =>
+      prev.length > 1 ? prev.filter((_, i) => i !== index) : prev,
+    );
+  };
+
+  // QA10 W3.3: toggle a resource in/out of an occupancy selection. The
+  // setter targets either the block or the series resource state.
+  const toggleResource = (
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+    resourceId: string,
+  ) => {
+    setter((prev) =>
+      prev.includes(resourceId)
+        ? prev.filter((id) => id !== resourceId)
+        : [...prev, resourceId],
+    );
   };
 
   useEffect(() => {
@@ -304,7 +514,6 @@ export function ProgramBlockDialog({
     if (!state.ok && state.values) {
       return {
         programId: state.values.programId,
-        scheduledCoachId: state.values.scheduledCoachId,
         startTime: state.values.startTime,
         endTime: state.values.endTime,
         note: state.values.note,
@@ -313,7 +522,6 @@ export function ProgramBlockDialog({
     if (isEdit && editInitial) {
       return {
         programId: editInitial.programId,
-        scheduledCoachId: editInitial.scheduledCoachId,
         startTime: formatPfaTime(editInitial.startAt),
         endTime: formatPfaTime(editInitial.endAt),
         note: editInitial.note ?? "",
@@ -322,7 +530,6 @@ export function ProgramBlockDialog({
     if (!isEdit && createPrefill) {
       return {
         programId: createPrefill.programId,
-        scheduledCoachId: "",
         startTime: createPrefill.startTime,
         endTime: createPrefill.endTime,
         note: "",
@@ -330,7 +537,6 @@ export function ProgramBlockDialog({
     }
     return {
       programId: "",
-      scheduledCoachId: "",
       startTime: "09:00",
       endTime: "10:00",
       note: "",
@@ -345,11 +551,32 @@ export function ProgramBlockDialog({
     );
   }, [editInitial, programs]);
 
+  // QA10 W3.2: the summary "Coach" row lists every scheduled coach (primary
+  // first), resolved to display names via the coaches list.
   const coachName = useMemo(() => {
     if (!editInitial) return "";
-    const coach = coaches.find((c) => c.id === editInitial.scheduledCoachId);
-    return coach ? (coach.name ?? coach.email) : editInitial.scheduledCoachId;
+    const ids =
+      editInitial.scheduledCoachIds?.length > 0
+        ? editInitial.scheduledCoachIds
+        : [editInitial.scheduledCoachId];
+    return ids
+      .map((id) => {
+        const coach = coaches.find((c) => c.id === id);
+        return coach ? (coach.name ?? coach.email) : id;
+      })
+      .join(", ");
   }, [editInitial, coaches]);
+
+  // QA10 W3.3: the summary "Occupies" row — the names of the cage resources
+  // this block occupies (its linked blocked_times), or "—" when none.
+  const occupiesLabel = useMemo(() => {
+    const ids = editInitial?.resourceIds ?? [];
+    if (ids.length === 0) return "—";
+    const names = ids
+      .map((id) => resources.find((r) => r.id === id)?.name ?? id)
+      .sort();
+    return names.join(", ");
+  }, [editInitial, resources]);
 
   // RECUR-b2: prefill values for the edit-series form. On an errored submit
   // echo what was submitted; otherwise seed from the parent series.
@@ -357,7 +584,6 @@ export function ProgramBlockDialog({
     if (!seriesState.ok && seriesState.values) {
       return {
         programId: seriesState.values.programId,
-        scheduledCoachId: seriesState.values.scheduledCoachId,
         startTime: seriesState.values.startTime,
         endTime: seriesState.values.endTime,
         note: seriesState.values.note,
@@ -366,7 +592,6 @@ export function ProgramBlockDialog({
     if (editSeriesInitial) {
       return {
         programId: editSeriesInitial.programId,
-        scheduledCoachId: editSeriesInitial.scheduledCoachId,
         startTime: editSeriesInitial.startTime,
         endTime: editSeriesInitial.endTime,
         note: editSeriesInitial.note ?? "",
@@ -374,7 +599,6 @@ export function ProgramBlockDialog({
     }
     return {
       programId: "",
-      scheduledCoachId: "",
       startTime: "09:00",
       endTime: "10:00",
       note: "",
@@ -388,6 +612,22 @@ export function ProgramBlockDialog({
     const days = formatWeekdayList(editSeriesInitial.daysOfWeek);
     return `Repeats ${days} · through ${formatIsoDateMedium(editSeriesInitial.endsOn)}`;
   }, [editSeriesInitial]);
+
+  // QA10 W3.1b: derive the (frequency, interval) submitted by each form
+  // from its chosen pattern. Monthly hides the weekday pills and submits a
+  // single derived weekday so the schema's non-empty constraint holds; the
+  // occurrence weekday + ordinal come from the start date (grid date for
+  // create; seriesStartsOn for edit).
+  const createFreq = freqIntervalForKind(freqKind, everyNWeeks);
+  const createIsMonthly = createFreq.frequency === "monthly";
+  const createMonthlyHint = monthlyHint(dateInput);
+
+  const seriesFreq = freqIntervalForKind(seriesFreqKind, seriesEveryNWeeks);
+  const seriesIsMonthly = seriesFreq.frequency === "monthly";
+  const seriesMonthlyHint = monthlyHint(seriesStartsOn);
+  // The monthly weekday submitted for the edit-series form, derived from
+  // the season-start date (null until a valid date is chosen).
+  const weekdayFromIsoForSeries = weekdayFromIso(seriesStartsOn);
 
   const handleDelete = () => {
     if (!editInitial) return;
@@ -505,17 +745,7 @@ export function ProgramBlockDialog({
           ) : null}
 
           {reconciliation ? (
-            <div
-              role="status"
-              className={`rounded-md border px-3 py-2 text-xs ${reconBannerStyles(
-                reconciliation.status,
-              )}`}
-            >
-              <span className="font-medium uppercase tracking-wider">
-                {RECON_STATUS_LABELS[reconciliation.status]}
-              </span>
-              <span className="block mt-0.5">{reconciliation.detail}</span>
-            </div>
+            <ReconBanner reconciliation={reconciliation} />
           ) : null}
 
           <dl className="space-y-3">
@@ -532,6 +762,7 @@ export function ProgramBlockDialog({
               tnum
             />
             <DetailRow label="Note" value={editInitial.note ?? "—"} />
+            <DetailRow label="Occupies" value={occupiesLabel} />
           </dl>
 
           <div className="flex items-center justify-between gap-2 pt-2">
@@ -581,9 +812,11 @@ export function ProgramBlockDialog({
           action={seriesFormAction}
           key={seriesFormKey}
           onSubmit={(e) => {
-            // Client guard: at least one weekday must be checked. Server
-            // schema is still the source of truth.
-            if (seriesDays.size === 0) {
+            // Client guard: for weekly patterns at least one weekday must
+            // be checked. Monthly derives its weekday from the start date
+            // (pills hidden), so the guard is skipped there. Server schema
+            // is still the source of truth.
+            if (!seriesIsMonthly && seriesDays.size === 0) {
               e.preventDefault();
               setSeriesError("Pick at least one weekday.");
             }
@@ -646,23 +879,25 @@ export function ProgramBlockDialog({
               </select>
             </Field>
 
-            <Field label="Scheduled coach">
-              <select
-                name="scheduledCoachId"
-                required
-                defaultValue={seriesDefaults.scheduledCoachId}
-                className={selectStyles}
-              >
-                <option value="" disabled>
-                  Choose a coach…
-                </option>
-                {coaches.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name ?? c.email}
-                  </option>
-                ))}
-              </select>
-            </Field>
+            <CoachMultiSelect
+              coachIds={seriesCoachIds}
+              coaches={coaches}
+              onChangeAt={(i, v) => {
+                setCoachAt(setSeriesCoachIds, i, v);
+                setSeriesError(null);
+              }}
+              onAdd={() => addCoachRow(setSeriesCoachIds)}
+              onRemoveAt={(i) => removeCoachRow(setSeriesCoachIds, i)}
+            />
+
+            <OccupiesResources
+              resources={resources}
+              selected={seriesResourceIds}
+              onToggle={(id) => {
+                toggleResource(setSeriesResourceIds, id);
+                setSeriesError(null);
+              }}
+            />
 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Start">
@@ -685,40 +920,116 @@ export function ProgramBlockDialog({
               </Field>
             </div>
 
-            <div>
-              <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
-                Repeat on
-              </span>
-              <div
-                role="group"
-                aria-label="Repeat on"
-                className="flex flex-wrap gap-1.5"
+            {/* QA10 W3.1b: pattern → (frequency, interval) for the whole
+                series, submitted as hidden fields. */}
+            <input
+              type="hidden"
+              name="frequency"
+              value={seriesFreq.frequency}
+            />
+            <input
+              type="hidden"
+              name="interval"
+              value={seriesFreq.interval}
+            />
+
+            <Field label="Frequency">
+              <select
+                aria-label="Frequency"
+                value={seriesFreqKind}
+                onChange={(e) => {
+                  setSeriesFreqKind(e.target.value as FrequencyKind);
+                  setSeriesError(null);
+                }}
+                className={selectStyles}
               >
-                {WEEKDAY_PILLS.map((d) => {
-                  const active = seriesDays.has(d.value);
-                  return (
-                    <label
-                      key={d.value}
-                      className={`inline-flex items-center justify-center h-8 min-w-[2.75rem] px-2.5 rounded-md border text-xs font-medium cursor-pointer select-none transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-gold/40 ${
-                        active
-                          ? "bg-gold/10 border-gold/40 text-gold-strong"
-                          : "border-line text-fg-muted hover:text-fg hover:border-line-strong"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        name="daysOfWeek"
-                        value={d.value}
-                        checked={active}
-                        onChange={() => toggleSeriesDay(d.value)}
-                        className="sr-only"
-                      />
-                      {d.label}
-                    </label>
-                  );
-                })}
+                {FREQUENCY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            {seriesFreqKind === "everyN" ? (
+              <Field
+                label="Every N weeks"
+                hint="Repeats every N weeks on the chosen days."
+              >
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  aria-label="Number of weeks between occurrences"
+                  value={seriesEveryNWeeks}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    setSeriesEveryNWeeks(
+                      Number.isFinite(n) && n >= 1 ? n : 1,
+                    );
+                    setSeriesError(null);
+                  }}
+                  className={inputStyles}
+                />
+              </Field>
+            ) : null}
+
+            {seriesIsMonthly ? (
+              <div>
+                {/* Monthly derives weekday + ordinal from the season-start
+                    date; pills don't apply. Submit one derived weekday so
+                    the schema's non-empty daysOfWeek constraint holds. */}
+                {weekdayFromIsoForSeries !== null ? (
+                  <input
+                    type="hidden"
+                    name="daysOfWeek"
+                    value={weekdayFromIsoForSeries}
+                  />
+                ) : null}
+                <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
+                  Repeats
+                </span>
+                <p className="text-sm text-fg">
+                  {seriesMonthlyHint ||
+                    "Pick a season-start date to set the monthly weekday."}
+                </p>
               </div>
-            </div>
+            ) : (
+              <div>
+                <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
+                  Repeat on
+                </span>
+                <div
+                  role="group"
+                  aria-label="Repeat on"
+                  className="flex flex-wrap gap-1.5"
+                >
+                  {WEEKDAY_PILLS.map((d) => {
+                    const active = seriesDays.has(d.value);
+                    return (
+                      <label
+                        key={d.value}
+                        className={`inline-flex items-center justify-center h-8 min-w-[2.75rem] px-2.5 rounded-md border text-xs font-medium cursor-pointer select-none transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-gold/40 ${
+                          active
+                            ? "bg-gold/10 border-gold/40 text-gold-strong"
+                            : "border-line text-fg-muted hover:text-fg hover:border-line-strong"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          name="daysOfWeek"
+                          value={d.value}
+                          checked={active}
+                          onChange={() => toggleSeriesDay(d.value)}
+                          className="sr-only"
+                        />
+                        {d.label}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Season starts on">
@@ -807,7 +1118,12 @@ export function ProgramBlockDialog({
           // be checked. The server schema is still the source of truth, but
           // this gives an immediate inline message. endsOn `required` on the
           // DateInput blocks an empty season-end via native validation.
-          if (!isEdit && recurring && selectedDays.size === 0) {
+          if (
+            !isEdit &&
+            recurring &&
+            !createIsMonthly &&
+            selectedDays.size === 0
+          ) {
             e.preventDefault();
             setRecurError("Pick at least one weekday.");
           }
@@ -857,17 +1173,7 @@ export function ProgramBlockDialog({
         ) : null}
 
         {isEdit && reconciliation ? (
-          <div
-            role="status"
-            className={`rounded-md border px-3 py-2 text-xs ${reconBannerStyles(
-              reconciliation.status,
-            )}`}
-          >
-            <span className="font-medium uppercase tracking-wider">
-              {RECON_STATUS_LABELS[reconciliation.status]}
-            </span>
-            <span className="block mt-0.5">{reconciliation.detail}</span>
-          </div>
+          <ReconBanner reconciliation={reconciliation} />
         ) : null}
 
         <div className="space-y-3">
@@ -889,23 +1195,19 @@ export function ProgramBlockDialog({
             </select>
           </Field>
 
-          <Field label="Scheduled coach">
-            <select
-              name="scheduledCoachId"
-              required
-              defaultValue={defaults.scheduledCoachId}
-              className={selectStyles}
-            >
-              <option value="" disabled>
-                Choose a coach…
-              </option>
-              {coaches.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name ?? c.email}
-                </option>
-              ))}
-            </select>
-          </Field>
+          <CoachMultiSelect
+            coachIds={blockCoachIds}
+            coaches={coaches}
+            onChangeAt={(i, v) => setCoachAt(setBlockCoachIds, i, v)}
+            onAdd={() => addCoachRow(setBlockCoachIds)}
+            onRemoveAt={(i) => removeCoachRow(setBlockCoachIds, i)}
+          />
+
+          <OccupiesResources
+            resources={resources}
+            selected={blockResourceIds}
+            onToggle={(id) => toggleResource(setBlockResourceIds, id)}
+          />
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Start">
@@ -941,49 +1243,122 @@ export function ProgramBlockDialog({
                   }}
                   className="h-4 w-4 rounded border-line text-gold accent-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
                 />
-                <span className="text-sm text-fg">Repeats weekly</span>
+                <span className="text-sm text-fg">Repeats</span>
               </label>
 
               {recurring ? (
                 <div className="space-y-3 rounded-md border border-line bg-surface-2/40 p-3">
-                  <div>
-                    <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
-                      Repeat on
-                    </span>
-                    <div
-                      role="group"
-                      aria-label="Repeat on"
-                      className="flex flex-wrap gap-1.5"
+                  {/* QA10 W3.1b: the chosen pattern → (frequency, interval)
+                      the series action understands, submitted as hidden
+                      fields so form-actions/zod read them. */}
+                  <input
+                    type="hidden"
+                    name="frequency"
+                    value={createFreq.frequency}
+                  />
+                  <input
+                    type="hidden"
+                    name="interval"
+                    value={createFreq.interval}
+                  />
+
+                  <Field label="Frequency">
+                    <select
+                      aria-label="Frequency"
+                      value={freqKind}
+                      onChange={(e) => {
+                        setFreqKind(e.target.value as FrequencyKind);
+                        setRecurError(null);
+                      }}
+                      className={selectStyles}
                     >
-                      {WEEKDAY_PILLS.map((d) => {
-                        const active = selectedDays.has(d.value);
-                        return (
-                          <label
-                            key={d.value}
-                            className={`inline-flex items-center justify-center h-8 min-w-[2.75rem] px-2.5 rounded-md border text-xs font-medium cursor-pointer select-none transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-gold/40 ${
-                              active
-                                ? "bg-gold/10 border-gold/40 text-gold-strong"
-                                : "border-line text-fg-muted hover:text-fg hover:border-line-strong"
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              name="daysOfWeek"
-                              value={d.value}
-                              checked={active}
-                              onChange={() => toggleDay(d.value)}
-                              className="sr-only"
-                            />
-                            {d.label}
-                          </label>
-                        );
-                      })}
+                      {FREQUENCY_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  {freqKind === "everyN" ? (
+                    <Field
+                      label="Every N weeks"
+                      hint="Repeats every N weeks on the chosen days."
+                    >
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        aria-label="Number of weeks between occurrences"
+                        value={everyNWeeks}
+                        onChange={(e) => {
+                          const n = Number(e.target.value);
+                          setEveryNWeeks(Number.isFinite(n) && n >= 1 ? n : 1);
+                          setRecurError(null);
+                        }}
+                        className={inputStyles}
+                      />
+                    </Field>
+                  ) : null}
+
+                  {createIsMonthly ? (
+                    <div>
+                      {/* Monthly derives its weekday + ordinal from the
+                          grid's selected date; pills don't apply. Submit a
+                          single derived weekday so the schema's non-empty
+                          daysOfWeek constraint still holds. */}
+                      <input
+                        type="hidden"
+                        name="daysOfWeek"
+                        value={selectedWeekday}
+                      />
+                      <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
+                        Repeats
+                      </span>
+                      <p className="text-sm text-fg">
+                        {createMonthlyHint || "On the same weekday each month"}
+                      </p>
                     </div>
-                  </div>
+                  ) : (
+                    <div>
+                      <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
+                        Repeat on
+                      </span>
+                      <div
+                        role="group"
+                        aria-label="Repeat on"
+                        className="flex flex-wrap gap-1.5"
+                      >
+                        {WEEKDAY_PILLS.map((d) => {
+                          const active = selectedDays.has(d.value);
+                          return (
+                            <label
+                              key={d.value}
+                              className={`inline-flex items-center justify-center h-8 min-w-[2.75rem] px-2.5 rounded-md border text-xs font-medium cursor-pointer select-none transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-gold/40 ${
+                                active
+                                  ? "bg-gold/10 border-gold/40 text-gold-strong"
+                                  : "border-line text-fg-muted hover:text-fg hover:border-line-strong"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                name="daysOfWeek"
+                                value={d.value}
+                                checked={active}
+                                onChange={() => toggleDay(d.value)}
+                                className="sr-only"
+                              />
+                              {d.label}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   <Field
                     label="Season ends on"
-                    hint="Repeats every chosen day through this date."
+                    hint="Repeats through this date."
                   >
                     <DateInput
                       name="endsOn"
@@ -998,8 +1373,8 @@ export function ProgramBlockDialog({
                   </Field>
 
                   <p className="text-[11px] text-fg-subtle leading-snug">
-                    Creates a block on each chosen day from{" "}
-                    {formatPfaDateMedium(date)} through the end date.
+                    Creates a block from {formatPfaDateMedium(date)} through
+                    the end date.
                   </p>
 
                   {recurError ? (
@@ -1101,6 +1476,150 @@ export function ProgramBlockDialog({
         isPending={cancelling}
       />
     </dialog>
+  );
+}
+
+// QA10 W3.2: a multi-coach picker — a primary <select> plus "+ Add another
+// coach" rows. Every <select> uses name="scheduledCoachIds" so the action
+// receives the full set via getAll. The first row is the primary; extra
+// rows can be removed. De-dupe is left to the action.
+function CoachMultiSelect({
+  coachIds,
+  coaches,
+  onChangeAt,
+  onAdd,
+  onRemoveAt,
+}: {
+  coachIds: string[];
+  coaches: CoachOption[];
+  onChangeAt: (index: number, value: string) => void;
+  onAdd: () => void;
+  onRemoveAt: (index: number) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
+        Scheduled coach{coachIds.length > 1 ? "es" : ""}
+      </span>
+      {coachIds.map((id, index) => (
+        <div key={index} className="flex items-center gap-2">
+          <select
+            name="scheduledCoachIds"
+            required
+            aria-label={index === 0 ? "Scheduled coach" : `Coach ${index + 1}`}
+            value={id}
+            onChange={(e) => onChangeAt(index, e.target.value)}
+            className={selectStyles}
+          >
+            <option value="" disabled>
+              Choose a coach…
+            </option>
+            {coaches.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name ?? c.email}
+              </option>
+            ))}
+          </select>
+          {index > 0 ? (
+            <button
+              type="button"
+              onClick={() => onRemoveAt(index)}
+              aria-label="Remove coach"
+              className="inline-flex items-center justify-center h-9 w-9 shrink-0 rounded-md border border-line text-fg-muted hover:text-danger hover:border-danger/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={onAdd}
+        className="inline-flex items-center gap-1.5 text-xs font-medium text-gold-strong hover:text-gold-hover focus-visible:outline-none focus-visible:underline transition-colors"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        Add another coach
+      </button>
+    </div>
+  );
+}
+
+// QA10 W3.3: a checkbox group of cage resources a program block occupies.
+// Each checkbox submits name="resourceIds" value=resource.id so the action
+// receives the full set via getAll. Controlled by the parent's selection
+// state. Leaving all unchecked = no occupancy (today's behavior). Resources
+// are grouped by type for readability.
+const RESOURCE_TYPE_LABELS: Record<ResourceOption["type"], string> = {
+  cage: "Cages",
+  bullpen: "Bullpens",
+  weight_room: "Weight room",
+};
+const RESOURCE_TYPE_ORDER: ResourceOption["type"][] = [
+  "cage",
+  "bullpen",
+  "weight_room",
+];
+
+function OccupiesResources({
+  resources,
+  selected,
+  onToggle,
+}: {
+  resources: ResourceOption[];
+  selected: string[];
+  onToggle: (resourceId: string) => void;
+}) {
+  if (resources.length === 0) return null;
+  const selectedSet = new Set(selected);
+  const groups = RESOURCE_TYPE_ORDER.map((type) => ({
+    type,
+    items: resources.filter((r) => r.type === type),
+  })).filter((g) => g.items.length > 0);
+
+  return (
+    <div>
+      <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
+        Occupies cage resources
+      </span>
+      <div className="space-y-2.5 rounded-md border border-line bg-surface-2/40 p-3">
+        {groups.map((g) => (
+          <div key={g.type}>
+            <span className="text-[10px] uppercase tracking-wider text-fg-subtle block mb-1">
+              {RESOURCE_TYPE_LABELS[g.type]}
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {g.items.map((r) => {
+                const active = selectedSet.has(r.id);
+                return (
+                  <label
+                    key={r.id}
+                    className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-xs font-medium cursor-pointer select-none transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-gold/40 ${
+                      active
+                        ? "bg-gold/10 border-gold/40 text-gold-strong"
+                        : "border-line text-fg-muted hover:text-fg hover:border-line-strong"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      name="resourceIds"
+                      value={r.id}
+                      checked={active}
+                      onChange={() => onToggle(r.id)}
+                      className="sr-only"
+                    />
+                    {r.name}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <span className="block text-[11px] text-fg-subtle mt-1 leading-snug">
+        Optional — ticked resources are blocked for coach booking during this
+        block&apos;s time.
+      </span>
+    </div>
   );
 }
 

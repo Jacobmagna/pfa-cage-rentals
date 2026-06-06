@@ -5,7 +5,7 @@
 // copied EXACTLY from schedule-grid.tsx so placements line up to the
 // pixel with the live interactive grids. No React — pure functions only.
 
-import { pfaHour, pfaMinute } from "@/lib/timezone";
+import { pfaHour, pfaMinute, pfaWallClockAt } from "@/lib/timezone";
 
 export const SCHEDULE_GRID_FIRST_HOUR = 8;
 export const SCHEDULE_GRID_LAST_HOUR = 22;
@@ -35,6 +35,46 @@ export function placeOnGrid(
   const clippedEnd = Math.min(endSlots, SCHEDULE_GRID_SLOTS);
   if (clippedEnd <= clippedStart) return null;
   return { col: clippedStart + 2, span: clippedEnd - clippedStart };
+}
+
+/**
+ * Vertical analog of placeOnGrid: maps a [startAt, endAt) date range to its
+ * `{ row, rowSpan }` placement on a VERTICAL time axis (time-of-day runs down
+ * the rows instead of across the columns). `row` is 1-based over the
+ * SCHEDULE_GRID_SLOTS slot rows (the caller adds any leading header row).
+ * Returns null if the range is fully outside the visible 8 AM–10 PM window.
+ * Ranges that straddle an edge are clipped to the window — identical slot
+ * math to placeOnGrid.
+ */
+export function placeVerticalOnGrid(
+  startAt: Date,
+  endAt: Date,
+): { row: number; rowSpan: number } | null {
+  const startSlots =
+    (pfaHour(startAt) - SCHEDULE_GRID_FIRST_HOUR) * 2 +
+    Math.floor(pfaMinute(startAt) / 30);
+  const endSlots =
+    (pfaHour(endAt) - SCHEDULE_GRID_FIRST_HOUR) * 2 +
+    Math.ceil(pfaMinute(endAt) / 30);
+  const clippedStart = Math.max(startSlots, 0);
+  const clippedEnd = Math.min(endSlots, SCHEDULE_GRID_SLOTS);
+  if (clippedEnd <= clippedStart) return null;
+  return { row: clippedStart + 1, rowSpan: Math.max(1, clippedEnd - clippedStart) };
+}
+
+/**
+ * The UTC instant at the START of grid slot `slotIndex` on the PFA day of
+ * `selectedDate`. Slot 0 = 8:00 AM, slot 1 = 8:30 AM, … (FIRST_HOUR + a
+ * half-hour step). Inverse of the placeOnGrid slot math, used by
+ * click-to-add to turn a clicked empty cell into a real start time. Mirrors
+ * the inline math in the interactive grids' openCreateAt.
+ */
+export function slotStartAt(selectedDate: Date, slotIndex: number): Date {
+  return pfaWallClockAt(
+    selectedDate,
+    SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIndex / 2),
+    (slotIndex % 2) * 30,
+  );
 }
 
 /**

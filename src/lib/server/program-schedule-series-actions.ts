@@ -29,8 +29,10 @@ import { and, eq, gte, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   programs,
+  programScheduleBlockCoaches,
   programScheduleBlocks,
   programScheduleSeries,
+  programScheduleSeriesCoaches,
   users,
 } from "@/db/schema";
 import type { AuthedSession } from "@/lib/authz";
@@ -49,12 +51,19 @@ import {
 import { generateOccurrences } from "@/lib/schedule-recurrence";
 import { formatPfaDate, pfaWallClockToUtc } from "@/lib/timezone";
 import { safeLogAudit } from "./audit-helpers";
+import {
+  assertResourcesFree,
+  insertProgramResourceBlocks,
+  programOccupancyReason,
+  type ProgramResourceBlockRow,
+} from "./program-resource-blocks";
 
 const AUDIT_ENTITY = "program_schedule_series";
 
 // Program must exist and be active — same check as the single-block
-// path. Throws ProgramNotFoundError / ProgramInactiveError.
-async function assertProgramActive(programId: string) {
+// path. Throws ProgramNotFoundError / ProgramInactiveError. Returns the
+// program NAME so occupancy blocked_times can stamp reason "Program: <name>".
+async function assertProgramActive(programId: string): Promise<string> {
   const [program] = await db
     .select()
     .from(programs)
@@ -64,6 +73,7 @@ async function assertProgramActive(programId: string) {
   if (!program.active) {
     throw new ProgramInactiveError(program.id, program.name);
   }
+  return program.name;
 }
 
 // Scheduled coach must be a non-deleted user with role = "coach".
@@ -96,8 +106,13 @@ export async function createProgramScheduleSeriesInternal(
 ) {
   const parsed = createProgramScheduleSeriesSchema.parse(input);
 
-  await assertProgramActive(parsed.programId);
-  await assertScheduledCoach(parsed.scheduledCoachId);
+  const programName = await assertProgramActive(parsed.programId);
+  // QA10 W3.2: full coach set; primary = [0]. Validate each, dedupe.
+  const primaryCoachId = parsed.scheduledCoachIds[0];
+  for (const coachId of parsed.scheduledCoachIds) {
+    await assertScheduledCoach(coachId);
+  }
+  const coachIds = [...new Set(parsed.scheduledCoachIds)];
 
   // Generate FIRST so an invalid recurrence (over-cap, etc.) throws
   // before we write the series row — no orphan series on a bad range.
@@ -107,14 +122,28 @@ export async function createProgramScheduleSeriesInternal(
     endTime: parsed.endTime,
     startsOn: parsed.startsOn,
     endsOn: parsed.endsOn,
+    frequency: parsed.frequency,
+    interval: parsed.interval,
   });
+
+  // QA10 W3.3: occupied resources → one linked blocked_time per occurrence.
+  // neon-http has no transactions, so PRE-VALIDATE every occurrence × resource
+  // is free BEFORE writing the series / blocks (no orphan on conflict).
+  const resourceIds = [...new Set(parsed.resourceIds)];
+  if (resourceIds.length > 0) {
+    for (const o of occurrences) {
+      await assertResourcesFree(resourceIds, o.startAt, o.endAt);
+    }
+  }
 
   const [series] = await db
     .insert(programScheduleSeries)
     .values({
       programId: parsed.programId,
-      scheduledCoachId: parsed.scheduledCoachId,
+      scheduledCoachId: primaryCoachId,
       daysOfWeek: parsed.daysOfWeek,
+      frequency: parsed.frequency,
+      interval: parsed.interval,
       startTime: parsed.startTime,
       endTime: parsed.endTime,
       startsOn: parsed.startsOn,
@@ -124,6 +153,10 @@ export async function createProgramScheduleSeriesInternal(
     })
     .returning();
 
+  await db
+    .insert(programScheduleSeriesCoaches)
+    .values(coachIds.map((coachId) => ({ seriesId: series.id, coachId })));
+
   let count = 0;
   if (occurrences.length > 0) {
     const inserted = await db
@@ -131,7 +164,7 @@ export async function createProgramScheduleSeriesInternal(
       .values(
         occurrences.map((o) => ({
           programId: parsed.programId,
-          scheduledCoachId: parsed.scheduledCoachId,
+          scheduledCoachId: primaryCoachId,
           startAt: o.startAt,
           endAt: o.endAt,
           note: parsed.note ?? null,
@@ -139,8 +172,38 @@ export async function createProgramScheduleSeriesInternal(
           createdBy: actor.id,
         })),
       )
-      .returning({ id: programScheduleBlocks.id });
+      .returning({
+        id: programScheduleBlocks.id,
+        startAt: programScheduleBlocks.startAt,
+        endAt: programScheduleBlocks.endAt,
+      });
     count = inserted.length;
+
+    // QA10 W3.2: copy the full coach set onto every materialized block.
+    await db.insert(programScheduleBlockCoaches).values(
+      inserted.flatMap((b) =>
+        coachIds.map((coachId) => ({ blockId: b.id, coachId })),
+      ),
+    );
+
+    // QA10 W3.3: one linked blocked_time per (occurrence block × resource),
+    // bulk-inserted in a single statement. The series' resource set is
+    // PERSISTED implicitly via these linked rows — the edit form derives it
+    // back on read (no separate series-resources table).
+    if (resourceIds.length > 0) {
+      const reason = programOccupancyReason(programName);
+      const rows: ProgramResourceBlockRow[] = inserted.flatMap((b) =>
+        resourceIds.map((resourceId) => ({
+          programScheduleBlockId: b.id,
+          resourceId,
+          startAt: b.startAt,
+          endAt: b.endAt,
+          reason,
+          createdBy: actor.id,
+        })),
+      );
+      await insertProgramResourceBlocks(rows);
+    }
   }
 
   await safeLogAudit(db, {
@@ -171,8 +234,15 @@ export async function editProgramScheduleSeriesInternal(
 
   const parsed = editProgramScheduleSeriesSchema.parse(input);
 
-  await assertProgramActive(parsed.programId);
-  await assertScheduledCoach(parsed.scheduledCoachId);
+  const programName = await assertProgramActive(parsed.programId);
+  // QA10 W3.2: full coach set; primary = [0]. Validate each, dedupe.
+  const primaryCoachId = parsed.scheduledCoachIds[0];
+  for (const coachId of parsed.scheduledCoachIds) {
+    await assertScheduledCoach(coachId);
+  }
+  const coachIds = [...new Set(parsed.scheduledCoachIds)];
+  // QA10 W3.3: the series' resource set comes fresh on each save.
+  const resourceIds = [...new Set(parsed.resourceIds)];
 
   // Edit-WHOLE-series: update the definition, then regenerate FUTURE
   // occurrences only. Past blocks (startAt before today's PFA midnight)
@@ -195,16 +265,34 @@ export async function editProgramScheduleSeriesInternal(
     endTime: parsed.endTime,
     startsOn: parsed.startsOn,
     endsOn: parsed.endsOn,
+    frequency: parsed.frequency,
+    interval: parsed.interval,
     skipDates: existing.skipDates,
   });
   const futureOccurrences = allOccurrences.filter((o) => o.date >= today);
 
+  // QA10 W3.3: PRE-VALIDATE every future occurrence × resource BEFORE any
+  // mutation (neon-http has no transactions). A conflict here aborts the
+  // edit with the series + its future occupancy fully intact. We exclude
+  // this series' OWN future occupancy blocks (about to be regenerated) via
+  // excludeSeriesId, so the series doesn't self-conflict; manually-created
+  // (NULL-linked) blocked_times are still checked.
+  if (resourceIds.length > 0) {
+    for (const o of futureOccurrences) {
+      await assertResourcesFree(resourceIds, o.startAt, o.endAt, {
+        excludeSeriesId: seriesId,
+      });
+    }
+  }
+
   const [updated] = await db
     .update(programScheduleSeries)
     .set({
-      scheduledCoachId: parsed.scheduledCoachId,
+      scheduledCoachId: primaryCoachId,
       programId: parsed.programId,
       daysOfWeek: parsed.daysOfWeek,
+      frequency: parsed.frequency,
+      interval: parsed.interval,
       startTime: parsed.startTime,
       endTime: parsed.endTime,
       startsOn: parsed.startsOn,
@@ -214,8 +302,19 @@ export async function editProgramScheduleSeriesInternal(
     .where(eq(programScheduleSeries.id, seriesId))
     .returning();
 
+  // QA10 W3.2: replace the series' full coach set.
+  await db
+    .delete(programScheduleSeriesCoaches)
+    .where(eq(programScheduleSeriesCoaches.seriesId, seriesId));
+  await db
+    .insert(programScheduleSeriesCoaches)
+    .values(coachIds.map((coachId) => ({ seriesId, coachId })));
+
   // Delete this series' FUTURE blocks (startAt >= start of PFA today),
-  // then re-insert from the new definition. Past blocks untouched.
+  // then re-insert from the new definition. Past blocks untouched. The
+  // deleted blocks' program_schedule_block_coaches rows cascade away — as
+  // do their linked occupancy blocked_times (FK ON DELETE CASCADE), so the
+  // future resource slots are freed before we re-validate + re-insert.
   await db
     .delete(programScheduleBlocks)
     .where(
@@ -232,7 +331,7 @@ export async function editProgramScheduleSeriesInternal(
       .values(
         futureOccurrences.map((o) => ({
           programId: parsed.programId,
-          scheduledCoachId: parsed.scheduledCoachId,
+          scheduledCoachId: primaryCoachId,
           startAt: o.startAt,
           endAt: o.endAt,
           note: parsed.note ?? null,
@@ -240,8 +339,36 @@ export async function editProgramScheduleSeriesInternal(
           createdBy: actor.id,
         })),
       )
-      .returning({ id: programScheduleBlocks.id });
+      .returning({
+        id: programScheduleBlocks.id,
+        startAt: programScheduleBlocks.startAt,
+        endAt: programScheduleBlocks.endAt,
+      });
     count = inserted.length;
+
+    // QA10 W3.2: re-insert the full coach set for each new future block.
+    await db.insert(programScheduleBlockCoaches).values(
+      inserted.flatMap((b) =>
+        coachIds.map((coachId) => ({ blockId: b.id, coachId })),
+      ),
+    );
+
+    // QA10 W3.3: re-insert the linked occupancy blocked_times for the new
+    // future blocks at the new times. Past blocks' occupancy is untouched.
+    if (resourceIds.length > 0) {
+      const reason = programOccupancyReason(programName);
+      const rows: ProgramResourceBlockRow[] = inserted.flatMap((b) =>
+        resourceIds.map((resourceId) => ({
+          programScheduleBlockId: b.id,
+          resourceId,
+          startAt: b.startAt,
+          endAt: b.endAt,
+          reason,
+          createdBy: actor.id,
+        })),
+      );
+      await insertProgramResourceBlocks(rows);
+    }
   }
 
   await safeLogAudit(db, {

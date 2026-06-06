@@ -5,6 +5,7 @@ import {
   eq,
   gt,
   gte,
+  inArray,
   isNull,
   lt,
   sql as drizzleSql,
@@ -24,6 +25,7 @@ import {
   blockedTimes,
   hourLogs,
   programs,
+  programScheduleBlockCoaches,
   programScheduleBlocks,
   resources,
   sessionsBilling,
@@ -31,11 +33,13 @@ import {
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import { totalFromSnapshot } from "@/lib/billing";
+import { listActiveCoaches } from "@/lib/server/coaches";
 import { formatDollars } from "@/lib/format-money";
 import { formatRelative } from "@/lib/format-relative";
 import {
   reconcileBlocks,
   type ReconBlock,
+  type ReconCoach,
   type ReconLog,
 } from "@/lib/server/reconciliation";
 import {
@@ -53,13 +57,13 @@ import {
 } from "@/app/admin/_components/activity-feed";
 import { describeActivity } from "@/app/admin/_components/activity-feed.logic";
 import {
-  MasterScheduleGrid,
   type MasterBlockedTime,
   type MasterProgramBlock,
   type MasterProgramRow,
   type MasterResourceRow,
   type MasterSession,
 } from "@/app/admin/_components/master-schedule-grid";
+import { EditableMasterSchedule } from "@/app/admin/_components/editable-master-schedule";
 import { AutoRefresh } from "@/app/admin/schedule/_components/auto-refresh";
 import { WeekNav } from "@/app/admin/schedule/_components/week-nav";
 
@@ -131,6 +135,7 @@ export default async function AdminHome({
     logRows,
     coachAuditRows,
     coachAccountRows,
+    activeCoaches,
   ] = await Promise.all([
     // Cage rentals this month → coaches OWE PFA (receivable).
     db
@@ -295,6 +300,10 @@ export default async function AdminHome({
       .where(and(eq(users.role, "coach"), isNull(users.deletedAt)))
       .orderBy(desc(users.createdAt))
       .limit(12),
+    // QA10 W3.6: active coaches for the click-to-add dialogs (cage + program).
+    // Same canonical list both dialogs' coach pickers use on the standalone
+    // pages; the {id,name,email} shape satisfies both dialog prop types.
+    listActiveCoaches(),
   ]);
 
   // Money totals read each row's snapshotted rate directly — never
@@ -343,6 +352,59 @@ export default async function AdminHome({
     name: p.name,
   }));
 
+  // QA10 W3.6: dialog option lists for the editable Home grid. Shapes MIRROR
+  // the standalone pages exactly:
+  //   - cage dialog (ScheduleCreateDialog): sessions-client CoachOption +
+  //     ResourceOption (resources carry sortOrder).
+  //   - program dialog (ProgramBlockDialog): ProgramOption {id,name}, its own
+  //     CoachOption {id,name,email}, W3.3 ResourceOption {id,name,type}.
+  // activeCoaches' {id,name,email} satisfies both dialogs' coach prop types.
+  const cageResourceOptions = resourceRows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    type: r.type,
+    sortOrder: r.sortOrder,
+  }));
+  const programResourceOptions = resourceRows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    type: r.type,
+  }));
+
+  // QA10 W3.2: the full scheduled-coach set for the day's program blocks,
+  // grouped by block (name = users.name ?? users.email, primary first).
+  const programBlockIds = programBlockRows.map((b) => b.id);
+  const programBlockCoachRows =
+    programBlockIds.length > 0
+      ? await db
+          .select({
+            blockId: programScheduleBlockCoaches.blockId,
+            coachId: programScheduleBlockCoaches.coachId,
+            coachName: users.name,
+            coachEmail: users.email,
+          })
+          .from(programScheduleBlockCoaches)
+          .innerJoin(users, eq(programScheduleBlockCoaches.coachId, users.id))
+          .where(inArray(programScheduleBlockCoaches.blockId, programBlockIds))
+      : [];
+  const programCoachesByBlock = new Map<string, ReconCoach[]>();
+  for (const r of programBlockCoachRows) {
+    const list = programCoachesByBlock.get(r.blockId) ?? [];
+    list.push({ coachId: r.coachId, coachName: r.coachName ?? r.coachEmail });
+    programCoachesByBlock.set(r.blockId, list);
+  }
+  const coachesForBlock = (
+    b: (typeof programBlockRows)[number],
+  ): ReconCoach[] => {
+    const primary = {
+      coachId: b.scheduledCoachId,
+      coachName: b.coachName ?? b.coachEmail,
+    };
+    const list = programCoachesByBlock.get(b.id);
+    if (!list || list.length === 0) return [primary];
+    return [primary, ...list.filter((c) => c.coachId !== b.scheduledCoachId)];
+  };
+
   // Reconcile the day's scheduled program blocks against coach hour-logs
   // (FEAT-16). The engine is pure — inject `now` + the PFA time formatter.
   const reconBlocks: ReconBlock[] = programBlockRows.map((b) => ({
@@ -350,6 +412,7 @@ export default async function AdminHome({
     programId: b.programId,
     scheduledCoachId: b.scheduledCoachId,
     scheduledCoachName: b.coachName ?? b.coachEmail,
+    coaches: coachesForBlock(b),
     startAt: b.startAt,
     endAt: b.endAt,
   }));
@@ -497,12 +560,18 @@ export default async function AdminHome({
 
             <AutoRefresh />
 
-            <MasterScheduleGrid
+            <EditableMasterSchedule
               resources={masterResources}
               sessions={masterSessions}
               blockedTimes={masterBlocked}
               programs={masterPrograms}
               programBlocks={masterProgramBlocks}
+              selectedDate={selectedDate}
+              cageCoaches={activeCoaches}
+              cageResources={cageResourceOptions}
+              programOptions={masterPrograms}
+              programCoaches={activeCoaches}
+              programResources={programResourceOptions}
             />
           </div>
         ) : null}

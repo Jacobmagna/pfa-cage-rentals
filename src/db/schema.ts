@@ -38,6 +38,17 @@ export const enrollmentCapPeriod = pgEnum("enrollment_cap_period", [
   "total",
 ]);
 
+// RECUR-a recurrence frequency for program_schedule_series.frequency.
+// "weekly" = the original every-N-weeks model (daysOfWeek expanded each
+// week whose index is a multiple of `interval`); "monthly" = same-weekday
+// monthly (e.g. "2nd Tuesday each month", weekday + ordinal derived from
+// startsOn, stepping by `interval` months). Defaults to "weekly" so every
+// pre-existing series row keeps today's behavior unchanged.
+export const recurrenceFrequency = pgEnum("recurrence_frequency", [
+  "weekly",
+  "monthly",
+]);
+
 // `deletedAt`: soft-delete timestamp for the J9 GDPR-style account-
 // removal flow. NULL = active. When set, the row is anonymized:
 // `name` becomes "Former coach" and `email` becomes
@@ -365,6 +376,13 @@ export const blockedTimes = pgTable(
     startAt: timestamp("start_at", { mode: "date" }).notNull(),
     endAt: timestamp("end_at", { mode: "date" }).notNull(),
     reason: text("reason").notNull(),
+    // QA10 W3.3: when a scheduled program OCCUPIES this resource, the
+    // blocked_time is linked to the owning program block. ON DELETE CASCADE
+    // so cancelling/regenerating the program block clears its occupancy.
+    programScheduleBlockId: text("program_schedule_block_id").references(
+      () => programScheduleBlocks.id,
+      { onDelete: "cascade" },
+    ),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),
@@ -372,6 +390,7 @@ export const blockedTimes = pgTable(
   },
   (table) => [
     index("blocked_times_resource_start_idx").on(table.resourceId, table.startAt),
+    index("blocked_times_program_block_idx").on(table.programScheduleBlockId),
   ],
 );
 
@@ -693,6 +712,13 @@ export const programScheduleSeries = pgTable("program_schedule_series", {
     .notNull()
     .references(() => users.id),
   daysOfWeek: integer("days_of_week").array().notNull(),
+  // RECUR-a frequency + interval. "weekly" with interval N = every N
+  // weeks; "monthly" with interval N = the same weekday/ordinal every N
+  // months. Both default to weekly/1 so existing rows are unchanged.
+  // interval >= 1 is enforced in the zod schema + the pure generator
+  // (no DB CHECK; the codebase enforces such invariants in app code).
+  frequency: recurrenceFrequency("frequency").notNull().default("weekly"),
+  interval: integer("recurrence_interval").notNull().default(1),
   startTime: text("start_time").notNull(),
   endTime: text("end_time").notNull(),
   startsOn: text("starts_on").notNull(),
@@ -753,6 +779,42 @@ export const programScheduleBlocks = pgTable(
     ),
     index("program_schedule_blocks_start_idx").on(table.startAt),
     index("program_schedule_blocks_series_idx").on(table.seriesId),
+  ],
+);
+
+// QA10 W3.2: the FULL set of scheduled coaches for a program block (the
+// primary scheduledCoachId is also a member). Reconciliation is per-coach.
+export const programScheduleBlockCoaches = pgTable(
+  "program_schedule_block_coaches",
+  {
+    blockId: text("block_id")
+      .notNull()
+      .references(() => programScheduleBlocks.id, { onDelete: "cascade" }),
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id),
+  },
+  (table) => [
+    primaryKey({ columns: [table.blockId, table.coachId] }),
+    index("program_schedule_block_coaches_coach_idx").on(table.coachId),
+  ],
+);
+
+// QA10 W3.2: the full coach set for a recurring series. Materialized
+// occurrences copy this set into program_schedule_block_coaches.
+export const programScheduleSeriesCoaches = pgTable(
+  "program_schedule_series_coaches",
+  {
+    seriesId: text("series_id")
+      .notNull()
+      .references(() => programScheduleSeries.id, { onDelete: "cascade" }),
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id),
+  },
+  (table) => [
+    primaryKey({ columns: [table.seriesId, table.coachId] }),
+    index("program_schedule_series_coaches_coach_idx").on(table.coachId),
   ],
 );
 
@@ -830,3 +892,11 @@ export type NewAttendanceRecord = typeof attendanceRecords.$inferInsert;
 export type ProgramScheduleBlock = typeof programScheduleBlocks.$inferSelect;
 export type NewProgramScheduleBlock =
   typeof programScheduleBlocks.$inferInsert;
+export type ProgramScheduleBlockCoach =
+  typeof programScheduleBlockCoaches.$inferSelect;
+export type NewProgramScheduleBlockCoach =
+  typeof programScheduleBlockCoaches.$inferInsert;
+export type ProgramScheduleSeriesCoach =
+  typeof programScheduleSeriesCoaches.$inferSelect;
+export type NewProgramScheduleSeriesCoach =
+  typeof programScheduleSeriesCoaches.$inferInsert;

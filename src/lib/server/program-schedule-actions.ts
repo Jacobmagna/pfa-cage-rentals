@@ -23,7 +23,13 @@
 
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { programs, programScheduleBlocks, users } from "@/db/schema";
+import {
+  blockedTimes,
+  programs,
+  programScheduleBlockCoaches,
+  programScheduleBlocks,
+  users,
+} from "@/db/schema";
 import type { AuthedSession } from "@/lib/authz";
 import {
   CoachNotFoundError,
@@ -36,12 +42,19 @@ import {
   updateProgramScheduleBlockSchema,
 } from "@/lib/schemas/program-schedule";
 import { safeLogAudit } from "./audit-helpers";
+import {
+  assertResourcesFree,
+  insertProgramResourceBlocks,
+  programOccupancyReason,
+} from "./program-resource-blocks";
 
 const AUDIT_ENTITY = "program_schedule_block";
 
 // Program must exist and be active. Same check as the hour-log create
-// path. Throws ProgramNotFoundError / ProgramInactiveError.
-async function assertProgramActive(programId: string) {
+// path. Throws ProgramNotFoundError / ProgramInactiveError. Returns the
+// program NAME so the caller can stamp it on occupancy blocked_times
+// (reason = "Program: <name>").
+async function assertProgramActive(programId: string): Promise<string> {
   const [program] = await db
     .select()
     .from(programs)
@@ -51,6 +64,7 @@ async function assertProgramActive(programId: string) {
   if (!program.active) {
     throw new ProgramInactiveError(program.id, program.name);
   }
+  return program.name;
 }
 
 // Scheduled coach must be a non-deleted user with role = "coach".
@@ -78,20 +92,52 @@ export async function createProgramScheduleBlockInternal(
 ) {
   const parsed = createProgramScheduleBlockSchema.parse(input);
 
-  await assertProgramActive(parsed.programId);
-  await assertScheduledCoach(parsed.scheduledCoachId);
+  const programName = await assertProgramActive(parsed.programId);
+  // QA10 W3.2: full coach set; primary = [0]. Validate EACH coach, then
+  // dedupe (preserving order) for the join rows.
+  const primaryCoachId = parsed.scheduledCoachIds[0];
+  for (const coachId of parsed.scheduledCoachIds) {
+    await assertScheduledCoach(coachId);
+  }
+  const coachIds = [...new Set(parsed.scheduledCoachIds)];
+
+  // QA10 W3.3: occupied cage resources → linked blocked_times. neon-http
+  // has no transactions, so PRE-VALIDATE every resource is free at this
+  // time BEFORE inserting the block (no orphan block on conflict).
+  const resourceIds = [...new Set(parsed.resourceIds ?? [])];
+  if (resourceIds.length > 0) {
+    await assertResourcesFree(resourceIds, parsed.startAt, parsed.endAt);
+  }
 
   const [inserted] = await db
     .insert(programScheduleBlocks)
     .values({
       programId: parsed.programId,
-      scheduledCoachId: parsed.scheduledCoachId,
+      scheduledCoachId: primaryCoachId,
       startAt: parsed.startAt,
       endAt: parsed.endAt,
       note: parsed.note ?? null,
       createdBy: actor.id,
     })
     .returning();
+
+  await db
+    .insert(programScheduleBlockCoaches)
+    .values(coachIds.map((coachId) => ({ blockId: inserted.id, coachId })));
+
+  // QA10 W3.3: write one linked blocked_time per occupied resource.
+  if (resourceIds.length > 0) {
+    await insertProgramResourceBlocks(
+      resourceIds.map((resourceId) => ({
+        programScheduleBlockId: inserted.id,
+        resourceId,
+        startAt: parsed.startAt,
+        endAt: parsed.endAt,
+        reason: programOccupancyReason(programName),
+        createdBy: actor.id,
+      })),
+    );
+  }
 
   await safeLogAudit(db, {
     actorUserId: actor.id,
@@ -123,24 +169,125 @@ export async function updateProgramScheduleBlockInternal(
   // cheap and keeps the row consistent if the program was retired
   // between create and edit).
   const finalProgramId = parsed.programId ?? existing.programId;
-  const finalCoachId = parsed.scheduledCoachId ?? existing.scheduledCoachId;
+  const finalStartAt = parsed.startAt ?? existing.startAt;
+  const finalEndAt = parsed.endAt ?? existing.endAt;
+  // QA10 W3.2: when scheduledCoachIds is provided, primary = [0] and the
+  // full join set is REPLACED; when omitted, coaches (and the primary
+  // scheduledCoachId) are left untouched.
+  const coachIdsProvided = parsed.scheduledCoachIds !== undefined;
+  const primaryCoachId = coachIdsProvided
+    ? parsed.scheduledCoachIds![0]
+    : existing.scheduledCoachId;
 
-  await assertProgramActive(finalProgramId);
-  await assertScheduledCoach(finalCoachId);
+  const programName = await assertProgramActive(finalProgramId);
+  if (coachIdsProvided) {
+    for (const coachId of parsed.scheduledCoachIds!) {
+      await assertScheduledCoach(coachId);
+    }
+  } else {
+    // Re-validate the unchanged primary, mirroring the program re-check.
+    await assertScheduledCoach(primaryCoachId);
+  }
 
-  const [updated] = await db
-    .update(programScheduleBlocks)
-    .set({
-      ...(parsed.programId !== undefined && { programId: parsed.programId }),
-      ...(parsed.scheduledCoachId !== undefined && {
-        scheduledCoachId: parsed.scheduledCoachId,
-      }),
-      ...(parsed.startAt !== undefined && { startAt: parsed.startAt }),
-      ...(parsed.endAt !== undefined && { endAt: parsed.endAt }),
-      ...(parsed.note !== undefined && { note: parsed.note ?? null }),
+  // QA10 W3.3: resolve the occupancy change BEFORE mutating anything
+  // (neon-http has no transactions — pre-validate, then write).
+  //   - resourceIds provided  → REPLACE the linked set at the final time.
+  //   - resourceIds undefined  → leave occupancy as-is, but if the TIME
+  //     changed, the existing linked blocks must MOVE to the new time;
+  //     re-check those resources are free there (excluding this block's
+  //     own rows) so we never silently move onto a busy slot.
+  const resourceIdsProvided = parsed.resourceIds !== undefined;
+  const timeChanged =
+    finalStartAt.getTime() !== existing.startAt.getTime() ||
+    finalEndAt.getTime() !== existing.endAt.getTime();
+
+  // The block's CURRENT linked blocked_times (for the move/replace paths).
+  const existingLinked = await db
+    .select({
+      id: blockedTimes.id,
+      resourceId: blockedTimes.resourceId,
     })
-    .where(eq(programScheduleBlocks.id, id))
-    .returning();
+    .from(blockedTimes)
+    .where(eq(blockedTimes.programScheduleBlockId, id));
+
+  if (resourceIdsProvided) {
+    const newResourceIds = [...new Set(parsed.resourceIds!)];
+    if (newResourceIds.length > 0) {
+      await assertResourcesFree(newResourceIds, finalStartAt, finalEndAt, {
+        excludeProgramBlockId: id,
+      });
+    }
+  } else if (timeChanged && existingLinked.length > 0) {
+    // Propagate the move: re-check the block's OWN occupied resources are
+    // free at the new time, excluding this block's own linked rows.
+    const ownResourceIds = [
+      ...new Set(existingLinked.map((r) => r.resourceId)),
+    ];
+    await assertResourcesFree(ownResourceIds, finalStartAt, finalEndAt, {
+      excludeProgramBlockId: id,
+    });
+  }
+
+  const blockSet = {
+    ...(parsed.programId !== undefined && { programId: parsed.programId }),
+    ...(coachIdsProvided && { scheduledCoachId: primaryCoachId }),
+    ...(parsed.startAt !== undefined && { startAt: parsed.startAt }),
+    ...(parsed.endAt !== undefined && { endAt: parsed.endAt }),
+    ...(parsed.note !== undefined && { note: parsed.note ?? null }),
+  };
+  let updated;
+  if (Object.keys(blockSet).length > 0) {
+    [updated] = await db
+      .update(programScheduleBlocks)
+      .set(blockSet)
+      .where(eq(programScheduleBlocks.id, id))
+      .returning();
+  } else {
+    updated = existing; // only occupancy/coaches changed — block row untouched
+  }
+
+  // Replace the join set only when a new coach list was provided.
+  if (coachIdsProvided) {
+    const coachIds = [...new Set(parsed.scheduledCoachIds!)];
+    await db
+      .delete(programScheduleBlockCoaches)
+      .where(eq(programScheduleBlockCoaches.blockId, id));
+    await db
+      .insert(programScheduleBlockCoaches)
+      .values(coachIds.map((coachId) => ({ blockId: id, coachId })));
+  }
+
+  // QA10 W3.3: apply the occupancy change.
+  if (resourceIdsProvided) {
+    // Replace the linked blocked_times with the new set at the final time.
+    const newResourceIds = [...new Set(parsed.resourceIds!)];
+    await db
+      .delete(blockedTimes)
+      .where(eq(blockedTimes.programScheduleBlockId, id));
+    if (newResourceIds.length > 0) {
+      await insertProgramResourceBlocks(
+        newResourceIds.map((resourceId) => ({
+          programScheduleBlockId: id,
+          resourceId,
+          startAt: finalStartAt,
+          endAt: finalEndAt,
+          reason: programOccupancyReason(programName),
+          createdBy: actor.id,
+        })),
+      );
+    }
+  } else if (timeChanged && existingLinked.length > 0) {
+    // Keep the same resource set, just move the linked blocks to the new
+    // time. Reason carries the program name (re-stamp in case it changed).
+    await db
+      .update(blockedTimes)
+      .set({
+        startAt: finalStartAt,
+        endAt: finalEndAt,
+        reason: programOccupancyReason(programName),
+      })
+      .where(eq(blockedTimes.programScheduleBlockId, id));
+  }
 
   await safeLogAudit(db, {
     actorUserId: actor.id,

@@ -11,9 +11,17 @@ import { z } from "zod";
 
 const programScheduleBlockShape = {
   programId: z.string().min(1, "programId is required"),
-  scheduledCoachId: z.string().min(1, "scheduledCoachId is required"),
+  // QA10 W3.2: the FULL set of scheduled coaches (primary = [0]). At least
+  // one is required; the action dedupes + validates each id.
+  scheduledCoachIds: z
+    .array(z.string().min(1))
+    .min(1, "Pick at least one coach"),
   startAt: z.coerce.date(),
   endAt: z.coerce.date(),
+  // QA10 W3.3: the cage resources this program block OCCUPIES. CREATE
+  // treats `resourceIds ?? []`; UPDATE treats `undefined` = "leave
+  // occupancy untouched" and a present array (incl. []) = "replace the set".
+  resourceIds: z.array(z.string().min(1)).optional(),
   note: z.string().max(200, "Note is at most 200 characters").nullish(),
 };
 
@@ -69,7 +77,10 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const programScheduleSeriesShape = {
   programId: z.string().min(1, "programId is required"),
-  scheduledCoachId: z.string().min(1, "scheduledCoachId is required"),
+  // QA10 W3.2: full scheduled-coach set (primary = [0]); required on save.
+  scheduledCoachIds: z
+    .array(z.string().min(1))
+    .min(1, "Pick at least one coach"),
   daysOfWeek: z
     .array(z.number().int().min(0).max(6))
     .min(1, "Pick at least one weekday"),
@@ -77,6 +88,19 @@ const programScheduleSeriesShape = {
   endTime: z.string().regex(TIME_RE, "endTime must be HH:MM (24h)"),
   startsOn: z.string().regex(DATE_RE, "startsOn must be YYYY-MM-DD"),
   endsOn: z.string().regex(DATE_RE, "endsOn must be YYYY-MM-DD"),
+  // RECUR-a recurrence frequency + interval. Both default to weekly/1 so
+  // a payload omitting them reproduces today's weekly-every-week
+  // behavior (back-compat). interval is coerced to an integer ≥ 1 (the
+  // generator enforces the same invariant).
+  frequency: z.enum(["weekly", "monthly"]).default("weekly"),
+  interval: z.coerce
+    .number()
+    .int("interval must be a whole number")
+    .min(1, "interval must be at least 1")
+    .default(1),
+  // QA10 W3.3: the cage resources every occurrence of this series OCCUPIES.
+  // The series form sends the full set on each save; [] = no occupancy.
+  resourceIds: z.array(z.string().min(1)).default([]),
   note: z.string().max(200, "Note is at most 200 characters").nullish(),
 };
 

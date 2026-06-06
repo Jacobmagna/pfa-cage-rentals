@@ -188,3 +188,40 @@ export async function deleteHourInternal(
     before: existing as unknown as Record<string, unknown>,
   });
 }
+
+// Admin-only "Resolve" — mark an unscheduled hour-log reviewed/acknowledged.
+// The row STAYS (real worked time/pay); stamping reviewedAt just drops it off
+// the needs-review queue. Idempotent: if the row is already reviewed we keep
+// the original reviewer/timestamp and return it unchanged (never overwrite).
+// We deliberately do NOT verify the row is actually unscheduled — stamping a
+// scheduled row is harmless (it simply never surfaces a Resolve button).
+export async function resolveHourLogInternal(
+  actor: AuthedSession["user"],
+  id: string,
+) {
+  const [existing] = await db
+    .select()
+    .from(hourLogs)
+    .where(eq(hourLogs.id, id))
+    .limit(1);
+  if (!existing) throw new HourLogNotFoundError(id);
+
+  // Idempotent — already reviewed, keep the original reviewer.
+  if (existing.reviewedAt) return existing;
+
+  const [updated] = await db
+    .update(hourLogs)
+    .set({ reviewedAt: new Date(), reviewedBy: actor.id })
+    .where(eq(hourLogs.id, id))
+    .returning();
+
+  await safeLogAudit(db, {
+    actorUserId: actor.id,
+    entityType: "hour_log",
+    entityId: id,
+    action: "update",
+    before: existing as unknown as Record<string, unknown>,
+    after: updated as unknown as Record<string, unknown>,
+  });
+  return updated;
+}

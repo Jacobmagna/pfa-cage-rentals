@@ -35,6 +35,8 @@ import {
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import { totalFromSnapshot } from "@/lib/billing";
+import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
+import type { NormalizedHourLogFilters } from "@/lib/reports/hour-log-filters";
 import { listActiveCoaches } from "@/lib/server/coaches";
 import { formatDollars } from "@/lib/format-money";
 import { formatRelative } from "@/lib/format-relative";
@@ -58,6 +60,7 @@ import {
   type ActivityFeedItem,
 } from "@/app/admin/_components/activity-feed";
 import { describeActivity } from "@/app/admin/_components/activity-feed.logic";
+import { UnscheduledAttentionCard } from "@/app/admin/_components/unscheduled-attention-card";
 import {
   type MasterBlockedTime,
   type MasterProgramBlock,
@@ -130,6 +133,28 @@ export default async function AdminHome({
   const schedDayStart = pfaDayStart(selectedDate);
   const schedDayEnd = pfaDayEnd(selectedDate);
 
+  // QA10 W3-polish13b: wide-window filter for the "Unscheduled hours — needs
+  // review" attention card. We want the FULL backlog of still-unreviewed
+  // unscheduled logs, not just this month, so nothing stale is missed. Floor
+  // at a fixed date that predates the app through today's PFA end, with NO
+  // coach/program narrowing. Reuses the SAME `fetchHourLogRowsWithScheduleNotes`
+  // the Hour Log table uses so the `unscheduled` flag matches exactly.
+  //
+  // Known small-data simplification: this loads every program hour-log + every
+  // scheduled block on each dashboard render. Fine at current scale; revisit
+  // (e.g. push the unscheduled+unreviewed filter into SQL) if data grows.
+  const reviewFloor = pfaDayStart(new Date("2024-01-01T12:00:00Z"));
+  const reviewCeiling = pfaDayEnd(now);
+  const reviewFilter: NormalizedHourLogFilters = {
+    from: "2024-01-01",
+    to: "2024-01-01",
+    fromDate: reviewFloor,
+    toDateExclusive: reviewCeiling,
+    coachId: undefined,
+    programId: undefined,
+    isFiltered: true,
+  };
+
   const [
     cageMonthRows,
     programMonthRows,
@@ -144,6 +169,7 @@ export default async function AdminHome({
     coachAuditRows,
     coachAccountRows,
     activeCoaches,
+    reviewWindowRows,
   ] = await Promise.all([
     // Cage rentals this month → coaches OWE PFA (receivable).
     db
@@ -317,7 +343,22 @@ export default async function AdminHome({
     // Same canonical list both dialogs' coach pickers use on the standalone
     // pages; the {id,name,email} shape satisfies both dialog prop types.
     listActiveCoaches(),
+    // QA10 W3-polish13b: full-backlog rows for the unscheduled-hours card.
+    fetchHourLogRowsWithScheduleNotes(reviewFilter),
   ]);
+
+  // QA10 W3-polish13b: still-open review queue = unscheduled AND not yet
+  // resolved. Sort newest-first; the card shows the count + the first 5 rows.
+  const needsReview = reviewWindowRows
+    .filter((r) => r.unscheduled && !r.reviewedAt)
+    .sort((a, b) => b.startAt.getTime() - a.startAt.getTime());
+  const needsReviewItems = needsReview.slice(0, 5).map((r) => ({
+    id: r.id,
+    coachName: r.coachName,
+    programName: r.programName,
+    startAt: r.startAt,
+    endAt: r.endAt,
+  }));
 
   // Money totals read each row's snapshotted rate directly — never
   // recompute from current overrides.
@@ -698,6 +739,13 @@ export default async function AdminHome({
           sub={programSessionsToday > 0 ? "Scheduled" : "Nothing scheduled"}
         />
       </section>
+
+      {needsReview.length > 0 ? (
+        <UnscheduledAttentionCard
+          items={needsReviewItems}
+          totalCount={needsReview.length}
+        />
+      ) : null}
 
       <ActivityFeed items={activityItems} />
 

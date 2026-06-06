@@ -18,6 +18,7 @@ import {
   programs,
   users,
 } from "@/db/schema";
+import { isLogScheduled } from "@/lib/coach-hour-log";
 import {
   annotateLogs,
   type ReconBlock,
@@ -53,6 +54,8 @@ export async function fetchHourLogRows(
       startAt: hourLogs.startAt,
       endAt: hourLogs.endAt,
       note: hourLogs.note,
+      reviewedAt: hourLogs.reviewedAt,
+      reviewedBy: hourLogs.reviewedBy,
     })
     .from(hourLogs)
     .innerJoin(users, eq(hourLogs.coachId, users.id))
@@ -152,5 +155,36 @@ export async function fetchHourLogRowsWithScheduleNotes(
 
   const notes = annotateLogs({ logs, blocks }, formatPfaTime12h);
 
-  return rows.map((r) => ({ ...r, scheduleNote: notes[r.id] ?? null }));
+  // QA10 W3-polish13a: per-coach "unscheduled" flag. A log is unscheduled
+  // iff NO block the log's coach is a MEMBER of (block.coaches) overlaps it
+  // for the same program — the exact rule the coach History page uses, NOT
+  // reconciliation's wrong_coach. Reuse the in-memory `blocks` membership
+  // sets: group each coach's membership blocks once, then test via the
+  // shared isLogScheduled helper.
+  const membershipByCoach = new Map<
+    string,
+    { programId: string; startMs: number; endMs: number }[]
+  >();
+  for (const b of blocks) {
+    const startMs = b.startAt.getTime();
+    const endMs = b.endAt.getTime();
+    for (const c of b.coaches) {
+      const list = membershipByCoach.get(c.coachId) ?? [];
+      list.push({ programId: b.programId, startMs, endMs });
+      membershipByCoach.set(c.coachId, list);
+    }
+  }
+
+  return rows.map((r) => ({
+    ...r,
+    scheduleNote: notes[r.id] ?? null,
+    unscheduled: !isLogScheduled(
+      {
+        programId: r.programId,
+        startMs: r.startAt.getTime(),
+        endMs: r.endAt.getTime(),
+      },
+      membershipByCoach.get(r.coachId) ?? [],
+    ),
+  }));
 }

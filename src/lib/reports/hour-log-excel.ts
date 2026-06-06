@@ -25,6 +25,17 @@ export type HourLogWorkbookRow = {
   // schedule (or was unscheduled). Filled by
   // fetchHourLogRowsWithScheduleNotes; null on the base fetch.
   scheduleNote: string | null;
+  // QA10 W3-polish13a: admin-only review fields. All three are optional on
+  // the base workbook type — the Excel builder ignores them and the test
+  // fixtures predate them. Only fetchHourLogRowsWithScheduleNotes fills
+  // `unscheduled`; both fetches surface `reviewedAt`/`reviewedBy`. The
+  // admin table (HourRow) re-declares them as required.
+  // true when NO scheduled block the log's coach is a MEMBER of overlaps
+  // it (same program) — the admin "Unscheduled" flag.
+  unscheduled?: boolean;
+  // Admin "Resolve" marker (see schema). Null = unreviewed.
+  reviewedAt?: Date | null;
+  reviewedBy?: string | null;
 };
 
 export type HourLogWorkbookMeta = {

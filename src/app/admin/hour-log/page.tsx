@@ -199,7 +199,12 @@ export default async function AdminHourLogPage({
       </div>
 
       <HoursClient
-        rows={rows}
+        rows={rows.map((r) => ({
+          ...r,
+          unscheduled: r.unscheduled ?? false,
+          reviewedAt: r.reviewedAt ?? null,
+          reviewedBy: r.reviewedBy ?? null,
+        }))}
         programOptions={programOptions}
       />
     </>

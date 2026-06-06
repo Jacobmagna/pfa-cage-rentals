@@ -623,6 +623,12 @@ export const hourLogs = pgTable(
     // and a new row stamps null when the program has no rate set → $0
     // pay. Reads use this snapshot, never recompute from current rates.
     ratePer30MinCents: integer("rate_per_30_min_cents"),
+    // Admin "Resolve" marker for unscheduled logs (mark reviewed/acknowledged).
+    // The log STAYS (real worked time/pay); a non-null reviewedAt drops it off
+    // the needs-review queue. Additive + nullable, no backfill — existing rows
+    // stay NULL = unreviewed.
+    reviewedAt: timestamp("reviewed_at", { mode: "date" }),
+    reviewedBy: text("reviewed_by").references(() => users.id),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),

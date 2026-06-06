@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { Check, Pencil, Trash2 } from "lucide-react";
 import { HourEditDialog, type HourEditInitialValues } from "./hour-edit-dialog";
 import { deleteHourAction } from "../form-actions";
+import { resolveUnscheduledHourLog } from "../actions";
 import { PFA_TIMEZONE } from "@/lib/timezone";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 
@@ -22,6 +23,11 @@ export type HourRow = {
   endAt: Date;
   note: string | null;
   scheduleNote: string | null;
+  // QA10 W3-polish13a: true when no scheduled block the coach is a member of
+  // overlaps this log (same program). reviewedAt set = admin acknowledged it.
+  unscheduled: boolean;
+  reviewedAt: Date | null;
+  reviewedBy: string | null;
 };
 
 export type ProgramOption = {
@@ -40,6 +46,9 @@ export function HoursClient({
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [confirmRow, setConfirmRow] = useState<HourRow | null>(null);
   const [isDeleting, startTransition] = useTransition();
+  const [unscheduledOnly, setUnscheduledOnly] = useState(false);
+  const [pendingResolveId, setPendingResolveId] = useState<string | null>(null);
+  const [, startResolveTransition] = useTransition();
 
   const handleConfirmDelete = () => {
     const row = confirmRow;
@@ -54,6 +63,26 @@ export function HoursClient({
       }
     });
   };
+
+  const handleResolve = (row: HourRow) => {
+    setPendingResolveId(row.id);
+    startResolveTransition(async () => {
+      try {
+        await resolveUnscheduledHourLog(row.id);
+      } finally {
+        setPendingResolveId(null);
+      }
+    });
+  };
+
+  // Needs-review queue: still-unreviewed unscheduled logs. Toggle filters
+  // the table down to exactly that set (and the entry count tracks it).
+  const visibleRows = unscheduledOnly
+    ? rows.filter((r) => r.unscheduled && !r.reviewedAt)
+    : rows;
+  const unscheduledCount = rows.filter(
+    (r) => r.unscheduled && !r.reviewedAt,
+  ).length;
 
   const initialValues: HourEditInitialValues | undefined = editRow
     ? {
@@ -81,17 +110,33 @@ export function HoursClient({
 
   return (
     <>
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs uppercase tracking-[0.14em] text-fg-subtle">
-          {rows.length} {rows.length === 1 ? "entry" : "entries"}
+          {visibleRows.length}{" "}
+          {visibleRows.length === 1 ? "entry" : "entries"}
         </p>
+        <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface px-3 h-9 text-sm text-fg-muted shadow-[var(--shadow-sm)] transition hover:text-fg focus-within:ring-2 focus-within:ring-gold/40">
+          <input
+            type="checkbox"
+            checked={unscheduledOnly}
+            onChange={(e) => setUnscheduledOnly(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-line-strong text-gold accent-[var(--gold)] focus:outline-none"
+          />
+          Show unscheduled only
+          {unscheduledCount > 0 ? (
+            <span className="inline-flex items-center rounded-full border border-danger/30 bg-danger/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-danger">
+              {unscheduledCount}
+            </span>
+          ) : null}
+        </label>
       </div>
 
-      {rows.length === 0 ? (
+      {visibleRows.length === 0 ? (
         <div className="rounded-lg border border-line/60 bg-surface/40 p-12 text-center">
           <p className="text-sm text-fg-muted">
-            No logged hours match these filters. Try widening the date range or
-            clearing some filters.
+            {unscheduledOnly
+              ? "No unscheduled logs need review in this window. Nice — everything lines up with the schedule."
+              : "No logged hours match these filters. Try widening the date range or clearing some filters."}
           </p>
         </div>
       ) : (
@@ -113,8 +158,9 @@ export function HoursClient({
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => {
+              {visibleRows.map((row) => {
                 const isPendingDelete = pendingDeleteId === row.id;
+                const isPendingResolve = pendingResolveId === row.id;
                 return (
                   <tr
                     key={row.id}
@@ -143,15 +189,42 @@ export function HoursClient({
                     <td className="px-4 py-3 text-sm text-fg-subtle">
                       {row.note ?? "—"}
                     </td>
-                    <td
-                      className={`px-4 py-3 text-sm ${
-                        row.scheduleNote ? "text-danger" : "text-fg-subtle"
-                      }`}
-                    >
-                      {row.scheduleNote ?? "—"}
+                    <td className="px-4 py-3 text-sm">
+                      <div className="flex flex-col items-start gap-1">
+                        {row.unscheduled ? (
+                          <span className="inline-flex items-center rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger whitespace-nowrap">
+                            Unscheduled
+                          </span>
+                        ) : null}
+                        {row.scheduleNote ? (
+                          <span className="text-danger">{row.scheduleNote}</span>
+                        ) : !row.unscheduled ? (
+                          <span className="text-fg-subtle">—</span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
                       <div className="inline-flex items-center gap-1">
+                        {row.unscheduled && !row.reviewedAt ? (
+                          <button
+                            type="button"
+                            onClick={() => handleResolve(row)}
+                            disabled={isPendingResolve}
+                            className="inline-flex items-center gap-1 h-8 rounded-md border border-line-strong bg-surface px-2.5 text-xs font-medium text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
+                            title="Mark this unscheduled log reviewed"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            {isPendingResolve ? "Resolving…" : "Resolve"}
+                          </button>
+                        ) : row.reviewedAt ? (
+                          <span
+                            className="inline-flex items-center gap-1 text-xs text-fg-subtle whitespace-nowrap"
+                            title={`Reviewed ${formatDate(row.reviewedAt)} ${formatTime(row.reviewedAt)}`}
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            Reviewed
+                          </span>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => setEditRow(row)}

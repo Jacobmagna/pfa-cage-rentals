@@ -1,7 +1,7 @@
 // Single source of truth for the timezone PFA operates in.
 //
-// PFA Baseball's cages are physical and located in Princeton, NJ
-// (US Eastern). Every user-facing date/time display must format in
+// PFA's cages are physical and located in California (US Pacific).
+// Every user-facing date/time display must format in
 // this timezone so what the admin types ("9 AM") matches what every
 // viewer sees, regardless of where the server runs (Vercel UTC) or
 // where any individual user's browser is.
@@ -14,7 +14,7 @@
 // to UTC display. If PFA ever opens a second location with its own
 // hours, promote to env-driven config and pick at request time.
 
-export const PFA_TIMEZONE = "America/New_York";
+export const PFA_TIMEZONE = "America/Los_Angeles";
 
 /**
  * "2026-05-24" — ISO date string in PFA TZ. Stable across server +
@@ -107,8 +107,8 @@ export function formatPfaMonthYear(d: Date): string {
  *
  * Used by the historical Excel import (I3): the parser emits
  * "YYYY-MM-DD" + "HH:mm" in PFA local; the sessions table stores
- * UTC Date instants. Wall-clock 14:30 on 2026-05-01 (EDT, UTC-4)
- * becomes 18:30 UTC.
+ * UTC Date instants. Wall-clock 14:30 on 2026-05-01 (PDT, UTC-7)
+ * becomes 21:30 UTC.
  *
  * Strategy: build the wall-clock-as-if-UTC instant, ask Intl for
  * the PFA offset at that moment, subtract it back. Survives DST
@@ -171,7 +171,7 @@ export function pfaWallClockAt(d: Date, hour: number, minute: number): Date {
 /**
  * First UTC instant of the PFA calendar day containing `d`. Used for
  * server-side bucketing — e.g. "today's sessions" / "May reports". Safe
- * on Vercel UTC: a 11:30 PM ET session on May 31 lands in the May bucket
+ * on Vercel UTC: a 11:30 PM PT session on May 31 lands in the May bucket
  * even though its UTC time is in June.
  */
 export function pfaDayStart(d: Date): Date {

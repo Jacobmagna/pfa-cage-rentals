@@ -15,10 +15,10 @@ function session(
   overrides: Partial<AggregateSessionInput> = {},
 ): AggregateSessionInput {
   // Construct dates as explicit UTC so display assertions are
-  // independent of the test runner's local TZ. 2026-05-01 is in EDT
-  // (UTC-4), so 13:00 UTC → "09:00" PFA time.
-  const startAt = new Date("2026-05-01T13:00:00Z");
-  const endAt = new Date("2026-05-01T14:00:00Z"); // 1 hour = 2 slots
+  // independent of the test runner's local TZ. 2026-05-01 is in PDT
+  // (UTC-7), so 16:00 UTC → "09:00" PFA time.
+  const startAt = new Date("2026-05-01T16:00:00Z");
+  const endAt = new Date("2026-05-01T17:00:00Z"); // 1 hour = 2 slots
   return {
     sessionId: "s-1",
     coachId: "coach-a",
@@ -144,8 +144,8 @@ function hourLog(
     coachId: "coach-a",
     coachName: "Coach A",
     coachEmail: "a@example.com",
-    startAt: new Date("2026-05-01T13:00:00Z"),
-    endAt: new Date("2026-05-01T14:00:00Z"), // 1 hour = 2 slots
+    startAt: new Date("2026-05-01T16:00:00Z"),
+    endAt: new Date("2026-05-01T17:00:00Z"), // 1 hour = 2 slots
     ratePer30MinCents: 1500,
     ...overrides,
   };

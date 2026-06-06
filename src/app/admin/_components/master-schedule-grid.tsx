@@ -17,6 +17,7 @@ import {
   formatGridHour,
   placeOnGrid,
 } from "@/lib/schedule-grid-utils";
+import { assignLanes } from "@/lib/schedule-lanes";
 import { formatPfaTime12h, pfaHour } from "@/lib/timezone";
 
 type ResourceType = "cage" | "bullpen" | "weight_room";
@@ -387,6 +388,13 @@ function ResourceGrid({
   );
 }
 
+// QA10 W3.8b: the Programs section is now a SINGLE combined timeline
+// (mirroring the standalone Program Schedule grid, W3.8a) instead of one row
+// per program. Non-overlapping program blocks share a compact lane row;
+// overlapping blocks stack into as many lanes as the concurrency needs (pure
+// `assignLanes`). Each bar's primary label is the PROGRAM name (the coach
+// moves to the tooltip). The leading 120px column stays empty so the time
+// columns line up exactly with the cage section + the shared time header.
 function ProgramGrid({
   programs,
   blocks,
@@ -396,44 +404,69 @@ function ProgramGrid({
   blocks: MasterProgramBlock[];
   onEmptyCellClick?: EmptyCellClick;
 }): React.JSX.Element {
-  const rowOf = new Map<string, number>();
-  programs.forEach((p, i) => rowOf.set(p.id, i + 1));
+  const programNameById = new Map(programs.map((p) => [p.id, p.name]));
+
+  // Dynamic lane-stacking across ALL visible program blocks. Lane index →
+  // grid row (lane + 1; this section's grid has no header row of its own).
+  // Always render at least one lane row so the empty cells still show + stay
+  // clickable.
+  const { laneByBlockId, laneCount } = assignLanes(
+    blocks.map((b) => ({ id: b.id, startAt: b.startAt, endAt: b.endAt })),
+  );
+  const laneRows = Math.max(laneCount, 1);
+
+  // A slot column is "occupied" if ANY visible block covers it, so empty-cell
+  // clicks only land on free time. Keyed by 0-based slot index.
+  const occupiedSlots = new Set<number>();
+  for (const b of blocks) {
+    const placement = placeOnGrid(b.startAt, b.endAt);
+    if (!placement) continue;
+    // placement.col is 1-based and includes the leading label column
+    // (slot 0 → col 2). Recover the 0-based slot index.
+    const startSlot = placement.col - 2;
+    for (let i = 0; i < placement.span; i++) {
+      occupiedSlots.add(startSlot + i);
+    }
+  }
 
   return (
     <div
       className="grid bg-surface"
       style={{
         gridTemplateColumns,
-        gridTemplateRows: `repeat(${programs.length}, 56px)`,
+        gridTemplateRows: `repeat(${laneRows}, 56px)`,
       }}
     >
-      {/* Program label cells. */}
-      {programs.map((p, i) => (
+      {/* Empty leading label column — kept blank (no per-program label) so the
+          time columns align with the cage section + the shared header. */}
+      {Array.from({ length: laneRows }).map((_, laneIdx) => (
         <div
-          key={`label-${p.id}`}
-          className="sticky left-0 z-10 border-b border-r border-line bg-surface flex items-center gap-2.5 pl-2 pr-3 py-2 text-sm font-medium text-fg"
-          style={{ gridRow: i + 1, gridColumn: 1 }}
-        >
-          <span aria-hidden className="h-6 w-0.5 rounded-full bg-gold" />
-          <span className="truncate">{p.name}</span>
-        </div>
+          key={`label-${laneIdx}`}
+          aria-hidden
+          className="sticky left-0 z-10 border-b border-r border-line bg-surface"
+          style={{ gridRow: laneIdx + 1, gridColumn: 1 }}
+        />
       ))}
 
-      {/* Empty cell grid. Read-only `aria-hidden` divs by default; with an
-          onEmptyCellClick handler they become click-to-add program buttons. */}
-      {programs.map((p, i) =>
+      {/* Empty cell grid — one per (lane row × slot). Read-only `aria-hidden`
+          divs by default; with an onEmptyCellClick handler the FREE cells
+          become click-to-add program buttons. There are no per-program rows
+          now, so the click carries rowId "" — the admin picks the program in
+          the create dialog. Occupied cells skip the click so the bar wins. */}
+      {Array.from({ length: laneRows }).map((_, laneIdx) =>
         Array.from({ length: SCHEDULE_GRID_SLOTS }).map((_, slotIdx) => {
+          const isOccupied = occupiedSlots.has(slotIdx);
           const cellClass = [
             "border-b border-line bg-surface-2/40",
             slotIdx % 2 === 0
               ? "border-l border-line-strong"
               : "border-l border-line/40",
           ].join(" ");
-          const cellStyle = { gridRow: i + 1, gridColumn: slotIdx + 2 };
-          if (!onEmptyCellClick) {
+          const cellStyle = { gridRow: laneIdx + 1, gridColumn: slotIdx + 2 };
+          if (!onEmptyCellClick || isOccupied) {
             return (
               <div
-                key={`cell-${p.id}-${slotIdx}`}
+                key={`cell-${laneIdx}-${slotIdx}`}
                 aria-hidden
                 className={cellClass}
                 style={cellStyle}
@@ -442,16 +475,18 @@ function ProgramGrid({
           }
           return (
             <button
-              key={`cell-${p.id}-${slotIdx}`}
+              key={`cell-${laneIdx}-${slotIdx}`}
               type="button"
               onClick={() =>
                 onEmptyCellClick({
                   section: "program",
-                  rowId: p.id,
+                  rowId: "",
                   slotIndex: slotIdx,
                 })
               }
-              aria-label={`Add program block for ${p.name}`}
+              aria-label={`Add program block at ${formatGridHour(
+                SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIdx / 2),
+              )}${slotIdx % 2 === 1 ? ":30" : ""}`}
               className={`${cellClass} cursor-pointer transition-colors hover:bg-gold/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gold/40`}
               style={cellStyle}
             />
@@ -459,16 +494,22 @@ function ProgramGrid({
         }),
       )}
 
-      {/* Program block bars (read-only, colored by status). */}
+      {/* Program block bars (read-only, colored by status). Row = the block's
+          assigned lane + 1; primary label = the PROGRAM name. */}
       {blocks.map((b) => {
-        const row = rowOf.get(b.programId);
-        if (!row) return null;
+        const lane = laneByBlockId.get(b.id);
+        if (lane === undefined) return null;
         const placement = placeOnGrid(b.startAt, b.endAt);
         if (!placement) return null;
         const timeLabel = `${formatPfaTime12h(b.startAt)}–${formatPfaTime12h(
           b.endAt,
         )}`;
-        const tooltip = [b.coachName, timeLabel].filter(Boolean).join(" · ");
+        const programLabel = programNameById.get(b.programId) ?? b.programId;
+        // Coach name moves OFF the bar into the tooltip; tooltip leads with
+        // the program name.
+        const tooltip = [programLabel, b.coachName, timeLabel]
+          .filter(Boolean)
+          .join(" · ");
         return (
           <div
             key={`pb-${b.id}`}
@@ -478,13 +519,13 @@ function ProgramGrid({
               statusAccent(b.status),
             ].join(" ")}
             style={{
-              gridRow: row,
+              gridRow: lane + 1,
               gridColumn: `${placement.col} / span ${placement.span}`,
               zIndex: 2,
             }}
             title={tooltip}
           >
-            <span className="truncate font-medium">{b.coachName}</span>
+            <span className="truncate font-medium">{programLabel}</span>
             <span className="truncate text-[9px] uppercase tracking-wider text-fg-subtle">
               {timeLabel}
             </span>

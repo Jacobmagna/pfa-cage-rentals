@@ -478,7 +478,7 @@ export function CageCalendar({
       {/* Legend + hint. */}
       <div className="space-y-2 text-[11px] text-fg-muted">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          <LegendDot className="bg-success/30 border border-success/50" label="Available" />
+          <LegendDot className="bg-surface border border-line-strong" label="Available" />
           <LegendDot className="bg-danger/20 border border-danger/50" label="Taken / blocked" />
           <LegendDot className="bg-gold/25 border border-gold/60" label="Your booking" />
         </div>
@@ -586,7 +586,7 @@ function SlotCell({
 
   const tone =
     state === "free"
-      ? "bg-success/25 hover:bg-success/40"
+      ? "bg-surface hover:bg-success/20"
       : state === "own"
         ? "bg-gold/25 hover:bg-gold/35"
         : "bg-danger/20 hover:bg-danger/30"; // taken or blocked

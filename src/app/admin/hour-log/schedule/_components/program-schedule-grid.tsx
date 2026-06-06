@@ -1,17 +1,20 @@
 "use client";
 
-// Programs schedule grid for a single day (SCR-1a). Mirrors the cage
-// schedule-grid's VISUAL layout — program rows × 30-min time-slot
-// columns 8 AM – 10 PM, sticky first column, overflow-x-auto, blocks
-// rendered as bars spanning their slots — but with the two simplified
-// interactions only:
-//   - Click an empty cell → create dialog seeded with that program +
-//     the cell's start time (default end = start + 60 min).
+// Programs schedule grid for a single day (SCR-1a / QA10 W3.8a). A SINGLE
+// combined "Programs" timeline — one shared time axis (8 AM – 10 PM, 30-min
+// columns) with DYNAMIC lane-stacking: non-overlapping blocks share one
+// compact lane row; overlapping blocks split into as many stacked lanes as
+// the concurrency needs. Each bar's primary label is the PROGRAM name (not
+// the coach); the reconciliation status color + small status label stay.
+// Interactions:
+//   - Click an empty timeline cell → create dialog with the clicked time
+//     prefilled but NO program preselected (admin picks the program there).
 //   - Click a block bar → edit dialog (edit + delete).
 // NO drag-to-create or drag-to-move (the admin sets precise start/end
 // times in the dialog).
 
 import { useState } from "react";
+import { assignLanes } from "@/lib/schedule-lanes";
 import {
   pfaHour,
   pfaMinute,
@@ -124,7 +127,9 @@ export function ProgramScheduleGrid({
 
   const close = () => setDialog({ kind: "closed" });
 
-  const openCreateAt = (programId: string, slotIdx: number) => {
+  // QA10 W3.8a: empty-cell create no longer preselects a program — the admin
+  // picks it in the dialog. Prefill carries only the clicked time.
+  const openCreateAt = (slotIdx: number) => {
     const start = pfaWallClockAt(
       selectedDate,
       FIRST_HOUR + Math.floor(slotIdx / 2),
@@ -138,7 +143,7 @@ export function ProgramScheduleGrid({
     setDialog({
       kind: "create",
       prefill: {
-        programId,
+        programId: "",
         startTime: formatPfaTime(start),
         endTime: formatPfaTime(end),
       },
@@ -149,28 +154,40 @@ export function ProgramScheduleGrid({
     setDialog({ kind: "edit", block });
   };
 
-  const programRow = new Map<string, number>();
-  programs.forEach((p, i) => programRow.set(p.id, i + 2));
+  const programNameById = new Map(programs.map((p) => [p.id, p.name]));
 
   const inRange = (when: Date) =>
     pfaHour(when) >= FIRST_HOUR && pfaHour(when) < LAST_HOUR;
   const visibleBlocks = blocks.filter((b) => inRange(b.startAt));
   const hiddenCount = blocks.length - visibleBlocks.length;
 
-  // Cells under a block get pointer-events disabled so the bar wins the
-  // click. Build the occupied set keyed by `${programId}-${slotIdx}`.
-  const occupiedSlots = new Set<string>();
+  // QA10 W3.8a: dynamic lane-stacking across ALL visible blocks. Lane index
+  // → grid row (lane + 2; header is row 1). Always render at least 1 lane
+  // row so the empty-timeline cells still show + stay clickable.
+  const { laneByBlockId, laneCount } = assignLanes(
+    visibleBlocks.map((b) => ({
+      id: b.id,
+      startAt: b.startAt,
+      endAt: b.endAt,
+    })),
+  );
+  const laneRows = Math.max(laneCount, 1);
+
+  // QA10 W3.8a: occupancy is now by TIME (not per program). A slot column is
+  // occupied if ANY visible block covers it, so empty-cell clicks only land
+  // on free time. Keyed by slot index.
+  const occupiedSlots = new Set<number>();
   for (const b of visibleBlocks) {
     const placement = placeOnGrid(b.startAt, b.endAt);
     if (!placement) continue;
     for (let i = 0; i < placement.span; i++) {
-      occupiedSlots.add(`${b.programId}-${placement.col - 2 + i}`);
+      occupiedSlots.add(placement.col - 1 + i);
     }
   }
 
   const gridStyle: React.CSSProperties = {
-    gridTemplateColumns: `120px repeat(${SLOTS}, minmax(36px, 1fr))`,
-    gridTemplateRows: `40px repeat(${programs.length}, 56px)`,
+    gridTemplateColumns: `repeat(${SLOTS}, minmax(36px, 1fr))`,
+    gridTemplateRows: `40px repeat(${laneRows}, 56px)`,
   };
 
   return (
@@ -195,15 +212,9 @@ export function ProgramScheduleGrid({
       ) : (
         <div className="overflow-x-auto rounded-xl border border-line shadow-[var(--shadow-sm)]">
           <div className="relative grid bg-surface min-w-fit" style={gridStyle}>
-            {/* Header corner cell. */}
-            <div
-              className="sticky left-0 z-20 border-b border-r border-line bg-surface"
-              style={{ gridRow: 1, gridColumn: 1 }}
-            />
-
             {/* Time-slot headers. */}
             {Array.from({ length: SLOTS }).map((_, slotIdx) => {
-              const col = slotIdx + 2;
+              const col = slotIdx + 1;
               const isHour = slotIdx % 2 === 0;
               const hour24 = FIRST_HOUR + Math.floor(slotIdx / 2);
               return (
@@ -223,42 +234,29 @@ export function ProgramScheduleGrid({
               );
             })}
 
-            {/* Program label cells (sticky first column). */}
-            {programs.map((p, i) => (
-              <div
-                key={`label-${p.id}`}
-                className="sticky left-0 z-10 border-r border-line bg-surface flex items-center gap-2.5 pl-2 pr-3 py-2 text-sm font-medium text-fg"
-                style={{ gridRow: i + 2, gridColumn: 1 }}
-              >
-                <span
-                  aria-hidden
-                  className="h-6 w-0.5 rounded-full bg-gold"
-                />
-                <span className="truncate">{p.name}</span>
-              </div>
-            ))}
-
-            {/* Cells — clickable when empty. */}
-            {programs.map((p, i) =>
+            {/* Cells — one per (lane row × slot), clickable when the slot's
+                time is not covered by any block. Occupied cells skip the
+                click so the bar above wins it. */}
+            {Array.from({ length: laneRows }).map((_, laneIdx) =>
               Array.from({ length: SLOTS }).map((_, slotIdx) => {
-                const isOccupied = occupiedSlots.has(`${p.id}-${slotIdx}`);
+                const isOccupied = occupiedSlots.has(slotIdx);
                 const baseBorders =
                   slotIdx % 2 === 0
                     ? "border-l border-line-strong"
                     : "border-l border-line/40";
                 return (
                   <button
-                    key={`cell-${p.id}-${slotIdx}`}
+                    key={`cell-${laneIdx}-${slotIdx}`}
                     type="button"
                     onClick={
-                      isOccupied ? undefined : () => openCreateAt(p.id, slotIdx)
+                      isOccupied ? undefined : () => openCreateAt(slotIdx)
                     }
                     disabled={isOccupied}
                     tabIndex={isOccupied ? -1 : 0}
                     aria-label={
                       isOccupied
                         ? undefined
-                        : `Create on ${p.name} at ${formatHour(
+                        : `Schedule a program at ${formatHour(
                             FIRST_HOUR + Math.floor(slotIdx / 2),
                           )}${slotIdx % 2 === 1 ? ":30" : ""}`
                     }
@@ -269,16 +267,17 @@ export function ProgramScheduleGrid({
                         ? "cursor-default bg-surface-2/40"
                         : "bg-surface-2/40 transition-colors hover:bg-gold/5 focus-visible:outline-none focus-visible:bg-gold/10",
                     ].join(" ")}
-                    style={{ gridRow: i + 2, gridColumn: slotIdx + 2 }}
+                    style={{ gridRow: laneIdx + 2, gridColumn: slotIdx + 1 }}
                   />
                 );
               }),
             )}
 
-            {/* Block bars. */}
+            {/* Block bars. QA10 W3.8a: row = the block's assigned lane + 2
+                (header is row 1); primary label = the PROGRAM name. */}
             {visibleBlocks.map((b) => {
-              const row = programRow.get(b.programId);
-              if (!row) return null;
+              const lane = laneByBlockId.get(b.id);
+              if (lane === undefined) return null;
               const placement = placeOnGrid(b.startAt, b.endAt);
               if (!placement) return null;
               const recon = statuses[b.id];
@@ -286,16 +285,21 @@ export function ProgramScheduleGrid({
               const timeLabel = `${formatPfaTime(b.startAt)}–${formatPfaTime(
                 b.endAt,
               )}`;
-              // QA10 W3.2: bar shows the primary name + "+N" for extra
-              // scheduled coaches; the tooltip lists all of them.
-              const extraCoaches = Math.max(b.coaches.length - 1, 0);
-              const coachLabel =
-                extraCoaches > 0 ? `${b.coachName} +${extraCoaches}` : b.coachName;
+              const programLabel =
+                programNameById.get(b.programId) ?? b.programId;
+              // Coach names move OFF the bar into the tooltip (W3.2 set).
               const allCoachNames =
                 b.coaches.length > 1
                   ? b.coaches.map((c) => c.name).join(", ")
                   : b.coachName;
-              const tooltip = [allCoachNames, timeLabel, b.note, recon?.detail]
+              // Tooltip leads with the program name, then coach(es)/time/etc.
+              const tooltip = [
+                programLabel,
+                allCoachNames,
+                timeLabel,
+                b.note,
+                recon?.detail,
+              ]
                 .filter(Boolean)
                 .join(" · ");
               return (
@@ -310,13 +314,13 @@ export function ProgramScheduleGrid({
                     "transition hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40",
                   ].join(" ")}
                   style={{
-                    gridRow: row,
+                    gridRow: lane + 2,
                     gridColumn: `${placement.col} / span ${placement.span}`,
                     zIndex: 2,
                   }}
                   title={`${tooltip} (click to edit)`}
                 >
-                  <span className="truncate font-medium">{coachLabel}</span>
+                  <span className="truncate font-medium">{programLabel}</span>
                   <span className="truncate text-[9px] uppercase tracking-wider text-fg-subtle">
                     {timeLabel}
                   </span>
@@ -345,9 +349,11 @@ export function ProgramScheduleGrid({
           <LegendDot className="bg-gold" label="Pending" />
         </div>
         <p className="text-fg-subtle">
-          Click an empty cell to schedule a program block. Click a block to
-          edit or delete it. The bar label shows the scheduled coach, time, and
-          reconciliation status (how the logged hours compare to the schedule).
+          Click an empty area to schedule a program block (pick the program in
+          the dialog). Click a block to edit or delete it. Each bar shows the
+          program, time, and reconciliation status (how the logged hours
+          compare to the schedule); the scheduled coach(es) appear in the
+          tooltip and the edit dialog.
         </p>
       </div>
 
@@ -411,7 +417,8 @@ function placeOnGrid(
   const clippedStart = Math.max(startSlots, 0);
   const clippedEnd = Math.min(endSlots, SLOTS);
   if (clippedEnd <= clippedStart) return null;
-  return { col: clippedStart + 2, span: clippedEnd - clippedStart };
+  // No label column (QA10 W3.8a): slot 0 → grid column 1.
+  return { col: clippedStart + 1, span: clippedEnd - clippedStart };
 }
 
 function formatHour(hour24: number): string {

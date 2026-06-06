@@ -33,6 +33,7 @@ import {
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import { totalFromSnapshot } from "@/lib/billing";
+import { listActiveCoaches } from "@/lib/server/coaches";
 import { formatDollars } from "@/lib/format-money";
 import { formatRelative } from "@/lib/format-relative";
 import {
@@ -56,13 +57,13 @@ import {
 } from "@/app/admin/_components/activity-feed";
 import { describeActivity } from "@/app/admin/_components/activity-feed.logic";
 import {
-  MasterScheduleGrid,
   type MasterBlockedTime,
   type MasterProgramBlock,
   type MasterProgramRow,
   type MasterResourceRow,
   type MasterSession,
 } from "@/app/admin/_components/master-schedule-grid";
+import { EditableMasterSchedule } from "@/app/admin/_components/editable-master-schedule";
 import { AutoRefresh } from "@/app/admin/schedule/_components/auto-refresh";
 import { WeekNav } from "@/app/admin/schedule/_components/week-nav";
 
@@ -134,6 +135,7 @@ export default async function AdminHome({
     logRows,
     coachAuditRows,
     coachAccountRows,
+    activeCoaches,
   ] = await Promise.all([
     // Cage rentals this month → coaches OWE PFA (receivable).
     db
@@ -298,6 +300,10 @@ export default async function AdminHome({
       .where(and(eq(users.role, "coach"), isNull(users.deletedAt)))
       .orderBy(desc(users.createdAt))
       .limit(12),
+    // QA10 W3.6: active coaches for the click-to-add dialogs (cage + program).
+    // Same canonical list both dialogs' coach pickers use on the standalone
+    // pages; the {id,name,email} shape satisfies both dialog prop types.
+    listActiveCoaches(),
   ]);
 
   // Money totals read each row's snapshotted rate directly — never
@@ -344,6 +350,25 @@ export default async function AdminHome({
   const masterPrograms: MasterProgramRow[] = programRows.map((p) => ({
     id: p.id,
     name: p.name,
+  }));
+
+  // QA10 W3.6: dialog option lists for the editable Home grid. Shapes MIRROR
+  // the standalone pages exactly:
+  //   - cage dialog (ScheduleCreateDialog): sessions-client CoachOption +
+  //     ResourceOption (resources carry sortOrder).
+  //   - program dialog (ProgramBlockDialog): ProgramOption {id,name}, its own
+  //     CoachOption {id,name,email}, W3.3 ResourceOption {id,name,type}.
+  // activeCoaches' {id,name,email} satisfies both dialogs' coach prop types.
+  const cageResourceOptions = resourceRows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    type: r.type,
+    sortOrder: r.sortOrder,
+  }));
+  const programResourceOptions = resourceRows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    type: r.type,
   }));
 
   // QA10 W3.2: the full scheduled-coach set for the day's program blocks,
@@ -535,12 +560,18 @@ export default async function AdminHome({
 
             <AutoRefresh />
 
-            <MasterScheduleGrid
+            <EditableMasterSchedule
               resources={masterResources}
               sessions={masterSessions}
               blockedTimes={masterBlocked}
               programs={masterPrograms}
               programBlocks={masterProgramBlocks}
+              selectedDate={selectedDate}
+              cageCoaches={activeCoaches}
+              cageResources={cageResourceOptions}
+              programOptions={masterPrograms}
+              programCoaches={activeCoaches}
+              programResources={programResourceOptions}
             />
           </div>
         ) : null}

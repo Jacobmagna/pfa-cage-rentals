@@ -5,7 +5,7 @@
 // copied EXACTLY from schedule-grid.tsx so placements line up to the
 // pixel with the live interactive grids. No React — pure functions only.
 
-import { pfaHour, pfaMinute } from "@/lib/timezone";
+import { pfaHour, pfaMinute, pfaWallClockAt } from "@/lib/timezone";
 
 export const SCHEDULE_GRID_FIRST_HOUR = 8;
 export const SCHEDULE_GRID_LAST_HOUR = 22;
@@ -60,6 +60,21 @@ export function placeVerticalOnGrid(
   const clippedEnd = Math.min(endSlots, SCHEDULE_GRID_SLOTS);
   if (clippedEnd <= clippedStart) return null;
   return { row: clippedStart + 1, rowSpan: Math.max(1, clippedEnd - clippedStart) };
+}
+
+/**
+ * The UTC instant at the START of grid slot `slotIndex` on the PFA day of
+ * `selectedDate`. Slot 0 = 8:00 AM, slot 1 = 8:30 AM, … (FIRST_HOUR + a
+ * half-hour step). Inverse of the placeOnGrid slot math, used by
+ * click-to-add to turn a clicked empty cell into a real start time. Mirrors
+ * the inline math in the interactive grids' openCreateAt.
+ */
+export function slotStartAt(selectedDate: Date, slotIndex: number): Date {
+  return pfaWallClockAt(
+    selectedDate,
+    SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIndex / 2),
+    (slotIndex % 2) * 30,
+  );
 }
 
 /**

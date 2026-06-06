@@ -6,8 +6,9 @@ import {
   formatGridHour,
   placeOnGrid,
   placeVerticalOnGrid,
+  slotStartAt,
 } from "./schedule-grid-utils";
-import { pfaWallClockAt } from "./timezone";
+import { formatPfaTime, pfaWallClockAt } from "./timezone";
 
 // Any in-range reference day works; the math is wall-clock relative.
 const refDate = pfaWallClockAt(new Date("2026-05-01T12:00:00Z"), 12, 0);
@@ -17,6 +18,20 @@ describe("schedule-grid constants", () => {
     expect(SCHEDULE_GRID_FIRST_HOUR).toBe(8);
     expect(SCHEDULE_GRID_LAST_HOUR).toBe(22);
     expect(SCHEDULE_GRID_SLOTS).toBe(28);
+  });
+});
+
+describe("slotStartAt", () => {
+  it("maps slot 0 to 8:00 AM and slot 1 to 8:30 AM", () => {
+    expect(formatPfaTime(slotStartAt(refDate, 0))).toBe("08:00");
+    expect(formatPfaTime(slotStartAt(refDate, 1))).toBe("08:30");
+  });
+  it("maps slot 2 (9:00) and the last slot (9:30 PM)", () => {
+    expect(formatPfaTime(slotStartAt(refDate, 2))).toBe("09:00");
+    // slot 27 = 8 + floor(27/2)=13 → 21:00 + 30 min = 21:30
+    expect(formatPfaTime(slotStartAt(refDate, SCHEDULE_GRID_SLOTS - 1))).toBe(
+      "21:30",
+    );
   });
 });
 

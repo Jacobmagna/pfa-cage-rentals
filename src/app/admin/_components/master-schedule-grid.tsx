@@ -117,18 +117,31 @@ function inRange(when: Date): boolean {
   );
 }
 
+// Optional click-to-add hook. When provided (by the editable Home wrapper),
+// empty grid cells become buttons that report which section + row + slot was
+// clicked. When ABSENT the grid stays exactly read-only (aria-hidden divs),
+// so other read-only / print usages are unaffected. This file imports no
+// dialogs — the handler is owned by the parent.
+export type EmptyCellClick = (args: {
+  section: "resource" | "program";
+  rowId: string;
+  slotIndex: number;
+}) => void;
+
 export function MasterScheduleGrid({
   resources,
   sessions,
   blockedTimes,
   programs,
   programBlocks,
+  onEmptyCellClick,
 }: {
   resources: MasterResourceRow[];
   sessions: MasterSession[];
   blockedTimes: MasterBlockedTime[];
   programs: MasterProgramRow[];
   programBlocks: MasterProgramBlock[];
+  onEmptyCellClick?: EmptyCellClick;
 }): React.JSX.Element {
   // Row index per resource / program. Row 1 is the time header; section
   // label rows are inserted between, so we lay each section out in its
@@ -153,6 +166,7 @@ export function MasterScheduleGrid({
             resources={resources}
             sessions={visibleSessions}
             blocks={visibleBlocks}
+            onEmptyCellClick={onEmptyCellClick}
           />
         )}
 
@@ -161,7 +175,11 @@ export function MasterScheduleGrid({
         {programs.length === 0 ? (
           <EmptyRow>No programs scheduled</EmptyRow>
         ) : (
-          <ProgramGrid programs={programs} blocks={visibleProgramBlocks} />
+          <ProgramGrid
+            programs={programs}
+            blocks={visibleProgramBlocks}
+            onEmptyCellClick={onEmptyCellClick}
+          />
         )}
 
         {/* Legend. */}
@@ -215,10 +233,12 @@ function ResourceGrid({
   resources,
   sessions,
   blocks,
+  onEmptyCellClick,
 }: {
   resources: MasterResourceRow[];
   sessions: MasterSession[];
   blocks: MasterBlockedTime[];
+  onEmptyCellClick?: EmptyCellClick;
 }): React.JSX.Element {
   const rowOf = new Map<string, number>();
   resources.forEach((r, i) => rowOf.set(r.id, i + 1));
@@ -246,21 +266,45 @@ function ResourceGrid({
         </div>
       ))}
 
-      {/* Empty cell grid (visual only). */}
+      {/* Empty cell grid. Read-only `aria-hidden` divs by default; when an
+          onEmptyCellClick handler is passed they become click-to-add buttons
+          (Home's editable surface). */}
       {resources.map((r, i) =>
-        Array.from({ length: SCHEDULE_GRID_SLOTS }).map((_, slotIdx) => (
-          <div
-            key={`cell-${r.id}-${slotIdx}`}
-            aria-hidden
-            className={[
-              "border-b border-line bg-surface-2/40",
-              slotIdx % 2 === 0
-                ? "border-l border-line-strong"
-                : "border-l border-line/40",
-            ].join(" ")}
-            style={{ gridRow: i + 1, gridColumn: slotIdx + 2 }}
-          />
-        )),
+        Array.from({ length: SCHEDULE_GRID_SLOTS }).map((_, slotIdx) => {
+          const cellClass = [
+            "border-b border-line bg-surface-2/40",
+            slotIdx % 2 === 0
+              ? "border-l border-line-strong"
+              : "border-l border-line/40",
+          ].join(" ");
+          const cellStyle = { gridRow: i + 1, gridColumn: slotIdx + 2 };
+          if (!onEmptyCellClick) {
+            return (
+              <div
+                key={`cell-${r.id}-${slotIdx}`}
+                aria-hidden
+                className={cellClass}
+                style={cellStyle}
+              />
+            );
+          }
+          return (
+            <button
+              key={`cell-${r.id}-${slotIdx}`}
+              type="button"
+              onClick={() =>
+                onEmptyCellClick({
+                  section: "resource",
+                  rowId: r.id,
+                  slotIndex: slotIdx,
+                })
+              }
+              aria-label={`Add cage rental for ${r.name}`}
+              className={`${cellClass} cursor-pointer transition-colors hover:bg-gold/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gold/40`}
+              style={cellStyle}
+            />
+          );
+        }),
       )}
 
       {/* Blocked-time bars (read-only, dashed red). */}
@@ -346,9 +390,11 @@ function ResourceGrid({
 function ProgramGrid({
   programs,
   blocks,
+  onEmptyCellClick,
 }: {
   programs: MasterProgramRow[];
   blocks: MasterProgramBlock[];
+  onEmptyCellClick?: EmptyCellClick;
 }): React.JSX.Element {
   const rowOf = new Map<string, number>();
   programs.forEach((p, i) => rowOf.set(p.id, i + 1));
@@ -373,21 +419,44 @@ function ProgramGrid({
         </div>
       ))}
 
-      {/* Empty cell grid (visual only). */}
+      {/* Empty cell grid. Read-only `aria-hidden` divs by default; with an
+          onEmptyCellClick handler they become click-to-add program buttons. */}
       {programs.map((p, i) =>
-        Array.from({ length: SCHEDULE_GRID_SLOTS }).map((_, slotIdx) => (
-          <div
-            key={`cell-${p.id}-${slotIdx}`}
-            aria-hidden
-            className={[
-              "border-b border-line bg-surface-2/40",
-              slotIdx % 2 === 0
-                ? "border-l border-line-strong"
-                : "border-l border-line/40",
-            ].join(" ")}
-            style={{ gridRow: i + 1, gridColumn: slotIdx + 2 }}
-          />
-        )),
+        Array.from({ length: SCHEDULE_GRID_SLOTS }).map((_, slotIdx) => {
+          const cellClass = [
+            "border-b border-line bg-surface-2/40",
+            slotIdx % 2 === 0
+              ? "border-l border-line-strong"
+              : "border-l border-line/40",
+          ].join(" ");
+          const cellStyle = { gridRow: i + 1, gridColumn: slotIdx + 2 };
+          if (!onEmptyCellClick) {
+            return (
+              <div
+                key={`cell-${p.id}-${slotIdx}`}
+                aria-hidden
+                className={cellClass}
+                style={cellStyle}
+              />
+            );
+          }
+          return (
+            <button
+              key={`cell-${p.id}-${slotIdx}`}
+              type="button"
+              onClick={() =>
+                onEmptyCellClick({
+                  section: "program",
+                  rowId: p.id,
+                  slotIndex: slotIdx,
+                })
+              }
+              aria-label={`Add program block for ${p.name}`}
+              className={`${cellClass} cursor-pointer transition-colors hover:bg-gold/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gold/40`}
+              style={cellStyle}
+            />
+          );
+        }),
       )}
 
       {/* Program block bars (read-only, colored by status). */}

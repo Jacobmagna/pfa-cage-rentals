@@ -15,6 +15,7 @@ import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/authz";
 import {
   deleteHourInternal,
+  resolveHourLogInternal,
   updateHourInternal,
 } from "@/lib/server/hour-log-actions";
 
@@ -29,5 +30,16 @@ export async function deleteHour(id: string) {
   const session = await requireRole("admin");
   const result = await deleteHourInternal(session.user, id);
   revalidatePath("/admin/hour-log");
+  return result;
+}
+
+// Mark an unscheduled hour-log reviewed/acknowledged. Non-destructive: the
+// row stays, it just drops off the needs-review queue. Also revalidates
+// /admin so the (future) dashboard needs-review card updates too.
+export async function resolveUnscheduledHourLog(id: string) {
+  const session = await requireRole("admin");
+  const result = await resolveHourLogInternal(session.user, id);
+  revalidatePath("/admin/hour-log");
+  revalidatePath("/admin");
   return result;
 }

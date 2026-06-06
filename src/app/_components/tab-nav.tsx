@@ -65,10 +65,10 @@ export function TabNav({ role }: { role: "admin" | "coach" }) {
                 href={hrefFor(tab.key, base)}
                 aria-current={isActive ? "page" : undefined}
                 className={[
-                  "inline-flex items-center rounded-md px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold",
+                  "inline-flex items-center rounded-md px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow",
                   isActive
-                    ? "bg-gold/10 text-gold-strong font-semibold"
-                    : "text-fg-muted font-medium hover:text-fg",
+                    ? "bg-yellow/15 text-yellow font-semibold"
+                    : "text-white/70 font-medium hover:text-white",
                 ].join(" ")}
               >
                 {tab.label}

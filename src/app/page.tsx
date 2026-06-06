@@ -54,15 +54,15 @@ export default async function Home({
     : undefined;
 
   return (
-    <main className="relative flex flex-1 flex-col items-center justify-center px-6 py-16">
-      {/* Ambient gold radial glow behind the card so the centered layout
+    <main className="relative flex min-h-screen flex-1 flex-col items-center justify-center bg-black px-6 py-16">
+      {/* Ambient yellow radial glow behind the card so the centered layout
           anchors visually instead of floating in pure black. Decorative,
           pointer-events: none so it doesn't intercept anything. */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 flex items-center justify-center"
       >
-        <div className="h-[640px] w-[640px] max-w-full rounded-full bg-gold/[0.06] blur-3xl" />
+        <div className="h-[640px] w-[640px] max-w-full rounded-full bg-yellow/[0.05] blur-3xl" />
       </div>
 
       <div className="relative w-full max-w-sm">
@@ -84,32 +84,33 @@ export default async function Home({
             priority
             className="mx-auto h-24 w-auto"
           />
-          <h1 className="mt-7 text-3xl font-bold tracking-tight text-gold">
-            PFA Engine
+          <h1 className="mt-7 text-3xl font-bold tracking-tight">
+            <span className="text-white">PFA</span>{" "}
+            <span className="text-yellow">Engine</span>
           </h1>
           <div
             aria-hidden
             className="mt-4 mx-auto flex items-center justify-center gap-2.5"
           >
-            <span className="h-px w-10 bg-gold/30" />
-            <DiamondMark className="h-2 w-2 text-gold/60" filled />
-            <span className="h-px w-10 bg-gold/30" />
+            <span className="h-px w-10 bg-yellow/30" />
+            <DiamondMark className="h-2 w-2 text-yellow/60" filled />
+            <span className="h-px w-10 bg-yellow/30" />
           </div>
-          <p className="mt-4 mx-auto max-w-[24ch] text-sm leading-relaxed text-fg-muted">
+          <p className="mt-4 mx-auto max-w-[24ch] text-sm leading-relaxed text-white/60">
             A private reservation system, built by PFA for the coaches who
             train with us.
           </p>
         </div>
 
-        <div className="rounded-2xl border border-line bg-surface p-6 shadow-[var(--shadow-md)]">
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
           <GoogleSignInButton />
 
           <div className="my-5 flex items-center gap-3">
-            <div className="h-px flex-1 bg-line" />
-            <span className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
+            <div className="h-px flex-1 bg-white/15" />
+            <span className="text-[10px] uppercase tracking-[0.18em] text-white/45">
               or with email
             </span>
-            <div className="h-px flex-1 bg-line" />
+            <div className="h-px flex-1 bg-white/15" />
           </div>
 
           <form action={requestMagicLink} className="space-y-3">
@@ -120,7 +121,7 @@ export default async function Home({
               autoComplete="email"
               aria-label="Email address"
               placeholder="you@example.com"
-              className="w-full rounded-lg border border-line bg-surface-2 px-3 h-10 text-sm text-fg placeholder:text-fg-subtle transition-colors focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+              className="w-full rounded-lg border border-white/15 bg-white/5 px-3 h-10 text-sm text-white placeholder:text-white/40 transition-colors focus:outline-none focus:border-white/30 focus:ring-2 focus:ring-yellow/40"
             />
             {errorMessage ? (
               <p role="alert" className="text-xs text-danger leading-relaxed">
@@ -129,7 +130,7 @@ export default async function Home({
             ) : null}
             <button
               type="submit"
-              className="w-full rounded-lg border border-line-strong bg-surface text-fg-muted h-10 px-4 text-sm font-medium shadow-[var(--shadow-sm)] transition hover:text-fg hover:-translate-y-px hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+              className="w-full rounded-lg border border-white/20 bg-white/5 text-white/85 h-10 px-4 text-sm font-medium transition hover:text-white hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow/40"
             >
               Send me a sign-in link
             </button>
@@ -142,31 +143,31 @@ export default async function Home({
             than a marketing line; when magnasoftware.com exists we
             promote it to a link. */}
         <div className="mt-8 flex flex-col items-center gap-3">
-          <p className="flex items-center justify-center gap-3 text-[11px] text-fg-subtle">
+          <p className="flex items-center justify-center gap-3 text-[11px] text-white/40">
             <Link
               href="https://pfasports.com"
               target="_blank"
               rel="noopener noreferrer"
-              className="transition-colors hover:text-fg-muted"
+              className="transition-colors hover:text-white/75"
             >
               PFA Sports
             </Link>
-            <span aria-hidden className="text-fg-disabled">·</span>
+            <span aria-hidden className="text-white/25">·</span>
             <Link
               href="/privacy"
-              className="transition-colors hover:text-fg-muted"
+              className="transition-colors hover:text-white/75"
             >
               Privacy
             </Link>
-            <span aria-hidden className="text-fg-disabled">·</span>
+            <span aria-hidden className="text-white/25">·</span>
             <Link
               href="/terms"
-              className="transition-colors hover:text-fg-muted"
+              className="transition-colors hover:text-white/75"
             >
               Terms
             </Link>
           </p>
-          <p className="text-[10px] uppercase tracking-[0.14em] text-fg-disabled">
+          <p className="text-[10px] uppercase tracking-[0.14em] text-white/30">
             Built by Magna Software LLC
           </p>
         </div>

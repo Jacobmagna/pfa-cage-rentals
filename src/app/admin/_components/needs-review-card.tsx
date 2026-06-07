@@ -13,14 +13,33 @@ import {
 // QA10 W3-polish15b-ii: unified Home-dashboard triage card for the admin
 // "needs review" queue. Three tagged alert types are merged + sorted by the
 // page, then rendered here:
-//   • unscheduled — coach logged program hours with no matching block
-//   • cancelled   — coach cancelled their assignment to a scheduled block
-//   • no_show     — coach was scheduled but logged no matching hours
+//   • unscheduled   — coach logged program hours with no matching block
+//   • wrong_time    — log overlaps a block but mismatches it (reconciliation)
+//   • double_logged — two overlapping logs for the same coach (dup/double-pay)
+//   • cancelled     — coach cancelled their assignment to a scheduled block
+//   • no_show       — coach was scheduled but logged no matching hours
 // Each row's Resolve button dispatches to the matching shared action (all of
 // which revalidate /admin), so resolving here refreshes the card.
 export type NeedsReviewItem =
   | {
       type: "unscheduled";
+      id: string;
+      coachName: string | null;
+      programName: string;
+      startAt: Date;
+      endAt: Date;
+    }
+  | {
+      type: "wrong_time";
+      id: string;
+      coachName: string | null;
+      programName: string;
+      startAt: Date;
+      endAt: Date;
+      detail: string | null;
+    }
+  | {
+      type: "double_logged";
       id: string;
       coachName: string | null;
       programName: string;
@@ -49,9 +68,13 @@ export type NeedsReviewItem =
 const keyOf = (i: NeedsReviewItem) =>
   i.type === "unscheduled"
     ? `u:${i.id}`
-    : i.type === "cancelled"
-      ? `c:${i.flagId}`
-      : `n:${i.blockId}:${i.coachId}`;
+    : i.type === "wrong_time"
+      ? `w:${i.id}`
+      : i.type === "double_logged"
+        ? `d:${i.id}`
+        : i.type === "cancelled"
+          ? `c:${i.flagId}`
+          : `n:${i.blockId}:${i.coachId}`;
 
 const TAG: Record<
   NeedsReviewItem["type"],
@@ -60,6 +83,14 @@ const TAG: Record<
   unscheduled: {
     label: "Unscheduled",
     className: "border-gold/30 bg-gold/10 text-gold-strong",
+  },
+  wrong_time: {
+    label: "Wrong time",
+    className: "border-warning/30 bg-warning/10 text-warning",
+  },
+  double_logged: {
+    label: "Double-logged",
+    className: "border-danger/30 bg-danger/10 text-danger",
   },
   cancelled: {
     label: "Cancelled",
@@ -86,7 +117,11 @@ export function NeedsReviewCard({
     setPendingKey(key);
     startResolveTransition(async () => {
       try {
-        if (item.type === "unscheduled") {
+        if (
+          item.type === "unscheduled" ||
+          item.type === "wrong_time" ||
+          item.type === "double_logged"
+        ) {
           await resolveUnscheduledHourLog(item.id);
         } else if (item.type === "cancelled") {
           await resolveCancellation(item.flagId);
@@ -103,7 +138,7 @@ export function NeedsReviewCard({
 
   return (
     <section aria-labelledby="needs-review-heading" className="mb-10">
-      <div className="overflow-hidden rounded-2xl border border-danger/30 bg-danger/5 p-5 shadow-[var(--shadow-md)]">
+      <div className="overflow-hidden rounded-2xl border border-danger/30 bg-danger/5 p-4 shadow-[var(--shadow-md)]">
         <div className="flex items-center gap-2">
           <TriangleAlert className="h-4 w-4 shrink-0 text-danger" />
           <h2
@@ -116,48 +151,54 @@ export function NeedsReviewCard({
             {totalCount}
           </span>
         </div>
-        <p className="mt-1.5 text-xs text-fg-muted">
-          Coaches logging unscheduled hours, cancelling scheduled blocks, or not
-          logging hours they were scheduled for.
+        <p className="mt-1 text-xs text-fg-muted">
+          Coaches logging unscheduled, wrong-time, or double-logged hours,
+          cancelling scheduled blocks, or not logging hours they were scheduled
+          for.
         </p>
 
-        <ul className="mt-4 divide-y divide-danger/15">
+        <ul className="mt-3 divide-y divide-danger/15">
           {items.map((item) => {
             const key = keyOf(item);
             const isPendingResolve = pendingKey === key;
             const tag = TAG[item.type];
-            const note = item.type === "cancelled" ? item.note : null;
+            // Optional trailing note, kept INLINE in the single truncating
+            // span so rows stay one line: cancelled → cancellation reason,
+            // wrong_time → reconciliation detail.
+            const extra =
+              item.type === "cancelled"
+                ? item.note
+                : item.type === "wrong_time"
+                  ? item.detail
+                  : null;
+            const extraText =
+              extra && extra.trim().length > 0 ? ` — “${extra.trim()}”` : "";
+            const lineTitle = `${item.coachName ?? "Unknown coach"} · ${item.programName} · ${formatPfaDateMedium(item.startAt)} ${formatPfaTime12h(item.startAt)}–${formatPfaTime12h(item.endAt)}${extraText}`;
             return (
-              <li
-                key={key}
-                className="flex items-start gap-3 py-2.5 first:pt-0"
-              >
-                <span className="min-w-0 flex-1 text-sm text-fg">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tag.className}`}
-                    >
-                      {tag.label}
+              <li key={key} className="flex items-center gap-3 py-2 first:pt-0">
+                <span
+                  className="flex min-w-0 flex-1 items-center gap-2 text-sm text-fg"
+                  title={lineTitle}
+                >
+                  <span
+                    className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tag.className}`}
+                  >
+                    {tag.label}
+                  </span>
+                  <span className="min-w-0 truncate">
+                    <span className="font-medium">
+                      {item.coachName ?? "Unknown coach"}
                     </span>
-                    <span className="min-w-0 truncate">
-                      <span className="font-medium">
-                        {item.coachName ?? "Unknown coach"}
-                      </span>
-                      <span className="text-fg-muted">
-                        {" · "}
-                        {item.programName}
-                        {" · "}
-                        {formatPfaDateMedium(item.startAt)}{" "}
-                        {formatPfaTime12h(item.startAt)}–
-                        {formatPfaTime12h(item.endAt)}
-                      </span>
+                    <span className="text-fg-muted">
+                      {" · "}
+                      {item.programName}
+                      {" · "}
+                      {formatPfaDateMedium(item.startAt)}{" "}
+                      {formatPfaTime12h(item.startAt)}–
+                      {formatPfaTime12h(item.endAt)}
+                      {extraText}
                     </span>
                   </span>
-                  {note && note.trim().length > 0 ? (
-                    <span className="mt-1 block truncate text-xs text-fg-muted">
-                      “{note}”
-                    </span>
-                  ) : null}
                 </span>
                 <button
                   type="button"

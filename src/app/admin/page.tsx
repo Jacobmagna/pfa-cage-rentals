@@ -60,7 +60,11 @@ import {
   type ActivityFeedItem,
 } from "@/app/admin/_components/activity-feed";
 import { describeActivity } from "@/app/admin/_components/activity-feed.logic";
-import { UnscheduledAttentionCard } from "@/app/admin/_components/unscheduled-attention-card";
+import {
+  NeedsReviewCard,
+  type NeedsReviewItem,
+} from "@/app/admin/_components/needs-review-card";
+import { fetchBlockAccountabilityAlerts } from "@/lib/server/needs-review";
 import {
   type MasterBlockedTime,
   type MasterProgramBlock,
@@ -170,6 +174,7 @@ export default async function AdminHome({
     coachAccountRows,
     activeCoaches,
     reviewWindowRows,
+    blockAlerts,
   ] = await Promise.all([
     // Cage rentals this month → coaches OWE PFA (receivable).
     db
@@ -345,6 +350,9 @@ export default async function AdminHome({
     listActiveCoaches(),
     // QA10 W3-polish13b: full-backlog rows for the unscheduled-hours card.
     fetchHourLogRowsWithScheduleNotes(reviewFilter),
+    // QA10 W3-polish15b-ii: block-accountability alerts (cancelled + no-show)
+    // for the unified Needs-review card.
+    fetchBlockAccountabilityAlerts(now),
   ]);
 
   // QA10 W3-polish13b: still-open review queue = unscheduled AND not yet
@@ -352,13 +360,21 @@ export default async function AdminHome({
   const needsReview = reviewWindowRows
     .filter((r) => r.unscheduled && !r.reviewedAt)
     .sort((a, b) => b.startAt.getTime() - a.startAt.getTime());
-  const needsReviewItems = needsReview.slice(0, 5).map((r) => ({
-    id: r.id,
-    coachName: r.coachName,
-    programName: r.programName,
-    startAt: r.startAt,
-    endAt: r.endAt,
-  }));
+
+  // QA10 W3-polish15b-ii: merge unscheduled logs with the block-accountability
+  // alerts (cancelled + no-show) into one Needs-review queue, newest-first.
+  const mergedReview: NeedsReviewItem[] = [
+    ...needsReview.map((r) => ({
+      type: "unscheduled" as const,
+      id: r.id,
+      coachName: r.coachName,
+      programName: r.programName,
+      startAt: r.startAt,
+      endAt: r.endAt,
+    })),
+    ...blockAlerts.cancelled,
+    ...blockAlerts.noShow,
+  ].sort((a, b) => b.startAt.getTime() - a.startAt.getTime());
 
   // Money totals read each row's snapshotted rate directly — never
   // recompute from current overrides.
@@ -740,10 +756,10 @@ export default async function AdminHome({
         />
       </section>
 
-      {needsReview.length > 0 ? (
-        <UnscheduledAttentionCard
-          items={needsReviewItems}
-          totalCount={needsReview.length}
+      {mergedReview.length > 0 ? (
+        <NeedsReviewCard
+          items={mergedReview.slice(0, 8)}
+          totalCount={mergedReview.length}
         />
       ) : null}
 

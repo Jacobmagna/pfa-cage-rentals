@@ -114,6 +114,7 @@ export default async function AdminReportsPage({
         detail={report.detail}
         summary={report.summary}
         grandTotalCents={report.grandTotalCents}
+        programGrandTotalCents={report.programGrandTotalCents}
         includeCageSessions={filters.includeCageSessions}
         includeProgramHours={filters.includeProgramHours}
       />

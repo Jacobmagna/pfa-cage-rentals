@@ -112,6 +112,7 @@ function makeReport(): ReportData {
       },
     ],
     grandTotalCents: 5000,
+    programGrandTotalCents: 0,
   };
 }
 
@@ -170,7 +171,7 @@ describe("buildReportWorkbook", () => {
         "WeightRoom $",
         "Program Slots",
         "Program $",
-        "Total",
+        "Cage Owed $",
         "Online Sessions",
       ]);
     });
@@ -182,7 +183,7 @@ describe("buildReportWorkbook", () => {
       const row2 = sheet.getRow(2);
       expect(row2.getCell(1).value).toBe("Alice Coach");
       expect(row2.getCell(4).value).toBe(36); // cage $ = 3600 cents / 100
-      expect(row2.getCell(11).value).toBe(36); // total (col 11 with program cols)
+      expect(row2.getCell(11).value).toBe(36); // Cage Owed $ (cage receivable, col 11)
       expect(row2.getCell(12).value).toBe(1); // 1 online session
 
       expect(sheet.getColumn(4).numFmt).toBe('"$"#,##0.00');
@@ -197,8 +198,28 @@ describe("buildReportWorkbook", () => {
       const footer = sheet.getRow(4);
       expect(String(footer.getCell(1).value)).toContain("Grand total");
       expect(String(footer.getCell(1).value)).toContain("3 sessions");
-      expect(footer.getCell(11).value).toBe(50); // 5000 cents / 100 (col 11)
+      // Cage-side grand sits under "Cage Owed $" (col 11), NOT merged with
+      // program pay. Program $ (col 10) holds the (here zero) program grand.
+      expect(footer.getCell(11).value).toBe(50); // cage grand: 5000 cents / 100
+      const programGrand = footer.getCell(10).value;
+      expect(programGrand === 0 || programGrand === null || programGrand === "").toBe(true);
       expect(footer.font?.bold).toBe(true);
+    });
+
+    it("puts cage and program grand totals in SEPARATE columns, never summed", async () => {
+      const report = makeReport();
+      // Give a coach program pay so both grand totals are non-zero.
+      report.summary[0].programSlots = 4;
+      report.summary[0].programTotalCents = 6000;
+      report.programGrandTotalCents = 6000;
+      const buf = await build(report, true, true);
+      const wb = await loadWorkbook(buf);
+      const sheet = wb.getWorksheet("Summary")!;
+      const footer = sheet.getRow(4);
+      // Program $ grand under col 10, Cage Owed $ grand under col 11 — the
+      // two opposite money directions are reported side by side, not added.
+      expect(footer.getCell(10).value).toBe(60); // program pay grand: 6000 / 100
+      expect(footer.getCell(11).value).toBe(50); // cage receivable grand: 5000 / 100
     });
 
     it("freezes the header row", async () => {
@@ -216,14 +237,14 @@ describe("buildReportWorkbook", () => {
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Summary")!;
       const headers = (sheet.getRow(1).values as unknown[]).slice(1);
+      // Cage scope off → no cage columns AND no "Cage Owed $" / Online.
       expect(headers).toEqual([
         "Coach",
         "Email",
         "Program Slots",
         "Program $",
-        "Total",
       ]);
-      // No leftover empty columns: Total is the last data column.
+      expect(headers).not.toContain("Cage Owed $");
       expect(headers).not.toContain("Online Sessions");
     });
 
@@ -241,7 +262,7 @@ describe("buildReportWorkbook", () => {
         "Bullpen $",
         "WeightRoom Slots",
         "WeightRoom $",
-        "Total",
+        "Cage Owed $",
         "Online Sessions",
       ]);
       expect(headers).not.toContain("Program Slots");
@@ -305,6 +326,7 @@ describe("buildReportWorkbook", () => {
       detail: [],
       summary: [],
       grandTotalCents: 0,
+      programGrandTotalCents: 0,
     };
     const buf = await build(empty);
     const wb = await loadWorkbook(buf);

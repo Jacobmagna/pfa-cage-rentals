@@ -98,7 +98,8 @@ describe("aggregateReport — summary roll-up", () => {
         ratePer30MinCents: 700,
       }), // 2 × 700 = 1400
     ];
-    const { summary, grandTotalCents } = aggregateReport(sessions);
+    const { summary, grandTotalCents, programGrandTotalCents } =
+      aggregateReport(sessions);
     expect(summary).toHaveLength(1);
     const row = summary[0];
     expect(row.cageSlots).toBe(2);
@@ -107,9 +108,12 @@ describe("aggregateReport — summary roll-up", () => {
     expect(row.bullpenTotalCents).toBe(4400);
     expect(row.weightRoomSlots).toBe(2);
     expect(row.weightRoomTotalCents).toBe(1400);
+    // totalCents = cage-side receivable only (4400 + 4400 + 1400).
     expect(row.totalCents).toBe(10200);
     expect(row.onlineSessions).toBe(0);
     expect(grandTotalCents).toBe(10200);
+    // No program hours → program-pay grand total is zero.
+    expect(programGrandTotalCents).toBe(0);
   });
 
   it("sorts summary by coach name and creates a row per coach", () => {
@@ -122,11 +126,13 @@ describe("aggregateReport — summary roll-up", () => {
     expect(summary.map((s) => s.coachName)).toEqual(["Alice", "Mike", "Zoe"]);
   });
 
-  it("returns empty arrays + zero grand total for no sessions", () => {
-    const { detail, summary, grandTotalCents } = aggregateReport([]);
+  it("returns empty arrays + zero grand totals for no sessions", () => {
+    const { detail, summary, grandTotalCents, programGrandTotalCents } =
+      aggregateReport([]);
     expect(detail).toEqual([]);
     expect(summary).toEqual([]);
     expect(grandTotalCents).toBe(0);
+    expect(programGrandTotalCents).toBe(0);
   });
 
   it("defaults program fields to 0 when no hour logs are passed", () => {
@@ -152,41 +158,50 @@ function hourLog(
 }
 
 describe("aggregateReport — program hours", () => {
-  it("rolls hour logs into a program category and the coach total", () => {
-    const { summary, grandTotalCents } = aggregateReport(
-      [session()], // cage: 2 × 2200 = 4400
-      [hourLog()], // program: 2 × 1500 = 3000
-    );
+  it("rolls hour logs into a SEPARATE program total, never netted into cage", () => {
+    const { summary, grandTotalCents, programGrandTotalCents } =
+      aggregateReport(
+        [session()], // cage: 2 × 2200 = 4400 (coach owes PFA)
+        [hourLog()], // program: 2 × 1500 = 3000 (PFA owes coach)
+      );
     expect(summary).toHaveLength(1);
     const row = summary[0];
     expect(row.cageTotalCents).toBe(4400);
     expect(row.programSlots).toBe(2);
     expect(row.programTotalCents).toBe(3000);
-    expect(row.totalCents).toBe(7400);
-    expect(grandTotalCents).toBe(7400);
+    // totalCents is the cage-side receivable ONLY — program pay is the
+    // opposite money direction and is never added in.
+    expect(row.totalCents).toBe(4400);
+    expect(grandTotalCents).toBe(4400);
+    expect(programGrandTotalCents).toBe(3000);
   });
 
   it("creates a summary row for a coach with only program hours (no detail)", () => {
-    const { detail, summary } = aggregateReport(
-      [],
-      [hourLog({ coachId: "c-prog", coachName: "Prog Only" })],
-    );
+    const { detail, summary, grandTotalCents, programGrandTotalCents } =
+      aggregateReport(
+        [],
+        [hourLog({ coachId: "c-prog", coachName: "Prog Only" })],
+      );
     expect(detail).toEqual([]);
     expect(summary).toHaveLength(1);
     expect(summary[0].coachName).toBe("Prog Only");
     expect(summary[0].programTotalCents).toBe(3000);
     expect(summary[0].cageTotalCents).toBe(0);
-    expect(summary[0].totalCents).toBe(3000);
+    // No cage sessions → cage-side total is zero; program pay is separate.
+    expect(summary[0].totalCents).toBe(0);
+    expect(grandTotalCents).toBe(0);
+    expect(programGrandTotalCents).toBe(3000);
   });
 
   it("treats a null/zero snapshot rate as $0 program pay", () => {
-    const { summary } = aggregateReport(
+    const { summary, programGrandTotalCents } = aggregateReport(
       [],
       [hourLog({ ratePer30MinCents: 0 })],
     );
     expect(summary[0].programSlots).toBe(2);
     expect(summary[0].programTotalCents).toBe(0);
     expect(summary[0].totalCents).toBe(0);
+    expect(programGrandTotalCents).toBe(0);
   });
 
   it("falls back to coach email when the hour-log coach name is null", () => {

@@ -95,6 +95,12 @@ export type SummaryRow = {
   /** Program-hour slots logged in range (additive; never a resource type). */
   programSlots: number;
   programTotalCents: number;
+  /**
+   * Cage-side receivable subtotal (cage + bullpen + weight_room) — money the
+   * coach OWES PFA. Does NOT include program pay (a payout in the opposite
+   * direction); program pay lives in `programTotalCents`. The two money
+   * directions are never summed.
+   */
   totalCents: number;
   onlineSessions: number;
 };
@@ -102,7 +108,10 @@ export type SummaryRow = {
 export type ReportData = {
   detail: DetailRow[];
   summary: SummaryRow[];
+  /** Cage-side receivable grand total (sum of detail rows) — coach owes PFA. */
   grandTotalCents: number;
+  /** Program-pay grand total — PFA owes the coach. Never summed with cage. */
+  programGrandTotalCents: number;
 };
 
 /**
@@ -115,9 +124,11 @@ export type ReportData = {
  * contribute $0 to totals.
  *
  * `hourLogs` (optional) are program-hour entries: they roll into each
- * coach's summary as the additive "Program hours" category and into the
- * per-coach + grand totals, but never appear in the session detail
- * table (they aren't resource bookings).
+ * coach's summary as the "Program hours" category (`programTotalCents`)
+ * and into `programGrandTotalCents`, but NEVER into the cage-side
+ * `totalCents` / `grandTotalCents` — program pay is a payout, the opposite
+ * money direction from the cage receivable, and the two are never summed.
+ * They also never appear in the session detail table (not resource bookings).
  */
 export function aggregateReport(
   sessions: AggregateSessionInput[],
@@ -221,7 +232,9 @@ export function aggregateReport(
     );
     entry.programSlots += slots;
     entry.programTotalCents += totalCents;
-    entry.totalCents += totalCents;
+    // Program pay is a payout (PFA owes the coach) — the OPPOSITE money
+    // direction from the cage receivable in `totalCents`. Never net them:
+    // it rolls into `programGrandTotalCents`, kept separate end-to-end.
     programGrandTotalCents += totalCents;
   }
 
@@ -229,8 +242,9 @@ export function aggregateReport(
     a.coachName.localeCompare(b.coachName),
   );
 
-  const grandTotalCents =
-    detail.reduce((sum, r) => sum + r.totalCents, 0) + programGrandTotalCents;
+  // Cage-side receivable grand total ONLY — program pay (the opposite
+  // direction) is returned separately as programGrandTotalCents.
+  const grandTotalCents = detail.reduce((sum, r) => sum + r.totalCents, 0);
 
-  return { detail, summary, grandTotalCents };
+  return { detail, summary, grandTotalCents, programGrandTotalCents };
 }

@@ -14,12 +14,14 @@ export function ReportPreview({
   detail,
   summary,
   grandTotalCents,
+  programGrandTotalCents,
   includeCageSessions,
   includeProgramHours,
 }: {
   detail: DetailRow[];
   summary: SummaryRow[];
   grandTotalCents: number;
+  programGrandTotalCents: number;
   includeCageSessions: boolean;
   includeProgramHours: boolean;
 }) {
@@ -42,7 +44,13 @@ export function ReportPreview({
           eyebrow="Summary"
           title={`${summary.length} ${summary.length === 1 ? "coach" : "coaches"}`}
           rightSlot={
-            <GrandTotal cents={grandTotalCents} sessionCount={detail.length} />
+            <GrandTotal
+              cageCents={grandTotalCents}
+              programCents={programGrandTotalCents}
+              includeCageSessions={includeCageSessions}
+              includeProgramHours={includeProgramHours}
+              sessionCount={detail.length}
+            />
           }
         />
         <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
@@ -60,7 +68,9 @@ export function ReportPreview({
                 {includeProgramHours ? (
                   <th scope="col" className="px-4 py-3 text-right font-semibold">Program hours</th>
                 ) : null}
-                <th scope="col" className="px-4 py-3 text-right font-semibold">Total</th>
+                {includeCageSessions ? (
+                  <th scope="col" className="px-4 py-3 text-right font-semibold">Cage owed</th>
+                ) : null}
                 {includeCageSessions ? (
                   <th scope="col" className="px-4 py-3 text-center font-semibold">Prepaid online</th>
                 ) : null}
@@ -99,9 +109,11 @@ export function ReportPreview({
                       cents={row.programTotalCents}
                     />
                   ) : null}
-                  <td className="px-4 py-3 text-right font-mono tnum tabular-nums font-semibold text-fg">
-                    {formatCents(row.totalCents)}
-                  </td>
+                  {includeCageSessions ? (
+                    <td className="px-4 py-3 text-right font-mono tnum tabular-nums font-semibold text-fg">
+                      {formatCents(row.totalCents)}
+                    </td>
+                  ) : null}
                   {includeCageSessions ? (
                     <td className="px-4 py-3 text-center">
                       {row.onlineSessions > 0 ? (
@@ -208,24 +220,48 @@ function SectionHeader({
   );
 }
 
+// Two clearly-labeled grand totals, NEVER summed: the cage receivable
+// (coach owes PFA) and the program payout (PFA owes coach) point in opposite
+// money directions. Each shows only when its scope is on.
 function GrandTotal({
-  cents,
+  cageCents,
+  programCents,
+  includeCageSessions,
+  includeProgramHours,
   sessionCount,
 }: {
-  cents: number;
+  cageCents: number;
+  programCents: number;
+  includeCageSessions: boolean;
+  includeProgramHours: boolean;
   sessionCount: number;
 }) {
   return (
-    <div className="text-right">
-      <p className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
-        Grand total
-      </p>
-      <p className="text-xl font-semibold font-mono tnum tabular-nums text-fg">
-        {formatCents(cents)}
-      </p>
-      <p className="text-[11px] text-fg-subtle">
-        across {sessionCount} {sessionCount === 1 ? "session" : "sessions"}
-      </p>
+    <div className="flex items-start justify-end gap-6 text-right">
+      {includeCageSessions ? (
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
+            Cage owed
+          </p>
+          <p className="text-xl font-semibold font-mono tnum tabular-nums text-fg">
+            {formatCents(cageCents)}
+          </p>
+          <p className="text-[11px] text-fg-subtle">
+            across {sessionCount} {sessionCount === 1 ? "session" : "sessions"}
+          </p>
+        </div>
+      ) : null}
+      {includeProgramHours ? (
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
+            Program pay
+          </p>
+          <p className="text-xl font-semibold font-mono tnum tabular-nums text-fg">
+            {formatCents(programCents)}
+          </p>
+          <p className="text-[11px] text-fg-subtle">PFA owes coaches</p>
+        </div>
+      ) : null}
     </div>
   );
 }

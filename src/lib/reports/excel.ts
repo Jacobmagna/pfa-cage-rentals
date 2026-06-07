@@ -86,14 +86,24 @@ function addSummarySheet(
       },
     );
   }
-  // Program hours (coach pay) — neutral labels; Program $ is coach pay.
+  // Program hours (coach pay, a payout) — neutral labels; Program $ is
+  // the amount PFA owes the coach. NEVER summed with the cage receivable.
   if (includeProgramHours) {
     columns.push(
       { header: "Program Slots", key: "programSlots", width: 13, kind: "num" },
       { header: "Program $", key: "programDollars", width: 12, kind: "dollar" },
     );
   }
-  columns.push({ header: "Total", key: "total", width: 12, kind: "dollar" });
+  // Cage-side receivable subtotal (cage + bullpen + weight room — coach owes
+  // PFA). Only when cage scope is on; never merged with program pay.
+  if (includeCageSessions) {
+    columns.push({
+      header: "Cage Owed $",
+      key: "cageOwed",
+      width: 13,
+      kind: "dollar",
+    });
+  }
   // Online is a session-only count — only when cage scope is on.
   if (includeCageSessions) {
     columns.push({
@@ -113,7 +123,6 @@ function addSummarySheet(
     const data: Record<string, string | number> = {
       coach: row.coachName,
       email: row.coachEmail,
-      total: row.totalCents / 100,
     };
     if (includeCageSessions) {
       data.cageSlots = row.cageSlots;
@@ -122,6 +131,7 @@ function addSummarySheet(
       data.bullpenDollars = row.bullpenTotalCents / 100;
       data.weightRoomSlots = row.weightRoomSlots;
       data.weightRoomDollars = row.weightRoomTotalCents / 100;
+      data.cageOwed = row.totalCents / 100; // cage-side receivable subtotal
       data.onlineSessions = row.onlineSessions || "";
     }
     if (includeProgramHours) {
@@ -131,13 +141,20 @@ function addSummarySheet(
     sheet.addRow(data);
   }
 
-  // Grand total row at the bottom. Blank cells for non-applicable
-  // columns; the "Total" cell holds the report's grand total.
+  // Grand total row at the bottom. Two SEPARATE grand totals, each under its
+  // own column and never summed: cage receivable under "Cage Owed $", program
+  // payout under "Program $". They point in opposite money directions.
   if (report.summary.length > 0) {
-    const totalRow = sheet.addRow({
+    const totalData: Record<string, string | number> = {
       coach: `Grand total (${report.detail.length} sessions)`,
-      total: report.grandTotalCents / 100,
-    });
+    };
+    if (includeCageSessions) {
+      totalData.cageOwed = report.grandTotalCents / 100;
+    }
+    if (includeProgramHours) {
+      totalData.programDollars = report.programGrandTotalCents / 100;
+    }
+    const totalRow = sheet.addRow(totalData);
     totalRow.font = { bold: true };
     totalRow.getCell("coach").alignment = { horizontal: "right" };
   }

@@ -56,11 +56,11 @@ export function TabNav({ role }: { role: "admin" | "coach" }) {
 
   return (
     <nav aria-label="Sections" className="min-w-0">
-      <ul className="flex items-center gap-1 overflow-x-auto whitespace-nowrap">
+      <ul className="flex items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         {tabs.map((tab) => {
           const isActive = tab.key === current;
           return (
-            <li key={tab.key}>
+            <li key={tab.key} className="shrink-0">
               <Link
                 href={hrefFor(tab.key, base)}
                 aria-current={isActive ? "page" : undefined}

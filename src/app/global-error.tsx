@@ -30,11 +30,11 @@ export default function GlobalError({
               viewBox="0 0 24 24"
               fill="currentColor"
               aria-hidden="true"
-              className="h-2.5 w-2.5 text-gold/70"
+              className="h-2.5 w-2.5 text-gold-strong"
             >
               <path d="M12 2.5 L21.5 12 L12 21.5 L2.5 12 Z" />
             </svg>
-            <span className="text-base font-bold tracking-tight text-gold">
+            <span className="text-base font-bold tracking-tight text-fg">
               PFA Cage Rentals
             </span>
           </div>

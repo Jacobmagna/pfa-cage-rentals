@@ -175,7 +175,7 @@ export function CoachesTable({
                 <div className="flex items-center gap-2 flex-wrap">
                   <Link
                     href={`/admin/coaches/${row.id}`}
-                    className="text-fg hover:text-gold-strong transition-colors font-medium"
+                    className="text-fg hover:underline transition-colors font-medium"
                   >
                     {row.name ?? row.email}
                   </Link>
@@ -273,7 +273,7 @@ function SortHeader({
       >
         {label}
         {active ? (
-          <Icon className="h-3 w-3 text-gold" />
+          <Icon className="h-3 w-3 text-fg" />
         ) : (
           <ArrowUpDown className="h-3 w-3 text-fg-disabled opacity-0 transition-opacity group-hover:opacity-100" />
         )}

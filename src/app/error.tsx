@@ -28,8 +28,8 @@ export default function Error({
     <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
       <div className="w-full max-w-sm text-center">
         <div className="mb-8 flex items-center justify-center gap-2.5">
-          <DiamondMark className="h-2.5 w-2.5 text-gold/70" filled />
-          <span className="text-base font-bold tracking-tight text-gold">
+          <DiamondMark className="h-2.5 w-2.5 text-gold-strong" filled />
+          <span className="text-base font-bold tracking-tight text-fg">
             PFA Cage Rentals
           </span>
         </div>

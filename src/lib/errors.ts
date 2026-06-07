@@ -221,6 +221,17 @@ export class HourLogNotFoundError extends Error {
   }
 }
 
+// QA10 W3-polish15: a coach tried to cancel a scheduled program block
+// they aren't a member of (stale client row, or a direct RPC call with a
+// block they don't run). Mirrors HourLogNotFoundError's shape.
+export class BlockMembershipError extends Error {
+  readonly code = "BLOCK_MEMBERSHIP" as const;
+  constructor(public readonly blockId: string) {
+    super(`Not a scheduled coach on block ${blockId}`);
+    this.name = "BlockMembershipError";
+  }
+}
+
 // Program-schedule-block edit/delete referenced a
 // program_schedule_blocks id that doesn't exist (stale client row, or
 // a direct RPC call with a bogus id). Mirrors BlockNotFoundError.

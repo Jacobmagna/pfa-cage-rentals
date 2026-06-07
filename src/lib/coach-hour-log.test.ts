@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  CONFIRM_WINDOW_MS,
+  OVERDUE_AFTER_MS,
   isBlockConfirmable,
+  isBlockOverdue,
   isLogScheduled,
 } from "./coach-hour-log";
 
@@ -11,44 +12,46 @@ const NOW = Date.UTC(2026, 5, 5, 17, 0, 0); // 2026-06-05 17:00:00 UTC
 const MIN = 60_000;
 
 describe("isBlockConfirmable", () => {
-  it("is true when the block ends exactly now (|now - end| = 0)", () => {
+  it("is true when the block starts exactly now (now == start)", () => {
     expect(isBlockConfirmable(NOW, NOW)).toBe(true);
   });
 
-  it("is true at the exact 15-min boundary before the end", () => {
-    expect(isBlockConfirmable(NOW + 15 * MIN, NOW)).toBe(true);
+  it("is true once the block has started (now > start)", () => {
+    expect(isBlockConfirmable(NOW - MIN, NOW)).toBe(true);
   });
 
-  it("is true at the exact 15-min boundary after the end", () => {
-    expect(isBlockConfirmable(NOW - 15 * MIN, NOW)).toBe(true);
+  it("is true long after the block started (open-ended)", () => {
+    expect(isBlockConfirmable(NOW - 5 * 24 * 60 * MIN, NOW)).toBe(true);
   });
 
-  it("is true just inside the window on the about-to-end side", () => {
-    expect(isBlockConfirmable(NOW + 14 * MIN, NOW)).toBe(true);
+  it("is false when the block has not started yet (now < start)", () => {
+    expect(isBlockConfirmable(NOW + MIN, NOW)).toBe(false);
   });
 
-  it("is true just inside the window on the just-ended side", () => {
-    expect(isBlockConfirmable(NOW - 14 * MIN, NOW)).toBe(true);
-  });
-
-  it("is false just outside the window before the end (16 min away)", () => {
-    expect(isBlockConfirmable(NOW + 16 * MIN, NOW)).toBe(false);
-  });
-
-  it("is false just outside the window after the end (16 min away)", () => {
-    expect(isBlockConfirmable(NOW - 16 * MIN, NOW)).toBe(false);
-  });
-
-  it("is false for a block ending far in the future", () => {
+  it("is false for a block starting far in the future", () => {
     expect(isBlockConfirmable(NOW + 3 * 60 * MIN, NOW)).toBe(false);
   });
+});
 
-  it("is false for a block that ended far in the past", () => {
-    expect(isBlockConfirmable(NOW - 3 * 60 * MIN, NOW)).toBe(false);
+describe("isBlockOverdue", () => {
+  it("is false at the block's end (not yet past)", () => {
+    expect(isBlockOverdue(NOW, NOW)).toBe(false);
   });
 
-  it("uses a 15-minute window constant", () => {
-    expect(CONFIRM_WINDOW_MS).toBe(15 * 60_000);
+  it("is false at exactly end + 60 min (strict >)", () => {
+    expect(isBlockOverdue(NOW, NOW + 60 * MIN)).toBe(false);
+  });
+
+  it("is true 1 ms past end + 60 min", () => {
+    expect(isBlockOverdue(NOW, NOW + 60 * MIN + 1)).toBe(true);
+  });
+
+  it("is true far past the end", () => {
+    expect(isBlockOverdue(NOW, NOW + 5 * 24 * 60 * MIN)).toBe(true);
+  });
+
+  it("uses a 1-hour overdue constant", () => {
+    expect(OVERDUE_AFTER_MS).toBe(60 * 60_000);
   });
 });
 

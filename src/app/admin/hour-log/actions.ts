@@ -14,6 +14,10 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/authz";
 import {
+  resolveCancellationInternal,
+  resolveNoShowInternal,
+} from "@/lib/server/block-flag-actions";
+import {
   deleteHourInternal,
   resolveHourLogInternal,
   updateHourInternal,
@@ -40,6 +44,25 @@ export async function resolveUnscheduledHourLog(id: string) {
   const session = await requireRole("admin");
   const result = await resolveHourLogInternal(session.user, id);
   revalidatePath("/admin/hour-log");
+  revalidatePath("/admin");
+  return result;
+}
+
+// Resolve a coach-cancelled block flag (mark reviewed/acknowledged). These
+// never appear in the hour-log table — they surface on the /admin
+// needs-review card — so we only revalidate /admin.
+export async function resolveCancellation(flagId: string) {
+  const session = await requireRole("admin");
+  const result = await resolveCancellationInternal(session.user, flagId);
+  revalidatePath("/admin");
+  return result;
+}
+
+// Acknowledge a derived no-show (inserts a stored 'no_show' flag). Same
+// surface as above — only /admin needs revalidating.
+export async function resolveNoShow(blockId: string, coachId: string) {
+  const session = await requireRole("admin");
+  const result = await resolveNoShowInternal(session.user, blockId, coachId);
   revalidatePath("/admin");
   return result;
 }

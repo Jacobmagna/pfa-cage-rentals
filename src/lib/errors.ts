@@ -232,6 +232,17 @@ export class BlockMembershipError extends Error {
   }
 }
 
+// Admin resolve referenced a program_block_coach_flags id that doesn't
+// exist (stale client row, or a direct RPC call with a bogus id).
+// Mirrors HourLogNotFoundError's shape.
+export class BlockFlagNotFoundError extends Error {
+  readonly code = "BLOCK_FLAG_NOT_FOUND" as const;
+  constructor(public readonly flagId: string) {
+    super(`Block flag ${flagId} not found`);
+    this.name = "BlockFlagNotFoundError";
+  }
+}
+
 // Program-schedule-block edit/delete referenced a
 // program_schedule_blocks id that doesn't exist (stale client row, or
 // a direct RPC call with a bogus id). Mirrors BlockNotFoundError.

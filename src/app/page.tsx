@@ -66,31 +66,25 @@ export default async function Home({
       </div>
 
       <div className="relative w-full max-w-sm">
-        {/* Brand lockup. Three-tier vertical hierarchy:
-             1. PFA Sports logo (parent brand)
-             2. "PFA Engine" — the product wordmark, promoted from
-                eyebrow label to a proper Geist-bold gold wordmark
-             3. Hairline-rule-with-diamond divider, signalling that
+        {/* Brand lockup. Vertical hierarchy:
+             1. The combined "PFA ENGINE" logo lockup (carries the wordmark)
+             2. Hairline-rule-with-diamond divider, signalling that
                 anything beneath is descriptive copy and not part of
                 the name
-             4. The positioning sentence, wrapped tight so it reads
+             3. The positioning sentence, wrapped tight so it reads
                 as a placard rather than a marketing tagline */}
         <div className="mb-10 text-center">
           <Image
-            src="/pfa-logo.png"
-            alt="PFA Sports"
-            width={813}
-            height={813}
+            src="/pfa-engine-logo.png"
+            alt="PFA Engine"
+            width={1672}
+            height={941}
             priority
-            className="mx-auto h-24 w-auto"
+            className="mx-auto w-72 h-auto"
           />
-          <h1 className="mt-7 text-3xl font-bold tracking-tight">
-            <span className="text-white">PFA</span>{" "}
-            <span className="text-yellow">Engine</span>
-          </h1>
           <div
             aria-hidden
-            className="mt-4 mx-auto flex items-center justify-center gap-2.5"
+            className="mt-6 mx-auto flex items-center justify-center gap-2.5"
           >
             <span className="h-px w-10 bg-yellow/30" />
             <DiamondMark className="h-2 w-2 text-yellow/60" filled />

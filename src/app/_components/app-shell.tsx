@@ -34,16 +34,13 @@ export async function AppShell({
               className="flex shrink-0 items-center gap-2.5 group"
             >
               <Image
-                src="/pfa-logo.png"
-                alt="PFA"
-                width={28}
-                height={28}
+                src="/pfa-engine-logo.png"
+                alt="PFA Engine"
+                width={1672}
+                height={941}
                 priority
-                className="h-7 w-7 object-contain"
+                className="h-10 w-auto object-contain"
               />
-              <span className="font-semibold tracking-tight text-[17px]">
-                <span className="text-yellow">Engine</span>
-              </span>
               <span className="hidden sm:inline text-[10px] uppercase tracking-[0.18em] text-white/55 border-l border-white/20 pl-2">
                 {role}
               </span>

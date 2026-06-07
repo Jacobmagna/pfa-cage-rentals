@@ -652,6 +652,15 @@ export const hourLogs = pgTable(
     index("hour_logs_coach_start_idx").on(table.coachId, table.startAt),
     index("hour_logs_program_start_idx").on(table.programId, table.startAt),
     index("hour_logs_start_idx").on(table.startAt),
+    // Prevents duplicate hour-logs from a double-confirm/double-tap: a coach
+    // can't log the same program at the same exact start/end time twice
+    // (an exact (coach, program, start, end) match is always a true dup).
+    uniqueIndex("hour_logs_coach_program_start_end_unique").on(
+      table.coachId,
+      table.programId,
+      table.startAt,
+      table.endAt,
+    ),
   ],
 );
 

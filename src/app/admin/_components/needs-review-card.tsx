@@ -175,7 +175,10 @@ export function NeedsReviewCard({
               extra && extra.trim().length > 0 ? ` — “${extra.trim()}”` : "";
             const lineTitle = `${item.coachName ?? "Unknown coach"} · ${item.programName} · ${formatPfaDateMedium(item.startAt)} ${formatPfaTime12h(item.startAt)}–${formatPfaTime12h(item.endAt)}${extraText}`;
             return (
-              <li key={key} className="flex items-center gap-3 py-2 first:pt-0">
+              <li
+                key={key}
+                className="flex flex-col items-stretch gap-1.5 py-2 first:pt-0 sm:flex-row sm:items-center sm:gap-3"
+              >
                 <span
                   className="flex min-w-0 flex-1 items-center gap-2 text-sm text-fg"
                   title={lineTitle}
@@ -204,7 +207,7 @@ export function NeedsReviewCard({
                   type="button"
                   onClick={() => handleResolve(item)}
                   disabled={isPendingResolve}
-                  className="inline-flex shrink-0 items-center gap-1 h-8 rounded-md border border-line-strong bg-surface px-2.5 text-xs font-medium text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
+                  className="inline-flex shrink-0 self-end sm:self-auto items-center gap-1 h-8 rounded-md border border-line-strong bg-surface px-2.5 text-xs font-medium text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
                   title="Mark this item reviewed"
                 >
                   <Check className="h-3.5 w-3.5" />

@@ -341,6 +341,9 @@ export function ProgramScheduleGrid({
       )}
 
       <div className="space-y-2 text-[11px] text-fg-muted">
+        <p className="text-[11px] text-fg-subtle md:hidden">
+          Scroll the schedule sideways to see all times.
+        </p>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
           <LegendDot className="bg-success" label="On schedule" />
           <LegendDot className="bg-danger" label="Wrong coach" />

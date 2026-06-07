@@ -79,7 +79,7 @@ export async function AppShell({
         </div>
       </header>
 
-      <main className="flex-1 mx-auto w-full px-6 lg:px-8 2xl:px-12 py-10">
+      <main className="flex-1 mx-auto w-full px-4 sm:px-6 lg:px-8 2xl:px-12 py-8 sm:py-10">
         {children}
       </main>
 

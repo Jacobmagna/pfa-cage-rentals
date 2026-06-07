@@ -49,6 +49,7 @@ import {
 } from "@/lib/timezone";
 import { CageSlotBooking } from "./cage-slot-booking";
 import { CageBatchBooking } from "./cage-batch-booking";
+import { CageDayList, type CageDaySlot } from "./cage-day-list";
 import { Modal } from "@/app/_components/modal";
 
 // Local copies of the schedule-grid type-stripe helper — duplicated per
@@ -70,6 +71,22 @@ function slotHourMinute(slotIndex: number): { hour: number; minute: number } {
     hour: SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIndex / 2),
     minute: (slotIndex % 2) * 30,
   };
+}
+
+// 12-hour "h:mm" piece, e.g. {hour:16,minute:30} → "4:30".
+function hm12(hour: number, minute: number): string {
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12}:${minute === 0 ? "00" : "30"}`;
+}
+
+// Slot index → its full 12-hour range label, e.g. "4:00 – 4:30 PM".
+// Mirrors the SlotCell time formatting; the AM/PM marker is the end's.
+function slotRangeLabel(slotIndex: number): string {
+  const { hour, minute } = slotHourMinute(slotIndex);
+  const endMinute = minute === 0 ? 30 : 0;
+  const endHour = minute === 0 ? hour : hour + 1;
+  const ampm = endHour < 12 || endHour === 24 ? "AM" : "PM";
+  return `${hm12(hour, minute)} – ${hm12(endHour, endMinute)} ${ampm}`;
 }
 
 type SelectedSlot = {
@@ -112,6 +129,14 @@ export function CageCalendar({
   // Whether the booking form modal is open for the current selection
   // (serves both the single-slot and batch paths).
   const [formOpen, setFormOpen] = useState(false);
+
+  // ── Mobile vertical view (md:hidden) ─────────────────────────────
+  // The phone view shows ONE resource at a time (the selected chip) as a
+  // top-to-bottom list of tappable slot rows. All booking state lives in
+  // the shared state above; this is just which resource the list renders.
+  const [mobileResourceId, setMobileResourceId] = useState(
+    resources[0]?.id ?? "",
+  );
 
   const dateStr = formatPfaDate(selectedDate);
 
@@ -210,6 +235,40 @@ export function CageCalendar({
   const selectedResource = selected
     ? resources.find((r) => r.id === selected.resourceId) ?? null
     : null;
+
+  // ── Mobile derived data ──────────────────────────────────────────
+  // The slot rows for the currently-selected resource chip, built from the
+  // SAME slotStateFor + shared selected/selection/revealed state the grid
+  // uses, then handed to the presentational <CageDayList>.
+  const mobileResource =
+    resources.find((r) => r.id === mobileResourceId) ?? resources[0] ?? null;
+  const mobileSlots: CageDaySlot[] = mobileResource
+    ? Array.from({ length: SCHEDULE_GRID_SLOTS }).map((_, slotIdx) => {
+        const { state, occupant } = slotStateFor(mobileResource.id, slotIdx);
+        const occupantLabel =
+          occupant?.kind === "session"
+            ? occupant.coachFirstName
+            : occupant?.kind === "block"
+              ? occupant.reason
+              : null;
+        return {
+          slotIndex: slotIdx,
+          timeLabel: slotRangeLabel(slotIdx),
+          state,
+          occupantLabel,
+          isSelected:
+            selected?.resourceId === mobileResource.id &&
+            selected.slotIndex === slotIdx,
+          isBatchSelected:
+            multiSelect &&
+            selection.resourceId === mobileResource.id &&
+            selection.slotIndexes.has(slotIdx),
+          isRevealed:
+            revealed?.resourceId === mobileResource.id &&
+            revealed.slotIndex === slotIdx,
+        };
+      })
+    : [];
 
   // Active batch-selection resource + count (derived during render).
   const selectionResource = selection.resourceId
@@ -457,8 +516,9 @@ export function CageCalendar({
         </div>
       ) : null}
 
-      {/* Grid. */}
-      <div className="overflow-x-auto rounded-xl border border-line shadow-[var(--shadow-sm)]">
+      {/* Grid — desktop / tablet only. On phones the vertical slot list
+          below replaces it (no fiddly ~34px horizontal-scroll cells). */}
+      <div className="hidden md:block overflow-x-auto rounded-xl border border-line shadow-[var(--shadow-sm)]">
         <div className="grid bg-surface min-w-fit" style={gridStyle}>
           {/* Header corner cell. */}
           <div
@@ -535,6 +595,56 @@ export function CageCalendar({
         </div>
       </div>
 
+      {/* Mobile view — pick a resource chip, then a vertical list of
+          full-width tappable slot rows. Reuses the SAME shared state +
+          handleSlotClick as the grid, so the sticky bar + modal flow above
+          are identical; only the per-day picker UI differs. */}
+      <div className="md:hidden space-y-3">
+        {/* Resource chip selector — horizontally scrollable, one chip per
+            resource (type-stripe color dot + name). */}
+        <div className="-mx-1 overflow-x-auto whitespace-nowrap px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="inline-flex gap-2">
+            {resources.map((r) => {
+              const active = r.id === mobileResource?.id;
+              return (
+                <button
+                  key={`chip-${r.id}`}
+                  type="button"
+                  onClick={() => setMobileResourceId(r.id)}
+                  aria-pressed={active}
+                  className={[
+                    "inline-flex items-center gap-2 rounded-full border px-3 h-9 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40",
+                    active
+                      ? "border-gold/50 bg-gold/10 text-gold-strong"
+                      : "border-line bg-surface text-fg-muted hover:text-fg hover:border-line-strong",
+                  ].join(" ")}
+                >
+                  <span
+                    aria-hidden
+                    className={`h-2.5 w-2.5 rounded-full ${typeStripe(r.type)}`}
+                  />
+                  {r.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {mobileResource ? (
+          <CageDayList
+            slots={mobileSlots}
+            multiSelect={multiSelect}
+            onSlotClick={(slotIdx) =>
+              handleSlotClick(
+                mobileResource.id,
+                slotIdx,
+                slotStateFor(mobileResource.id, slotIdx).state,
+              )
+            }
+          />
+        ) : null}
+      </div>
+
       {/* Legend + hint. */}
       <div className="space-y-2 text-[11px] text-fg-muted">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
@@ -546,7 +656,12 @@ export function CageCalendar({
           {multiSelect
             ? "Tap open slots in a single row to select them, then book the batch. Tapping a slot in a different row starts a new selection."
             : "Tap an open slot to book it. Tap a red slot to see who has it."}{" "}
-          Rotate your phone or scroll sideways to see the full day.
+          <span className="hidden md:inline">
+            Rotate your phone or scroll sideways to see the full day.
+          </span>
+          <span className="md:hidden">
+            Pick a resource above, then tap a slot to book it.
+          </span>
         </p>
       </div>
 

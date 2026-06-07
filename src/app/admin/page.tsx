@@ -35,6 +35,7 @@ import {
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import { totalFromSnapshot } from "@/lib/billing";
+import { findOverlappingLogIds } from "@/lib/hour-log-overlap";
 import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
 import type { NormalizedHourLogFilters } from "@/lib/reports/hour-log-filters";
 import { listActiveCoaches } from "@/lib/server/coaches";
@@ -355,22 +356,57 @@ export default async function AdminHome({
     fetchBlockAccountabilityAlerts(now),
   ]);
 
-  // QA10 W3-polish13b: still-open review queue = unscheduled AND not yet
-  // resolved. Sort newest-first; the card shows the count + the first 5 rows.
-  const needsReview = reviewWindowRows
-    .filter((r) => r.unscheduled && !r.reviewedAt)
-    .sort((a, b) => b.startAt.getTime() - a.startAt.getTime());
+  // QA10 W3-polish16: bucket each UNREVIEWED review-window row into exactly one
+  // hour-log alert type, by priority, so no log shows under two tags:
+  //   • unscheduled — logged program hours with no matching block (as before)
+  //   • double_logged — a non-unscheduled log overlapping ANOTHER log of the
+  //     same coach (double-pay / duplicate-entry risk)
+  //   • wrong_time — a non-unscheduled, non-overlapping log that reconciliation
+  //     flagged with a scheduleNote (overlaps a block but mismatches it)
+  const reviewable = reviewWindowRows.filter((r) => !r.reviewedAt);
+  const unscheduledRows = reviewable.filter((r) => r.unscheduled);
+  const rest = reviewable.filter((r) => !r.unscheduled);
+  const doubleIds = findOverlappingLogIds(
+    reviewable.map((r) => ({
+      id: r.id,
+      coachId: r.coachId,
+      startMs: r.startAt.getTime(),
+      endMs: r.endAt.getTime(),
+    })),
+  );
+  const doubleRows = rest.filter((r) => doubleIds.has(r.id));
+  const wrongTimeRows = rest.filter(
+    (r) => !doubleIds.has(r.id) && r.scheduleNote,
+  );
 
-  // QA10 W3-polish15b-ii: merge unscheduled logs with the block-accountability
-  // alerts (cancelled + no-show) into one Needs-review queue, newest-first.
+  // QA10 W3-polish15b-ii / polish16: merge the hour-log alerts with the
+  // block-accountability alerts (cancelled + no-show) into one Needs-review
+  // queue, newest-first.
   const mergedReview: NeedsReviewItem[] = [
-    ...needsReview.map((r) => ({
+    ...unscheduledRows.map((r) => ({
       type: "unscheduled" as const,
       id: r.id,
       coachName: r.coachName,
       programName: r.programName,
       startAt: r.startAt,
       endAt: r.endAt,
+    })),
+    ...doubleRows.map((r) => ({
+      type: "double_logged" as const,
+      id: r.id,
+      coachName: r.coachName,
+      programName: r.programName,
+      startAt: r.startAt,
+      endAt: r.endAt,
+    })),
+    ...wrongTimeRows.map((r) => ({
+      type: "wrong_time" as const,
+      id: r.id,
+      coachName: r.coachName,
+      programName: r.programName,
+      startAt: r.startAt,
+      endAt: r.endAt,
+      detail: r.scheduleNote,
     })),
     ...blockAlerts.cancelled,
     ...blockAlerts.noShow,
@@ -758,7 +794,7 @@ export default async function AdminHome({
 
       {mergedReview.length > 0 ? (
         <NeedsReviewCard
-          items={mergedReview.slice(0, 8)}
+          items={mergedReview.slice(0, 5)}
           totalCount={mergedReview.length}
         />
       ) : null}

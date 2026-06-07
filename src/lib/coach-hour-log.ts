@@ -7,18 +7,20 @@
 // `now` is always passed in by the caller (the server component reads it
 // once per request; the client passes the same instant it rendered with).
 
-// A scheduled block is "confirmable now" when the current moment is
-// within 15 minutes of the block's END (just-ended or about-to-end). The
-// window is symmetric: 15 min before the end through 15 min after it.
-export const CONFIRM_WINDOW_MS = 15 * 60_000;
+// A scheduled block is "confirmable now" the moment it STARTS and stays
+// confirmable open-ended (until the coach logs or cancels it) — the page
+// bounds the list to a 14-day lookback. Once we're more than 1 hr past a
+// block's END it's tagged "Overdue" so a coach sees what they still owe.
+export const OVERDUE_AFTER_MS = 60 * 60_000; // 1 hr past end → "Overdue"
 
-/**
- * True iff `now` is within CONFIRM_WINDOW_MS of the block's end time, on
- * either side (|now - end| <= 15 min). This is the one-click "Confirm
- * these hours" eligibility test for a coach's scheduled program block.
- */
-export function isBlockConfirmable(blockEndMs: number, nowMs: number): boolean {
-  return Math.abs(nowMs - blockEndMs) <= CONFIRM_WINDOW_MS;
+/** Confirmable from the moment the block STARTS, open-ended (until logged). */
+export function isBlockConfirmable(blockStartMs: number, nowMs: number): boolean {
+  return nowMs >= blockStartMs;
+}
+
+/** True once we're more than 1 hr past the block's end. */
+export function isBlockOverdue(blockEndMs: number, nowMs: number): boolean {
+  return nowMs > blockEndMs + OVERDUE_AFTER_MS;
 }
 
 /**

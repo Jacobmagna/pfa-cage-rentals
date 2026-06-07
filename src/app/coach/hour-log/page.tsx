@@ -1,16 +1,17 @@
 import { Clock } from "lucide-react";
-import { and, asc, eq, gte, lt } from "drizzle-orm";
+import { and, asc, eq, gte, lte } from "drizzle-orm";
 import { db } from "@/db";
 import {
   hourLogs,
+  programBlockCoachFlags,
   programs,
   programScheduleBlockCoaches,
   programScheduleBlocks,
 } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
 import {
-  CONFIRM_WINDOW_MS,
   isBlockConfirmable,
+  isBlockOverdue,
   isLogScheduled,
 } from "@/lib/coach-hour-log";
 import {
@@ -24,9 +25,13 @@ import {
   type ConfirmableBlock,
 } from "./_components/schedule-confirm-list";
 
-// Coach hour-log "Log hours" tab (QA10 W3.7). Two stacked sections:
-//   1. Confirm-the-schedule — the coach's scheduled program blocks whose
-//      end is within 15 min of now, each one tap away from being logged.
+// Coach hour-log "Log hours" tab (QA10 W3.7 + W3-polish15). Two stacked
+// sections:
+//   1. Confirm-the-schedule — the coach's scheduled program blocks that
+//      have STARTED within the last 14 days and aren't yet logged or
+//      cancelled. Each is one tap away from being logged; a block more
+//      than 1 hr past its end is tagged "Overdue". They can also Cancel
+//      a block that didn't happen.
 //   2. The manual HourLogForm (unchanged), for any hours on or off the
 //      schedule. The <h1> + sub-nav live in layout.tsx.
 //
@@ -34,12 +39,10 @@ import {
 // action `logOwnHour` enforces coachId = self regardless of any
 // client-supplied value.
 
-// We query scheduled blocks ending in a tight window around now (one
-// hour either side) — a cheap, index-friendly DB filter — then keep only
-// those the 15-min `isBlockConfirmable` window admits. The query window
-// is wider than the confirm window so a block ending up to an hour ago is
-// still a candidate the predicate can reject precisely.
-const QUERY_PAD_MS = 60 * 60 * 1000;
+// Confirm-list lookback: the coach's started-but-not-future blocks from
+// the last 14 days. Wide enough to surface anything they still owe; the
+// per-row "Overdue" tag distinguishes stale ones.
+const LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
 
 export default async function CoachHourLogPage() {
   const session = await requireSession();
@@ -48,10 +51,10 @@ export default async function CoachHourLogPage() {
 
   const now = new Date();
   const nowMs = now.getTime();
-  const windowStart = new Date(nowMs - QUERY_PAD_MS - CONFIRM_WINDOW_MS);
-  const windowEnd = new Date(nowMs + QUERY_PAD_MS + CONFIRM_WINDOW_MS);
+  const windowStart = new Date(nowMs - LOOKBACK_MS);
 
-  const [programOptions, candidateBlocks, recentLogs] = await Promise.all([
+  const [programOptions, candidateBlocks, recentLogs, cancelledFlags] =
+    await Promise.all([
     db
       .select({ id: programs.id, name: programs.name })
       .from(programs)
@@ -77,7 +80,7 @@ export default async function CoachHourLogPage() {
         and(
           eq(programScheduleBlockCoaches.coachId, coachId),
           gte(programScheduleBlocks.endAt, windowStart),
-          lt(programScheduleBlocks.endAt, windowEnd),
+          lte(programScheduleBlocks.startAt, now),
         ),
       )
       .orderBy(asc(programScheduleBlocks.endAt)),
@@ -94,10 +97,23 @@ export default async function CoachHourLogPage() {
         and(
           eq(hourLogs.coachId, coachId),
           gte(hourLogs.startAt, windowStart),
-          lt(hourLogs.startAt, windowEnd),
+          lte(hourLogs.startAt, now),
+        ),
+      ),
+    // This coach's 'cancelled' flags — blocks they've explicitly cancelled
+    // are removed from the confirm list below (W3-polish15).
+    db
+      .select({ blockId: programBlockCoachFlags.blockId })
+      .from(programBlockCoachFlags)
+      .where(
+        and(
+          eq(programBlockCoachFlags.coachId, coachId),
+          eq(programBlockCoachFlags.kind, "cancelled"),
         ),
       ),
   ]);
+
+  const cancelledBlockIds = new Set(cancelledFlags.map((f) => f.blockId));
 
   const loggedMatchers = recentLogs.map((l) => ({
     programId: l.programId,
@@ -106,7 +122,7 @@ export default async function CoachHourLogPage() {
   }));
 
   const confirmableBlocks: ConfirmableBlock[] = candidateBlocks
-    .filter((b) => isBlockConfirmable(b.endAt.getTime(), nowMs))
+    .filter((b) => isBlockConfirmable(b.startAt.getTime(), nowMs))
     // Drop blocks the coach already logged a matching hour for: reuse the
     // same overlap+program predicate by treating the BLOCK as the "log"
     // and the coach's logs as the "blocks".
@@ -121,6 +137,8 @@ export default async function CoachHourLogPage() {
           loggedMatchers,
         ),
     )
+    // Drop blocks this coach has explicitly cancelled.
+    .filter((b) => !cancelledBlockIds.has(b.id))
     .map((b) => ({
       id: b.id,
       programId: b.programId,
@@ -128,6 +146,7 @@ export default async function CoachHourLogPage() {
       startIso: b.startAt.toISOString(),
       endIso: b.endAt.toISOString(),
       whenLabel: buildWhenLabel(b.startAt, b.endAt, now),
+      overdue: isBlockOverdue(b.endAt.getTime(), nowMs),
     }));
 
   const displayName = user.name ?? user.email;

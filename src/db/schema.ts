@@ -49,6 +49,16 @@ export const recurrenceFrequency = pgEnum("recurrence_frequency", [
   "monthly",
 ]);
 
+// QA10 W3-polish15: a coach flag on a scheduled program block. "cancelled"
+// = the coach proactively says they will NOT run a block they're assigned
+// to (optional reason); stays unreviewed until an admin resolves it.
+// "no_show" = an admin-side tombstone for an acknowledged no-show
+// (stamped reviewed at insert). The coach side only writes "cancelled".
+export const blockCoachFlagKind = pgEnum("program_block_coach_flag_kind", [
+  "cancelled",
+  "no_show",
+]);
+
 // `deletedAt`: soft-delete timestamp for the J9 GDPR-style account-
 // removal flow. NULL = active. When set, the row is anonymized:
 // `name` becomes "Former coach" and `email` becomes
@@ -806,6 +816,52 @@ export const programScheduleBlockCoaches = pgTable(
   ],
 );
 
+// QA10 W3-polish15: per-(block, coach) accountability flag. A coach can
+// cancel their assignment to a scheduled block (kind="cancelled", optional
+// note), which drops the block off their confirm list and surfaces to the
+// admin for review; admins later tombstone acknowledged no-shows
+// (kind="no_show"). reviewedAt/reviewedBy: NULL until an admin resolves a
+// "cancelled" flag; stamped at insert for an admin "no_show".
+//
+// The unique index makes a coach's cancel idempotent (one row per
+// block/coach/kind — onConflictDoNothing); the (kind, reviewedAt) index
+// powers the admin needs-review queue.
+export const programBlockCoachFlags = pgTable(
+  "program_block_coach_flags",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    blockId: text("block_id")
+      .notNull()
+      .references(() => programScheduleBlocks.id, { onDelete: "cascade" }),
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id),
+    kind: blockCoachFlagKind("kind").notNull(),
+    note: text("note"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    // 'cancelled': null until an admin resolves. 'no_show': stamped at
+    // insert (admin Resolve == acknowledge).
+    reviewedAt: timestamp("reviewed_at", { mode: "date" }),
+    reviewedBy: text("reviewed_by").references(() => users.id),
+  },
+  (table) => [
+    uniqueIndex("program_block_coach_flags_block_coach_kind_idx").on(
+      table.blockId,
+      table.coachId,
+      table.kind,
+    ),
+    index("program_block_coach_flags_kind_reviewed_idx").on(
+      table.kind,
+      table.reviewedAt,
+    ),
+  ],
+);
+
 // QA10 W3.2: the full coach set for a recurring series. Materialized
 // occurrences copy this set into program_schedule_block_coaches.
 export const programScheduleSeriesCoaches = pgTable(
@@ -906,3 +962,8 @@ export type ProgramScheduleSeriesCoach =
   typeof programScheduleSeriesCoaches.$inferSelect;
 export type NewProgramScheduleSeriesCoach =
   typeof programScheduleSeriesCoaches.$inferInsert;
+export type ProgramBlockCoachFlag =
+  typeof programBlockCoachFlags.$inferSelect;
+export type NewProgramBlockCoachFlag =
+  typeof programBlockCoachFlags.$inferInsert;
+export type BlockCoachFlagKind = (typeof blockCoachFlagKind.enumValues)[number];

@@ -16,12 +16,28 @@
 
 import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/authz";
-import { logHourInternal } from "@/lib/server/hour-log-actions";
+import {
+  cancelScheduledBlockInternal,
+  logHourInternal,
+} from "@/lib/server/hour-log-actions";
 
 export async function logOwnHour(input: unknown) {
   const session = await requireSession();
   const result = await logHourInternal(session.user, input);
   revalidatePath("/coach/hour-log");
   revalidatePath("/coach");
+  return result;
+}
+
+// QA10 W3-polish15: coach cancels their assignment to a scheduled program
+// block (optional reason). cancelScheduledBlockInternal stamps coachId
+// from the authed actor, so a client-supplied coachId is never read.
+// Revalidates /admin too so the admin needs-review card (slice 2b) picks
+// up the new flag.
+export async function cancelScheduledBlock(input: unknown) {
+  const session = await requireSession();
+  const result = await cancelScheduledBlockInternal(session.user, input);
+  revalidatePath("/coach/hour-log");
+  revalidatePath("/admin");
   return result;
 }

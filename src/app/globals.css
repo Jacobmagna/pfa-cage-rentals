@@ -41,20 +41,21 @@
   --color-fg-subtle: #646464;
   --color-fg-disabled: #a3a3a3;
 
-  /* Gold is now accent-on-light: fine for fills, borders, large/bold
-   * accents and CTAs. On gold CTA backgrounds, gold-ink (#0a0a0a) gives
-   * 10.20:1 — AA/AAA. Gold itself is ~1.94:1 on white, so it must NOT be
-   * used as small body text; gold-strong (#8a6206, AA on page/surface:
-   * 5.18 / 4.84) exists for any gold-COLORED text that needs legibility.
-   * Prefer gold-ink-on-gold fills over gold text wherever possible. */
-  --color-gold: #e9b13c;
-  --color-gold-hover: #f0bf52;
+  /* Gold tokens now ALL resolve to the brand yellow #FFC400 — gold has
+   * been retired as a distinct color and the app is unified on one accent.
+   * gold-ink (#0a0a0a) is the near-black text used ON yellow fills/CTAs
+   * (10.20:1 — AA/AAA). gold-strong is now dark ink (#0a0a0a) for small
+   * accent text/labels on LIGHT backgrounds, since bright yellow is
+   * illegible as small text on white. Prefer gold-ink-on-yellow fills. */
+  --color-gold: #FFC400;
+  --color-gold-hover: #FFD23D;
   --color-gold-ink: #0a0a0a;
-  --color-gold-strong: #8a6206;
+  --color-gold-strong: #0a0a0a;
 
-  /* Brand yellow (W3-polish14): bright golden-yellow used ONLY on the
-   * black-backed nav + sign-in surfaces. Exposes text-yellow / bg-yellow /
-   * bg-yellow/15 / ring-yellow utilities. Additive — does not touch gold. */
+  /* Brand yellow (W3-polish14): the brand yellow #FFC400. As of polish19a
+   * the gold tokens above are this same yellow; --color-yellow is kept as
+   * the explicit name used on the black-backed nav + sign-in surfaces.
+   * Exposes text-yellow / bg-yellow / bg-yellow/15 / ring-yellow utilities. */
   --color-yellow: #FFC400;
 
   /* Status colors darkened from the dark-theme values so they read on

@@ -5,7 +5,7 @@ import { ImageResponse } from "next/og";
 // Used by the PWA manifest as the 192px web-app icon and as the
 // browser tab favicon at retina sizes.
 //
-// Brand mark: a filled gold diamond on a near-black square. Same
+// Brand mark: a filled yellow diamond on a near-black square. Same
 // shape as the inline <DiamondMark> SVG used in the nav and landing
 // page — see src/app/_components/diamond-mark.tsx. At 16px tab size
 // a stroked outline disappears, so we render filled here. The mark
@@ -36,7 +36,7 @@ export default function Icon() {
           style={{
             width: "108px",
             height: "108px",
-            background: "#e9b13c",
+            background: "#FFC400",
             transform: "rotate(45deg)",
             borderRadius: "10px",
           }}

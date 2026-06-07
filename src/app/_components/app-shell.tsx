@@ -26,8 +26,8 @@ export async function AppShell({
 
   return (
     <>
-      <header className="sticky top-0 z-40 h-16 border-b border-white/10 bg-black backdrop-blur-md">
-        <div className="mx-auto flex h-full items-center justify-between gap-4 px-6 lg:px-8 2xl:px-12">
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-black backdrop-blur-md">
+        <div className="mx-auto flex h-16 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8 2xl:px-12">
           <div className="flex min-w-0 items-center gap-3">
             <Link
               href={role === "admin" ? "/admin" : "/coach"}
@@ -49,7 +49,7 @@ export async function AppShell({
               </span>
             </Link>
 
-            <div className="border-l border-line pl-3 min-w-0">
+            <div className="hidden md:block border-l border-line pl-3 min-w-0">
               <TabNav role={role} />
             </div>
           </div>
@@ -73,9 +73,13 @@ export async function AppShell({
             </form>
           </div>
         </div>
+
+        <div className="md:hidden border-t border-white/10 px-3 py-1.5">
+          <TabNav role={role} />
+        </div>
       </header>
 
-      <main className="flex-1 mx-auto w-full px-6 lg:px-8 2xl:px-12 py-10">
+      <main className="flex-1 mx-auto w-full px-4 sm:px-6 lg:px-8 2xl:px-12 py-8 sm:py-10">
         {children}
       </main>
 

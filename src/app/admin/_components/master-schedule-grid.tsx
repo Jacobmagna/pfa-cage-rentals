@@ -168,6 +168,7 @@ export function MasterScheduleGrid({
   const visibleProgramBlocks = programBlocks.filter((b) => inRange(b.startAt));
 
   return (
+    <>
     <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
       <div className="min-w-fit">
         {/* Shared time header row. */}
@@ -204,6 +205,10 @@ export function MasterScheduleGrid({
         <Legend />
       </div>
     </div>
+    <p className="mt-2 text-[11px] text-fg-subtle md:hidden">
+      Scroll the schedule sideways to see all times.
+    </p>
+    </>
   );
 }
 

@@ -19,13 +19,26 @@ const endAfterStartError = {
   path: ["endAt"],
 };
 
+// Upper bound on a single log's span. 16h is generous vs the 8 AM–10 PM
+// facility window but catches a date typo that produces a 24h+ span.
+// Zod-only — no DB constraint backs this (unlike endAt > startAt).
+const MAX_DURATION_MS = 16 * 60 * 60 * 1000;
+const underMaxDuration = (v: { startAt: Date; endAt: Date }) =>
+  v.endAt.getTime() - v.startAt.getTime() <= MAX_DURATION_MS;
+const underMaxDurationError = {
+  message: "That span is over 16 hours — check the start/end (did the date slip?)",
+  path: ["endAt"],
+};
+
 export const createHourLogSchema = z
   .object(hourLogShape)
-  .refine(endAfterStart, endAfterStartError);
+  .refine(endAfterStart, endAfterStartError)
+  .refine(underMaxDuration, underMaxDurationError);
 
 export const editHourLogSchema = z
   .object(hourLogShape)
-  .refine(endAfterStart, endAfterStartError);
+  .refine(endAfterStart, endAfterStartError)
+  .refine(underMaxDuration, underMaxDurationError);
 
 // QA10 W3-polish15: a coach cancelling their assignment to a scheduled
 // program block. reason is optional free text (trimmed, capped) explaining

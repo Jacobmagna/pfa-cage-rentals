@@ -12,7 +12,7 @@
 
 import { z } from "zod";
 
-export const createSessionSchema = z.object({
+const sessionShape = {
   coachId: z.string().min(1, "coachId is required"),
   resourceId: z.string().min(1, "resourceId is required"),
   startAt: z.coerce.date(),
@@ -34,9 +34,31 @@ export const createSessionSchema = z.object({
   // Forces the snapshot rate to $0 (PFA nets the rental against the
   // payout to the coach, off-app).
   isOnline: z.boolean().optional(),
-});
+};
 
-export const updateSessionSchema = createSessionSchema.partial();
+const sessionBase = z.object(sessionShape);
+
+// Upper bound on a single session's span. start < end is intentionally
+// NOT refined here (the DB CHECK is canonical), but a date typo can
+// still produce a huge span; 16h is generous vs the facility window.
+// Zod-only — no DB constraint backs this max.
+const MAX_DURATION_MS = 16 * 60 * 60 * 1000;
+const maxDur = (v: { startAt: Date; endAt: Date }) =>
+  v.endAt.getTime() - v.startAt.getTime() <= MAX_DURATION_MS;
+// Update/partial case: no-op unless BOTH bounds are present.
+const maxDurPartial = (v: { startAt?: Date; endAt?: Date }) =>
+  !(v.startAt && v.endAt) ||
+  v.endAt.getTime() - v.startAt.getTime() <= MAX_DURATION_MS;
+const maxDurError = {
+  message: "That span is over 16 hours — check the start/end (did the date slip?)",
+  path: ["endAt"],
+};
+
+export const createSessionSchema = sessionBase.refine(maxDur, maxDurError);
+
+export const updateSessionSchema = sessionBase
+  .partial()
+  .refine(maxDurPartial, maxDurError);
 
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 export type UpdateSessionInput = z.infer<typeof updateSessionSchema>;
@@ -53,14 +75,16 @@ export const createSessionBatchSchema = z.object({
   useType: z.enum(["hitting", "pitching"]).nullish(),
   slots: z
     .array(
-      z.object({
-        startAt: z.coerce.date(),
-        endAt: z.coerce.date(),
-        note: z.string().max(500).nullish(),
-        isTeamRental: z.boolean().optional(),
-        pfaReferred: z.boolean().optional(),
-        isOnline: z.boolean().optional(),
-      }),
+      z
+        .object({
+          startAt: z.coerce.date(),
+          endAt: z.coerce.date(),
+          note: z.string().max(500).nullish(),
+          isTeamRental: z.boolean().optional(),
+          pfaReferred: z.boolean().optional(),
+          isOnline: z.boolean().optional(),
+        })
+        .refine(maxDur, maxDurError),
     )
     .min(1, "at least one slot is required")
     .max(50, "too many slots — max 50 per submission"),

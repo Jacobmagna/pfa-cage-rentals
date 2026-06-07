@@ -204,6 +204,13 @@
       "when": 1780788850904,
       "tag": "0028_normal_red_skull",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1780863385999,
+      "tag": "0029_crazy_captain_universe",
+      "breakpoints": true
     }
   ]
 }

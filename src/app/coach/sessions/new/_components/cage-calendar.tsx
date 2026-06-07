@@ -480,7 +480,10 @@ export function CageCalendar({
           BOTH the single-slot and batch paths. */}
       {(!multiSelect && selected && selectedResource) ||
       (multiSelect && selectionCount > 0 && selectionResource) ? (
-        <div className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gold/40 bg-gold/5 px-4 py-3 shadow-[var(--shadow-sm)] backdrop-blur supports-[backdrop-filter]:bg-page/80">
+        // Offsets track the AppShell header height so the bar rests below it
+        // rather than sliding under the z-40 header: mobile two-row ≈110px,
+        // desktop one-row h-16=64px.
+        <div className="sticky top-[110px] md:top-16 z-30 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gold/40 bg-gold/5 px-4 py-3 shadow-[var(--shadow-sm)] backdrop-blur supports-[backdrop-filter]:bg-page/80">
           <p className="text-sm font-medium text-fg">
             {multiSelect && selectionResource ? (
               <>

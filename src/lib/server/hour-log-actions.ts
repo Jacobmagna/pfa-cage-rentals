@@ -104,6 +104,12 @@ export async function logHourInternal(
     programDefaultCents: program.defaultRatePer30MinCents,
   });
 
+  // Idempotent insert: the hour_logs_coach_program_start_end_unique index
+  // (mig 0029) makes an exact (coach, program, start, end) a true duplicate.
+  // onConflictDoNothing means a double-confirm/double-tap (or a race between
+  // two tabs/devices) never writes a second paid row — the second attempt
+  // returns an EMPTY array, which we treat as a graceful no-op by returning
+  // the already-logged row (no error, no duplicate audit entry).
   const [inserted] = await db
     .insert(hourLogs)
     .values({
@@ -115,7 +121,33 @@ export async function logHourInternal(
       ratePer30MinCents,
       createdBy: actor.id,
     })
+    .onConflictDoNothing({
+      target: [
+        hourLogs.coachId,
+        hourLogs.programId,
+        hourLogs.startAt,
+        hourLogs.endAt,
+      ],
+    })
     .returning();
+
+  if (!inserted) {
+    // Conflict: an identical log already exists. Return it unchanged
+    // without writing a duplicate audit row.
+    const [existing] = await db
+      .select()
+      .from(hourLogs)
+      .where(
+        and(
+          eq(hourLogs.coachId, actor.id),
+          eq(hourLogs.programId, parsed.programId),
+          eq(hourLogs.startAt, parsed.startAt),
+          eq(hourLogs.endAt, parsed.endAt),
+        ),
+      )
+      .limit(1);
+    return existing;
+  }
 
   await safeLogAudit(db, {
     actorUserId: actor.id,

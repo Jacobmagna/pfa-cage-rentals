@@ -16,7 +16,8 @@ export const createPaymentSchema = z.object({
   amountCents: z
     .number()
     .int("amount must be whole cents")
-    .positive("amount must be greater than zero"),
+    .positive("amount must be greater than zero")
+    .max(100_000_00, "amount can't exceed $100,000"),
   method: z.enum(METHODS),
   paidAt: z.coerce.date(),
   reference: z.string().max(200).nullish(),

@@ -24,6 +24,7 @@ import {
   type CoachGridProgramBlock,
   type CoachGridSession,
 } from "./_components/coach-week-grid";
+import { CoachWeekAgenda } from "./_components/coach-week-agenda";
 
 // Coach Schedule page (SCR-2). Read-only WEEK time-grid (QA10 W3.4): days
 // across the top, time of day down the rows. Shows, for THIS coach only,
@@ -175,10 +176,6 @@ export default async function CoachSchedulePage({
         <h1 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight">
           Week of {formatPfaDateMedium(monday)} – {formatPfaDateMedium(sunday)}
         </h1>
-        <p className="mt-1 text-xs italic text-fg-subtle md:hidden">
-          This page is designed for desktop. Rotate your device or use a laptop
-          for the full experience.
-        </p>
       </header>
 
       <nav
@@ -206,11 +203,24 @@ export default async function CoachSchedulePage({
           <p className="text-fg-muted">Nothing scheduled this week.</p>
         </div>
       ) : (
-        <CoachWeekGrid
-          days={gridDays}
-          programBlocks={gridProgramBlocks}
-          sessions={gridSessions}
-        />
+        <>
+          {/* Desktop: read-only week time-grid (unchanged). */}
+          <div className="hidden md:block">
+            <CoachWeekGrid
+              days={gridDays}
+              programBlocks={gridProgramBlocks}
+              sessions={gridSessions}
+            />
+          </div>
+          {/* Mobile: vertical day-by-day agenda (same props). */}
+          <div className="md:hidden">
+            <CoachWeekAgenda
+              days={gridDays}
+              programBlocks={gridProgramBlocks}
+              sessions={gridSessions}
+            />
+          </div>
+        </>
       )}
     </div>
   );

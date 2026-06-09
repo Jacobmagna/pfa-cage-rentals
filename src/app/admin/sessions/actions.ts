@@ -25,6 +25,9 @@ import {
 function revalidateSessionSurfaces() {
   revalidatePath("/admin/schedule");
   revalidatePath("/admin/sessions");
+  // 1b #26/27: an admin removing a rental updates the cancellations dashboard.
+  revalidatePath("/admin/cage-rentals");
+  revalidatePath("/admin/cage-rentals/cancellations");
 }
 
 export async function createSession(input: unknown) {

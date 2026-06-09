@@ -1,6 +1,7 @@
 import { and, gte, lt, sql as drizzleSql } from "drizzle-orm";
 import {
   CalendarDays,
+  CalendarX,
   ClipboardList,
   Coins,
 } from "lucide-react";
@@ -10,6 +11,7 @@ import { requireRole } from "@/lib/authz";
 import { EditableName } from "@/app/_components/editable-name";
 import { NavCard } from "@/app/_components/nav-card";
 import { StatCard } from "@/app/_components/stat-card";
+import { loadCancellationsDashboard } from "@/lib/server/cancellations-data";
 import { totalFromSnapshot } from "@/lib/billing";
 import { formatDollars } from "@/lib/format-money";
 import {
@@ -48,6 +50,7 @@ export default async function AdminHome() {
     [{ count: sessionsToday }],
     monthSessionRows,
     [{ count: blocksToday }],
+    { counts: cancelCounts },
   ] = await Promise.all([
     db
       .select({ count: drizzleSql<number>`count(*)::int` })
@@ -80,6 +83,7 @@ export default async function AdminHome() {
           lt(blockedTimes.startAt, dayEnd),
         ),
       ),
+    loadCancellationsDashboard(),
   ]);
 
   // Month total reads the snapshotted rate from each session row directly.
@@ -103,7 +107,7 @@ export default async function AdminHome() {
 
       <section
         aria-label="Today and this month at a glance"
-        className="mb-12 grid gap-4 sm:grid-cols-3"
+        className="mb-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
       >
         <StatCard
           icon={<CalendarDays className="h-4 w-4" />}
@@ -123,6 +127,16 @@ export default async function AdminHome() {
           label="Active blocks today"
           value={blocksToday.toString()}
           sub={blocksToday === 0 ? "Cages all bookable" : "Resources held"}
+        />
+        <StatCard
+          icon={<CalendarX className="h-4 w-4" />}
+          label="Last-minute cancels (30d)"
+          value={cancelCounts.lastMinute30d.toString()}
+          sub={
+            cancelCounts.lastMinute30d === 0
+              ? "No late cancels"
+              : "Last-minute or mid-session"
+          }
         />
       </section>
 
@@ -149,6 +163,16 @@ export default async function AdminHome() {
             icon={<ClipboardList className="h-4 w-4" />}
             title="Rentals"
             stat="Log, edit, review"
+          />
+          <NavCard
+            href="/admin/cage-rentals/cancellations"
+            icon={<CalendarX className="h-4 w-4" />}
+            title="Cancellations"
+            stat={
+              cancelCounts.lastMinute30d === 0
+                ? "No late cancels (30d)"
+                : `${cancelCounts.lastMinute30d} late cancel${cancelCounts.lastMinute30d === 1 ? "" : "s"} (30d)`
+            }
           />
         </div>
       </section>

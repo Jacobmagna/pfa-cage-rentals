@@ -37,6 +37,10 @@ import {
 function revalidateCoachSurfaces() {
   revalidatePath("/coach");
   revalidatePath("/coach/sessions");
+  // 1b #26/27: a coach cancelling a rental updates the admin cancellations
+  // dashboard (records a session_cancellations row on delete).
+  revalidatePath("/admin/cage-rentals");
+  revalidatePath("/admin/cage-rentals/cancellations");
 }
 
 export async function logOwnSession(input: unknown) {

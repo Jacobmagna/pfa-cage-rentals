@@ -355,6 +355,51 @@ export const sessionsBilling = pgTable(
   ],
 );
 
+// 1b #26/27: audit trail of cancelled (deleted) cage rentals. A
+// sessions_billing row is HARD-deleted on cancel, so we snapshot the
+// fields we need here (sessionId carries NO FK — the row is gone).
+// One row per cancelled rental; timing categories (advance /
+// short_notice / last_minute / mid_session / after_end) are DERIVED on
+// read from startAt/endAt/cancelledAt (see src/lib/cancellation.ts) so
+// thresholds can change without a migration. `coachId` is the rental
+// OWNER; `cancelledBy` is the ACTOR (a coach removing their own rental,
+// or an admin). Per-coach pattern rollups count only owner-cancellations
+// (cancelledBy === coachId); admin removals are recorded but excluded.
+export const sessionCancellations = pgTable(
+  "session_cancellations",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    sessionId: text("session_id").notNull(),
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id),
+    resourceId: text("resource_id")
+      .notNull()
+      .references(() => resources.id),
+    startAt: timestamp("start_at", { mode: "date" }).notNull(),
+    endAt: timestamp("end_at", { mode: "date" }).notNull(),
+    ratePer30MinCents: integer("rate_per_30_min_cents"),
+    note: text("note"),
+    cancelledAt: timestamp("cancelled_at", { mode: "date" })
+      .notNull()
+      .defaultNow(),
+    cancelledBy: text("cancelled_by")
+      .notNull()
+      .references(() => users.id),
+    // round((startAt - cancelledAt) / 60000); positive = before start,
+    // may be negative (cancelled at/after start).
+    leadTimeMins: integer("lead_time_mins").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("session_cancellations_session_idx").on(table.sessionId),
+    index("session_cancellations_coach_idx").on(table.coachId),
+    index("session_cancellations_cancelled_at_idx").on(table.cancelledAt),
+  ],
+);
+
 // Admin-created resource blocks for non-billing reasons: summer
 // camps, private team rentals, HVAC repair, holidays. Coaches can't
 // book a resource while it's blocked.
@@ -1012,3 +1057,6 @@ export type ProgramBlockCoachFlag =
 export type NewProgramBlockCoachFlag =
   typeof programBlockCoachFlags.$inferInsert;
 export type BlockCoachFlagKind = (typeof blockCoachFlagKind.enumValues)[number];
+export type SessionCancellation = typeof sessionCancellations.$inferSelect;
+export type NewSessionCancellation =
+  typeof sessionCancellations.$inferInsert;

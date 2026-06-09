@@ -3,6 +3,7 @@ import {
   FileText,
   History,
   Settings,
+  ShieldAlert,
   Upload,
   Users,
   Wallet,
@@ -11,6 +12,7 @@ import { db } from "@/db";
 import { auditLog, coachPayments, sessionsBilling, users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import { NavCard } from "@/app/_components/nav-card";
+import { loadAccountabilityScorecard } from "@/lib/server/accountability-data";
 import { totalFromSnapshot } from "@/lib/billing";
 import { formatDollars } from "@/lib/format-money";
 import {
@@ -50,6 +52,7 @@ export default async function BillingRecordsHome() {
     allSessionsForBalance,
     confirmedPaymentRows,
     [{ count: pendingPaymentsCount }],
+    accountability,
   ] = await Promise.all([
     db
       .select({ count: drizzleSql<number>`count(*)::int` })
@@ -104,6 +107,7 @@ export default async function BillingRecordsHome() {
           eq(coachPayments.status, "pending"),
         ),
       ),
+    loadAccountabilityScorecard(),
   ]);
 
   // Month + lifetime totals read the snapshotted rate from each session
@@ -151,6 +155,16 @@ export default async function BillingRecordsHome() {
           icon={<Users className="h-4 w-4" />}
           title="Coaches"
           stat={`${activeCoaches} active`}
+        />
+        <NavCard
+          href="/admin/records/accountability"
+          icon={<ShieldAlert className="h-4 w-4" />}
+          title="Accountability"
+          stat={
+            accountability.totals.coachesFlagged > 0
+              ? `${accountability.totals.coachesFlagged} flagged`
+              : "All on track"
+          }
         />
         <NavCard
           href="/admin/reports"

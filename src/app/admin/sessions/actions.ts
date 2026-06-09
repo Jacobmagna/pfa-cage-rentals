@@ -25,9 +25,10 @@ import {
 function revalidateSessionSurfaces() {
   revalidatePath("/admin/schedule");
   revalidatePath("/admin/sessions");
-  // 1b #26/27: an admin removing a rental updates the cancellations dashboard.
+  // 1b #26/27: an admin removing a rental updates the cancellations dashboard
+  // (now folded under the coach accountability scorecard).
   revalidatePath("/admin/cage-rentals");
-  revalidatePath("/admin/cage-rentals/cancellations");
+  revalidatePath("/admin/records/accountability/cancellations");
 }
 
 export async function createSession(input: unknown) {

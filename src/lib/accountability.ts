@@ -8,8 +8,8 @@
 // policy thresholds and shapes/sorts the per-coach rows.
 
 // A work-hour log entered more than this many hours after the session ended
-// is "late logging" (concerning) — `hour_logs.createdAt − endAt > 48h`.
-export const LATE_LOG_HOURS = 48;
+// is "late logging" (concerning) — `hour_logs.createdAt − endAt > 24h`.
+export const LATE_LOG_HOURS = 24;
 // Logged duration may exceed the scheduled block duration by up to this many
 // minutes before it counts as "over-logged".
 export const OVER_LOG_MARGIN_MINUTES = 30;

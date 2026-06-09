@@ -15,6 +15,8 @@ import {
   assignAthletesToProgramInternal,
   createAthleteInternal,
   deleteAthleteInternal,
+  dismissDuplicateInternal,
+  mergeAthletesInternal,
   updateAthleteInternal,
 } from "@/lib/server/athlete-actions";
 
@@ -53,5 +55,40 @@ export async function archiveAthletes(ids: string[]) {
   const result = await archiveAthletesInternal(session.user, ids);
   revalidatePath("/admin/attendance/roster");
   revalidatePath("/admin/attendance/archive");
+  return result;
+}
+
+// Merge duplicate athletes into a single survivor (#17 roster dedup).
+// Re-points attendance + enrollments off each source onto the survivor
+// then deletes the sources. Revalidates every surface that lists athletes
+// or rolls up their attendance/reporting.
+export async function mergeAthletesAction(
+  survivorId: string,
+  sourceIds: string[],
+) {
+  const session = await requireRole("admin");
+  const result = await mergeAthletesInternal(session.user, {
+    survivorId,
+    sourceIds,
+  });
+  revalidatePath("/admin/attendance/roster");
+  revalidatePath("/admin/attendance/roster/duplicates");
+  revalidatePath("/admin/attendance");
+  revalidatePath("/admin/reports");
+  return result;
+}
+
+// Persist a "not duplicates" decision so the pair never re-surfaces (#17).
+export async function dismissDuplicateAction(
+  athleteAId: string,
+  athleteBId: string,
+) {
+  const session = await requireRole("admin");
+  const result = await dismissDuplicateInternal(session.user, {
+    athleteAId,
+    athleteBId,
+  });
+  revalidatePath("/admin/attendance/roster/duplicates");
+  revalidatePath("/admin/attendance/roster");
   return result;
 }

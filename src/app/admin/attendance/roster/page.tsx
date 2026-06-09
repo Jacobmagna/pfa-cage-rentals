@@ -1,7 +1,10 @@
+import Link from "next/link";
 import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { CopyCheck } from "lucide-react";
 import { db } from "@/db";
 import { athletePrograms, athletes, programs } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
+import { loadDuplicateGroups } from "@/lib/server/athlete-actions";
 import { AddAthleteForm } from "./_components/add-athlete-form";
 import { RosterClient, type AthleteRow } from "./_components/roster-client";
 import { TermFilter } from "./_components/term-filter";
@@ -30,7 +33,7 @@ export default async function RosterPage({
   // Distinct non-null terms among non-archived athletes → filter options,
   // plus the active programs list (also used to validate the ?program=
   // param before building the athlete query).
-  const [termRows, activePrograms] = await Promise.all([
+  const [termRows, activePrograms, duplicates] = await Promise.all([
     db
       .selectDistinct({ term: athletes.term })
       .from(athletes)
@@ -41,7 +44,11 @@ export default async function RosterPage({
       .from(programs)
       .where(eq(programs.active, true))
       .orderBy(asc(programs.name)),
+    // #17 — count of possible-duplicate groups for the toolbar entry. The
+    // loader early-returns cheaply when there are none.
+    loadDuplicateGroups(),
   ]);
+  const duplicateGroups = duplicates.totalGroups;
   const termOptions = termRows
     .map((r) => r.term)
     .filter((t): t is string => t != null);
@@ -113,6 +120,22 @@ export default async function RosterPage({
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end">
+        {duplicateGroups > 0 ? (
+          <Link
+            href="/admin/attendance/roster/duplicates"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-gold/40 bg-gold/10 px-3 text-sm font-medium text-gold-strong transition-colors hover:border-gold hover:bg-gold/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+          >
+            <CopyCheck className="h-4 w-4" aria-hidden="true" />
+            Review duplicates ({duplicateGroups})
+          </Link>
+        ) : (
+          <span className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line bg-surface-2 px-3 text-sm font-medium text-fg-subtle">
+            <CopyCheck className="h-4 w-4" aria-hidden="true" />
+            No duplicates
+          </span>
+        )}
+      </div>
       <AddAthleteForm />
       {termOptions.length > 0 || activePrograms.length > 0 ? (
         <TermFilter

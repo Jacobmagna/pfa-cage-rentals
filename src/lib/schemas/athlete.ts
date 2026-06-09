@@ -72,8 +72,26 @@ export const assignAthletesToProgramSchema = z
   })
   .refine(assignCapCoRequired, assignCapCoRequiredError);
 
+// Merge one or more duplicate "source" athletes into a single "survivor"
+// (#17 roster dedup). The survivor is kept; each source's attendance +
+// enrollments are re-pointed onto the survivor and the source row deleted.
+// Capped at 20 sources per call (a dedup group is realistically 2–3).
+export const mergeAthletesSchema = z.object({
+  survivorId: z.string().min(1),
+  sourceIds: z.array(z.string().min(1)).min(1).max(20),
+});
+
+// Persist a "these two athletes are NOT duplicates" decision so the pair
+// never re-surfaces in detection. Order-independent — the action canonicalizes.
+export const dismissDuplicateSchema = z.object({
+  athleteAId: z.string().min(1),
+  athleteBId: z.string().min(1),
+});
+
 export type CreateAthleteInput = z.infer<typeof createAthleteSchema>;
 export type UpdateAthleteInput = z.infer<typeof updateAthleteSchema>;
 export type AssignAthletesToProgramInput = z.infer<
   typeof assignAthletesToProgramSchema
 >;
+export type MergeAthletesInput = z.infer<typeof mergeAthletesSchema>;
+export type DismissDuplicateInput = z.infer<typeof dismissDuplicateSchema>;

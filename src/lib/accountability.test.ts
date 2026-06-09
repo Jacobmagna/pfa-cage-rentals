@@ -18,20 +18,20 @@ function afterEnd(mins: number): Date {
 
 describe("constants", () => {
   it("locked thresholds", () => {
-    expect(LATE_LOG_HOURS).toBe(48);
+    expect(LATE_LOG_HOURS).toBe(24);
     expect(OVER_LOG_MARGIN_MINUTES).toBe(30);
   });
 });
 
 describe("isLateLog boundaries", () => {
-  it("47h59m after end is NOT late", () => {
-    expect(isLateLog(afterEnd(47 * 60 + 59), END)).toBe(false);
+  it("23h59m after end is NOT late", () => {
+    expect(isLateLog(afterEnd(23 * 60 + 59), END)).toBe(false);
   });
-  it("exactly 48h after end is NOT late (must be strictly over)", () => {
-    expect(isLateLog(afterEnd(48 * 60), END)).toBe(false);
+  it("exactly 24h after end is NOT late (must be strictly over)", () => {
+    expect(isLateLog(afterEnd(24 * 60), END)).toBe(false);
   });
-  it("48h01m after end IS late", () => {
-    expect(isLateLog(afterEnd(48 * 60 + 1), END)).toBe(true);
+  it("24h01m after end IS late", () => {
+    expect(isLateLog(afterEnd(24 * 60 + 1), END)).toBe(true);
   });
   it("created before end is not late", () => {
     expect(isLateLog(afterEnd(-30), END)).toBe(false);

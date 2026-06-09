@@ -211,7 +211,7 @@ export async function loadAccountabilityScorecard(opts?: {
 
   // --- late logs + over-logged: count per coach, collect recent events ---
   // NOTE: right after a fresh `db:seed`, seeded hour_logs have a createdAt of
-  // seed-time vs a past endAt, so they read as "late" (createdAt − endAt > 48h).
+  // seed-time vs a past endAt, so they read as "late" (createdAt − endAt > 24h).
   // That's a known demo-data artifact, not a real accountability signal — the
   // counts are only meaningful for coach-entered logs in production.
   const lateLogByCoach = new Map<string, number>();

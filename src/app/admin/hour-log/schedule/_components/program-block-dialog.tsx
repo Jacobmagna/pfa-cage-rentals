@@ -14,7 +14,7 @@
 // submitted date + start/end times via parsePfaInput.
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, Pencil, Plus, Repeat, Trash2, X } from "lucide-react";
+import { Pencil, Plus, Repeat, Trash2, X } from "lucide-react";
 import {
   cancelSeriesOccurrenceAction,
   createProgramScheduleBlockFormAction,
@@ -262,9 +262,15 @@ export function ProgramBlockDialog({
 
   // Edit opens to a read-only summary first (QA2-5); create goes straight
   // to the form as before. RECUR-b2 adds the "editSeries" whole-series form.
-  const [view, setView] = useState<"summary" | "edit" | "editSeries">(
+  const [view, setView] = useState<"summary" | "edit">(
     isEdit ? "summary" : "edit",
   );
+  // #10: when editing a recurring occurrence, the edit form defaults to
+  // editing ONLY this occurrence. Ticking "Apply to all in this recurring
+  // series" opts into a series-wide edit — it switches the form's action to
+  // editProgramScheduleSeriesFormAction and reveals the series-level fields
+  // (frequency/interval, weekday pills, season start/end). Default UNCHECKED.
+  const [applyToSeries, setApplyToSeries] = useState(false);
   // Reset the view on each (re)open via adjust-during-render keyed on the
   // open transition — NOT setState-in-effect (repo lint).
   const [prevOpen, setPrevOpen] = useState(open);
@@ -321,33 +327,30 @@ export function ProgramBlockDialog({
   // <select> submits name="scheduledCoachIds" so the action receives the
   // full set via getAll. Seed from the initial values on (re)open; create
   // starts with a single empty row. De-dupe is left to the action.
+  // #10: the edit form's coach + resource controls always read the BLOCK
+  // state — even for an apply-to-all (series) edit, which seeds from this
+  // occurrence (its values belong to the series). So there's no separate
+  // series coach/resource state; the series-error re-seed below writes here.
   const [blockCoachIds, setBlockCoachIds] = useState<string[]>(() =>
     isEdit && editInitial?.scheduledCoachIds?.length
       ? editInitial.scheduledCoachIds
       : [""],
   );
-  const [seriesCoachIds, setSeriesCoachIds] = useState<string[]>(() =>
-    editSeriesInitial?.scheduledCoachIds?.length
-      ? editSeriesInitial.scheduledCoachIds
-      : [""],
-  );
 
-  // QA10 W3.3: occupied-resource selection for the BLOCK form (create/edit)
-  // and the SERIES form. Controlled checkbox groups; each checkbox submits
-  // name="resourceIds". Seed from the initial values on (re)open; create
-  // starts empty (no occupancy = today's behavior). Re-seed on errored
-  // submit so the admin's selection survives the round-trip.
+  // QA10 W3.3: occupied-resource selection for the BLOCK form (create/edit).
+  // Controlled checkbox group; each checkbox submits name="resourceIds".
+  // Seed from the initial values on (re)open; create starts empty (no
+  // occupancy = today's behavior). Re-seed on errored submit so the admin's
+  // selection survives the round-trip.
   const [blockResourceIds, setBlockResourceIds] = useState<string[]>(() =>
     isEdit ? (editInitial?.resourceIds ?? []) : [],
-  );
-  const [seriesResourceIds, setSeriesResourceIds] = useState<string[]>(
-    () => editSeriesInitial?.resourceIds ?? [],
   );
 
   if (open !== prevOpen) {
     setPrevOpen(open);
     if (open) {
       setView(isEdit ? "summary" : "edit");
+      setApplyToSeries(false);
       setRecurring(false);
       setSelectedDays(new Set([selectedWeekday]));
       setEndsOn("");
@@ -375,13 +378,7 @@ export function ProgramBlockDialog({
           ? editInitial.scheduledCoachIds
           : [""],
       );
-      setSeriesCoachIds(
-        editSeriesInitial?.scheduledCoachIds?.length
-          ? editSeriesInitial.scheduledCoachIds
-          : [""],
-      );
       setBlockResourceIds(isEdit ? (editInitial?.resourceIds ?? []) : []);
-      setSeriesResourceIds(editSeriesInitial?.resourceIds ?? []);
       setCancelError(null);
     }
   }
@@ -401,14 +398,17 @@ export function ProgramBlockDialog({
       setBlockResourceIds(state.values.resourceIds);
     }
   }
+  // #10: an errored apply-to-all (series) submit re-seeds the SAME block
+  // coach/resource controls the edit form renders, so the admin's selection
+  // survives the round-trip. Same adjust-during-render pattern as above.
   const [prevSeriesState, setPrevSeriesState] = useState(seriesState);
   if (seriesState !== prevSeriesState) {
     setPrevSeriesState(seriesState);
     if (!seriesState.ok && seriesState.values.scheduledCoachIds.length > 0) {
-      setSeriesCoachIds(seriesState.values.scheduledCoachIds);
+      setBlockCoachIds(seriesState.values.scheduledCoachIds);
     }
     if (!seriesState.ok) {
-      setSeriesResourceIds(seriesState.values.resourceIds);
+      setBlockResourceIds(seriesState.values.resourceIds);
     }
   }
 
@@ -511,6 +511,17 @@ export function ProgramBlockDialog({
   // empty skeleton. The date is always the grid's selected date.
   const dateInput = formatPfaDate(date);
   const defaults = useMemo(() => {
+    // #10: when "apply to all" is on, an errored series submit echoes its
+    // submitted values back into the shared fields. Takes priority so the
+    // admin's typed values survive a series-action round-trip.
+    if (applyToSeries && !seriesState.ok && seriesState.values) {
+      return {
+        programId: seriesState.values.programId,
+        startTime: seriesState.values.startTime,
+        endTime: seriesState.values.endTime,
+        note: seriesState.values.note,
+      };
+    }
     if (!state.ok && state.values) {
       return {
         programId: state.values.programId,
@@ -541,7 +552,7 @@ export function ProgramBlockDialog({
       endTime: "10:00",
       note: "",
     };
-  }, [isEdit, editInitial, createPrefill, state]);
+  }, [isEdit, editInitial, createPrefill, state, applyToSeries, seriesState]);
 
   const programName = useMemo(() => {
     if (!editInitial) return "";
@@ -577,33 +588,6 @@ export function ProgramBlockDialog({
       .sort();
     return names.join(", ");
   }, [editInitial, resources]);
-
-  // RECUR-b2: prefill values for the edit-series form. On an errored submit
-  // echo what was submitted; otherwise seed from the parent series.
-  const seriesDefaults = useMemo(() => {
-    if (!seriesState.ok && seriesState.values) {
-      return {
-        programId: seriesState.values.programId,
-        startTime: seriesState.values.startTime,
-        endTime: seriesState.values.endTime,
-        note: seriesState.values.note,
-      };
-    }
-    if (editSeriesInitial) {
-      return {
-        programId: editSeriesInitial.programId,
-        startTime: editSeriesInitial.startTime,
-        endTime: editSeriesInitial.endTime,
-        note: editSeriesInitial.note ?? "",
-      };
-    }
-    return {
-      programId: "",
-      startTime: "09:00",
-      endTime: "10:00",
-      note: "",
-    };
-  }, [editSeriesInitial, seriesState]);
 
   // Recurrence summary line for a series occurrence, e.g.
   // "Repeats Mon, Wed · through Aug 30, 2026".
@@ -798,321 +782,19 @@ export function ProgramBlockDialog({
               <button
                 ref={editButtonRef}
                 type="button"
-                onClick={() => setView(isSeries ? "editSeries" : "edit")}
+                onClick={() => setView("edit")}
                 className="inline-flex items-center gap-1.5 rounded-md bg-gold text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover h-9 px-4 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
               >
                 <Pencil className="h-4 w-4" />
-                {isSeries ? "Edit series" : "Edit"}
+                Edit
               </button>
             </div>
           </div>
         </div>
-      ) : view === "editSeries" && editSeriesInitial ? (
-        <form
-          action={seriesFormAction}
-          key={seriesFormKey}
-          onSubmit={(e) => {
-            // Client guard: for weekly patterns at least one weekday must
-            // be checked. Monthly derives its weekday from the start date
-            // (pills hidden), so the guard is skipped there. Server schema
-            // is still the source of truth.
-            if (!seriesIsMonthly && seriesDays.size === 0) {
-              e.preventDefault();
-              setSeriesError("Pick at least one weekday.");
-            }
-          }}
-          className="space-y-5 p-6"
-        >
-          <input
-            type="hidden"
-            name="seriesId"
-            defaultValue={editSeriesInitial.id}
-          />
-
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-xs uppercase tracking-[0.14em] text-fg-muted">
-                Edit series
-              </p>
-              <h2 className="text-xl font-semibold tracking-tight mt-0.5">
-                Recurring work block
-              </h2>
-              <p className="text-xs text-fg-muted mt-1">
-                Saving updates the whole series and regenerates future dates.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex items-center justify-center h-8 w-8 -mr-1 -mt-1 rounded-md text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
-              aria-label="Close"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-
-          {!seriesState.ok ? (
-            <div
-              role="alert"
-              className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
-            >
-              {seriesState.error.message}
-            </div>
-          ) : null}
-
-          <div className="space-y-3">
-            <Field label="Work">
-              <select
-                name="programId"
-                required
-                defaultValue={seriesDefaults.programId}
-                className={selectStyles}
-              >
-                <option value="" disabled>
-                  Choose work…
-                </option>
-                {programs.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <CoachMultiSelect
-              coachIds={seriesCoachIds}
-              coaches={coaches}
-              onChangeAt={(i, v) => {
-                setCoachAt(setSeriesCoachIds, i, v);
-                setSeriesError(null);
-              }}
-              onAdd={() => addCoachRow(setSeriesCoachIds)}
-              onRemoveAt={(i) => removeCoachRow(setSeriesCoachIds, i)}
-            />
-
-            <OccupiesResources
-              resources={resources}
-              selected={seriesResourceIds}
-              onToggle={(id) => {
-                toggleResource(setSeriesResourceIds, id);
-                setSeriesError(null);
-              }}
-            />
-
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Start">
-                <TimeSelect
-                  name="startTime"
-                  variant="start"
-                  required
-                  defaultValue={seriesDefaults.startTime}
-                  className={selectStyles}
-                />
-              </Field>
-              <Field label="End">
-                <TimeSelect
-                  name="endTime"
-                  variant="end"
-                  required
-                  defaultValue={seriesDefaults.endTime}
-                  className={selectStyles}
-                />
-              </Field>
-            </div>
-
-            {/* QA10 W3.1b: pattern → (frequency, interval) for the whole
-                series, submitted as hidden fields. */}
-            <input
-              type="hidden"
-              name="frequency"
-              value={seriesFreq.frequency}
-            />
-            <input
-              type="hidden"
-              name="interval"
-              value={seriesFreq.interval}
-            />
-
-            <Field label="Frequency">
-              <select
-                aria-label="Frequency"
-                value={seriesFreqKind}
-                onChange={(e) => {
-                  setSeriesFreqKind(e.target.value as FrequencyKind);
-                  setSeriesError(null);
-                }}
-                className={selectStyles}
-              >
-                {FREQUENCY_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            {seriesFreqKind === "everyN" ? (
-              <Field
-                label="Every N weeks"
-                hint="Repeats every N weeks on the chosen days."
-              >
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  aria-label="Number of weeks between occurrences"
-                  value={seriesEveryNWeeks}
-                  onChange={(e) => {
-                    const n = Number(e.target.value);
-                    setSeriesEveryNWeeks(
-                      Number.isFinite(n) && n >= 1 ? n : 1,
-                    );
-                    setSeriesError(null);
-                  }}
-                  className={inputStyles}
-                />
-              </Field>
-            ) : null}
-
-            {seriesIsMonthly ? (
-              <div>
-                {/* Monthly derives weekday + ordinal from the season-start
-                    date; pills don't apply. Submit one derived weekday so
-                    the schema's non-empty daysOfWeek constraint holds. */}
-                {weekdayFromIsoForSeries !== null ? (
-                  <input
-                    type="hidden"
-                    name="daysOfWeek"
-                    value={weekdayFromIsoForSeries}
-                  />
-                ) : null}
-                <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
-                  Repeats
-                </span>
-                <p className="text-sm text-fg">
-                  {seriesMonthlyHint ||
-                    "Pick a season-start date to set the monthly weekday."}
-                </p>
-              </div>
-            ) : (
-              <div>
-                <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
-                  Repeat on
-                </span>
-                <div
-                  role="group"
-                  aria-label="Repeat on"
-                  className="flex flex-wrap gap-1.5"
-                >
-                  {WEEKDAY_PILLS.map((d) => {
-                    const active = seriesDays.has(d.value);
-                    return (
-                      <label
-                        key={d.value}
-                        className={`inline-flex items-center justify-center h-8 min-w-[2.75rem] px-2.5 rounded-md border text-xs font-medium cursor-pointer select-none transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-gold/40 ${
-                          active
-                            ? "bg-gold/10 border-gold/40 text-gold-strong"
-                            : "border-line text-fg-muted hover:text-fg hover:border-line-strong"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          name="daysOfWeek"
-                          value={d.value}
-                          checked={active}
-                          onChange={() => toggleSeriesDay(d.value)}
-                          className="sr-only"
-                        />
-                        {d.label}
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Season starts on">
-                <DateInput
-                  name="startsOn"
-                  value={seriesStartsOn}
-                  onChange={(iso) => {
-                    setSeriesStartsOn(iso);
-                    setSeriesError(null);
-                  }}
-                  required
-                  aria-label="Season starts on"
-                />
-              </Field>
-              <Field label="Season ends on">
-                <DateInput
-                  name="endsOn"
-                  value={seriesEndsOn}
-                  onChange={(iso) => {
-                    setSeriesEndsOn(iso);
-                    setSeriesError(null);
-                  }}
-                  required
-                  aria-label="Season ends on"
-                />
-              </Field>
-            </div>
-
-            {seriesError ? (
-              <p
-                role="alert"
-                className="text-[11px] text-danger leading-snug"
-              >
-                {seriesError}
-              </p>
-            ) : null}
-
-            <Field
-              label="Note"
-              hint="Optional — e.g. 'Bring radar gun', context for the coach."
-            >
-              <input
-                type="text"
-                name="note"
-                maxLength={200}
-                defaultValue={seriesDefaults.note}
-                className={inputStyles}
-              />
-            </Field>
-          </div>
-
-          <div className="flex items-center justify-between gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => setView("summary")}
-              disabled={seriesPending}
-              className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface-2 text-fg-muted hover:text-fg hover:border-line-strong h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <ChevronLeft className="h-4 w-4" />
-              Back
-            </button>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-md border border-line bg-surface-2 text-fg-muted hover:text-fg hover:border-line-strong h-9 px-4 text-sm font-medium transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={seriesPending}
-                className="rounded-md bg-gold text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
-              >
-                {seriesPending ? "Saving…" : "Save series"}
-              </button>
-            </div>
-          </div>
-        </form>
       ) : (
       <form
-        action={formAction}
-        key={formKey}
+        action={applyToSeries ? seriesFormAction : formAction}
+        key={applyToSeries ? `${seriesFormKey}-applyall` : formKey}
         onSubmit={(e) => {
           // Client guard for the recurring path: at least one weekday must
           // be checked. The server schema is still the source of truth, but
@@ -1127,11 +809,31 @@ export function ProgramBlockDialog({
             e.preventDefault();
             setRecurError("Pick at least one weekday.");
           }
+          // #10: same weekday guard for an apply-to-all (series) edit of a
+          // recurring occurrence. Monthly derives its weekday from the start
+          // date so the guard is skipped there.
+          if (
+            applyToSeries &&
+            !seriesIsMonthly &&
+            seriesDays.size === 0
+          ) {
+            e.preventDefault();
+            setSeriesError("Pick at least one weekday.");
+          }
         }}
         className="space-y-5 p-6"
       >
-        {isEdit && editInitial ? (
+        {/* Single-occurrence edit submits the block id; an apply-to-all
+            (#10) edit submits the parent series id instead. */}
+        {isEdit && editInitial && !applyToSeries ? (
           <input type="hidden" name="id" defaultValue={editInitial.id} />
+        ) : null}
+        {isEdit && applyToSeries && editInitial?.seriesId ? (
+          <input
+            type="hidden"
+            name="seriesId"
+            defaultValue={editInitial.seriesId}
+          />
         ) : null}
         <input type="hidden" name="date" defaultValue={dateInput} />
 
@@ -1154,7 +856,19 @@ export function ProgramBlockDialog({
           </button>
         </div>
 
-        {!state.ok ? (
+        {/* #10: surface whichever action backs the current submit — the
+            series action when "apply to all" is ticked, else the single
+            block action. */}
+        {applyToSeries ? (
+          !seriesState.ok ? (
+            <div
+              role="alert"
+              className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+            >
+              {seriesState.error.message}
+            </div>
+          ) : null
+        ) : !state.ok ? (
           <div
             role="alert"
             className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
@@ -1229,6 +943,161 @@ export function ProgramBlockDialog({
               />
             </Field>
           </div>
+
+          {/* #10: when "apply to all" is ticked for a recurring occurrence,
+              reveal the series-level fields (frequency/interval, weekday
+              pills, season start/end) so a series-wide edit has everything
+              the series action needs. These submit only while applyToSeries
+              is true (this branch unmounts when unchecked). */}
+          {isEdit && isSeries && applyToSeries ? (
+            <div className="space-y-3 rounded-md border border-gold/30 bg-gold/[0.04] p-3">
+              <p className="text-[11px] uppercase tracking-wider text-gold-strong font-medium">
+                Recurring series settings
+              </p>
+
+              {/* QA10 W3.1b: pattern → (frequency, interval) for the whole
+                  series, submitted as hidden fields. */}
+              <input
+                type="hidden"
+                name="frequency"
+                value={seriesFreq.frequency}
+              />
+              <input type="hidden" name="interval" value={seriesFreq.interval} />
+
+              <Field label="Frequency">
+                <select
+                  aria-label="Frequency"
+                  value={seriesFreqKind}
+                  onChange={(e) => {
+                    setSeriesFreqKind(e.target.value as FrequencyKind);
+                    setSeriesError(null);
+                  }}
+                  className={selectStyles}
+                >
+                  {FREQUENCY_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              {seriesFreqKind === "everyN" ? (
+                <Field
+                  label="Every N weeks"
+                  hint="Repeats every N weeks on the chosen days."
+                >
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    aria-label="Number of weeks between occurrences"
+                    value={seriesEveryNWeeks}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      setSeriesEveryNWeeks(Number.isFinite(n) && n >= 1 ? n : 1);
+                      setSeriesError(null);
+                    }}
+                    className={inputStyles}
+                  />
+                </Field>
+              ) : null}
+
+              {seriesIsMonthly ? (
+                <div>
+                  {/* Monthly derives weekday + ordinal from the season-start
+                      date; pills don't apply. Submit one derived weekday so
+                      the schema's non-empty daysOfWeek constraint holds. */}
+                  {weekdayFromIsoForSeries !== null ? (
+                    <input
+                      type="hidden"
+                      name="daysOfWeek"
+                      value={weekdayFromIsoForSeries}
+                    />
+                  ) : null}
+                  <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
+                    Repeats
+                  </span>
+                  <p className="text-sm text-fg">
+                    {seriesMonthlyHint ||
+                      "Pick a season-start date to set the monthly weekday."}
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
+                    Repeat on
+                  </span>
+                  <div
+                    role="group"
+                    aria-label="Repeat on"
+                    className="flex flex-wrap gap-1.5"
+                  >
+                    {WEEKDAY_PILLS.map((d) => {
+                      const active = seriesDays.has(d.value);
+                      return (
+                        <label
+                          key={d.value}
+                          className={`inline-flex items-center justify-center h-8 min-w-[2.75rem] px-2.5 rounded-md border text-xs font-medium cursor-pointer select-none transition-colors focus-within:outline-none focus-within:ring-2 focus-within:ring-gold/40 ${
+                            active
+                              ? "bg-gold/10 border-gold/40 text-gold-strong"
+                              : "border-line text-fg-muted hover:text-fg hover:border-line-strong"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            name="daysOfWeek"
+                            value={d.value}
+                            checked={active}
+                            onChange={() => toggleSeriesDay(d.value)}
+                            className="sr-only"
+                          />
+                          {d.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Season starts on">
+                  <DateInput
+                    name="startsOn"
+                    value={seriesStartsOn}
+                    onChange={(iso) => {
+                      setSeriesStartsOn(iso);
+                      setSeriesError(null);
+                    }}
+                    required
+                    aria-label="Season starts on"
+                  />
+                </Field>
+                <Field label="Season ends on">
+                  <DateInput
+                    name="endsOn"
+                    value={seriesEndsOn}
+                    onChange={(iso) => {
+                      setSeriesEndsOn(iso);
+                      setSeriesError(null);
+                    }}
+                    required
+                    aria-label="Season ends on"
+                  />
+                </Field>
+              </div>
+
+              {seriesError ? (
+                <p role="alert" className="text-[11px] text-danger leading-snug">
+                  {seriesError}
+                </p>
+              ) : null}
+
+              <p className="text-[11px] text-fg-subtle leading-snug">
+                Saving updates the whole series and regenerates future dates.
+              </p>
+            </div>
+          ) : null}
 
           {!isEdit ? (
             <div className="space-y-3">
@@ -1404,12 +1273,37 @@ export function ProgramBlockDialog({
           </Field>
         </div>
 
+        {/* #10: recurring-occurrence edits default to THIS occurrence only.
+            Ticking this opts into a series-wide edit — switches the form's
+            action to the series action + reveals the series settings above. */}
+        {isEdit && isSeries ? (
+          <div className="rounded-md border border-line bg-surface-2/40 px-3 py-2.5">
+            <label className="flex items-center gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={applyToSeries}
+                onChange={(e) => {
+                  setApplyToSeries(e.target.checked);
+                  setSeriesError(null);
+                }}
+                className="h-4 w-4 rounded border-line text-gold accent-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+              />
+              <span className="text-sm text-fg">
+                Apply to all in this recurring series
+              </span>
+            </label>
+            <p className="text-[11px] text-fg-subtle mt-1 ml-[1.625rem] leading-snug">
+              Unchecked changes only this occurrence.
+            </p>
+          </div>
+        ) : null}
+
         <div className="flex items-center justify-between gap-2 pt-2">
           {isEdit ? (
             <button
               type="button"
               onClick={handleDelete}
-              disabled={deleting || pending}
+              disabled={deleting || pending || seriesPending}
               className="inline-flex items-center gap-1.5 rounded-md border border-danger/30 bg-danger/10 text-danger hover:bg-danger/20 h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
             >
               <Trash2 className="h-4 w-4" />
@@ -1428,16 +1322,20 @@ export function ProgramBlockDialog({
             </button>
             <button
               type="submit"
-              disabled={pending || deleting}
+              disabled={pending || seriesPending || deleting}
               className="rounded-md bg-gold text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
             >
-              {pending
-                ? "Saving…"
-                : isEdit
-                  ? "Save changes"
-                  : recurring
-                    ? "Schedule series"
-                    : "Schedule block"}
+              {applyToSeries
+                ? seriesPending
+                  ? "Saving…"
+                  : "Save series"
+                : pending
+                  ? "Saving…"
+                  : isEdit
+                    ? "Save changes"
+                    : recurring
+                      ? "Schedule series"
+                      : "Schedule block"}
             </button>
           </div>
         </div>

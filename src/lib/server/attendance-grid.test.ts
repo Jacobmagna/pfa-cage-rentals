@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAttendanceGrid,
   formatGridDate,
+  formatGridDateWithWeekday,
   type GridAthlete,
   type GridRecordInput,
   type GridSession,
@@ -121,5 +122,17 @@ describe("formatGridDate", () => {
 
   it("returns the input unchanged when it isn't a valid date", () => {
     expect(formatGridDate("nonsense")).toBe("nonsense");
+  });
+});
+
+describe("formatGridDateWithWeekday", () => {
+  it("prefixes the weekday: 'Wed, Jun 3' (2026-06-03 is a Wednesday)", () => {
+    expect(formatGridDateWithWeekday("2026-06-03")).toBe("Wed, Jun 3");
+    // 2026-06-07 is a Sunday.
+    expect(formatGridDateWithWeekday("2026-06-07")).toBe("Sun, Jun 7");
+  });
+
+  it("returns the input unchanged when it isn't a valid date", () => {
+    expect(formatGridDateWithWeekday("nonsense")).toBe("nonsense");
   });
 });

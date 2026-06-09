@@ -10,8 +10,9 @@
 // here can never touch the live editable grids. The time-axis math is the
 // shared, unit-tested src/lib/schedule-grid-utils (placeVerticalOnGrid).
 //
-// Coaches never see reconciliation status, so program blocks render in a
-// single neutral gold treatment — no green/red.
+// Coaches never see reconciliation status, so program/work blocks render in
+// a single neutral blue treatment (#22/#24: blue = work, gold = cage) — no
+// green/red.
 
 import {
   SCHEDULE_GRID_FIRST_HOUR,
@@ -150,7 +151,7 @@ export function CoachWeekGrid({
             )),
           )}
 
-          {/* Program block bars (neutral gold — NO recon colors). */}
+          {/* Program block bars (neutral blue work color — NO recon colors). */}
           {programBlocks.map((b) => {
             const placement = placeVerticalOnGrid(b.startAt, b.endAt);
             if (!placement) return null;
@@ -169,7 +170,7 @@ export function CoachWeekGrid({
               <div
                 key={`pb-${b.id}`}
                 className={[
-                  "m-0.5 overflow-hidden rounded-md border border-line border-l-4 border-l-gold bg-surface-2 px-1.5 py-1 text-[11px] text-fg shadow-[var(--shadow-sm)]",
+                  "m-0.5 overflow-hidden rounded-md border border-line border-l-4 border-l-blue bg-blue/10 px-1.5 py-1 text-[11px] text-fg shadow-[var(--shadow-sm)]",
                   "flex flex-col justify-start min-w-0",
                 ].join(" ")}
                 style={{
@@ -185,7 +186,7 @@ export function CoachWeekGrid({
                 <span className="truncate text-[9px] tabular-nums text-fg-subtle">
                   {timeLabel}
                 </span>
-                <span className="text-[8px] uppercase tracking-wider text-gold-strong">
+                <span className="text-[8px] uppercase tracking-wider text-blue-strong">
                   Work
                 </span>
               </div>
@@ -241,7 +242,7 @@ function Legend(): React.JSX.Element {
   return (
     <div className="space-y-2 border-t border-line px-3 py-3 text-[11px] text-fg-muted">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-        <LegendDot className="border-l-4 border-l-gold bg-surface-2" label="Work" />
+        <LegendDot className="border-l-4 border-l-blue bg-blue/10" label="Work" />
         <LegendDot className="border-l-4 border-l-gold" label="Cage" />
         <LegendDot className="border-l-4 border-l-success" label="Bullpen" />
         <LegendDot className="border-l-4 border-l-warning" label="Weight room" />

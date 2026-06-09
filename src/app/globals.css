@@ -68,6 +68,14 @@
   --color-warning: #9a5208;
   --color-danger: #b01818;
 
+  /* Work/program blocks (#22/#24): blue distinguishes a work block from a
+   * gold cage rental on shared schedules. blue #1d4ed8 (blue-700) is ~6.3:1
+   * on white — AA for borders, /10 bg tints, and small label text. blue-strong
+   * #1e40af (blue-800, ~8.3:1) for emphasis labels. Exposes bg-blue /
+   * border-l-blue / text-blue / bg-blue/10 / text-blue-strong utilities. */
+  --color-blue: #1d4ed8;
+  --color-blue-strong: #1e40af;
+
   /* 2026-06 uplift: warm-tinted elevation scale, single top light
    * source. Consumed via shadow-[var(--shadow-md)] arbitrary utilities;
    * the :root aliases below mirror these so that syntax resolves. */

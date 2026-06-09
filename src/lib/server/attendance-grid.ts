@@ -93,14 +93,36 @@ const MONTHS = [
   "Dec",
 ];
 
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
 /**
- * "Jun 3" from a "YYYY-MM-DD" calendar string. Session dates are pure
- * calendar days (no timezone), so we format the parts directly — no
- * Date/timezone conversion that could shift the displayed day. Mirrors
- * the roster's formatBirthday approach.
+ * "Jun 3" from a "YYYY-MM-DD" calendar string. Session dates are
+ * pure calendar days (no timezone), so we format the month/day parts
+ * directly — no Date/timezone conversion that could shift the displayed
+ * day. Mirrors the roster's formatBirthday approach.
+ *
+ * Used both for per-day grid columns AND for the weekday-less "Week of
+ * {date}" period labels in attendance-flags.ts — so this stays without a
+ * weekday. For the per-day display sites that want the weekday prefix,
+ * use formatGridDateWithWeekday.
  */
 export function formatGridDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
   if (!y || !m || !d || m < 1 || m > 12) return iso;
   return `${MONTHS[m - 1]} ${d}`;
+}
+
+/**
+ * "Wed, Jun 3" from a "YYYY-MM-DD" calendar string — the weekday-prefixed
+ * form for per-day display sites (attendance grid columns / by-player date
+ * cells). The weekday is derived from a UTC-anchored Date (read via
+ * getUTCDay) so it stays on the same calendar day regardless of the
+ * runtime's local timezone. Falls back to the raw string when it doesn't
+ * parse, matching formatGridDate.
+ */
+export function formatGridDateWithWeekday(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d || m < 1 || m > 12) return iso;
+  const weekday = WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  return `${weekday}, ${MONTHS[m - 1]} ${d}`;
 }

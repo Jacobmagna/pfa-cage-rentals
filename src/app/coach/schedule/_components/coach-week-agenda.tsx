@@ -129,7 +129,7 @@ function BlockRow({
   block: CoachGridProgramBlock;
 }): React.JSX.Element {
   return (
-    <li className="flex items-start gap-3 border-l-4 border-l-gold px-3 py-2.5">
+    <li className="flex items-start gap-3 border-l-4 border-l-blue px-3 py-2.5">
       <span className="shrink-0 pt-0.5 text-[11px] tabular-nums text-fg-muted">
         {timeRange(block.startAt, block.endAt)}
       </span>
@@ -137,7 +137,7 @@ function BlockRow({
         <p className="font-medium leading-tight text-fg">
           {block.programName}
         </p>
-        <p className="text-[10px] uppercase tracking-wider text-gold-strong">
+        <p className="text-[10px] uppercase tracking-wider text-blue-strong">
           Work
         </p>
         {block.note ? (

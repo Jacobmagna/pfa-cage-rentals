@@ -119,13 +119,15 @@ export default async function AdminHome({
 
   const params = await searchParams;
   const selectedDate = parseDateInput(params.date) ?? startOfToday();
-  const scheduleOpen = params.schedule === "open";
+  // Master Schedule is the hero at the top of Home, so it defaults to
+  // EXPANDED. It collapses only when explicitly closed via ?schedule=closed.
+  const scheduleOpen = params.schedule !== "closed";
 
-  // Toggle-bar href: closed → add schedule=open; open → drop it. Both
+  // Toggle-bar href: open → add schedule=closed; closed → drop it. Both
   // preserve the current ?date so navigating in/out keeps the selected day.
   const toggleHref = scheduleOpen
-    ? buildAdminHref({ date: params.date })
-    : buildAdminHref({ date: params.date, schedule: "open" });
+    ? buildAdminHref({ date: params.date, schedule: "closed" })
+    : buildAdminHref({ date: params.date });
 
   // Card windows are anchored to NOW, never the selected day.
   const now = new Date();
@@ -754,6 +756,68 @@ export default async function AdminHome({
         </p>
       </header>
 
+      <section aria-labelledby="master-schedule-heading" className="mb-10">
+        <h2 id="master-schedule-heading" className="sr-only">
+          Master Schedule
+        </h2>
+
+        <Link
+          href={toggleHref}
+          aria-expanded={scheduleOpen}
+          className="flex w-full items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3 text-left shadow-[var(--shadow-sm)] transition hover:-translate-y-px hover:border-gold/40 hover:shadow-[var(--shadow-md)]"
+        >
+          <span className="flex h-8 w-8 items-center justify-center rounded-md border border-line bg-bg text-fg-muted">
+            <CalendarDays className="h-4 w-4" />
+          </span>
+          <span className="flex-1">
+            <span className="block text-sm font-semibold">Master Schedule</span>
+            <span className="block text-xs text-fg-muted">
+              {scheduleOpen
+                ? "Browsing cage + program sessions by day"
+                : "Show cage + program sessions for a day"}
+            </span>
+          </span>
+          <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-fg-muted">
+            {scheduleOpen ? "Hide" : "Show"}
+            {scheduleOpen ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </span>
+        </Link>
+
+        {scheduleOpen ? (
+          <div className="mt-5">
+            <WeekNav
+              selectedDate={selectedDate}
+              preserveScroll
+            />
+
+            <AutoRefresh />
+
+            <EditableMasterSchedule
+              resources={masterResources}
+              sessions={masterSessions}
+              blockedTimes={masterBlocked}
+              programs={masterPrograms}
+              programBlocks={masterProgramBlocks}
+              selectedDate={selectedDate}
+              cageCoaches={activeCoaches}
+              cageResources={cageResourceOptions}
+              programOptions={masterPrograms}
+              programCoaches={activeCoaches}
+              programResources={programResourceOptions}
+              sessionEditById={sessionEditById}
+              blockEditById={blockEditById}
+              programEditById={programEditById}
+              seriesById={seriesById}
+              reconciliation={reconciliation}
+            />
+          </div>
+        ) : null}
+      </section>
+
       <section className="mb-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           icon={<Coins className="h-4 w-4" />}
@@ -790,69 +854,6 @@ export default async function AdminHome({
       ) : null}
 
       <ActivityFeed items={activityItems} />
-
-      <section aria-labelledby="master-schedule-heading">
-        <h2 id="master-schedule-heading" className="sr-only">
-          Master Schedule
-        </h2>
-
-        <Link
-          href={toggleHref}
-          aria-expanded={scheduleOpen}
-          className="flex w-full items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3 text-left shadow-[var(--shadow-sm)] transition hover:-translate-y-px hover:border-gold/40 hover:shadow-[var(--shadow-md)]"
-        >
-          <span className="flex h-8 w-8 items-center justify-center rounded-md border border-line bg-bg text-fg-muted">
-            <CalendarDays className="h-4 w-4" />
-          </span>
-          <span className="flex-1">
-            <span className="block text-sm font-semibold">Master Schedule</span>
-            <span className="block text-xs text-fg-muted">
-              {scheduleOpen
-                ? "Browsing cage + program sessions by day"
-                : "Show cage + program sessions for a day"}
-            </span>
-          </span>
-          <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-fg-muted">
-            {scheduleOpen ? "Hide" : "Show"}
-            {scheduleOpen ? (
-              <ChevronUp className="h-4 w-4" />
-            ) : (
-              <ChevronDown className="h-4 w-4" />
-            )}
-          </span>
-        </Link>
-
-        {scheduleOpen ? (
-          <div className="mt-5">
-            <WeekNav
-              selectedDate={selectedDate}
-              extraParams={{ schedule: "open" }}
-              preserveScroll
-            />
-
-            <AutoRefresh />
-
-            <EditableMasterSchedule
-              resources={masterResources}
-              sessions={masterSessions}
-              blockedTimes={masterBlocked}
-              programs={masterPrograms}
-              programBlocks={masterProgramBlocks}
-              selectedDate={selectedDate}
-              cageCoaches={activeCoaches}
-              cageResources={cageResourceOptions}
-              programOptions={masterPrograms}
-              programCoaches={activeCoaches}
-              programResources={programResourceOptions}
-              sessionEditById={sessionEditById}
-              blockEditById={blockEditById}
-              programEditById={programEditById}
-              seriesById={seriesById}
-              reconciliation={reconciliation}
-            />
-          </div>
-        ) : null}
-      </section>
     </>
   );
 }

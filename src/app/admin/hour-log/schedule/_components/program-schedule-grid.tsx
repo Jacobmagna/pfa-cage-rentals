@@ -67,8 +67,9 @@ type DialogState =
   | { kind: "edit"; block: ProgramScheduleBlockView };
 
 // Maps a reconciliation status → the bar's left-accent + bg-tint classes
-// and the tiny status-label text. `pending`/missing keep the neutral gold
-// accent. All token colors are AA-safe per globals.css.
+// and the tiny status-label text. `pending`/missing use the neutral blue
+// work-block accent (#22/#24: blue = work, distinct from gold cages). All
+// token colors are AA-safe per globals.css.
 const STATUS_LABELS: Record<BlockStatus, string> = {
   logged: "On schedule",
   wrong_coach: "Wrong coach",
@@ -86,7 +87,7 @@ function statusAccent(status: BlockStatus | undefined): string {
     case "no_show":
       return "border-l-danger bg-danger/10";
     default:
-      return "border-l-gold bg-surface-2";
+      return "border-l-blue bg-blue/10";
   }
 }
 
@@ -349,7 +350,7 @@ export function ProgramScheduleGrid({
           <LegendDot className="bg-danger" label="Wrong coach" />
           <LegendDot className="bg-danger" label="Wrong time" />
           <LegendDot className="bg-danger" label="No-show" />
-          <LegendDot className="bg-gold" label="Pending" />
+          <LegendDot className="bg-blue" label="Pending" />
         </div>
         <p className="text-fg-subtle">
           Click an empty area to schedule a program block (pick the program in

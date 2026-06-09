@@ -10,7 +10,7 @@ import {
   normalizeHourLogFilters,
 } from "@/lib/reports/hour-log-filters";
 import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
-import { slotsBetween, totalFromSnapshot } from "@/lib/billing";
+import { programMinutes, programPayFromSnapshot } from "@/lib/billing";
 import { formatDollars } from "@/lib/format-money";
 import { pfaDayEnd, pfaDayStart, pfaMonthEnd, pfaMonthStart } from "@/lib/timezone";
 import { fetchNeedsReviewItems } from "@/lib/server/needs-review";
@@ -110,24 +110,25 @@ export default async function AdminHourLogPage({
     fetchNeedsReviewItems(now),
   ]);
 
-  // Card 1: program hours this month. Each 30-min slot = 0.5 hr.
-  // Card 2: program pay PFA owes coaches this month — sum the snapshot
-  // total, treating a null stamped rate as $0 (the "$0 pay" convention).
-  let monthSlots = 0;
+  // Card 1: program hours this month — EXACT duration (a 45-min block is
+  // 0.75 hr), not 30-min-slot-rounded.
+  // Card 2: program pay PFA owes coaches this month — per-hour × exact
+  // duration, treating a null stamped rate as $0 (the "$0 pay" convention).
+  let monthMinutes = 0;
   let owedProgramCents = 0;
   for (const r of monthHourLogRows) {
-    monthSlots += slotsBetween(r.startAt, r.endAt);
-    owedProgramCents += totalFromSnapshot(
+    monthMinutes += programMinutes(r.startAt, r.endAt);
+    owedProgramCents += programPayFromSnapshot(
       r.startAt,
       r.endAt,
       r.ratePer30MinCents ?? 0,
     );
   }
-  const monthHours = monthSlots / 2;
-  // Up to 1 decimal, trailing ".0" stripped: 42.5 → "42.5", 40 → "40".
+  const monthHours = monthMinutes / 60;
+  // Up to 2 decimals, trailing zeros stripped: 42.75 → "42.75", 42.5 → "42.5", 40 → "40".
   const monthHoursLabel = monthHours
-    .toFixed(1)
-    .replace(/\.0$/, "");
+    .toFixed(2)
+    .replace(/\.?0+$/, "");
   const monthEntryCount = monthHourLogRows.length;
 
   const downloadHref = `/admin/hour-log/download?${hourLogFiltersToQueryString(filters)}`;

@@ -129,6 +129,9 @@ export function computeRate(args: {
  * count. This is what every report + display surface should call —
  * it can NEVER drift from the historical rate, regardless of later
  * override or default changes.
+ *
+ * CAGE / resource model ONLY (sessions_billing). Program/work pay uses
+ * `programPayFromSnapshot` below — do NOT call this for hour_logs.
  */
 export function totalFromSnapshot(
   startAt: Date,
@@ -136,4 +139,45 @@ export function totalFromSnapshot(
   ratePer30MinCents: number,
 ): number {
   return slotsBetween(startAt, endAt) * ratePer30MinCents;
+}
+
+// --- Program / work pay (hour_logs) — true per-hour, exact-minute ---
+//
+// PROGRAM pay is billed on the EXACT duration of the work block, NOT
+// the 30-min cage slot model. Programs went to 15-min granularity in
+// P3 #8, so a 45-min block must pay 0.75× the hourly rate, a 90-min
+// block 1.5×, etc. These helpers are PROGRAM-ONLY — cage sessions keep
+// using slotsBetween / totalFromSnapshot, byte-for-byte unchanged.
+
+/**
+ * Exact whole minutes of a program/work block. Blocks are 15-min
+ * granular (P3 #8) so this is exact; Math.round absorbs any sub-minute
+ * drift. Throws when endAt is not after startAt (a zero/negative-length
+ * block is a UI bug — surfacing it is safer than silently billing $0).
+ */
+export function programMinutes(startAt: Date, endAt: Date): number {
+  if (endAt <= startAt) {
+    throw new Error("programMinutes: endAt must be after startAt");
+  }
+  return Math.round((endAt.getTime() - startAt.getTime()) / 60000);
+}
+
+/**
+ * Program/work PAY: per-hour rate × exact duration, NOT 30-min-slot-
+ * rounded. The stored snapshot is per-30-min cents, so
+ * per-30 × (minutes/30) = per-hour × hours. A 45-min block at $44/hr
+ * (2200 per 30 min) = round(2200 × 45 / 30) = 3300 = $33.00 = 0.75×$44.
+ *
+ * Historical guarantee: a 30-min-aligned block (minutes a multiple of
+ * 30) equals the old `slotsBetween × rate` exactly, so past pay is
+ * unchanged. Null snapshot (pre-rate logs) → 0.
+ */
+export function programPayFromSnapshot(
+  startAt: Date,
+  endAt: Date,
+  ratePer30MinCents: number | null,
+): number {
+  return Math.round(
+    ((ratePer30MinCents ?? 0) * programMinutes(startAt, endAt)) / 30,
+  );
 }

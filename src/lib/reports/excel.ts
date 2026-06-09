@@ -90,7 +90,7 @@ function addSummarySheet(
   // the amount PFA owes the coach. NEVER summed with the cage receivable.
   if (includeProgramHours) {
     columns.push(
-      { header: "Work Slots", key: "programSlots", width: 13, kind: "num" },
+      { header: "Work Hours", key: "programHours", width: 13, kind: "num" },
       { header: "Work $", key: "programDollars", width: 12, kind: "dollar" },
     );
   }
@@ -126,7 +126,7 @@ function addSummarySheet(
       data.cageOwed = row.totalCents / 100; // cage-side receivable subtotal
     }
     if (includeProgramHours) {
-      data.programSlots = row.programSlots;
+      data.programHours = row.programHours;
       data.programDollars = row.programTotalCents / 100;
     }
     sheet.addRow(data);

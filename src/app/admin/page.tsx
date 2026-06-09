@@ -34,7 +34,7 @@ import {
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
-import { totalFromSnapshot } from "@/lib/billing";
+import { programPayFromSnapshot, totalFromSnapshot } from "@/lib/billing";
 import { listActiveCoaches } from "@/lib/server/coaches";
 import { formatDollars } from "@/lib/format-money";
 import { formatRelative } from "@/lib/format-relative";
@@ -337,7 +337,9 @@ export default async function AdminHome({
   }
   let programPayMonthCents = 0;
   for (const l of programMonthRows) {
-    programPayMonthCents += totalFromSnapshot(
+    // Program pay is per-hour × EXACT duration (not the 30-min cage slot
+    // model). Cage above keeps totalFromSnapshot.
+    programPayMonthCents += programPayFromSnapshot(
       l.startAt,
       l.endAt,
       l.ratePer30MinCents ?? 0,

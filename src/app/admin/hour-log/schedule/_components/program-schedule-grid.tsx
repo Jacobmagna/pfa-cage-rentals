@@ -16,6 +16,11 @@
 import { useState } from "react";
 import { assignLanes } from "@/lib/schedule-lanes";
 import {
+  PROGRAM_GRID_SLOTS,
+  placeOnGrid15,
+  slotStartAt15,
+} from "@/lib/schedule-grid-utils";
+import {
   pfaHour,
   pfaMinute,
   pfaWallClockAt,
@@ -35,7 +40,9 @@ import {
 
 const FIRST_HOUR = 8;
 const LAST_HOUR = 22;
-const SLOTS = (LAST_HOUR - FIRST_HOUR) * 2; // 28
+// #8: programs use 15-min resolution → 56 slots over the same 8 AM–10 PM
+// window (cage grids keep the 28 half-hour slots). 4 slots = 1 hour.
+const SLOTS = PROGRAM_GRID_SLOTS; // 56
 
 export type ProgramScheduleBlockView = {
   id: string;
@@ -131,11 +138,9 @@ export function ProgramScheduleGrid({
   // QA10 W3.8a: empty-cell create no longer preselects a program — the admin
   // picks it in the dialog. Prefill carries only the clicked time.
   const openCreateAt = (slotIdx: number) => {
-    const start = pfaWallClockAt(
-      selectedDate,
-      FIRST_HOUR + Math.floor(slotIdx / 2),
-      (slotIdx % 2) * 30,
-    );
+    // 15-min slot start (slot 0 = 8:00, slot 1 = 8:15, …); default a 1-hour
+    // duration prefilled in the dialog (admin can edit to any time there).
+    const start = slotStartAt15(selectedDate, slotIdx);
     const end = pfaWallClockAt(
       selectedDate,
       pfaHour(start) + 1,
@@ -179,7 +184,7 @@ export function ProgramScheduleGrid({
   // on free time. Keyed by slot index.
   const occupiedSlots = new Set<number>();
   for (const b of visibleBlocks) {
-    const placement = placeOnGrid(b.startAt, b.endAt);
+    const placement = placeOnGrid15(b.startAt, b.endAt);
     if (!placement) continue;
     for (let i = 0; i < placement.span; i++) {
       occupiedSlots.add(placement.col - 1 + i);
@@ -187,7 +192,9 @@ export function ProgramScheduleGrid({
   }
 
   const gridStyle: React.CSSProperties = {
-    gridTemplateColumns: `repeat(${SLOTS}, minmax(36px, 1fr))`,
+    // 56 fifteen-min columns; half the per-cell min width of the 30-min grid
+    // so the total width stays comparable.
+    gridTemplateColumns: `repeat(${SLOTS}, minmax(18px, 1fr))`,
     gridTemplateRows: `40px repeat(${laneRows}, 56px)`,
   };
 
@@ -216,15 +223,17 @@ export function ProgramScheduleGrid({
             {/* Time-slot headers. */}
             {Array.from({ length: SLOTS }).map((_, slotIdx) => {
               const col = slotIdx + 1;
-              const isHour = slotIdx % 2 === 0;
-              const hour24 = FIRST_HOUR + Math.floor(slotIdx / 2);
+              // 4 fifteen-min slots = 1 hour: label + strong divider on the
+              // hour boundary (slotIdx % 4 === 0), faint dividers in between.
+              const isHour = slotIdx % 4 === 0;
+              const hour24 = FIRST_HOUR + Math.floor(slotIdx / 4);
               return (
                 <div
                   key={`h-${slotIdx}`}
                   className={[
                     "border-b border-line text-[10px] uppercase tracking-wider text-fg-muted",
                     "flex items-end pb-1.5 pl-1",
-                    slotIdx % 2 === 0
+                    isHour
                       ? "border-l border-line-strong"
                       : "border-l border-line/40",
                   ].join(" ")}
@@ -242,7 +251,7 @@ export function ProgramScheduleGrid({
               Array.from({ length: SLOTS }).map((_, slotIdx) => {
                 const isOccupied = occupiedSlots.has(slotIdx);
                 const baseBorders =
-                  slotIdx % 2 === 0
+                  slotIdx % 4 === 0
                     ? "border-l border-line-strong"
                     : "border-l border-line/40";
                 return (
@@ -258,8 +267,12 @@ export function ProgramScheduleGrid({
                       isOccupied
                         ? undefined
                         : `Schedule a program at ${formatHour(
-                            FIRST_HOUR + Math.floor(slotIdx / 2),
-                          )}${slotIdx % 2 === 1 ? ":30" : ""}`
+                            FIRST_HOUR + Math.floor(slotIdx / 4),
+                          )}${
+                            slotIdx % 4 !== 0
+                              ? `:${String((slotIdx % 4) * 15).padStart(2, "0")}`
+                              : ""
+                          }`
                     }
                     className={[
                       "border-b border-line text-left",
@@ -279,7 +292,7 @@ export function ProgramScheduleGrid({
             {visibleBlocks.map((b) => {
               const lane = laneByBlockId.get(b.id);
               if (lane === undefined) return null;
-              const placement = placeOnGrid(b.startAt, b.endAt);
+              const placement = placeOnGrid15(b.startAt, b.endAt);
               if (!placement) return null;
               const recon = statuses[b.id];
               const status = recon?.status;
@@ -408,21 +421,6 @@ function LegendDot({ className, label }: { className: string; label: string }) {
       <span>{label}</span>
     </span>
   );
-}
-
-function placeOnGrid(
-  startAt: Date,
-  endAt: Date,
-): { col: number; span: number } | null {
-  const startSlots =
-    (pfaHour(startAt) - FIRST_HOUR) * 2 + Math.floor(pfaMinute(startAt) / 30);
-  const endSlots =
-    (pfaHour(endAt) - FIRST_HOUR) * 2 + Math.ceil(pfaMinute(endAt) / 30);
-  const clippedStart = Math.max(startSlots, 0);
-  const clippedEnd = Math.min(endSlots, SLOTS);
-  if (clippedEnd <= clippedStart) return null;
-  // No label column (QA10 W3.8a): slot 0 → grid column 1.
-  return { col: clippedStart + 1, span: clippedEnd - clippedStart };
 }
 
 function formatHour(hour24: number): string {

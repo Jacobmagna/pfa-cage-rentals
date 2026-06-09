@@ -11,11 +11,13 @@
 // time-axis math is the shared, unit-tested src/lib/schedule-grid-utils.
 
 import {
+  PROGRAM_GRID_SLOTS,
   SCHEDULE_GRID_FIRST_HOUR,
   SCHEDULE_GRID_LAST_HOUR,
   SCHEDULE_GRID_SLOTS,
   formatGridHour,
   placeOnGrid,
+  placeOnGrid15,
 } from "@/lib/schedule-grid-utils";
 import { assignLanes } from "@/lib/schedule-lanes";
 import { formatPfaTime12h, pfaHour } from "@/lib/timezone";
@@ -207,6 +209,11 @@ export function MasterScheduleGrid({
 }
 
 const gridTemplateColumns = `120px repeat(${SCHEDULE_GRID_SLOTS}, minmax(36px, 1fr))`;
+// #8: the Work (program) section uses 15-min resolution → 56 equal-fraction
+// time columns vs the cage section's 28. Same leading 120px label column and
+// equal fractions, and 56 = 2×28, so the columns line up at identical clock
+// times with the cage section + the shared 28-slot time header.
+const programGridTemplateColumns = `120px repeat(${PROGRAM_GRID_SLOTS}, minmax(18px, 1fr))`;
 
 function TimeHeader(): React.JSX.Element {
   return (
@@ -461,11 +468,11 @@ function ProgramGrid({
   // clicks only land on free time. Keyed by 0-based slot index.
   const occupiedSlots = new Set<number>();
   for (const b of blocks) {
-    const placement = placeOnGrid(b.startAt, b.endAt);
+    const placement = placeOnGrid15(b.startAt, b.endAt);
     if (!placement) continue;
-    // placement.col is 1-based and includes the leading label column
-    // (slot 0 → col 2). Recover the 0-based slot index.
-    const startSlot = placement.col - 2;
+    // placeOnGrid15.col is 1-based with NO leading label column (slot 0 →
+    // col 1). Recover the 0-based 15-min slot index.
+    const startSlot = placement.col - 1;
     for (let i = 0; i < placement.span; i++) {
       occupiedSlots.add(startSlot + i);
     }
@@ -475,7 +482,7 @@ function ProgramGrid({
     <div
       className="grid bg-surface"
       style={{
-        gridTemplateColumns,
+        gridTemplateColumns: programGridTemplateColumns,
         gridTemplateRows: `repeat(${laneRows}, 56px)`,
       }}
     >
@@ -496,11 +503,11 @@ function ProgramGrid({
           now, so the click carries rowId "" — the admin picks the program in
           the create dialog. Occupied cells skip the click so the bar wins. */}
       {Array.from({ length: laneRows }).map((_, laneIdx) =>
-        Array.from({ length: SCHEDULE_GRID_SLOTS }).map((_, slotIdx) => {
+        Array.from({ length: PROGRAM_GRID_SLOTS }).map((_, slotIdx) => {
           const isOccupied = occupiedSlots.has(slotIdx);
           const cellClass = [
             "border-b border-line bg-surface-2/40",
-            slotIdx % 2 === 0
+            slotIdx % 4 === 0
               ? "border-l border-line-strong"
               : "border-l border-line/40",
           ].join(" ");
@@ -527,8 +534,12 @@ function ProgramGrid({
                 })
               }
               aria-label={`Add work block at ${formatGridHour(
-                SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIdx / 2),
-              )}${slotIdx % 2 === 1 ? ":30" : ""}`}
+                SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIdx / 4),
+              )}${
+                slotIdx % 4 !== 0
+                  ? `:${String((slotIdx % 4) * 15).padStart(2, "0")}`
+                  : ""
+              }`}
               className={`${cellClass} cursor-pointer transition-colors hover:bg-gold/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gold/40`}
               style={cellStyle}
             />
@@ -541,8 +552,11 @@ function ProgramGrid({
       {blocks.map((b) => {
         const lane = laneByBlockId.get(b.id);
         if (lane === undefined) return null;
-        const placement = placeOnGrid(b.startAt, b.endAt);
+        const placement = placeOnGrid15(b.startAt, b.endAt);
         if (!placement) return null;
+        // placeOnGrid15.col has NO leading label column; this grid does, so
+        // shift the bar one column right to clear the 120px label column.
+        const gridColumn = `${placement.col + 1} / span ${placement.span}`;
         const timeLabel = `${formatPfaTime12h(b.startAt)}–${formatPfaTime12h(
           b.endAt,
         )}`;
@@ -559,7 +573,7 @@ function ProgramGrid({
         ].join(" ");
         const barStyle = {
           gridRow: lane + 1,
-          gridColumn: `${placement.col} / span ${placement.span}`,
+          gridColumn,
           zIndex: 2,
         };
         const inner = (

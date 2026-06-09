@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  PROGRAM_GRID_SLOTS,
   SCHEDULE_GRID_FIRST_HOUR,
   SCHEDULE_GRID_LAST_HOUR,
   SCHEDULE_GRID_SLOTS,
   formatGridHour,
   placeOnGrid,
+  placeOnGrid15,
   placeVerticalOnGrid,
+  placeVerticalOnGrid15,
   slotStartAt,
+  slotStartAt15,
 } from "./schedule-grid-utils";
 import { formatPfaTime, pfaWallClockAt } from "./timezone";
 
@@ -114,6 +118,113 @@ describe("placeVerticalOnGrid", () => {
     const end = pfaWallClockAt(refDate, 8, 30); // slot 1
     // row = 0 + 1 = 1, rowSpan = 1 - 0 = 1
     expect(placeVerticalOnGrid(start, end)).toEqual({ row: 1, rowSpan: 1 });
+  });
+});
+
+describe("PROGRAM_GRID_SLOTS (15-min)", () => {
+  it("splits 8 AM–10 PM into 56 fifteen-minute slots", () => {
+    expect(PROGRAM_GRID_SLOTS).toBe(56);
+  });
+});
+
+describe("slotStartAt15", () => {
+  it("maps slot 0/1/2/3 to 8:00, 8:15, 8:30, 8:45", () => {
+    expect(formatPfaTime(slotStartAt15(refDate, 0))).toBe("08:00");
+    expect(formatPfaTime(slotStartAt15(refDate, 1))).toBe("08:15");
+    expect(formatPfaTime(slotStartAt15(refDate, 2))).toBe("08:30");
+    expect(formatPfaTime(slotStartAt15(refDate, 3))).toBe("08:45");
+  });
+  it("maps slot 4 to 9:00 and the last slot to 9:45 PM", () => {
+    expect(formatPfaTime(slotStartAt15(refDate, 4))).toBe("09:00");
+    // slot 55 = 8 + floor(55/4)=13 → 21:00 + (55%4=3)*15 = 21:45
+    expect(formatPfaTime(slotStartAt15(refDate, PROGRAM_GRID_SLOTS - 1))).toBe(
+      "21:45",
+    );
+  });
+  it("round-trips with placeOnGrid15 (slotStartAt15(n) places at col n+1)", () => {
+    for (const slot of [0, 1, 5, 17, 55]) {
+      const start = slotStartAt15(refDate, slot);
+      const end = slotStartAt15(refDate, slot + 1);
+      expect(placeOnGrid15(start, end)).toEqual({ col: slot + 1, span: 1 });
+    }
+  });
+});
+
+describe("placeOnGrid15", () => {
+  it("places a 4:15 PM–5:00 PM block at col 34, span 3", () => {
+    const start = pfaWallClockAt(refDate, 16, 15);
+    const end = pfaWallClockAt(refDate, 17, 0);
+    // startSlots = (16-8)*4 + 1 = 33 → col 34; endSlots = (17-8)*4 = 36 → span 3
+    expect(placeOnGrid15(start, end)).toEqual({ col: 34, span: 3 });
+  });
+
+  it("places a 15-min block (8:00–8:15) at col 1, span 1", () => {
+    const start = pfaWallClockAt(refDate, 8, 0);
+    const end = pfaWallClockAt(refDate, 8, 15);
+    expect(placeOnGrid15(start, end)).toEqual({ col: 1, span: 1 });
+  });
+
+  it("places an 8:45–9:00 block at col 4, span 1", () => {
+    const start = pfaWallClockAt(refDate, 8, 45);
+    const end = pfaWallClockAt(refDate, 9, 0);
+    expect(placeOnGrid15(start, end)).toEqual({ col: 4, span: 1 });
+  });
+
+  it("returns null for a block entirely before 8 AM", () => {
+    const start = pfaWallClockAt(refDate, 6, 0);
+    const end = pfaWallClockAt(refDate, 7, 0);
+    expect(placeOnGrid15(start, end)).toBeNull();
+  });
+
+  it("returns null for a block entirely after 10 PM", () => {
+    const start = pfaWallClockAt(refDate, 22, 15);
+    const end = pfaWallClockAt(refDate, 22, 45);
+    expect(placeOnGrid15(start, end)).toBeNull();
+  });
+
+  it("clips a block that straddles the 10 PM edge", () => {
+    const start = pfaWallClockAt(refDate, 21, 45); // slot 55
+    const end = pfaWallClockAt(refDate, 22, 30); // slot 58 → clipped to 56
+    // col = 55 + 1 = 56, span = 56 - 55 = 1
+    expect(placeOnGrid15(start, end)).toEqual({ col: 56, span: 1 });
+  });
+
+  it("clips a block that straddles the 8 AM edge", () => {
+    const start = pfaWallClockAt(refDate, 7, 45); // slot -1 → clamp 0
+    const end = pfaWallClockAt(refDate, 8, 30); // slot 2
+    expect(placeOnGrid15(start, end)).toEqual({ col: 1, span: 2 });
+  });
+});
+
+describe("placeVerticalOnGrid15", () => {
+  it("places a 4:15 PM–5:00 PM block at row 34, rowSpan 3", () => {
+    const start = pfaWallClockAt(refDate, 16, 15);
+    const end = pfaWallClockAt(refDate, 17, 0);
+    expect(placeVerticalOnGrid15(start, end)).toEqual({ row: 34, rowSpan: 3 });
+  });
+
+  it("places a 30-min cage block (8:00–8:30) at row 1, rowSpan 2", () => {
+    const start = pfaWallClockAt(refDate, 8, 0);
+    const end = pfaWallClockAt(refDate, 8, 30);
+    expect(placeVerticalOnGrid15(start, end)).toEqual({ row: 1, rowSpan: 2 });
+  });
+
+  it("places a 15-min block (8:00–8:15) at row 1, rowSpan 1", () => {
+    const start = pfaWallClockAt(refDate, 8, 0);
+    const end = pfaWallClockAt(refDate, 8, 15);
+    expect(placeVerticalOnGrid15(start, end)).toEqual({ row: 1, rowSpan: 1 });
+  });
+
+  it("returns null for a block entirely after 10 PM", () => {
+    const start = pfaWallClockAt(refDate, 22, 15);
+    const end = pfaWallClockAt(refDate, 22, 45);
+    expect(placeVerticalOnGrid15(start, end)).toBeNull();
+  });
+
+  it("clips a block that straddles the 10 PM edge", () => {
+    const start = pfaWallClockAt(refDate, 21, 45); // slot 55
+    const end = pfaWallClockAt(refDate, 22, 30); // slot 58 → clipped to 56
+    expect(placeVerticalOnGrid15(start, end)).toEqual({ row: 56, rowSpan: 1 });
   });
 });
 

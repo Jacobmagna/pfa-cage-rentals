@@ -49,7 +49,7 @@ import {
   type SeriesView,
 } from "@/app/admin/hour-log/schedule/_components/program-block-dialog";
 import type { BlockReconciliation } from "@/lib/server/reconciliation";
-import { slotStartAt } from "@/lib/schedule-grid-utils";
+import { slotStartAt, slotStartAt15 } from "@/lib/schedule-grid-utils";
 import { formatPfaTime, pfaHour, pfaMinute, pfaWallClockAt } from "@/lib/timezone";
 
 type ProgramCreatePrefill = {
@@ -116,7 +116,13 @@ export function EditableMasterSchedule({
     rowId,
     slotIndex,
   }) => {
-    const start = slotStartAt(selectedDate, slotIndex);
+    // #8: the cage (resource) section reports 30-min slot indices; the Work
+    // (program) section reports 15-min slot indices. Decode with the matching
+    // helper so the clicked cell maps to the right start time.
+    const start =
+      section === "resource"
+        ? slotStartAt(selectedDate, slotIndex)
+        : slotStartAt15(selectedDate, slotIndex);
     // Default span = 60 min, mirroring the standalone grids' openCreateAt.
     const end = pfaWallClockAt(
       selectedDate,

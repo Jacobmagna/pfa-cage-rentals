@@ -15,10 +15,10 @@
 // green/red.
 
 import {
+  PROGRAM_GRID_SLOTS,
   SCHEDULE_GRID_FIRST_HOUR,
-  SCHEDULE_GRID_SLOTS,
   formatGridHour,
-  placeVerticalOnGrid,
+  placeVerticalOnGrid15,
 } from "@/lib/schedule-grid-utils";
 import { formatPfaTime12h } from "@/lib/timezone";
 
@@ -66,8 +66,10 @@ function typeBorder(type: ResourceType): string {
 
 // Columns: 64px sticky time-label column + 7 equal day columns.
 const gridTemplateColumns = "64px repeat(7, minmax(120px, 1fr))";
-// Rows: 44px header row + SCHEDULE_GRID_SLOTS slot rows of 30px each.
-const gridTemplateRows = `44px repeat(${SCHEDULE_GRID_SLOTS}, 30px)`;
+// Rows: 44px header row + 56 fifteen-min slot rows of 15px each (#8). Same
+// total height as the old 28 × 30px grid; a 30-min cage block now spans 2
+// rows = identical visual height, a 15-min work block spans 1 row.
+const gridTemplateRows = `44px repeat(${PROGRAM_GRID_SLOTS}, 15px)`;
 
 export function CoachWeekGrid({
   days,
@@ -117,9 +119,10 @@ export function CoachWeekGrid({
 
           {/* Time-label column (sticky left). One cell per slot row; hour
               boundaries are labeled, half-hour rows blank. */}
-          {Array.from({ length: SCHEDULE_GRID_SLOTS }).map((_, slotIdx) => {
-            const isHour = slotIdx % 2 === 0;
-            const hour24 = SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIdx / 2);
+          {Array.from({ length: PROGRAM_GRID_SLOTS }).map((_, slotIdx) => {
+            // 4 fifteen-min rows = 1 hour: label + strong divider on the hour.
+            const isHour = slotIdx % 4 === 0;
+            const hour24 = SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIdx / 4);
             return (
               <div
                 key={`time-${slotIdx}`}
@@ -136,13 +139,13 @@ export function CoachWeekGrid({
 
           {/* Empty cell backdrop (visual grid lines). */}
           {days.map((_, dayIdx) =>
-            Array.from({ length: SCHEDULE_GRID_SLOTS }).map((__, slotIdx) => (
+            Array.from({ length: PROGRAM_GRID_SLOTS }).map((__, slotIdx) => (
               <div
                 key={`cell-${dayIdx}-${slotIdx}`}
                 aria-hidden
                 className={[
                   "border-l border-line bg-surface-2/40",
-                  slotIdx % 2 === 0
+                  slotIdx % 4 === 0
                     ? "border-t border-line-strong"
                     : "border-t border-line/40",
                 ].join(" ")}
@@ -153,7 +156,7 @@ export function CoachWeekGrid({
 
           {/* Program block bars (neutral blue work color — NO recon colors). */}
           {programBlocks.map((b) => {
-            const placement = placeVerticalOnGrid(b.startAt, b.endAt);
+            const placement = placeVerticalOnGrid15(b.startAt, b.endAt);
             if (!placement) return null;
             if (b.dayIndex < 0 || b.dayIndex > 6) return null;
             const timeLabel = `${formatPfaTime12h(b.startAt)}–${formatPfaTime12h(
@@ -195,7 +198,7 @@ export function CoachWeekGrid({
 
           {/* Cage-rental session bars (accent by resource type). */}
           {sessions.map((s) => {
-            const placement = placeVerticalOnGrid(s.startAt, s.endAt);
+            const placement = placeVerticalOnGrid15(s.startAt, s.endAt);
             if (!placement) return null;
             if (s.dayIndex < 0 || s.dayIndex > 6) return null;
             const timeLabel = `${formatPfaTime12h(s.startAt)}–${formatPfaTime12h(

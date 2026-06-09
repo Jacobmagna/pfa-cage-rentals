@@ -73,9 +73,11 @@ export function ProgramFormDialog({
     if (initial) {
       return {
         name: initial.name,
+        // Rates are STORED per 30 min but ENTERED/DISPLAYED per hour, so
+        // double the stored cents (× 2 / 100) for the prefilled value.
         rateDollars:
           initial.defaultRatePer30MinCents !== null
-            ? (initial.defaultRatePer30MinCents / 100).toFixed(2)
+            ? ((initial.defaultRatePer30MinCents * 2) / 100).toFixed(2)
             : "",
       };
     }

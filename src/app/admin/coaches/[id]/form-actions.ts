@@ -127,6 +127,30 @@ export type ProgramRateOverrideActionResult =
       values: ProgramRateOverrideFormValues;
     };
 
+/**
+ * PROGRAM (work) override rates are ENTERED per HOUR but STORED per
+ * 30 min. Same validation as the cage dollarsToCents parser, but the
+ * entered dollars are halved to the per-30-min storage unit:
+ * cents = round(dollarsPerHour * 100 / 2). Cage rates keep using
+ * dollarsToCents (per 30 min) — only programs switched to hourly entry.
+ */
+function hourlyDollarsToCentsPer30Min(input: string): number {
+  const trimmed = input.trim();
+  if (!trimmed) throw new Error("Rate is required");
+  const cleaned = trimmed.replace(/^\$/, "").trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) {
+    throw new Error(
+      "Rate must be a positive dollar amount (e.g. 44 or 44.50)",
+    );
+  }
+  const asFloat = Number(cleaned);
+  if (!Number.isFinite(asFloat) || asFloat <= 0) {
+    throw new Error("Rate must be greater than $0");
+  }
+  // Entered per HOUR → stored per 30 min (half).
+  return Math.round((asFloat * 100) / 2);
+}
+
 function snapshotProgram(
   formData: FormData,
 ): ProgramRateOverrideFormValues {
@@ -170,7 +194,8 @@ export async function upsertProgramRateOverrideFormAction(
 ): Promise<ProgramRateOverrideActionResult> {
   const values = snapshotProgram(formData);
   try {
-    const cents = dollarsToCents(values.rateDollars);
+    // Entered per HOUR → stored per 30 min.
+    const cents = hourlyDollarsToCentsPer30Min(values.rateDollars);
     await upsertProgramRateOverride({
       coachId: values.coachId,
       programId: values.programId,

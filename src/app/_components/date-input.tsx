@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 // Typable masked date field — a drop-in replacement for native
 // <input type="date">. The user types digits and the field auto-inserts
@@ -134,6 +134,85 @@ export function digitIndexToCaret(masked: string, digitIndex: number): number {
   return masked.length;
 }
 
+// ── Calendar-grid helpers (pure, tz-safe) ─────────────────────────────
+//
+// All grid math is done on integer year/month/day parts. We use
+// `Date.UTC(y, m, d)` ONLY to derive a stable weekday index (0=Sun) — it
+// is UTC-anchored so it never shifts across the viewer's local timezone,
+// and we never read back a local date from it. Selected/emitted values
+// stay `YYYY-MM-DD` strings, consistent with the rest of this file.
+
+/** Weekday (0=Sun … 6=Sat) for a 1-based month, via UTC anchor. */
+function weekdayOf(year: number, month: number, day: number): number {
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+}
+
+/** Build a `YYYY-MM-DD` ISO string from integer parts (zero-padded). */
+function partsToIso(year: number, month: number, day: number): string {
+  const mm = String(month).padStart(2, "0");
+  const dd = String(day).padStart(2, "0");
+  return `${String(year).padStart(4, "0")}-${mm}-${dd}`;
+}
+
+type DayCell = {
+  year: number;
+  month: number; // 1-based
+  day: number;
+  inMonth: boolean; // false for leading/trailing days from adjacent months
+};
+
+/**
+ * 42 cells (6 rows × 7 cols) for the month grid of `year`/`month`
+ * (1-based), Sunday-first, padded with the tail of the previous month and
+ * the head of the next month. Pure integer math — no local-tz Date reads.
+ */
+export function monthGrid(year: number, month: number): DayCell[] {
+  const firstWeekday = weekdayOf(year, month, 1);
+  const daysThis = daysInMonth(year, month);
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const prevYear = month === 1 ? year - 1 : year;
+  const daysPrev = daysInMonth(prevYear, prevMonth);
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+
+  const cells: DayCell[] = [];
+  // Leading days from the previous month.
+  for (let i = firstWeekday - 1; i >= 0; i--) {
+    cells.push({ year: prevYear, month: prevMonth, day: daysPrev - i, inMonth: false });
+  }
+  // Current-month days.
+  for (let d = 1; d <= daysThis; d++) {
+    cells.push({ year, month, day: d, inMonth: true });
+  }
+  // Trailing days from the next month to fill 42 cells.
+  let nextDay = 1;
+  while (cells.length < 42) {
+    cells.push({ year: nextYear, month: nextMonth, day: nextDay++, inMonth: false });
+  }
+  return cells;
+}
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+const WEEKDAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+
+/** Step a {year, month} by ±1 month, wrapping the year. */
+function stepMonth(year: number, month: number, delta: 1 | -1): { year: number; month: number } {
+  let m = month + delta;
+  let y = year;
+  if (m < 1) {
+    m = 12;
+    y -= 1;
+  } else if (m > 12) {
+    m = 1;
+    y += 1;
+  }
+  return { year: y, month: m };
+}
+
 const BASE_STYLES =
   "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40";
 
@@ -190,6 +269,27 @@ export function DateInput({
   // helper so the helper itself never constructs a Date.
   const [currentYear] = useState(() => new Date().getFullYear());
 
+  // Today's local calendar date as integer parts, captured once on mount
+  // (viewer-local "today" for the calendar's TODAY marker + quick button).
+  const [today] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() };
+  });
+
+  // Popover open state + the month the grid is currently showing. The
+  // calendar is purely additive: typing in the visible input still works
+  // exactly as before whether or not the popover is open.
+  const [open, setOpen] = useState(false);
+  const [viewYM, setViewYM] = useState<{ year: number; month: number }>(() => ({
+    year: today.year,
+    month: today.month,
+  }));
+  // The day cell currently focused for keyboard nav (1-based) within
+  // viewYM; null until the user arrows into the grid.
+  const [focusDay, setFocusDay] = useState<number | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+
   // Resolve the ISO from the current text, applying the current-year fill
   // so "MM/DD" (year left blank) still produces a valid ISO. Filling MM/DD
   // does NOT mutate the visible text here — that happens on blur.
@@ -227,6 +327,63 @@ export function DateInput({
     setText(masked);
     if (onChange) onChange(maskedToIso(fillCurrentYear(masked, currentYear)));
   }
+
+  // Commit a fully-resolved ISO `YYYY-MM-DD` from the calendar. Routes
+  // through the SAME path as typing: the masked visible text, the hidden
+  // ISO (derived from `text`), and `onChange` all update together.
+  function commitIso(isoValue: string) {
+    const masked = isoToMasked(isoValue);
+    // No caret to restore — the calendar, not the text field, drove this.
+    pendingCaret.current = null;
+    setText(masked);
+    if (onChange) onChange(isoValue);
+  }
+
+  // When the popover opens, point the visible month at the selected date
+  // (if any) so the user lands on the right month.
+  function openCalendar() {
+    if (disabled) return;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    if (m) {
+      setViewYM({ year: Number(m[1]), month: Number(m[2]) });
+      setFocusDay(Number(m[3]));
+    } else {
+      setViewYM({ year: today.year, month: today.month });
+      setFocusDay(null);
+    }
+    setOpen(true);
+  }
+
+  function selectCell(cell: DayCell) {
+    commitIso(partsToIso(cell.year, cell.month, cell.day));
+    setOpen(false);
+    // Return focus to the field for a smooth typing-first flow.
+    inputRef.current?.focus();
+  }
+
+  // Close on click-outside + Escape while the popover is open.
+  useEffect(() => {
+    if (!open) return;
+    const onDocPointer = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onDocKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        inputRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onDocPointer);
+    document.addEventListener("keydown", onDocKey);
+    // Focus the grid so arrow-key navigation works immediately on open.
+    gridRef.current?.focus();
+    return () => {
+      document.removeEventListener("mousedown", onDocPointer);
+      document.removeEventListener("keydown", onDocKey);
+    };
+  }, [open]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const el = e.target;
@@ -291,8 +448,70 @@ export function DateInput({
     }
   };
 
+  // Grid + keyboard nav for the open popover.
+  const grid = monthGrid(viewYM.year, viewYM.month);
+  const selected = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  const selYear = selected ? Number(selected[1]) : null;
+  const selMonth = selected ? Number(selected[2]) : null;
+  const selDay = selected ? Number(selected[3]) : null;
+
+  // Move the keyboard focus within the grid by a day delta, crossing into
+  // adjacent months (and re-pointing the view) as needed.
+  function moveFocus(delta: number) {
+    const base = focusDay ?? selDay ?? today.day;
+    let { year, month } = viewYM;
+    let day = base + delta;
+    // Walk across month boundaries via pure day-count arithmetic.
+    while (day < 1) {
+      const prev = stepMonth(year, month, -1);
+      year = prev.year;
+      month = prev.month;
+      day += daysInMonth(year, month);
+    }
+    let len = daysInMonth(year, month);
+    while (day > len) {
+      day -= len;
+      const next = stepMonth(year, month, 1);
+      year = next.year;
+      month = next.month;
+      len = daysInMonth(year, month);
+    }
+    setViewYM({ year, month });
+    setFocusDay(day);
+  }
+
+  function handleGridKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    switch (e.key) {
+      case "ArrowLeft":
+        e.preventDefault();
+        moveFocus(-1);
+        break;
+      case "ArrowRight":
+        e.preventDefault();
+        moveFocus(1);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        moveFocus(-7);
+        break;
+      case "ArrowDown":
+        e.preventDefault();
+        moveFocus(7);
+        break;
+      case "Enter":
+      case " ": {
+        e.preventDefault();
+        const d = focusDay ?? selDay ?? today.day;
+        selectCell({ year: viewYM.year, month: viewYM.month, day: d, inMonth: true });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
   return (
-    <>
+    <div ref={wrapRef} className="relative">
       <input
         ref={inputRef}
         type="text"
@@ -314,9 +533,148 @@ export function DateInput({
         pattern={required ? "\\d{2}/\\d{2}/\\d{4}" : undefined}
         aria-label={ariaLabel}
         aria-describedby={ariaDescribedby}
-        className={className ?? BASE_STYLES}
+        // Reserve room on the right for the calendar adornment so long
+        // text never slides under it.
+        className={(className ?? BASE_STYLES) + " pr-10"}
       />
+
+      {/* Trailing calendar toggle (inside the field, right edge). */}
+      <button
+        type="button"
+        tabIndex={-1}
+        disabled={disabled}
+        aria-label="Open calendar"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => (open ? setOpen(false) : openCalendar())}
+        className="absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-r-lg text-fg-subtle transition-colors hover:text-fg disabled:cursor-not-allowed disabled:text-fg-disabled"
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="3" y="4" width="18" height="18" rx="2" />
+          <path d="M16 2v4M8 2v4M3 10h18" />
+        </svg>
+      </button>
+
+      {open ? (
+        <div
+          role="dialog"
+          aria-label="Choose date"
+          className="absolute left-0 top-full z-50 mt-2 w-[19rem] max-w-[calc(100vw-1rem)] rounded-xl border border-line bg-surface p-3 shadow-lg"
+        >
+          {/* Header: prev ‹ — Month Year — › next */}
+          <div className="mb-2 flex items-center justify-between">
+            <button
+              type="button"
+              aria-label="Previous month"
+              onClick={() => setViewYM((s) => stepMonth(s.year, s.month, -1))}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg"
+            >
+              <span aria-hidden="true" className="text-lg leading-none">
+                &#8249;
+              </span>
+            </button>
+            <div className="text-sm font-semibold text-fg">
+              {MONTH_NAMES[viewYM.month - 1]} {viewYM.year}
+            </div>
+            <button
+              type="button"
+              aria-label="Next month"
+              onClick={() => setViewYM((s) => stepMonth(s.year, s.month, 1))}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg"
+            >
+              <span aria-hidden="true" className="text-lg leading-none">
+                &#8250;
+              </span>
+            </button>
+          </div>
+
+          {/* Weekday column headers */}
+          <div className="grid grid-cols-7 gap-1">
+            {WEEKDAY_LABELS.map((w) => (
+              <div
+                key={w}
+                className="flex h-7 items-center justify-center text-xs font-medium text-fg-subtle"
+              >
+                {w}
+              </div>
+            ))}
+          </div>
+
+          {/* 6-row day grid (keyboard-navigable as a group) */}
+          <div
+            ref={gridRef}
+            className="mt-1 grid grid-cols-7 gap-1 outline-none"
+            role="grid"
+            tabIndex={0}
+            onKeyDown={handleGridKeyDown}
+          >
+            {grid.map((cell) => {
+              const isSelected =
+                cell.year === selYear && cell.month === selMonth && cell.day === selDay;
+              const isToday =
+                cell.year === today.year &&
+                cell.month === today.month &&
+                cell.day === today.day;
+              const isFocus =
+                cell.inMonth && focusDay !== null && cell.day === focusDay;
+              return (
+                <button
+                  type="button"
+                  key={`${cell.year}-${cell.month}-${cell.day}-${cell.inMonth ? "in" : "out"}`}
+                  aria-current={isToday ? "date" : undefined}
+                  aria-pressed={isSelected}
+                  onClick={() => selectCell(cell)}
+                  className={
+                    "flex h-9 w-9 items-center justify-center rounded-lg text-sm transition-colors " +
+                    (isSelected
+                      ? "bg-gold font-semibold text-gold-ink hover:bg-gold-hover"
+                      : cell.inMonth
+                        ? "text-fg hover:bg-surface-2"
+                        : "text-fg-disabled hover:bg-surface-2") +
+                    (isToday && !isSelected ? " ring-1 ring-inset ring-gold" : "") +
+                    (isFocus && !isSelected ? " bg-surface-2" : "")
+                  }
+                >
+                  {cell.day}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Footer: Today quick button */}
+          <div className="mt-3 flex items-center justify-between border-t border-line pt-2">
+            <button
+              type="button"
+              onClick={() => selectCell({ ...today, inMonth: true })}
+              className="rounded-lg px-2 py-1 text-xs font-medium text-gold-strong transition-colors hover:bg-surface-2"
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                inputRef.current?.focus();
+              }}
+              className="rounded-lg px-2 py-1 text-xs font-medium text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {name ? <input type="hidden" name={name} value={iso} /> : null}
-    </>
+    </div>
   );
 }

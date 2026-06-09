@@ -1,15 +1,17 @@
 import Link from "next/link";
-import { and, eq, gte, lt, sql as drizzleSql } from "drizzle-orm";
+import { and, eq, gte, isNull, lt, sql as drizzleSql } from "drizzle-orm";
 import {
   ArrowUpRight,
   CalendarDays,
   CalendarPlus,
   ClipboardList,
   Clock,
+  Wallet,
 } from "lucide-react";
 import { db } from "@/db";
-import { sessionsBilling } from "@/db/schema";
+import { coachPayments, sessionsBilling } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
+import { totalFromSnapshot } from "@/lib/billing";
 import {
   formatPfaDateLong,
   formatPfaMonthYear,
@@ -19,13 +21,21 @@ import {
 import { EditableName } from "../_components/editable-name";
 
 // /coach landing. Two stat tiles + the two actions a coach actually
-// does (log a new session, review history). Dollar amounts are
-// admin-only — coach rates are variable per-coach and per-resource,
-// and Dad handles invoicing manually outside the app. The /coach/payments
-// surface was built then removed 2026-05-25 — Dad decided he doesn't
-// want coaches paying through the app at all. Backend (coach_payments
-// table, computeBalances helper, admin /admin/payments + /admin/settings
-// surfaces) stays in place for the admin-side ledger view.
+// does (log a new session, review history). The /coach/payments
+// surface (with PAY buttons) was built then removed 2026-05-25 — Dad
+// doesn't want coaches PAYING through the app. Backend (coach_payments
+// table, admin /admin/payments + /admin/settings) stays in place for
+// the admin-side ledger.
+//
+// #30 (2026-06-08): re-added a READ-ONLY "what you owe PFA for cage
+// rentals" balance card below — NO pay buttons, no Venmo/Zelle, just
+// the number so a coach can see their balance. Computed exactly like
+// the admin Payments page: sum each of THIS coach's sessions_billing
+// rows via totalFromSnapshot(start, end, ratePer30MinCents) (cage owed)
+// minus their CONFIRMED, non-deleted coach_payments. Cage = coach OWES
+// PFA. Program/work pay (PFA → coach, opposite direction) is NOT shown
+// here on purpose — mixing directions confuses the balance. Strictly
+// coach-scoped to session.user.id; never reads another coach's rows.
 
 export default async function CoachHome() {
   const session = await requireSession();
@@ -37,7 +47,12 @@ export default async function CoachHome() {
   const monthStart = pfaMonthStart(now);
   const monthEndExclusive = pfaMonthEnd(now);
 
-  const [monthSessionRows, [{ count: totalEver }]] = await Promise.all([
+  const [
+    monthSessionRows,
+    [{ count: totalEver }],
+    allSessionRows,
+    confirmedPaymentRows,
+  ] = await Promise.all([
     db
       .select({
         startAt: sessionsBilling.startAt,
@@ -55,6 +70,28 @@ export default async function CoachHome() {
       .select({ count: drizzleSql<number>`count(*)::int` })
       .from(sessionsBilling)
       .where(eq(sessionsBilling.coachId, coachId)),
+    // Every cage rental THIS coach has ever booked, with its snapshotted
+    // rate — for the cage-owed total. (Coach-scoped: coachId only.)
+    db
+      .select({
+        startAt: sessionsBilling.startAt,
+        endAt: sessionsBilling.endAt,
+        ratePer30MinCents: sessionsBilling.ratePer30MinCents,
+      })
+      .from(sessionsBilling)
+      .where(eq(sessionsBilling.coachId, coachId)),
+    // This coach's CONFIRMED, non-deleted payments — matches the admin
+    // Payments balance (pending payments don't count yet).
+    db
+      .select({ amountCents: coachPayments.amountCents })
+      .from(coachPayments)
+      .where(
+        and(
+          eq(coachPayments.coachId, coachId),
+          eq(coachPayments.status, "confirmed"),
+          isNull(coachPayments.deletedAt),
+        ),
+      ),
   ]);
 
   const monthCount = monthSessionRows.length;
@@ -62,6 +99,19 @@ export default async function CoachHome() {
     (sum, s) => sum + (s.endAt.getTime() - s.startAt.getTime()) / 60_000,
     0,
   );
+
+  // Cage owed (coach OWES PFA) − confirmed payments = balance owed.
+  // Same calc as /admin/payments; snapshot rate read off each row so a
+  // later rate change never rewrites a past balance.
+  const owedCageCents = allSessionRows.reduce(
+    (sum, s) => sum + totalFromSnapshot(s.startAt, s.endAt, s.ratePer30MinCents),
+    0,
+  );
+  const paidCents = confirmedPaymentRows.reduce(
+    (sum, p) => sum + p.amountCents,
+    0,
+  );
+  const balanceCents = owedCageCents - paidCents;
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -100,6 +150,12 @@ export default async function CoachHome() {
           accent
         />
       </section>
+
+      <BalanceCard
+        balanceCents={balanceCents}
+        owedCageCents={owedCageCents}
+        paidCents={paidCents}
+      />
 
       <div className="grid gap-3 sm:grid-cols-2">
         <NavCard
@@ -171,6 +227,57 @@ function Stat({
   );
 }
 
+// Read-only cage-rental balance. NO pay buttons by design (#30) — Dad
+// doesn't want coaches paying through the app, this just shows the
+// number so a coach knows where they stand. Direction is stated
+// explicitly: the coach OWES PFA for rentals.
+function BalanceCard({
+  balanceCents,
+  owedCageCents,
+  paidCents,
+}: {
+  balanceCents: number;
+  owedCageCents: number;
+  paidCents: number;
+}) {
+  const owes = balanceCents > 0;
+  return (
+    <section
+      aria-label="Cage-rental balance"
+      className="mb-10 rounded-2xl border border-line bg-surface px-6 py-5 shadow-[var(--shadow-md)]"
+    >
+      <div className="flex items-center gap-2 text-fg-muted">
+        <Wallet className="h-4 w-4" />
+        <p className="text-[11px] uppercase tracking-[0.14em] text-fg-muted">
+          What you owe PFA — cage rentals
+        </p>
+      </div>
+      <p className="tnum mt-4 text-4xl font-semibold tracking-tight text-fg">
+        {formatCents(owes ? balanceCents : 0)}
+      </p>
+      <p className="mt-2 text-sm text-fg-muted">
+        {owes
+          ? `You owe PFA ${formatCents(balanceCents)} for cage rentals.`
+          : "You're all paid up on cage rentals."}
+      </p>
+      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1 border-t border-line pt-3 text-xs text-fg-subtle">
+        <dt>Total cage rentals billed</dt>
+        <dd className="tnum text-right text-fg-muted">
+          {formatCents(owedCageCents)}
+        </dd>
+        <dt>Payments received by PFA</dt>
+        <dd className="tnum text-right text-fg-muted">
+          −{formatCents(paidCents)}
+        </dd>
+      </dl>
+      <p className="mt-3 text-xs text-fg-subtle">
+        Read-only — pay PFA directly. Program/work hours are paid to you by
+        PFA separately and are not shown here.
+      </p>
+    </section>
+  );
+}
+
 function NavCard({
   href,
   icon,
@@ -199,6 +306,15 @@ function NavCard({
       </span>
     </Link>
   );
+}
+
+function formatCents(cents: number): string {
+  // Cents-precise ($1,234.50) for the balance card — a coach needs the
+  // exact owed figure, not the whole-dollar rounding the stat heroes use.
+  return `$${(cents / 100).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function formatHours(minutes: number): string {

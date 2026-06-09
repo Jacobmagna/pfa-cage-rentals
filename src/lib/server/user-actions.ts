@@ -136,6 +136,101 @@ export async function deleteCoachInternal(
   return updated;
 }
 
+// Restore a soft-deleted coach BY ID (mirrors restoreAthletesInternal,
+// but keyed on the user id rather than email — the archived-coaches view
+// already knows the row's id). Clears `users.deletedAt` and re-affirms
+// role="coach" so the row reappears on every active-coach surface and
+// the invite-only signIn gate lets them back in.
+//
+// CAVEAT: deleteCoachInternal anonymizes name → "Former coach" and email
+// → deleted-<id>@…invalid (J9 / privacy promise). Restore does NOT
+// recover the original name/email — that data is intentionally gone. The
+// admin can rename via the normal coach surfaces / a fresh sign-in. Only
+// currently-deleted rows are flipped; a non-deleted or unknown id is a
+// no-op (returns null) so a double-click can't error.
+export async function restoreCoachInternal(
+  actor: AuthedSession["user"],
+  coachId: string,
+): Promise<typeof users.$inferSelect | null> {
+  const [existing] = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, coachId))
+    .limit(1);
+  if (!existing) return null;
+  if (existing.deletedAt === null) return existing; // already active — no-op.
+
+  const [updated] = await db
+    .update(users)
+    .set({ deletedAt: null, role: "coach" })
+    .where(eq(users.id, coachId))
+    .returning();
+
+  await safeLogAudit(db, {
+    actorUserId: actor.id,
+    entityType: "user",
+    entityId: coachId,
+    action: "update",
+    before: existing as unknown as Record<string, unknown>,
+    after: updated as unknown as Record<string, unknown>,
+  });
+
+  return updated;
+}
+
+// Archive a coach (#28): a REVERSIBLE soft-delete that PRESERVES the
+// coach's identity. Sets users.deletedAt = now and KEEPS name / email /
+// role / image intact — so Archive → Restore is a clean lossless round-
+// trip (matching the athlete archive). This is the path the interactive
+// "Archive coach" danger-zone card uses.
+//
+// Contrast with deleteCoachInternal above, which ANONYMIZES (name →
+// "Former coach", email → deleted-<id>@…invalid) to satisfy the J9
+// privacy promise. That heavier scrub is kept for the GDPR/"remove my
+// info" case and is no longer wired to the interactive UI — see the
+// public deleteCoach action.
+//
+// No-op safety: a non-coach (e.g. admin), an unknown id, or an already-
+// archived row returns without writing, so a stray double-click can't
+// error. Active-coach surfaces filter isNull(users.deletedAt), so the
+// row simply leaves the active list and appears in /admin/coaches/archive
+// with its real name + email. Auth handles are intentionally NOT stripped
+// here — archiving is administrative, not a privacy erasure; the row is
+// meant to come back intact. (The invite-only signIn gate already blocks
+// a soft-deleted user from signing in while archived.)
+export async function archiveCoachInternal(
+  actor: AuthedSession["user"],
+  coachId: string,
+): Promise<typeof users.$inferSelect | null> {
+  const [existing] = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, coachId))
+    .limit(1);
+  if (!existing) return null;
+  if (existing.role === "admin") {
+    throw new CannotDeleteAdminError(coachId);
+  }
+  if (existing.deletedAt !== null) return existing; // already archived — no-op.
+
+  const [updated] = await db
+    .update(users)
+    .set({ deletedAt: new Date() }) // name/email/role/image PRESERVED.
+    .where(eq(users.id, coachId))
+    .returning();
+
+  await safeLogAudit(db, {
+    actorUserId: actor.id,
+    entityType: "user",
+    entityId: coachId,
+    action: "update",
+    before: existing as unknown as Record<string, unknown>,
+    after: updated as unknown as Record<string, unknown>,
+  });
+
+  return updated;
+}
+
 // Predicate: a "synthetic" coach is one created by the historical
 // import flow (pseudo-account, no auth tie). Email pattern is the
 // canonical signal — see syntheticEmailFor() in src/lib/import/commit.ts.

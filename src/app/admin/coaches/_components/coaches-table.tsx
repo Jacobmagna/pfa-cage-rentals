@@ -171,17 +171,18 @@ export function CoachesTable({
               key={row.id}
               className="border-t border-line hover:bg-surface-2 transition-colors"
             >
-              <td className="px-4 py-3">
-                <div className="flex items-center gap-2 flex-wrap">
+              <td className="px-4 py-3 max-w-[18rem]">
+                <div className="flex min-w-0 items-center gap-2">
                   <Link
                     href={`/admin/coaches/${row.id}`}
-                    className="text-fg hover:underline transition-colors font-medium"
+                    className="min-w-0 truncate text-fg hover:underline transition-colors font-medium"
+                    title={row.name ?? row.email}
                   >
                     {row.name ?? row.email}
                   </Link>
                   {row.isSynthetic ? (
                     <span
-                      className="inline-flex items-center rounded-full bg-surface-2 px-1.5 py-px text-[10px] font-medium uppercase tracking-wider text-fg-muted ring-1 ring-inset ring-line"
+                      className="inline-flex shrink-0 items-center rounded-full bg-surface-2 px-1.5 py-px text-[10px] font-medium uppercase tracking-wider text-fg-muted ring-1 ring-inset ring-line"
                       title="Created by the historical import — has no auth tie to a real user"
                     >
                       Imported

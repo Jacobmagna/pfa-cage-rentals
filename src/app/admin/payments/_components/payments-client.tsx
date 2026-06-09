@@ -304,9 +304,11 @@ function BalancesTable({
                 key={row.coachId}
                 className="border-t border-line hover:bg-surface-2 transition-colors"
               >
-                <td className="px-4 py-3 text-sm align-top">
-                  <div className="flex flex-col gap-1">
-                    <span>{row.coachName}</span>
+                <td className="px-4 py-3 text-sm align-top max-w-[16rem]">
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <span className="truncate" title={row.coachName}>
+                      {row.coachName}
+                    </span>
                     {row.zelleContact ? (
                       <div className="flex flex-wrap items-center gap-1">
                         <HandleChip
@@ -428,15 +430,24 @@ function PendingInbox({
                     <td className="px-4 py-3 text-sm font-mono tnum tabular-nums whitespace-nowrap">
                       {formatDate(row.paidAt)}
                     </td>
-                    <td className="px-4 py-3 text-sm">{row.coachName}</td>
+                    <td className="px-4 py-3 text-sm max-w-[14rem]">
+                      <span className="block truncate" title={row.coachName}>
+                        {row.coachName}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-sm text-fg-muted">
                       <MethodBadge method={row.method} />
                     </td>
                     <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right whitespace-nowrap">
                       {formatDollars(row.amountCents)}
                     </td>
-                    <td className="px-4 py-3 text-xs text-fg-subtle">
-                      {row.reference ?? "—"}
+                    <td className="px-4 py-3 text-xs text-fg-subtle max-w-[14rem]">
+                      <span
+                        className="block truncate"
+                        title={row.reference ?? undefined}
+                      >
+                        {row.reference ?? "—"}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
                       <button
@@ -513,7 +524,11 @@ function RecentTable({
                     <td className="px-4 py-3 text-sm font-mono tnum tabular-nums whitespace-nowrap">
                       {formatDate(row.paidAt)}
                     </td>
-                    <td className="px-4 py-3 text-sm">{row.coachName}</td>
+                    <td className="px-4 py-3 text-sm max-w-[14rem]">
+                      <span className="block truncate" title={row.coachName}>
+                        {row.coachName}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-sm">
                       <MethodBadge method={row.method} />
                     </td>

@@ -19,12 +19,13 @@ export type ProgramFormValues = {
 };
 
 /**
- * Parses an OPTIONAL user-typed dollar string into integer cents.
- * Empty/blank → null (no rate set). Otherwise mirrors the resource-type
- * override parser in admin/coaches/[id]/form-actions.ts: accepts "22",
- * "22.0", "22.50", optional leading $, max 2-decimal precision; multiply
- * before rounding to dodge half-cent float drift. Rejects negatives and
- * non-numbers so Zod's int/min/max cap fires a clean error.
+ * Parses an OPTIONAL user-typed PER-HOUR dollar string into integer
+ * cents PER 30 MIN (the storage unit). Empty/blank → null (no rate set).
+ * Accepts "44", "44.0", "44.50", optional leading $, max 2-decimal
+ * precision. The entered dollars are PER HOUR, so we halve them to get
+ * the per-30-min rate: cents = round(dollarsPerHour * 100 / 2). Multiply
+ * before dividing/rounding to dodge half-cent float drift. Rejects
+ * negatives and non-numbers so Zod's int/min/max cap fires a clean error.
  */
 function optionalDollarsToCents(input: string): number | null {
   const trimmed = input.trim();
@@ -32,14 +33,15 @@ function optionalDollarsToCents(input: string): number | null {
   const cleaned = trimmed.replace(/^\$/, "").trim();
   if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) {
     throw new Error(
-      "Pay rate must be a positive dollar amount (e.g. 22 or 22.50)",
+      "Pay rate must be a positive dollar amount (e.g. 44 or 44.50)",
     );
   }
   const asFloat = Number(cleaned);
   if (!Number.isFinite(asFloat) || asFloat < 0) {
     throw new Error("Pay rate must be a positive dollar amount");
   }
-  return Math.round(asFloat * 100);
+  // Entered per HOUR → stored per 30 min (half).
+  return Math.round((asFloat * 100) / 2);
 }
 
 export type CreateProgramResult =

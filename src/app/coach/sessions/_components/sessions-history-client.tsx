@@ -1,9 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
-import { ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
-import { deleteOwnSessionAction } from "../form-actions";
+import { useEffect, useRef, useState, useTransition } from "react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
+import {
+  deleteOwnSessionAction,
+  requestOwnSessionRemovalAction,
+} from "../form-actions";
 import { PFA_TIMEZONE } from "@/lib/timezone";
 import {
   EditSessionDialog,
@@ -27,6 +37,11 @@ export type HistoryRow = {
   startAt: Date;
   endAt: Date;
   note: string | null;
+  // 1b security: a PAST rental (startAt <= now) can't be deleted/edited-
+  // billable by the coach — they request admin removal instead.
+  isPast: boolean;
+  // True when a PENDING removal request already exists for this rental.
+  removalPending: boolean;
 };
 
 export function SessionsHistoryClient({
@@ -48,6 +63,7 @@ export function SessionsHistoryClient({
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [confirmRow, setConfirmRow] = useState<HistoryRow | null>(null);
   const [isDeleting, startTransition] = useTransition();
+  const [removalRow, setRemovalRow] = useState<HistoryRow | null>(null);
 
   const onDelete = (row: HistoryRow) => {
     setConfirmRow(row);
@@ -152,6 +168,9 @@ export function SessionsHistoryClient({
                 </span>
 
                 <div className="flex items-center gap-0.5 whitespace-nowrap">
+                  {/* Edit stays available on every row — for PAST rentals the
+                      dialog disables billable fields server-side & in-UI, so
+                      only the note can change. */}
                   <button
                     type="button"
                     onClick={() => setEditingRow(row)}
@@ -162,16 +181,38 @@ export function SessionsHistoryClient({
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => onDelete(row)}
-                    disabled={isPendingDelete}
-                    className="inline-flex items-center justify-center h-9 w-9 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors disabled:opacity-40"
-                    aria-label="Delete rental"
-                    title="Delete"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  {row.isPast ? (
+                    row.removalPending ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full border border-line-strong bg-surface-2 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-fg-muted"
+                        title="An admin will review this removal request"
+                      >
+                        <Clock3 className="h-3 w-3" />
+                        Removal requested
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setRemovalRow(row)}
+                        className="inline-flex items-center justify-center h-9 w-9 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
+                        aria-label="Request removal"
+                        title="Request removal"
+                      >
+                        <Clock3 className="h-4 w-4" />
+                      </button>
+                    )
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onDelete(row)}
+                      disabled={isPendingDelete}
+                      className="inline-flex items-center justify-center h-9 w-9 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors disabled:opacity-40"
+                      aria-label="Delete rental"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               </li>
             );
@@ -213,6 +254,7 @@ export function SessionsHistoryClient({
         onClose={() => setEditingRow(null)}
         resources={resources}
         initial={initialForDialog}
+        isPast={editingRow?.isPast ?? false}
       />
 
       <ConfirmDialog
@@ -230,7 +272,130 @@ export function SessionsHistoryClient({
         onConfirm={handleConfirmDelete}
         isPending={isDeleting}
       />
+
+      <RequestRemovalDialog
+        row={removalRow}
+        onClose={() => setRemovalRow(null)}
+      />
     </>
+  );
+}
+
+// 1b security: a coach can't delete a PAST rental directly — they ask an
+// admin to remove it (it's money owed, so removal is admin-approved). This
+// small dialog collects an optional "why it didn't happen" reason and files
+// the request. Mirrors the ConfirmDialog chrome (default tone — this isn't
+// the destructive action itself, just a request).
+function RequestRemovalDialog({
+  row,
+  onClose,
+}: {
+  row: HistoryRow | null;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [pending, startTransition] = useTransition();
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  const open = row !== null;
+
+  // Reset the reason + focus Cancel each time the dialog opens.
+  useEffect(() => {
+    if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setReason("");
+    const t = requestAnimationFrame(() => cancelRef.current?.focus());
+    return () => cancelAnimationFrame(t);
+  }, [open]);
+
+  // ESC dismiss (unless mid-submit).
+  useEffect(() => {
+    if (!open) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !pending) {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [open, pending, onClose]);
+
+  if (!row) return null;
+
+  const handleSubmit = () => {
+    startTransition(async () => {
+      await requestOwnSessionRemovalAction(row.id, reason.trim() || null);
+      onClose();
+    });
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Request rental removal"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={() => {
+        if (!pending) onClose();
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md rounded-2xl border border-line bg-surface shadow-[var(--shadow-lg)]"
+      >
+        <div className="px-5 py-4 border-b border-line">
+          <h4 className="text-base font-semibold text-fg">
+            Request removal of this rental?
+          </h4>
+          <p className="mt-1 text-xs text-fg-muted leading-relaxed">
+            {row.resourceName} · {formatWhen(row.startAt, row.endAt)}. This
+            rental has already started, so it can&apos;t be deleted directly —
+            an admin will review your request.
+          </p>
+        </div>
+
+        <div className="px-5 py-4">
+          <label className="block">
+            <span className="flex items-baseline justify-between mb-1.5">
+              <span className="text-xs uppercase tracking-wider text-fg-muted">
+                Reason
+              </span>
+              <span className="text-[10px] text-fg-subtle">optional</span>
+            </span>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              disabled={pending}
+              rows={3}
+              maxLength={500}
+              placeholder="What happened? (e.g. the rental didn't happen)"
+              className="w-full rounded-lg bg-page border border-line text-fg placeholder:text-fg-subtle px-3 py-2 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40 resize-none"
+            />
+          </label>
+        </div>
+
+        <div className="px-5 py-4 border-t border-line flex items-center justify-end gap-2">
+          <button
+            ref={cancelRef}
+            type="button"
+            onClick={onClose}
+            disabled={pending}
+            className="inline-flex items-center justify-center rounded-lg border border-line-strong bg-surface text-fg-muted hover:text-fg hover:-translate-y-px h-9 px-3 text-sm font-medium shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={pending}
+            className="inline-flex items-center justify-center rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          >
+            {pending ? "Submitting…" : "Request removal"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

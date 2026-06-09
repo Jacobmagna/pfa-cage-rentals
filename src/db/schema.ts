@@ -400,6 +400,59 @@ export const sessionCancellations = pgTable(
   ],
 );
 
+// 1b security: a coach can no longer unilaterally delete or edit a
+// PAST cage rental (a charge they OWE PFA). Instead they submit a
+// "didn't happen — request removal" that an admin approves (which
+// hard-deletes the rental and records the #26/27 cancellation) or
+// denies. We SNAPSHOT the rental here because sessionId carries NO FK
+// — the sessions_billing row is hard-deleted on approval (mirrors the
+// sessionCancellations pattern above). `coachId` is the rental OWNER;
+// `requestedBy` is the actor who filed the request (the coach);
+// `resolvedBy` is the admin who approved/denied it.
+export const removalRequestStatus = pgEnum("removal_request_status", [
+  "pending",
+  "approved",
+  "denied",
+]);
+
+export const sessionRemovalRequests = pgTable(
+  "session_removal_requests",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    // ref only; no FK (the session row is hard-deleted on approve)
+    sessionId: text("session_id").notNull(),
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id),
+    resourceId: text("resource_id")
+      .notNull()
+      .references(() => resources.id),
+    startAt: timestamp("start_at", { mode: "date" }).notNull(),
+    endAt: timestamp("end_at", { mode: "date" }).notNull(),
+    ratePer30MinCents: integer("rate_per_30_min_cents"),
+    // coach's "why didn't it happen"
+    reason: text("reason"),
+    status: removalRequestStatus("status").notNull().default("pending"),
+    requestedAt: timestamp("requested_at", { mode: "date" })
+      .notNull()
+      .defaultNow(),
+    requestedBy: text("requested_by")
+      .notNull()
+      .references(() => users.id),
+    resolvedAt: timestamp("resolved_at", { mode: "date" }),
+    resolvedBy: text("resolved_by").references(() => users.id),
+    // optional deny reason
+    adminNote: text("admin_note"),
+  },
+  (table) => [
+    index("session_removal_requests_status_idx").on(table.status),
+    index("session_removal_requests_coach_idx").on(table.coachId),
+    index("session_removal_requests_session_idx").on(table.sessionId),
+  ],
+);
+
 // Admin-created resource blocks for non-billing reasons: summer
 // camps, private team rentals, HVAC repair, holidays. Coaches can't
 // book a resource while it's blocked.

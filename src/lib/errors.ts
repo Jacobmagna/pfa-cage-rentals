@@ -306,6 +306,40 @@ export class AttendanceEmptyRosterError extends Error {
   }
 }
 
+// 1b security: a coach tried to hard-delete or edit a billable field
+// (resource/date/start/end) of a PAST cage rental (startAt <= now).
+// Past charges are money the coach owes PFA — they can't be erased
+// unilaterally, only via an admin-approved removal request.
+export class PastRentalImmutableError extends Error {
+  readonly code = "PAST_RENTAL_IMMUTABLE" as const;
+  constructor(public readonly sessionId: string) {
+    super(
+      "Past rentals can't be changed directly — submit a removal request.",
+    );
+    this.name = "PastRentalImmutableError";
+  }
+}
+
+// 1b security: a coach filed a removal request for a session that
+// already has a pending request. One open request per session.
+export class RemovalRequestExistsError extends Error {
+  readonly code = "REMOVAL_REQUEST_EXISTS" as const;
+  constructor(public readonly sessionId: string) {
+    super(`A removal request is already pending for this rental`);
+    this.name = "RemovalRequestExistsError";
+  }
+}
+
+// 1b security: an admin approved/denied a removal request that doesn't
+// exist or is no longer pending (already resolved, or a stale/bogus id).
+export class RemovalRequestNotFoundError extends Error {
+  readonly code = "REMOVAL_REQUEST_NOT_FOUND" as const;
+  constructor(public readonly requestId: string) {
+    super(`Removal request ${requestId} not found or already resolved`);
+    this.name = "RemovalRequestNotFoundError";
+  }
+}
+
 export class BlockConflictsWithSessionError extends Error {
   readonly code = "BLOCK_CONFLICTS_WITH_SESSION" as const;
   constructor(

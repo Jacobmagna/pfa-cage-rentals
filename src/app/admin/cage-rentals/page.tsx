@@ -4,6 +4,7 @@ import {
   CalendarX,
   ClipboardList,
   Coins,
+  Inbox,
 } from "lucide-react";
 import { db } from "@/db";
 import { blockedTimes, sessionsBilling } from "@/db/schema";
@@ -12,6 +13,7 @@ import { EditableName } from "@/app/_components/editable-name";
 import { NavCard } from "@/app/_components/nav-card";
 import { StatCard } from "@/app/_components/stat-card";
 import { loadCancellationsDashboard } from "@/lib/server/cancellations-data";
+import { countPendingRemovalRequests } from "@/lib/server/session-removal-actions";
 import { totalFromSnapshot } from "@/lib/billing";
 import { formatDollars } from "@/lib/format-money";
 import {
@@ -51,6 +53,7 @@ export default async function AdminHome() {
     monthSessionRows,
     [{ count: blocksToday }],
     { counts: cancelCounts },
+    pendingRemovals,
   ] = await Promise.all([
     db
       .select({ count: drizzleSql<number>`count(*)::int` })
@@ -84,6 +87,7 @@ export default async function AdminHome() {
         ),
       ),
     loadCancellationsDashboard(),
+    countPendingRemovalRequests(),
   ]);
 
   // Month total reads the snapshotted rate from each session row directly.
@@ -163,6 +167,16 @@ export default async function AdminHome() {
             icon={<ClipboardList className="h-4 w-4" />}
             title="Rentals"
             stat="Log, edit, review"
+          />
+          <NavCard
+            href="/admin/sessions/removal-requests"
+            icon={<Inbox className="h-4 w-4" />}
+            title="Removal requests"
+            stat={
+              pendingRemovals === 0
+                ? "None pending"
+                : `${pendingRemovals} pending`
+            }
           />
         </div>
       </section>

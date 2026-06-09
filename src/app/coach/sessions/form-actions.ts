@@ -7,7 +7,11 @@
 
 import { revalidatePath } from "next/cache";
 import { ZodError } from "zod";
-import { deleteOwnSession, updateOwnSession } from "./actions";
+import {
+  deleteOwnSession,
+  requestOwnSessionRemoval,
+  updateOwnSession,
+} from "./actions";
 import {
   BlockedTimeError,
   ResourceNotFoundError,
@@ -116,4 +120,16 @@ export async function updateOwnSessionFormAction(
 export async function deleteOwnSessionAction(id: string): Promise<void> {
   await deleteOwnSession(id);
   revalidatePath("/coach/sessions");
+}
+
+// 1b security: a coach files a removal request for a PAST rental (it can't
+// be deleted/edited-billable directly). The underlying action already
+// revalidates the coach + admin surfaces; this thin wrapper exists so the
+// client component calls a local server action with the simple
+// (id, reason) shape its dialog produces.
+export async function requestOwnSessionRemovalAction(
+  id: string,
+  reason: string | null,
+): Promise<void> {
+  await requestOwnSessionRemoval(id, reason);
 }

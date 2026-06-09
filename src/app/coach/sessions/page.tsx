@@ -4,6 +4,7 @@ import { ArrowLeft, CalendarPlus } from "lucide-react";
 import { db } from "@/db";
 import { resources, sessionsBilling } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
+import { pendingRemovalSessionIds } from "@/lib/server/session-removal-actions";
 import { parsePfaInput, pfaDayEnd } from "@/lib/timezone";
 import { SessionsHistoryClient, type HistoryRow } from "./_components/sessions-history-client";
 import type { ResourceOption } from "./_components/types";
@@ -129,6 +130,13 @@ export default async function CoachSessionsPage({
   const totalCount = count;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
+  // Which of this coach's rentals already have a PENDING removal request —
+  // so a past row shows a "Removal requested" chip instead of the button.
+  const pendingRemoval = await pendingRemovalSessionIds(coachId);
+
+  // "Past" = the rental has started (startAt <= now). Past rentals can no
+  // longer be deleted/edited-billable by the coach — they request removal.
+  const now = new Date();
   const rows: HistoryRow[] = rawRows.map((r) => ({
     id: r.id,
     resourceId: r.resourceId,
@@ -137,6 +145,8 @@ export default async function CoachSessionsPage({
     startAt: r.startAt,
     endAt: r.endAt,
     note: r.note,
+    isPast: r.startAt <= now,
+    removalPending: pendingRemoval.has(r.id),
   }));
 
   return (

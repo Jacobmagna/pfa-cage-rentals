@@ -75,3 +75,22 @@ export const createSessionBatchSchema = z.object({
 });
 
 export type CreateSessionBatchInput = z.infer<typeof createSessionBatchSchema>;
+
+// 1b security: a coach's request to remove a PAST cage rental (an
+// admin approves/denies it). `reason` is the coach's optional "why
+// didn't it happen". nullish so a missing reason and an explicit-null
+// reason both parse.
+export const requestRemovalSchema = z.object({
+  sessionId: z.string().min(1, "sessionId is required"),
+  reason: z.string().max(500).nullish(),
+});
+
+// 1b security: an admin resolving (approving/denying) a removal request.
+// `adminNote` is the optional deny reason.
+export const resolveRemovalSchema = z.object({
+  requestId: z.string().min(1, "requestId is required"),
+  adminNote: z.string().max(500).nullish(),
+});
+
+export type RequestRemovalInput = z.infer<typeof requestRemovalSchema>;
+export type ResolveRemovalInput = z.infer<typeof resolveRemovalSchema>;

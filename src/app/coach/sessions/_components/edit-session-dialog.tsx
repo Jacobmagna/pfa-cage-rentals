@@ -31,11 +31,16 @@ export function EditSessionDialog({
   onClose,
   resources,
   initial,
+  isPast = false,
 }: {
   open: boolean;
   onClose: () => void;
   resources: ResourceOption[];
   initial: SessionInitial | null;
+  // 1b security: when the rental has already started the coach can only
+  // edit the note — the billable fields (resource/date/start/end) are
+  // disabled here to match the server-side immutability.
+  isPast?: boolean;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [state, formAction, pending] = useActionState(
@@ -110,13 +115,41 @@ export function EditSessionDialog({
         action={formAction}
         key={
           state.ok
-            ? `edit-${initial?.id ?? "none"}`
+            ? `edit-${initial?.id ?? "none"}-${isPast ? "past" : "future"}`
             : `edit-err-${state.error.code}-${state.error.message}`
         }
         className="space-y-5 p-6"
       >
         {initial ? (
           <input type="hidden" name="id" defaultValue={initial.id} />
+        ) : null}
+
+        {/* PAST rental: the billable inputs are disabled (so they're not in
+            FormData) — these hidden fields carry the ORIGINAL values so the
+            server's note-only update sees no billable change and accepts it. */}
+        {isPast && initial ? (
+          <>
+            <input
+              type="hidden"
+              name="resourceId"
+              defaultValue={initial.resourceId}
+            />
+            <input
+              type="hidden"
+              name="date"
+              defaultValue={toDateInput(initial.startAt)}
+            />
+            <input
+              type="hidden"
+              name="startTime"
+              defaultValue={toTimeInput(initial.startAt)}
+            />
+            <input
+              type="hidden"
+              name="endTime"
+              defaultValue={toTimeInput(initial.endAt)}
+            />
+          </>
         ) : null}
 
         <div className="flex items-start justify-between gap-4">
@@ -147,13 +180,20 @@ export function EditSessionDialog({
           </div>
         ) : null}
 
+        {isPast ? (
+          <div className="rounded-md border border-line-strong bg-surface-2 px-3 py-2 text-xs text-fg-muted leading-relaxed">
+            Already started — you can only edit the note, or request removal.
+          </div>
+        ) : null}
+
         <div className="space-y-3">
           <Field label="Resource">
             <select
-              name="resourceId"
-              required
+              name={isPast ? undefined : "resourceId"}
+              required={!isPast}
+              disabled={isPast}
               defaultValue={defaults.resourceId}
-              className={selectStyles}
+              className={`${selectStyles} disabled:opacity-60 disabled:cursor-not-allowed`}
             >
               <option value="" disabled>
                 Choose a resource…
@@ -189,32 +229,69 @@ export function EditSessionDialog({
           </Field>
 
           <div className="grid grid-cols-3 gap-3">
-            <Field label="Date">
-              <DateInput
-                name="date"
-                required
-                defaultValue={defaults.date}
-                className={inputStyles}
-              />
-            </Field>
-            <Field label="Start">
-              <TimeSelect
-                name="startTime"
-                variant="start"
-                required
-                defaultValue={defaults.startTime}
-                className={selectStyles}
-              />
-            </Field>
-            <Field label="End">
-              <TimeSelect
-                name="endTime"
-                variant="end"
-                required
-                defaultValue={defaults.endTime}
-                className={selectStyles}
-              />
-            </Field>
+            {/* PAST rental: render disabled read-only displays (no `name`, so
+                they don't submit) — the hidden fields above carry the values.
+                FUTURE rental: the editable date/time controls. */}
+            {isPast ? (
+              <>
+                <Field label="Date">
+                  <input
+                    type="text"
+                    value={defaults.date}
+                    disabled
+                    readOnly
+                    className={`${inputStyles} disabled:opacity-60 disabled:cursor-not-allowed`}
+                  />
+                </Field>
+                <Field label="Start">
+                  <input
+                    type="text"
+                    value={defaults.startTime}
+                    disabled
+                    readOnly
+                    className={`${inputStyles} disabled:opacity-60 disabled:cursor-not-allowed`}
+                  />
+                </Field>
+                <Field label="End">
+                  <input
+                    type="text"
+                    value={defaults.endTime}
+                    disabled
+                    readOnly
+                    className={`${inputStyles} disabled:opacity-60 disabled:cursor-not-allowed`}
+                  />
+                </Field>
+              </>
+            ) : (
+              <>
+                <Field label="Date">
+                  <DateInput
+                    name="date"
+                    required
+                    defaultValue={defaults.date}
+                    className={inputStyles}
+                  />
+                </Field>
+                <Field label="Start">
+                  <TimeSelect
+                    name="startTime"
+                    variant="start"
+                    required
+                    defaultValue={defaults.startTime}
+                    className={selectStyles}
+                  />
+                </Field>
+                <Field label="End">
+                  <TimeSelect
+                    name="endTime"
+                    variant="end"
+                    required
+                    defaultValue={defaults.endTime}
+                    className={selectStyles}
+                  />
+                </Field>
+              </>
+            )}
           </div>
 
           <Field label="Note" optional>

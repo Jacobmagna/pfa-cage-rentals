@@ -225,6 +225,13 @@
       "when": 1781039223512,
       "tag": "0031_long_wallow",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1781045014096,
+      "tag": "0032_complete_blonde_phantom",
+      "breakpoints": true
     }
   ]
 }

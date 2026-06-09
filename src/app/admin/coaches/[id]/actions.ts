@@ -23,7 +23,10 @@ import {
   deleteProgramRateOverrideInternal,
   upsertProgramRateOverrideInternal,
 } from "@/lib/server/program-rate-override-actions";
-import { deleteCoachInternal } from "@/lib/server/user-actions";
+import {
+  archiveCoachInternal,
+  deleteCoachInternal,
+} from "@/lib/server/user-actions";
 import { updateUserHandlesInternal } from "@/lib/server/handles-actions";
 
 function revalidateOverrideSurfaces(coachId: string) {
@@ -88,10 +91,28 @@ export async function updateCoachHandles(input: unknown) {
   return result;
 }
 
-// J9 account deletion. Soft-delete + anonymize. See
-// src/lib/server/user-actions.ts for the shape; this wrapper just
-// gates with requireRole and revalidates every surface that lists
-// active coaches.
+// #28 archive coach. REVERSIBLE soft-delete that PRESERVES name/email —
+// this is what the danger-zone "Archive coach" card calls. Mirrors the
+// revalidation set of deleteCoach / restoreCoach so the coach leaves the
+// active surfaces and appears (with real identity) on /admin/coaches/archive.
+export async function archiveCoach(coachId: string) {
+  const session = await requireRole("admin");
+  await archiveCoachInternal(session.user, coachId);
+  revalidatePath(`/admin/coaches/${coachId}`);
+  revalidatePath("/admin/coaches");
+  revalidatePath("/admin/coaches/archive");
+  revalidatePath("/admin/sessions");
+  revalidatePath("/admin/schedule");
+  revalidatePath("/admin/reports");
+  revalidatePath("/admin/audit");
+}
+
+// J9 account deletion (GDPR / "remove my info"). Soft-delete + ANONYMIZE.
+// See src/lib/server/user-actions.ts for the shape; this wrapper gates
+// with requireRole and revalidates every surface that lists active
+// coaches. No longer wired to the interactive UI (the Archive card now
+// uses the non-anonymizing archiveCoach above) — kept exported for the
+// privacy-erasure path / scripts.
 export async function deleteCoach(coachId: string) {
   const session = await requireRole("admin");
   await deleteCoachInternal(session.user, { coachId });

@@ -7,7 +7,7 @@
 
 export type ProgramFieldDefaults = {
   name: string;
-  /** Pay rate per 30 min, as dollars (e.g. "22.00"). "" = no rate. */
+  /** Pay rate per HOUR, as dollars (e.g. "44.00"). "" = no rate. */
   rateDollars: string;
 };
 
@@ -30,7 +30,7 @@ export function ProgramFields({
         />
       </Field>
 
-      <Field label="Pay rate (per 30 min)">
+      <Field label="Pay rate (per hour)">
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-fg-subtle">
             $
@@ -40,8 +40,8 @@ export function ProgramFields({
             inputMode="decimal"
             name="rateDollars"
             defaultValue={defaults.rateDollars}
-            placeholder="Optional — e.g. 22.00"
-            aria-label="Pay rate per 30 minutes"
+            placeholder="Optional — e.g. 44.00"
+            aria-label="Pay rate per hour"
             className={`${inputStyles} pl-7`}
           />
         </div>

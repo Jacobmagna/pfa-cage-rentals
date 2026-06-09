@@ -12,6 +12,7 @@ import {
   addCoachInternal,
   CoachEmailTakenError,
   mergeSyntheticCoachInternal,
+  restoreCoachInternal,
 } from "@/lib/server/user-actions";
 
 export async function mergeSyntheticCoach(
@@ -33,6 +34,22 @@ export async function mergeSyntheticCoach(
   revalidatePath("/admin/schedule");
   revalidatePath("/admin/reports");
   return result;
+}
+
+// Restore a soft-deleted (archived) coach back to the active roster.
+// Mirrors restoreAthletes — thin authz wrapper, revalidates both the
+// archive view (the row leaves) and the active list + active-coach
+// surfaces (the coach returns). The internal is a no-op for already-
+// active / unknown ids, so a stray click can't error.
+export async function restoreCoach(coachId: string) {
+  const session = await requireRole("admin");
+  await restoreCoachInternal(session.user, coachId);
+  revalidatePath("/admin/coaches/archive");
+  revalidatePath("/admin/coaches");
+  revalidatePath("/admin/sessions");
+  revalidatePath("/admin/schedule");
+  revalidatePath("/admin/reports");
+  revalidatePath("/admin/audit");
 }
 
 // ---- Add coach (invite path) --------------------------------------------

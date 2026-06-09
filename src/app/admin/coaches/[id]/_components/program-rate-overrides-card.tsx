@@ -82,10 +82,12 @@ function Row({
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const hasOverride = row.override !== null;
+  // Rates are STORED per 30 min but DISPLAYED/ENTERED per hour, so show
+  // the hourly dollars (stored cents × 2 / 100).
   const defaultDollars =
-    row.defaultCents !== null ? formatDollars(row.defaultCents) : null;
+    row.defaultCents !== null ? formatHourlyDollars(row.defaultCents) : null;
   const overrideDollars = row.override
-    ? formatDollars(row.override.ratePer30MinCents)
+    ? formatHourlyDollars(row.override.ratePer30MinCents)
     : "";
 
   // Re-key the form when the override changes (server re-fetched). Without
@@ -150,7 +152,7 @@ function Row({
           {defaultDollars !== null ? `$${defaultDollars}` : "—"}
         </p>
         <p className="text-[10px] text-fg-subtle uppercase tracking-wider mt-0.5">
-          default / 30 min
+          default / hr
         </p>
       </div>
 
@@ -215,7 +217,7 @@ function Row({
             Future work for {row.programName} will pay at the program
             default
             {defaultDollars !== null
-              ? ` of $${defaultDollars} per 30 min`
+              ? ` of $${defaultDollars} per hr`
               : " (none set)"}
             . Past logged hours keep the rate they were stamped with.
           </>
@@ -228,6 +230,7 @@ function Row({
   );
 }
 
-function formatDollars(cents: number): string {
-  return (cents / 100).toFixed(2);
+// Stored cents are PER 30 MIN; the UI shows rates PER HOUR, so double.
+function formatHourlyDollars(centsPer30Min: number): string {
+  return ((centsPer30Min * 2) / 100).toFixed(2);
 }

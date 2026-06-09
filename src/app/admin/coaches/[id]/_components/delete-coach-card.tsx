@@ -19,8 +19,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2 } from "lucide-react";
-import { deleteCoach } from "../actions";
+import { Archive } from "lucide-react";
+import { archiveCoach } from "../actions";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 
 export function DeleteCoachCard({
@@ -53,13 +53,13 @@ export function DeleteCoachCard({
     setError(null);
     startTransition(async () => {
       try {
-        await deleteCoach(coachId);
+        await archiveCoach(coachId);
         router.push("/admin/coaches");
       } catch (err) {
         setError(
           err instanceof Error
             ? err.message
-            : "Couldn't delete this coach. Please try again.",
+            : "Couldn't archive this coach. Please try again.",
         );
       }
     });
@@ -72,20 +72,20 @@ export function DeleteCoachCard({
           Danger zone
         </p>
         <h3 className="mt-1 text-base font-semibold text-fg">
-          Delete coach
+          Archive coach
         </h3>
         <p className="mt-1.5 text-xs text-fg-muted leading-relaxed">
-          Anonymizes this coach&rsquo;s identity (name and email) and removes
-          them from active lists. Past session and billing rows are kept for
-          historical reports but no longer linked to a personal identity.
-          The coach won&rsquo;t be able to sign back in. This action cannot
-          be undone.
+          Removes this coach from active lists. Their name, email, and past
+          session and billing rows are all kept. While archived they
+          won&rsquo;t be able to sign in. This is reversible &mdash; you can
+          restore them anytime from the Archived coaches list with their
+          information intact.
         </p>
       </div>
       <div className="px-5 py-4 flex items-center justify-between gap-4">
         <p className="text-xs text-fg-muted">
           {isAdmin
-            ? "Admins can't be deleted from this screen."
+            ? "Admins can't be archived from this screen."
             : "Type the coach's name on the next screen to confirm."}
         </p>
         <button
@@ -94,26 +94,26 @@ export function DeleteCoachCard({
           disabled={isAdmin}
           title={
             isAdmin
-              ? "Admin accounts can't be deleted via this surface"
+              ? "Admin accounts can't be archived via this surface"
               : undefined
           }
           className="inline-flex items-center gap-1.5 rounded-lg border border-danger/40 bg-danger/10 text-danger hover:bg-danger/20 hover:border-danger/60 shadow-[var(--shadow-sm)] h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
         >
-          <Trash2 className="h-3.5 w-3.5" />
-          Delete coach
+          <Archive className="h-3.5 w-3.5" />
+          Archive coach
         </button>
       </div>
 
       <ConfirmDialog
         open={open}
         onOpenChange={handleOpenChange}
-        title="Delete this coach?"
+        title="Archive this coach?"
         description={
           <>
             <p>
-              This anonymizes their identity and removes them from active
-              surfaces. Past billing stays in reports under &ldquo;Former
-              coach.&rdquo;
+              This removes them from active surfaces but keeps their name,
+              email, and past billing intact. You can restore them anytime
+              from the Archived coaches list.
             </p>
             {error ? (
               <p role="alert" className="mt-2 text-danger">
@@ -123,7 +123,7 @@ export function DeleteCoachCard({
           </>
         }
         typedConfirmation={{ phrase: expected }}
-        confirmLabel={pending ? "Deleting…" : "Delete coach"}
+        confirmLabel={pending ? "Archiving…" : "Archive coach"}
         onConfirm={handleConfirm}
         isPending={pending}
       />

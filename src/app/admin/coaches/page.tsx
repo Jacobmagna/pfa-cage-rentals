@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { and, asc, eq, gte, isNull, lt } from "drizzle-orm";
-import { ArrowLeft } from "lucide-react";
+import { Archive, ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import { sessionsBilling, users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
@@ -124,6 +124,13 @@ export default async function AdminCoachesPage() {
           This page is designed for desktop. Rotate your device or use a
           laptop for the full experience.
         </p>
+        <Link
+          href="/admin/coaches/archive"
+          className="inline-flex items-center gap-1.5 pt-1 text-xs font-medium text-fg-muted hover:text-fg transition-colors"
+        >
+          <Archive className="h-3.5 w-3.5" />
+          Archived coaches
+        </Link>
       </div>
 
       <AddCoachForm />

@@ -233,6 +233,43 @@ export function reconcileBlocks(
 }
 
 /**
+ * Match ONE scheduled block to a log, deterministically — the single
+ * source of truth for "which block did this log belong to". Returns null
+ * when no block of the same program overlaps the log (an unscheduled /
+ * ad-hoc log). Choice order:
+ *   1. a block the coach is IN-SET on AND within tolerance, else
+ *   2. a block the coach is in-set on, else
+ *   3. the first overlapping block by startAt (tie-break id).
+ * Both `annotateLogs` (schedule notes) and the accountability scorecard's
+ * over-logged check call this so the matching lives in exactly one place.
+ */
+export function matchLogToBlock(
+  log: { coachId: string; programId: string; startAt: Date; endAt: Date },
+  blocks: ReconBlock[],
+): ReconBlock | null {
+  const candidates = blocks.filter(
+    (block) =>
+      block.programId === log.programId &&
+      overlaps(log.startAt, log.endAt, block.startAt, block.endAt),
+  );
+  if (candidates.length === 0) return null;
+
+  const sorted = [...candidates].sort(
+    (a, b) =>
+      a.startAt.getTime() - b.startAt.getTime() || a.id.localeCompare(b.id),
+  );
+  // QA10 W3.2: same-coach means "this coach is in the block's scheduled
+  // coach SET" (not just the primary).
+  const inSet = (block: ReconBlock) =>
+    block.coaches.some((bc) => bc.coachId === log.coachId);
+  return (
+    sorted.find((block) => inSet(block) && withinTol(log, block)) ??
+    sorted.find((block) => inSet(block)) ??
+    sorted[0]
+  );
+}
+
+/**
  * Annotates each hour-log with a "Schedule" note describing how it
  * differs from what was scheduled. Returns logId → note | null, where
  * null means "no mismatch worth noting" (on-schedule or unscheduled).
@@ -247,34 +284,18 @@ export function annotateLogs(
   for (const l of logs) {
     const c = l.coachId;
 
-    const candidates = blocks.filter(
-      (block) =>
-        block.programId === l.programId &&
-        overlaps(l.startAt, l.endAt, block.startAt, block.endAt),
-    );
+    const chosen = matchLogToBlock(l, blocks);
 
-    if (candidates.length === 0) {
+    if (chosen === null) {
       // Unscheduled / ad-hoc log — nothing to say.
       result[l.id] = null;
       continue;
     }
 
-    // Choose ONE block deterministically:
-    //   1. same coach AND within tolerance, else
-    //   2. same coach, else
-    //   3. the first by startAt (tie-break id).
-    const sorted = [...candidates].sort(
-      (a, b) =>
-        a.startAt.getTime() - b.startAt.getTime() || a.id.localeCompare(b.id),
-    );
-    // QA10 W3.2: same-coach now means "this coach is in the block's
+    // QA10 W3.2: same-coach means "this coach is in the block's
     // scheduled-coach SET" (not just the primary).
     const inSet = (block: ReconBlock) =>
       block.coaches.some((bc) => bc.coachId === c);
-    const chosen =
-      sorted.find((block) => inSet(block) && withinTol(l, block)) ??
-      sorted.find((block) => inSet(block)) ??
-      sorted[0];
 
     if (inSet(chosen) && withinTol(l, chosen)) {
       // On schedule — no note.

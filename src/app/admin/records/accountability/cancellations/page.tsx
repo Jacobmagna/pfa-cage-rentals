@@ -5,10 +5,11 @@ import { loadCancellationsDashboard } from "@/lib/server/cancellations-data";
 import type { CancelCategory } from "@/lib/cancellation";
 import { formatPfaDateMedium, formatPfaTime12h } from "@/lib/timezone";
 
-// /admin/cage-rentals/cancellations — billable #26/27. Read-only audit of
-// deleted cage rentals: a per-coach pattern rollup (most-concerning first,
-// repeat offenders flagged) plus a recent-cancellations feed with derived
-// timing categories. Thin server shell — guards the role, loads the
+// /admin/records/accountability/cancellations — billable #26/27. Read-only
+// audit of deleted cage rentals: a per-coach pattern rollup (most-concerning
+// first, repeat offenders flagged) plus a recent-cancellations feed with
+// derived timing categories. The "late cancels" drill-down of the coach
+// accountability scorecard. Thin server shell — guards the role, loads the
 // dashboard, renders. Mirrors the duplicates sub-page (back-link + header +
 // empty state) and the existing admin table styling.
 
@@ -57,11 +58,11 @@ export default async function CancellationsPage() {
   return (
     <>
       <Link
-        href="/admin/cage-rentals"
+        href="/admin/records/accountability"
         className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
-        Back to Rentals
+        Back to Coach accountability
       </Link>
 
       <div className="mb-6 space-y-1.5">

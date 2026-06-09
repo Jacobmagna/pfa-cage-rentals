@@ -231,6 +231,120 @@ export async function fetchBlockAccountabilityAlerts(
 }
 
 /**
+ * Per-coach no-show COUNT over a `sinceDays` (default 90) lookback, for the
+ * Coach Accountability scorecard. Mirrors `fetchBlockAccountabilityAlerts`'s
+ * no-show derivation (same tables/joins, same `noShowDueAt` + `isLogScheduled`
+ * helpers) with TWO differences:
+ *   • lookback is `sinceDays` (90), not the queue's hardcoded 30; and
+ *   • it COUNTS already-acknowledged no_show flags — an acknowledged no-show
+ *     still happened, so unlike the queue we do NOT suppress on existing
+ *     no_show flags. CANCELLED flags still suppress (the coach told us in
+ *     advance), exactly as in the queue.
+ *
+ * Returns coachId → count (coaches with zero no-shows are simply absent).
+ */
+export async function countNoShowsByCoach(
+  now: Date,
+  sinceDays = 90,
+): Promise<Map<string, number>> {
+  const windowStart = new Date(now.getTime() - sinceDays * 24 * 60 * 60_000);
+
+  // Candidate (block, member-coach) pairs: blocks that have ENDED within the
+  // window, for every member coach. Same fetch as the queue.
+  const candidates = await db
+    .select({
+      blockId: programScheduleBlocks.id,
+      programId: programScheduleBlocks.programId,
+      coachId: programScheduleBlockCoaches.coachId,
+      startAt: programScheduleBlocks.startAt,
+      endAt: programScheduleBlocks.endAt,
+    })
+    .from(programScheduleBlocks)
+    .innerJoin(
+      programScheduleBlockCoaches,
+      eq(programScheduleBlockCoaches.blockId, programScheduleBlocks.id),
+    )
+    .where(
+      and(
+        gte(programScheduleBlocks.endAt, windowStart),
+        lt(programScheduleBlocks.endAt, now),
+      ),
+    );
+
+  const counts = new Map<string, number>();
+  if (candidates.length === 0) return counts;
+
+  const coachIds = [...new Set(candidates.map((c) => c.coachId))];
+  const blockIds = [...new Set(candidates.map((c) => c.blockId))];
+
+  // Logs for these coaches within the window, grouped by coach.
+  const logRows = await db
+    .select({
+      coachId: hourLogs.coachId,
+      programId: hourLogs.programId,
+      startAt: hourLogs.startAt,
+      endAt: hourLogs.endAt,
+    })
+    .from(hourLogs)
+    .where(
+      and(
+        inArray(hourLogs.coachId, coachIds),
+        gte(hourLogs.startAt, windowStart),
+      ),
+    );
+
+  const logsByCoach = new Map<
+    string,
+    { programId: string; startMs: number; endMs: number }[]
+  >();
+  for (const log of logRows) {
+    const list = logsByCoach.get(log.coachId) ?? [];
+    list.push({
+      programId: log.programId,
+      startMs: log.startAt.getTime(),
+      endMs: log.endAt.getTime(),
+    });
+    logsByCoach.set(log.coachId, list);
+  }
+
+  // Only CANCELLED flags suppress a no-show here (unlike the queue, an acked
+  // no_show flag does NOT — it still counts as a no-show that happened).
+  const flagRows = await db
+    .select({
+      blockId: programBlockCoachFlags.blockId,
+      coachId: programBlockCoachFlags.coachId,
+      kind: programBlockCoachFlags.kind,
+    })
+    .from(programBlockCoachFlags)
+    .where(inArray(programBlockCoachFlags.blockId, blockIds));
+
+  const cancelledKeys = new Set<string>();
+  for (const f of flagRows) {
+    if (f.kind === "cancelled") {
+      cancelledKeys.add(`${f.blockId}:${f.coachId}`);
+    }
+  }
+
+  const nowMs = now.getTime();
+  for (const c of candidates) {
+    if (nowMs < noShowDueAt(c.endAt).getTime()) continue;
+    if (cancelledKeys.has(`${c.blockId}:${c.coachId}`)) continue;
+    const scheduled = isLogScheduled(
+      {
+        programId: c.programId,
+        startMs: c.startAt.getTime(),
+        endMs: c.endAt.getTime(),
+      },
+      logsByCoach.get(c.coachId) ?? [],
+    );
+    if (scheduled) continue;
+    counts.set(c.coachId, (counts.get(c.coachId) ?? 0) + 1);
+  }
+
+  return counts;
+}
+
+/**
  * The full merged admin "Needs review" queue, newest-first (startAt desc).
  * Combines the hour-log-derived alerts (unscheduled / double_logged /
  * wrong_time, from `fetchHourLogRowsWithScheduleNotes`) with the

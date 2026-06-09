@@ -164,16 +164,6 @@ export default async function AdminHome() {
             title="Rentals"
             stat="Log, edit, review"
           />
-          <NavCard
-            href="/admin/cage-rentals/cancellations"
-            icon={<CalendarX className="h-4 w-4" />}
-            title="Cancellations"
-            stat={
-              cancelCounts.lastMinute30d === 0
-                ? "No late cancels (30d)"
-                : `${cancelCounts.lastMinute30d} late cancel${cancelCounts.lastMinute30d === 1 ? "" : "s"} (30d)`
-            }
-          />
         </div>
       </section>
     </>

@@ -125,7 +125,6 @@ describe("deleteCoachInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
-      useType: "hitting",
     });
 
     await deleteCoachInternal(fixtures.admin, { coachId: coach.id });
@@ -258,14 +257,12 @@ describe("mergeSyntheticCoachInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
-      useType: "hitting",
     });
     const s2 = await createSessionInternal(fixtures.admin, {
       coachId: source.id,
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(13),
       endAt: tomorrowAt(14),
-      useType: "hitting",
     });
 
     // A rate override on the synthetic — should be dropped.
@@ -350,7 +347,6 @@ describe("mergeSyntheticCoachInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
-      useType: "hitting",
     });
     expect(session.ratePer30MinCents).toBe(1500);
 
@@ -447,7 +443,6 @@ describe("mergeSyntheticCoachInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
-      useType: "hitting",
     });
 
     await mergeSyntheticCoachInternal(fixtures.admin, source.id, target.id);
@@ -468,7 +463,6 @@ describe("mergeSyntheticCoachInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
-      useType: "hitting",
     });
 
     // Step 1 done manually (no audit).

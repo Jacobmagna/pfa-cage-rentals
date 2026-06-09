@@ -174,21 +174,7 @@ describe("rateForProgram", () => {
 describe("computeRate", () => {
   const coachId = "coach-1";
 
-  it("returns 0 for an online session regardless of overrides", () => {
-    const overrides: RateOverride[] = [
-      { coachId, resourceType: "cage", ratePer30MinCents: 1500 },
-    ];
-    expect(
-      computeRate({
-        coachId,
-        resourceType: "cage",
-        isOnline: true,
-        overrides,
-      }),
-    ).toBe(0);
-  });
-
-  it("returns the per-coach override when not online", () => {
+  it("returns the per-coach override when one matches", () => {
     const overrides: RateOverride[] = [
       { coachId, resourceType: "cage", ratePer30MinCents: 1700 },
     ];
@@ -196,7 +182,6 @@ describe("computeRate", () => {
       computeRate({
         coachId,
         resourceType: "cage",
-        isOnline: false,
         overrides,
       }),
     ).toBe(1700);
@@ -207,7 +192,6 @@ describe("computeRate", () => {
       computeRate({
         coachId,
         resourceType: "weight_room",
-        isOnline: false,
         overrides: [],
       }),
     ).toBe(700);
@@ -218,26 +202,10 @@ describe("computeRate", () => {
       computeRate({
         coachId,
         resourceType: "cage",
-        isOnline: false,
         overrides: [],
         defaults: { cage: 2400, bullpen: 2400, weight_room: 800 },
       }),
     ).toBe(2400);
-  });
-
-  it("online flag wins over both override and custom defaults", () => {
-    const overrides: RateOverride[] = [
-      { coachId, resourceType: "cage", ratePer30MinCents: 1700 },
-    ];
-    expect(
-      computeRate({
-        coachId,
-        resourceType: "cage",
-        isOnline: true,
-        overrides,
-        defaults: { cage: 9999, bullpen: 9999, weight_room: 9999 },
-      }),
-    ).toBe(0);
   });
 });
 
@@ -252,7 +220,7 @@ describe("totalFromSnapshot", () => {
     ).toBe(5100);
   });
 
-  it("returns 0 when the snapshot rate is 0 (online session)", () => {
+  it("returns 0 when the snapshot rate is 0", () => {
     expect(
       totalFromSnapshot(
         new Date("2026-05-24T09:00:00Z"),

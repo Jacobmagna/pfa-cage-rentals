@@ -5,9 +5,9 @@
 // lands on page 1.
 //
 // From/To reuse the shared masked DateInput (digits → MM/DD/YYYY, hidden ISO).
-// Resource + use-type are plain <select>s (a coach picks at most one of each —
-// no multi-select needed at this surface). "Clear" links back to the bare
-// route, dropping every param.
+// Resource is a plain <select> (a coach picks at most one — no multi-select
+// needed at this surface). "Clear" links back to the bare route, dropping
+// every param.
 
 import { Search, X } from "lucide-react";
 import Link from "next/link";
@@ -18,7 +18,6 @@ type HistoryFilterValues = {
   from: string | null;
   to: string | null;
   resourceId: string | null;
-  useType: "hitting" | "pitching" | null;
 };
 
 export function HistoryFilters({
@@ -36,7 +35,7 @@ export function HistoryFilters({
       action="/coach/sessions"
       className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] p-4 mb-5"
     >
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 lg:items-end">
         <Field label="From">
           <DateInput
             name="from"
@@ -67,19 +66,6 @@ export function HistoryFilters({
                 {r.name}
               </option>
             ))}
-          </select>
-        </Field>
-
-        <Field label="Use type">
-          <select
-            name="useType"
-            defaultValue={values.useType ?? ""}
-            className={inputStyles}
-            aria-label="Filter by use type"
-          >
-            <option value="">All uses</option>
-            <option value="hitting">Hitting</option>
-            <option value="pitching">Pitching</option>
           </select>
         </Field>
       </div>

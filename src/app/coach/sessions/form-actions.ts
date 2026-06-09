@@ -13,7 +13,6 @@ import {
   ResourceNotFoundError,
   SessionNotFoundError,
   SessionOverlapError,
-  UseTypeValidationError,
 } from "@/lib/errors";
 import { parsePfaInput } from "@/lib/timezone";
 
@@ -22,11 +21,7 @@ export type EditFormValues = {
   date: string;
   startTime: string;
   endTime: string;
-  useType: string;
   note: string;
-  isTeamRental: boolean;
-  pfaReferred: boolean;
-  isOnline: boolean;
 };
 
 export type EditActionResult =
@@ -43,11 +38,7 @@ function snapshot(formData: FormData): EditFormValues {
     date: formData.get("date")?.toString() ?? "",
     startTime: formData.get("startTime")?.toString() ?? "",
     endTime: formData.get("endTime")?.toString() ?? "",
-    useType: formData.get("useType")?.toString() ?? "",
     note: formData.get("note")?.toString() ?? "",
-    isTeamRental: formData.get("isTeamRental") === "on",
-    pfaReferred: formData.get("pfaReferred") === "on",
-    isOnline: formData.get("isOnline") === "on",
   };
 }
 
@@ -60,19 +51,11 @@ function buildInput(formData: FormData) {
   }
   const startAt = parsePfaInput(dateStr, startStr);
   const endAt = parsePfaInput(dateStr, endStr);
-  const useTypeRaw = formData.get("useType")?.toString().trim();
   return {
     resourceId: formData.get("resourceId")?.toString() ?? "",
     startAt,
     endAt,
-    useType:
-      useTypeRaw === "hitting" || useTypeRaw === "pitching"
-        ? useTypeRaw
-        : null,
     note: formData.get("note")?.toString().trim() || null,
-    isTeamRental: formData.get("isTeamRental") === "on",
-    pfaReferred: formData.get("pfaReferred") === "on",
-    isOnline: formData.get("isOnline") === "on",
   };
 }
 
@@ -80,7 +63,6 @@ function translate(err: unknown, values: EditFormValues): EditActionResult {
   if (
     err instanceof SessionOverlapError ||
     err instanceof BlockedTimeError ||
-    err instanceof UseTypeValidationError ||
     err instanceof SessionNotFoundError ||
     err instanceof ResourceNotFoundError
   ) {

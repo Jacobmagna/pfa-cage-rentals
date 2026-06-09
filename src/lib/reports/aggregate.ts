@@ -32,11 +32,7 @@ export type AggregateSessionInput = {
   resourceType: ResourceType;
   startAt: Date;
   endAt: Date;
-  useType: "hitting" | "pitching" | null;
   note: string | null;
-  isTeamRental: boolean;
-  pfaReferred: boolean;
-  isOnline: boolean;
   /** Cents-per-30-min rate stamped on the session row at creation. */
   ratePer30MinCents: number;
 };
@@ -73,13 +69,9 @@ export type DetailRow = {
   coachId: string;
   coachName: string;     // Display name; falls back to email if null
   coachEmail: string;
-  useType: "hitting" | "pitching" | null;
   ratePerSlotCents: number;
   totalCents: number;
   note: string | null;
-  isTeamRental: boolean;
-  pfaReferred: boolean;
-  isOnline: boolean;
 };
 
 export type SummaryRow = {
@@ -102,7 +94,6 @@ export type SummaryRow = {
    * directions are never summed.
    */
   totalCents: number;
-  onlineSessions: number;
 };
 
 export type ReportData = {
@@ -120,8 +111,7 @@ export type ReportData = {
  * is sorted by coach name for stable UI / Excel output.
  *
  * Reads `ratePer30MinCents` straight off each input row — never
- * recomputes. Online sessions arrive with rate 0 and naturally
- * contribute $0 to totals.
+ * recomputes.
  *
  * `hourLogs` (optional) are program-hour entries: they roll into each
  * coach's summary as the "Program hours" category (`programTotalCents`)
@@ -152,13 +142,9 @@ export function aggregateReport(
       coachId: s.coachId,
       coachName: s.coachName ?? s.coachEmail,
       coachEmail: s.coachEmail,
-      useType: s.useType,
       ratePerSlotCents: s.ratePer30MinCents,
       totalCents,
       note: s.note,
-      isTeamRental: s.isTeamRental,
-      pfaReferred: s.pfaReferred,
-      isOnline: s.isOnline,
     };
   });
 
@@ -188,7 +174,6 @@ export function aggregateReport(
         programSlots: 0,
         programTotalCents: 0,
         totalCents: 0,
-        onlineSessions: 0,
       };
       summaryMap.set(coachId, entry);
     }
@@ -211,7 +196,6 @@ export function aggregateReport(
         break;
     }
     entry.totalCents += row.totalCents;
-    if (row.isOnline) entry.onlineSessions += 1;
   }
 
   // Fold program hours into the same per-coach summary as an additive

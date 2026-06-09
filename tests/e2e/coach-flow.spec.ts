@@ -107,7 +107,6 @@ test("coach logs a session, sees it in history, then deletes it", async ({
   await expect(page.getByRole("heading", { name: "New session" })).toBeVisible();
 
   await page.locator("select[name=resourceId]").selectOption({ label: "Cage 5" });
-  await page.locator("select[name=useType]").selectOption({ value: "hitting" });
   await page.locator("input[name=note]").fill("E2E happy path");
 
   await page.getByRole("button", { name: "Log session" }).click();

@@ -186,7 +186,6 @@ describe("updateRateDefaultsInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
-      useType: "hitting",
     });
     expect(session.ratePer30MinCents).toBe(2200); // seeded cage default
 
@@ -217,7 +216,6 @@ describe("updateRateDefaultsInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
-      useType: "hitting",
     });
     expect(session.ratePer30MinCents).toBe(3000);
   });

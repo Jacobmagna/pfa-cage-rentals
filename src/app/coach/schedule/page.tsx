@@ -100,9 +100,6 @@ export default async function CoachSchedulePage({
         resourceType: resources.type,
         startAt: sessionsBilling.startAt,
         endAt: sessionsBilling.endAt,
-        useType: sessionsBilling.useType,
-        isTeamRental: sessionsBilling.isTeamRental,
-        isOnline: sessionsBilling.isOnline,
       })
       .from(sessionsBilling)
       .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
@@ -156,9 +153,6 @@ export default async function CoachSchedulePage({
         dayIndex,
         resourceName: s.resourceName,
         resourceType: s.resourceType,
-        useType: s.useType,
-        isTeamRental: s.isTeamRental,
-        isOnline: s.isOnline,
         startAt: s.startAt,
         endAt: s.endAt,
       },

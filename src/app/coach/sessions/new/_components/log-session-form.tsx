@@ -17,7 +17,6 @@ import type { ResourceOption } from "../../_components/types";
 import { CompletionPanel } from "@/app/_components/completion-panel";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
-import { SessionFlagsRow } from "@/app/_components/session-flags-row";
 import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
 import {
   SessionSlotsList,
@@ -25,7 +24,6 @@ import {
   type SlotInput,
 } from "@/app/_components/session-slots-list";
 import { formatPfaDate, formatPfaTime, parsePfaInput } from "@/lib/timezone";
-import { cageUseTypeError } from "@/lib/use-type-validation";
 import { AvailabilityPanel } from "./availability-panel";
 
 const INITIAL_STATE: CoachActionResult = { ok: true, loggedAt: 0 };
@@ -36,7 +34,7 @@ const INITIAL_STATE: CoachActionResult = { ok: true, loggedAt: 0 };
 //   - Multi slot (end - start > slotLength): onSubmit intercepts,
 //     calls logOwnSessionsBatch directly with the live slot array.
 //     The slot list is controlled and N notecards render in place
-//     of the single Note + TeamRental fields.
+//     of the single Note field.
 //
 // Why two paths instead of one batch-only path: keeping the
 // useActionState flow for the common N=1 case means we don't have
@@ -90,11 +88,7 @@ export function LogSessionForm({
       date: toDateInput(start),
       startTime,
       endTime,
-      useType: "",
       note: "",
-      isTeamRental: false,
-      pfaReferred: false,
-      isOnline: false,
     };
   }, [state]);
 
@@ -155,21 +149,11 @@ export function LogSessionForm({
   // Slot length + computed slot count. Slot count = (end - start) /
   // length, validated for clean divisibility. If invalid (e.g. 4h15m
   // / 30min), count = 0 and we show an inline error.
-  const [slotLengthMinutes, setSlotLengthMinutes] = useState<30 | 60>(30);
+  const [slotLengthMinutes, setSlotLengthMinutes] = useState<number>(30);
   const [slots, setSlots] = useState<SlotInput[]>([]);
   // Per-session notes editor is collapsed by default on multi-slot.
   // The coach reveals it on demand via a small affordance.
   const [revealNotes, setRevealNotes] = useState(false);
-  const [useTypeValue, setUseTypeValue] = useState(defaults.useType);
-
-  // Reset useType when defaults change (post-success or post-error reset).
-  const [prevUseTypeDefault, setPrevUseTypeDefault] = useState(
-    defaults.useType,
-  );
-  if (defaults.useType !== prevUseTypeDefault) {
-    setPrevUseTypeDefault(defaults.useType);
-    setUseTypeValue(defaults.useType);
-  }
 
   const { rangeStart, rangeEnd, slotCount, divisibilityError } = useMemo(() => {
     if (!live.date || !live.startTime || !live.endTime) {
@@ -268,42 +252,15 @@ export function LogSessionForm({
     if (slotCount === 0 || divisibilityError) return;
     if (slots.length === 0) return;
 
-    // Cage use-type guard BEFORE hitting the batch action. The server
-    // still enforces this (createSessionsBatchInternal throws
-    // UseTypeValidationError), but an uncaught server-action throw is
-    // redacted to a generic "Server Components render" message in
-    // production — so we surface the friendly inline message here,
-    // through the same batchResult error channel the action errors use.
-    const selectedResource = resources.find((r) => r.id === live.resourceId);
-    const cageError = selectedResource
-      ? cageUseTypeError(
-          selectedResource.type,
-          useTypeValue === "hitting" || useTypeValue === "pitching"
-            ? useTypeValue
-            : null,
-        )
-      : null;
-    if (cageError) {
-      setBatchResult({ status: "error", message: cageError });
-      return;
-    }
-
     setBatchResult({ status: "idle" });
     startBatchTransition(async () => {
       try {
         await logOwnSessionsBatch({
           resourceId: live.resourceId,
-          useType:
-            useTypeValue === "hitting" || useTypeValue === "pitching"
-              ? useTypeValue
-              : null,
           slots: slots.map((s) => ({
             startAt: s.startAt,
             endAt: s.endAt,
             note: s.note.trim() || null,
-            isTeamRental: s.isTeamRental,
-            pfaReferred: s.pfaReferred,
-            isOnline: s.isOnline,
           })),
         });
         setBatchResult({
@@ -344,7 +301,6 @@ export function LogSessionForm({
         startTime: defaults.startTime,
         endTime: defaults.endTime,
       });
-      setUseTypeValue(defaults.useType);
       setSlotLengthMinutes(30);
       setSlots([]);
       setRevealNotes(false);
@@ -536,45 +492,17 @@ export function LogSessionForm({
           </div>
         ) : null}
 
-        <Field
-          label="Use type"
-          hint="Required for cages (hitting or pitching). Leave blank for bullpens and weight rooms."
-        >
-          <SelectWrapper>
-            <select
-              name="useType"
-              value={useTypeValue}
-              onChange={(e) => setUseTypeValue(e.target.value)}
-              className={selectStyles}
-            >
-              <option value="">— None (bullpen / weight room)</option>
-              <option value="hitting">Hitting</option>
-              <option value="pitching">Pitching</option>
-            </select>
-          </SelectWrapper>
-        </Field>
-
         {!isMultiSlot ? (
-          <>
-            <Field label="Note" optional>
-              <input
-                type="text"
-                name="note"
-                defaultValue={defaults.note}
-                maxLength={500}
-                placeholder="Optional context"
-                className={inputStyles}
-              />
-            </Field>
-
-            <SessionFlagsRow
-              showTeamRental={false}
-              defaults={{
-                pfaReferred: defaults.pfaReferred,
-                isOnline: defaults.isOnline,
-              }}
+          <Field label="Note" optional>
+            <input
+              type="text"
+              name="note"
+              defaultValue={defaults.note}
+              maxLength={500}
+              placeholder="Optional context"
+              className={inputStyles}
             />
-          </>
+          </Field>
         ) : revealNotes ? (
           // Presentational-only: the parent owns derivation (see the
           // deriveSlots effect above), so we do NOT pass range props.
@@ -583,7 +511,6 @@ export function LogSessionForm({
           <SessionSlotsList
             slots={slots}
             onChange={setSlots}
-            showTeamRental={false}
           />
         ) : null}
 

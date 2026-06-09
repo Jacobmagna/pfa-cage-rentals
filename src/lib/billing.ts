@@ -42,8 +42,7 @@ export type RateOverride = {
 
 // Program-hour pay: per-PROGRAM default rate + optional per-(coach,
 // program) override. Same cents-per-30-min unit as cage sessions, but
-// keyed on program rather than resource type. There is no online=$0
-// carve-out — program hours are always billable.
+// keyed on program rather than resource type.
 export type ProgramRateOverride = {
   coachId: string;
   programId: string;
@@ -109,20 +108,14 @@ export function rateForSlot(
 
 /**
  * Computes the cents-per-30-min-slot rate to STAMP onto a new
- * sessions_billing row. Online sessions always bill at $0 — PFA
- * collects from the client directly and nets the rental against the
- * coach's payout, which happens off-app.
- *
- * Otherwise: per-coach override → resource-type default.
+ * sessions_billing row: per-coach override → resource-type default.
  */
 export function computeRate(args: {
   coachId: string;
   resourceType: ResourceType;
-  isOnline: boolean;
   overrides: RateOverride[];
   defaults?: Record<ResourceType, number>;
 }): number {
-  if (args.isOnline) return 0;
   return rateForSlot(
     args.resourceType,
     args.coachId,

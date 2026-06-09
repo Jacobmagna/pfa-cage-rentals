@@ -206,7 +206,6 @@ async function seedFullGraph() {
     resourceId: resource.id,
     startAt: new Date("2026-05-02T14:00:00Z"),
     endAt: new Date("2026-05-02T15:00:00Z"),
-    useType: "hitting",
     ratePer30MinCents: 200,
     createdBy: coach.id,
   });

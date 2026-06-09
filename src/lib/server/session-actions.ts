@@ -11,7 +11,7 @@
 //
 // Pipeline (same for all 3):
 //   1. Zod-parse                           — B1 schemas
-//   2. Resource lookup + useType rule      — business invariant
+//   2. Resource lookup                     — existence check
 //   3. Cross-check blocked_times           — block-vs-session app-layer
 //   4. Mutation, then audit (sequential)   — see "Atomicity" below
 //   5. Translate Postgres 23P01 (EXCLUDE)  — friendly SessionOverlapError
@@ -47,19 +47,16 @@ import {
   ResourceNotFoundError,
   SessionNotFoundError,
   SessionOverlapError,
-  UseTypeValidationError,
 } from "@/lib/errors";
 import {
   createSessionBatchSchema,
   createSessionSchema,
   updateSessionSchema,
 } from "@/lib/schemas/session";
-import { CAGE_USE_TYPE_REQUIRED_MESSAGE } from "@/lib/use-type-validation";
 
 // Resolves the per-30-min cents rate to stamp on a new (or edited)
 // session row. Reads the coach's override + the resource-type default
-// from the DB, then delegates to billing.computeRate. Online sessions
-// always come back as 0 — PFA collects from the client directly.
+// from the DB, then delegates to billing.computeRate.
 //
 // Exported so the historical-import path (src/lib/server/import-actions.ts)
 // can stamp rows with the correct snapshotted rate instead of falling
@@ -67,7 +64,6 @@ import { CAGE_USE_TYPE_REQUIRED_MESSAGE } from "@/lib/use-type-validation";
 export async function resolveRateCents(args: {
   coachId: string;
   resourceType: ResourceType;
-  isOnline: boolean;
 }): Promise<number> {
   const [override] = await db
     .select()
@@ -88,7 +84,6 @@ export async function resolveRateCents(args: {
   return computeRate({
     coachId: args.coachId,
     resourceType: args.resourceType,
-    isOnline: args.isOnline,
     overrides: override
       ? [
           {
@@ -168,30 +163,6 @@ async function findOverlappingSession(
   return row;
 }
 
-// Validates that useType matches the resource's type rules. Cages
-// require hitting or pitching; bullpens and weight rooms must not
-// have a useType. Throws UseTypeValidationError on mismatch.
-//
-// The cage-missing case (the only one a coach/admin can hit from the
-// UI) reuses the shared friendly copy in @/lib/use-type-validation so
-// the message the server stamps here is byte-identical to the inline
-// message the batch-submit guards render client-side.
-function validateUseType(
-  resourceName: string,
-  resourceType: "cage" | "bullpen" | "weight_room",
-  useType: "hitting" | "pitching" | null | undefined,
-) {
-  if (resourceType === "cage") {
-    if (!useType) {
-      throw new UseTypeValidationError(CAGE_USE_TYPE_REQUIRED_MESSAGE);
-    }
-  } else if (useType) {
-    throw new UseTypeValidationError(
-      `${resourceName} is a ${resourceType} — leave use type empty.`,
-    );
-  }
-}
-
 async function getResourceOrThrow(resourceId: string) {
   const [row] = await db
     .select()
@@ -225,7 +196,6 @@ export async function createSessionInternal(
 ) {
   const parsed = createSessionSchema.parse(input);
   const resource = await getResourceOrThrow(parsed.resourceId);
-  validateUseType(resource.name, resource.type, parsed.useType);
 
   const block = await findOverlappingBlock(
     parsed.resourceId,
@@ -234,11 +204,9 @@ export async function createSessionInternal(
   );
   if (block) throw new BlockedTimeError(resource.name, block.reason);
 
-  const isOnline = parsed.isOnline ?? false;
   const ratePer30MinCents = await resolveRateCents({
     coachId: parsed.coachId,
     resourceType: resource.type,
-    isOnline,
   });
 
   let inserted;
@@ -250,11 +218,7 @@ export async function createSessionInternal(
         resourceId: parsed.resourceId,
         startAt: parsed.startAt,
         endAt: parsed.endAt,
-        useType: parsed.useType ?? null,
         note: parsed.note,
-        isTeamRental: parsed.isTeamRental ?? false,
-        pfaReferred: parsed.pfaReferred ?? false,
-        isOnline,
         ratePer30MinCents,
         createdBy: actor.id,
       })
@@ -303,19 +267,14 @@ export async function updateSessionInternal(
   if (!existing) throw new SessionNotFoundError(id);
 
   // Merge desired final state for downstream checks. Drizzle's update
-  // only persists fields present in `parsed`, but useType + block checks
-  // need to know the effective post-update values.
+  // only persists fields present in `parsed`, but the block check + rate
+  // resolution need to know the effective post-update values.
   const finalResourceId = parsed.resourceId ?? existing.resourceId;
   const finalStartAt = parsed.startAt ?? existing.startAt;
   const finalEndAt = parsed.endAt ?? existing.endAt;
-  const finalUseType =
-    parsed.useType !== undefined ? parsed.useType : existing.useType;
   const finalCoachId = parsed.coachId ?? existing.coachId;
-  const finalIsOnline =
-    parsed.isOnline !== undefined ? parsed.isOnline : existing.isOnline;
 
   const resource = await getResourceOrThrow(finalResourceId);
-  validateUseType(resource.name, resource.type, finalUseType);
 
   const block = await findOverlappingBlock(
     finalResourceId,
@@ -325,19 +284,17 @@ export async function updateSessionInternal(
   if (block) throw new BlockedTimeError(resource.name, block.reason);
 
   // Re-stamp ratePer30MinCents only when one of its inputs changed.
-  // Editing time/note/teamRental/useType leaves the historical rate
-  // alone — this honors the snapshot guarantee: a coach renegotiating
-  // their rate doesn't retroactively rewrite past sessions even if an
-  // admin later edits one of those sessions.
+  // Editing time/note leaves the historical rate alone — this honors the
+  // snapshot guarantee: a coach renegotiating their rate doesn't
+  // retroactively rewrite past sessions even if an admin later edits one
+  // of those sessions.
   const inputsChanged =
     finalCoachId !== existing.coachId ||
-    finalResourceId !== existing.resourceId ||
-    finalIsOnline !== existing.isOnline;
+    finalResourceId !== existing.resourceId;
   const nextRate = inputsChanged
     ? await resolveRateCents({
         coachId: finalCoachId,
         resourceType: resource.type,
-        isOnline: finalIsOnline,
       })
     : existing.ratePer30MinCents;
 
@@ -352,15 +309,7 @@ export async function updateSessionInternal(
         }),
         ...(parsed.startAt !== undefined && { startAt: parsed.startAt }),
         ...(parsed.endAt !== undefined && { endAt: parsed.endAt }),
-        ...(parsed.useType !== undefined && { useType: parsed.useType }),
         ...(parsed.note !== undefined && { note: parsed.note }),
-        ...(parsed.isTeamRental !== undefined && {
-          isTeamRental: parsed.isTeamRental,
-        }),
-        ...(parsed.pfaReferred !== undefined && {
-          pfaReferred: parsed.pfaReferred,
-        }),
-        ...(parsed.isOnline !== undefined && { isOnline: parsed.isOnline }),
         ratePer30MinCents: nextRate,
       })
       .where(eq(sessionsBilling.id, id))
@@ -418,14 +367,13 @@ export async function deleteSessionInternal(
 }
 
 /**
- * Batch-create: insert N sessions sharing the same coach + resource
- * + useType, each with its own time range / note / team-rental flag.
- * Used by the multi-slot UI ("create 8 back-to-back 30-min lessons
- * in Cage 3 from 10 AM to 2 PM").
+ * Batch-create: insert N sessions sharing the same coach + resource,
+ * each with its own time range / note. Used by the multi-slot UI
+ * ("create 8 back-to-back 30-min lessons in Cage 3 from 10 AM to 2 PM").
  *
  * Pipeline:
  *   1. Zod-parse
- *   2. Resource lookup + useType rule (shared — checked once)
+ *   2. Resource lookup (shared — checked once)
  *   3. For each slot: cross-check blocked_times AND the rest of
  *      sessions_billing AND every PRIOR slot in this same batch
  *      (so a self-overlap inside the batch is caught here, not
@@ -448,7 +396,6 @@ export async function createSessionsBatchInternal(
 ) {
   const parsed = createSessionBatchSchema.parse(input);
   const resource = await getResourceOrThrow(parsed.resourceId);
-  validateUseType(resource.name, resource.type, parsed.useType);
 
   // Pre-validate each slot:
   //   (a) against any existing block on the same resource
@@ -493,12 +440,11 @@ export async function createSessionsBatchInternal(
     }
   }
 
-  // Resolve the non-online rate once — coach + resource type are
-  // shared across the batch. Online sessions resolve to 0 directly.
-  const nonOnlineRate = await resolveRateCents({
+  // Resolve the rate once — coach + resource type are shared across
+  // the batch.
+  const ratePer30MinCents = await resolveRateCents({
     coachId: parsed.coachId,
     resourceType: resource.type,
-    isOnline: false,
   });
 
   // Bulk insert in a single statement. drizzle accepts an array on
@@ -509,22 +455,15 @@ export async function createSessionsBatchInternal(
     inserted = await db
       .insert(sessionsBilling)
       .values(
-        parsed.slots.map((s) => {
-          const slotIsOnline = s.isOnline ?? false;
-          return {
-            coachId: parsed.coachId,
-            resourceId: parsed.resourceId,
-            startAt: s.startAt,
-            endAt: s.endAt,
-            useType: parsed.useType ?? null,
-            note: s.note ?? null,
-            isTeamRental: s.isTeamRental ?? false,
-            pfaReferred: s.pfaReferred ?? false,
-            isOnline: slotIsOnline,
-            ratePer30MinCents: slotIsOnline ? 0 : nonOnlineRate,
-            createdBy: actor.id,
-          };
-        }),
+        parsed.slots.map((s) => ({
+          coachId: parsed.coachId,
+          resourceId: parsed.resourceId,
+          startAt: s.startAt,
+          endAt: s.endAt,
+          note: s.note ?? null,
+          ratePer30MinCents,
+          createdBy: actor.id,
+        })),
       )
       .returning();
   } catch (err) {

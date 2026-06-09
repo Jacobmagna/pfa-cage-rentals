@@ -27,7 +27,6 @@ type SearchParams = Promise<{
   from?: string | string[];
   to?: string | string[];
   resourceId?: string | string[];
-  useType?: string | string[];
 }>;
 
 export default async function CoachSessionsPage({
@@ -80,9 +79,6 @@ export default async function CoachSessionsPage({
   if (filters.resourceId) {
     whereClauses.push(eq(sessionsBilling.resourceId, filters.resourceId));
   }
-  if (filters.useType) {
-    whereClauses.push(eq(sessionsBilling.useType, filters.useType));
-  }
   const where = and(...whereClauses);
 
   // Unfiltered "does this coach have ANY sessions?" check — decides whether
@@ -120,11 +116,7 @@ export default async function CoachSessionsPage({
         resourceType: resources.type,
         startAt: sessionsBilling.startAt,
         endAt: sessionsBilling.endAt,
-        useType: sessionsBilling.useType,
         note: sessionsBilling.note,
-        isTeamRental: sessionsBilling.isTeamRental,
-        pfaReferred: sessionsBilling.pfaReferred,
-        isOnline: sessionsBilling.isOnline,
       })
       .from(sessionsBilling)
       .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
@@ -144,11 +136,7 @@ export default async function CoachSessionsPage({
     resourceType: r.resourceType,
     startAt: r.startAt,
     endAt: r.endAt,
-    useType: r.useType,
     note: r.note,
-    isTeamRental: r.isTeamRental,
-    pfaReferred: r.pfaReferred,
-    isOnline: r.isOnline,
   }));
 
   return (

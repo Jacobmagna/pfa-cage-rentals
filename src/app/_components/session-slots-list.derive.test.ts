@@ -11,7 +11,7 @@ import { deriveSlots, type SlotInput } from "./session-slots-list";
 const MS_MIN = 60_000;
 
 describe("deriveSlots", () => {
-  it("derives N=2 thirty-minute slots for a 1-hour range with empty notes/flags", () => {
+  it("derives N=2 thirty-minute slots for a 1-hour range with empty notes", () => {
     const start = new Date("2026-06-02T14:00:00.000Z");
     const end = new Date("2026-06-02T15:00:00.000Z");
 
@@ -23,13 +23,10 @@ describe("deriveSlots", () => {
     expect(slots[0].endAt.getTime()).toBe(start.getTime() + 30 * MS_MIN);
     expect(slots[1].startAt.getTime()).toBe(start.getTime() + 30 * MS_MIN);
     expect(slots[1].endAt.getTime()).toBe(end.getTime());
-    // Defaults: empty notes, all flags false — so a collapsed-notes
-    // submit logs N sessions with null notes / false flags.
+    // Defaults: empty notes — so a collapsed-notes submit logs N
+    // sessions with null notes.
     for (const s of slots) {
       expect(s.note).toBe("");
-      expect(s.isTeamRental).toBe(false);
-      expect(s.pfaReferred).toBe(false);
-      expect(s.isOnline).toBe(false);
     }
   });
 
@@ -46,21 +43,19 @@ describe("deriveSlots", () => {
     expect(slots[1].endAt.getTime()).toBe(end.getTime());
   });
 
-  it("preserves prior notes/flags for slots whose start/end signature is unchanged", () => {
+  it("preserves prior notes for slots whose start/end signature is unchanged", () => {
     const start = new Date("2026-06-02T14:00:00.000Z");
     const end = new Date("2026-06-02T15:00:00.000Z");
     const first = deriveSlots(start, end, 30);
 
     const prior: SlotInput[] = [
-      { ...first[0], note: "JP", isOnline: true },
-      { ...first[1], note: "drill", pfaReferred: true },
+      { ...first[0], note: "JP" },
+      { ...first[1], note: "drill" },
     ];
 
     const next = deriveSlots(start, end, 30, prior);
     expect(next[0].note).toBe("JP");
-    expect(next[0].isOnline).toBe(true);
     expect(next[1].note).toBe("drill");
-    expect(next[1].pfaReferred).toBe(true);
   });
 
   it("returns [] for a null range", () => {

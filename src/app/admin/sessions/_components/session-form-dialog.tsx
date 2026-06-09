@@ -19,7 +19,6 @@ import { createSessionsBatch } from "../actions";
 import type { CoachOption, ResourceOption } from "./sessions-client";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
-import { SessionFlagsRow } from "@/app/_components/session-flags-row";
 import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
 import {
   SessionSlotsList,
@@ -30,7 +29,6 @@ import {
   formatPfaTime,
   parsePfaInput,
 } from "@/lib/timezone";
-import { cageUseTypeError } from "@/lib/use-type-validation";
 
 export type SessionFormInitialValues = {
   id: string;
@@ -38,11 +36,7 @@ export type SessionFormInitialValues = {
   resourceId: string;
   startAt: Date;
   endAt: Date;
-  useType: "hitting" | "pitching" | null;
   note: string | null;
-  isTeamRental: boolean;
-  pfaReferred: boolean;
-  isOnline: boolean;
 };
 
 // Modal form for creating or editing a session.
@@ -52,7 +46,7 @@ export type SessionFormInitialValues = {
 // one row).
 //
 // In create mode: when the time range covers > 1 slot of the chosen
-// length, the single Note + TeamRental fields swap for a list of N
+// length, the single Note field swaps for a list of N
 // notecards, and submit dispatches to createSessionsBatch (bypassing
 // the form-action layer). Sub-1-slot creates use the original
 // createSessionFormAction path.
@@ -124,11 +118,7 @@ export function SessionFormDialog({
         date: toDateInput(initial.startAt),
         startTime: toTimeInput(initial.startAt),
         endTime: toTimeInput(initial.endAt),
-        useType: initial.useType ?? "",
         note: initial.note ?? "",
-        isTeamRental: initial.isTeamRental,
-        pfaReferred: initial.pfaReferred,
-        isOnline: initial.isOnline,
       };
     }
     const now = new Date();
@@ -138,11 +128,7 @@ export function SessionFormDialog({
       date: toDateInput(now),
       startTime: "09:00",
       endTime: "10:00",
-      useType: "",
       note: "",
-      isTeamRental: false,
-      pfaReferred: false,
-      isOnline: false,
     };
   }, [initial, state]);
 
@@ -155,7 +141,6 @@ export function SessionFormDialog({
     date: defaults.date,
     startTime: defaults.startTime,
     endTime: defaults.endTime,
-    useType: defaults.useType,
   });
   const [prevDefaults, setPrevDefaults] = useState(defaults);
   if (defaults !== prevDefaults) {
@@ -166,13 +151,12 @@ export function SessionFormDialog({
       date: defaults.date,
       startTime: defaults.startTime,
       endTime: defaults.endTime,
-      useType: defaults.useType,
     });
     setBatchError(null);
   }
 
   // Multi-slot state (create mode only).
-  const [slotLengthMinutes, setSlotLengthMinutes] = useState<30 | 60>(30);
+  const [slotLengthMinutes, setSlotLengthMinutes] = useState<number>(30);
   const [slots, setSlots] = useState<SlotInput[]>([]);
 
   const { rangeStart, rangeEnd, slotCount, divisibilityError } = useMemo(() => {
@@ -238,44 +222,16 @@ export function SessionFormDialog({
     e.preventDefault();
     if (slotCount === 0 || divisibilityError || slots.length === 0) return;
 
-    // Cage use-type guard BEFORE the batch action. The server still
-    // enforces it (createSessionsBatchInternal throws), but an uncaught
-    // server-action throw is redacted to a generic message in
-    // production, so we surface the friendly inline copy here through
-    // the existing batchError channel.
-    const selectedResource = resourceOptions.find(
-      (r) => r.id === live.resourceId,
-    );
-    const cageError = selectedResource
-      ? cageUseTypeError(
-          selectedResource.type,
-          live.useType === "hitting" || live.useType === "pitching"
-            ? live.useType
-            : null,
-        )
-      : null;
-    if (cageError) {
-      setBatchError(cageError);
-      return;
-    }
-
     setBatchError(null);
     startBatchTransition(async () => {
       try {
         await createSessionsBatch({
           coachId: live.coachId,
           resourceId: live.resourceId,
-          useType:
-            live.useType === "hitting" || live.useType === "pitching"
-              ? live.useType
-              : null,
           slots: slots.map((s) => ({
             startAt: s.startAt,
             endAt: s.endAt,
             note: s.note.trim() || null,
-            isTeamRental: s.isTeamRental,
-            pfaReferred: s.pfaReferred,
-            isOnline: s.isOnline,
           })),
         });
         setSlots([]);
@@ -452,45 +408,17 @@ export function SessionFormDialog({
             </p>
           ) : null}
 
-          <Field
-            label="Use type"
-            hint="Required for cages (hitting or pitching). Leave blank for bullpens and weight rooms."
-          >
-            <select
-              name="useType"
-              value={live.useType}
-              onChange={(e) =>
-                setLive((p) => ({ ...p, useType: e.target.value }))
-              }
-              className={selectStyles}
-            >
-              <option value="">— None (bullpen / weight room)</option>
-              <option value="hitting">Hitting</option>
-              <option value="pitching">Pitching</option>
-            </select>
-          </Field>
-
           {!isMultiSlot ? (
-            <>
-              <Field label="Note" optional>
-                <input
-                  type="text"
-                  name="note"
-                  defaultValue={defaults.note}
-                  maxLength={500}
-                  placeholder="Optional context"
-                  className={inputStyles}
-                />
-              </Field>
-
-              <SessionFlagsRow
-                defaults={{
-                  isTeamRental: defaults.isTeamRental,
-                  pfaReferred: defaults.pfaReferred,
-                  isOnline: defaults.isOnline,
-                }}
+            <Field label="Note" optional>
+              <input
+                type="text"
+                name="note"
+                defaultValue={defaults.note}
+                maxLength={500}
+                placeholder="Optional context"
+                className={inputStyles}
               />
-            </>
+            </Field>
           ) : (
             <SessionSlotsList
               rangeStart={rangeStart}

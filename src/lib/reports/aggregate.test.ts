@@ -29,11 +29,7 @@ function session(
     resourceType: "cage",
     startAt,
     endAt,
-    useType: "hitting",
     note: null,
-    isTeamRental: false,
-    pfaReferred: false,
-    isOnline: false,
     ratePer30MinCents: 2200,
     ...overrides,
   };
@@ -69,13 +65,11 @@ describe("aggregateReport — detail rows", () => {
     expect(summary[0].totalCents).toBe(3000);
   });
 
-  it("treats online sessions as $0 even with slots > 0", () => {
+  it("treats a zero snapshot rate as $0 even with slots > 0", () => {
     const { detail, summary } = aggregateReport([
-      session({ isOnline: true, ratePer30MinCents: 0 }),
+      session({ ratePer30MinCents: 0 }),
     ]);
-    expect(detail[0].isOnline).toBe(true);
     expect(detail[0].totalCents).toBe(0);
-    expect(summary[0].onlineSessions).toBe(1);
     expect(summary[0].totalCents).toBe(0);
   });
 });
@@ -88,13 +82,11 @@ describe("aggregateReport — summary roll-up", () => {
         sessionId: "s2",
         resourceType: "bullpen",
         resourceName: "Bullpen 1",
-        useType: null,
       }), // 2 × 2200 = 4400
       session({
         sessionId: "s3",
         resourceType: "weight_room",
         resourceName: "Weight Room 1",
-        useType: null,
         ratePer30MinCents: 700,
       }), // 2 × 700 = 1400
     ];
@@ -110,7 +102,6 @@ describe("aggregateReport — summary roll-up", () => {
     expect(row.weightRoomTotalCents).toBe(1400);
     // totalCents = cage-side receivable only (4400 + 4400 + 1400).
     expect(row.totalCents).toBe(10200);
-    expect(row.onlineSessions).toBe(0);
     expect(grandTotalCents).toBe(10200);
     // No program hours → program-pay grand total is zero.
     expect(programGrandTotalCents).toBe(0);

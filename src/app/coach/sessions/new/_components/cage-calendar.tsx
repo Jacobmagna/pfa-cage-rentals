@@ -28,8 +28,8 @@ import {
   type DayAvailability,
 } from "../availability-actions";
 import {
-  canBookOneHour,
   computeSlotState,
+  maxConsecutiveFreeSlots,
   type SlotBlock,
   type SlotOccupant,
   type SlotSession,
@@ -119,8 +119,8 @@ export function CageCalendar({
 
   // ── Batch multi-select (W3.5b) ───────────────────────────────────
   // When ON, tapping green slots builds a selection scoped to ONE
-  // resource row (the batch action is single-resource + shared useType).
-  // A cross-resource tap RESETS the selection to that new resource.
+  // resource row (the batch action is single-resource). A cross-resource
+  // tap RESETS the selection to that new resource.
   const [multiSelect, setMultiSelect] = useState(false);
   const [selection, setSelection] = useState<{
     resourceId: string | null;
@@ -276,16 +276,18 @@ export function CageCalendar({
     : null;
   const selectionCount = selection.slotIndexes.size;
 
-  // Whether the selected slot can be booked for a full hour (this slot
-  // free AND next free AND next in-window).
-  const selectedCanBookHour =
+  // How many consecutive free 30-min slots start at the selected slot —
+  // the booking-duration headroom. Multiplied by 30 gives the max rental
+  // length (in minutes) the single-slot panel may offer.
+  const selectedMaxFreeSlots =
     selected && selectedResource
-      ? canBookOneHour({
+      ? maxConsecutiveFreeSlots({
           slotIndex: selected.slotIndex,
           totalSlots: SCHEDULE_GRID_SLOTS,
           slotState: (i) => slotStateFor(selected.resourceId, i).state,
         })
-      : false;
+      : 0;
+  const selectedMaxDurationMin = selectedMaxFreeSlots * 30;
 
   // 12h start time of the single selected slot, for the sticky bar.
   const selectedStartLabel = selected
@@ -686,7 +688,7 @@ export function CageCalendar({
             resource={selectedResource}
             selectedDate={selectedDate}
             slotIndex={selected.slotIndex}
-            canBookOneHour={selectedCanBookHour}
+            maxDurationMin={selectedMaxDurationMin}
             onBooked={handleBooked}
             onCancel={() => setFormOpen(false)}
           />

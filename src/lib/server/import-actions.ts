@@ -157,15 +157,12 @@ export async function executeCommitPlan(
 
     // Snapshot the per-row rate exactly the same way the live session
     // path does (src/lib/server/session-actions.ts:resolveRateCents).
-    // Historical imports don't track isOnline — the Excel never had a
-    // column for it — so assume false and let admin flip individual
-    // rows later if needed. Without this call the schema default of 0
-    // would land on every row and the snapshot rule would silently
-    // break for the entire imported batch (audit E9).
+    // Without this call the schema default of 0 would land on every row
+    // and the snapshot rule would silently break for the entire imported
+    // batch (audit E9).
     const ratePer30MinCents = await resolveRateCents({
       coachId,
       resourceType,
-      isOnline: false,
     });
 
     try {
@@ -176,7 +173,6 @@ export async function executeCommitPlan(
           resourceId,
           startAt,
           endAt,
-          useType: planned.source.useTypeHint,
           note: planned.note,
           source: IMPORT_SOURCE,
           ratePer30MinCents,
@@ -197,7 +193,6 @@ export async function executeCommitPlan(
           resourceId,
           startAt: startAt.toISOString(),
           endAt: endAt.toISOString(),
-          useType: planned.source.useTypeHint,
           note: planned.note,
           source: IMPORT_SOURCE,
           sourceTab: planned.source.sourceTab,

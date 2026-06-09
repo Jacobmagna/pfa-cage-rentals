@@ -10,6 +10,7 @@
 // locally so a bug here can never touch the live editable grids. The
 // time-axis math is the shared, unit-tested src/lib/schedule-grid-utils.
 
+import { useDraggable, useDroppable } from "@dnd-kit/core";
 import {
   PROGRAM_GRID_SLOTS,
   SCHEDULE_GRID_FIRST_HOUR,
@@ -21,6 +22,28 @@ import {
 } from "@/lib/schedule-grid-utils";
 import { assignLanes } from "@/lib/schedule-lanes";
 import { formatPfaTime12h, pfaHour } from "@/lib/timezone";
+
+// #15B drag-to-MOVE. The single DndContext lives in the editable wrapper
+// (editable-master-schedule.tsx). These data shapes are what each draggable
+// bar / droppable cell carries; the wrapper's handleDragEnd demultiplexes on
+// `type`. @dnd-kit serializes data, so Dates are passed as ISO strings.
+export type MasterSessionDragData = {
+  type: "session";
+  id: string;
+  startAt: string;
+  endAt: string;
+};
+
+export type MasterProgramBlockDragData = {
+  type: "program-block";
+  id: string;
+  startAt: string;
+  endAt: string;
+};
+
+export type MasterCellDropData =
+  | { type: "cell"; section: "resource"; resourceId: string; slotIndex: number }
+  | { type: "cell"; section: "program"; slotIndex: number };
 
 type ResourceType = "cage" | "bullpen" | "weight_room";
 
@@ -146,6 +169,15 @@ export function MasterScheduleGrid({
   programBlocks,
   onEmptyCellClick,
   onBlockClick,
+  // #15B: when true the wrapper has mounted a DndContext around this grid, so
+  // session / program-block bars become @dnd-kit draggables and empty cells
+  // become droppables. When false/absent the grid renders exactly as before
+  // (read-only or click-only usages elsewhere are unaffected — no hook calls).
+  dragEnabled = false,
+  // Id of the bar currently being dragged (from the wrapper's onDragStart), so
+  // its own footprint is excluded from the "occupied" set — otherwise a
+  // half-slot shift in place is rejected because the source cells read as busy.
+  draggingId = null,
 }: {
   resources: MasterResourceRow[];
   sessions: MasterSession[];
@@ -154,6 +186,8 @@ export function MasterScheduleGrid({
   programBlocks: MasterProgramBlock[];
   onEmptyCellClick?: EmptyCellClick;
   onBlockClick?: BlockClick;
+  dragEnabled?: boolean;
+  draggingId?: string | null;
 }): React.JSX.Element {
   // Row index per resource / program. Row 1 is the time header; section
   // label rows are inserted between, so we lay each section out in its
@@ -181,6 +215,8 @@ export function MasterScheduleGrid({
             blocks={visibleBlocks}
             onEmptyCellClick={onEmptyCellClick}
             onBlockClick={onBlockClick}
+            dragEnabled={dragEnabled}
+            draggingId={draggingId}
           />
         )}
 
@@ -194,6 +230,8 @@ export function MasterScheduleGrid({
             blocks={visibleProgramBlocks}
             onEmptyCellClick={onEmptyCellClick}
             onBlockClick={onBlockClick}
+            dragEnabled={dragEnabled}
+            draggingId={draggingId}
           />
         )}
 
@@ -259,15 +297,42 @@ function ResourceGrid({
   blocks,
   onEmptyCellClick,
   onBlockClick,
+  dragEnabled,
+  draggingId,
 }: {
   resources: MasterResourceRow[];
   sessions: MasterSession[];
   blocks: MasterBlockedTime[];
   onEmptyCellClick?: EmptyCellClick;
   onBlockClick?: BlockClick;
+  dragEnabled?: boolean;
+  draggingId?: string | null;
 }): React.JSX.Element {
   const rowOf = new Map<string, number>();
   resources.forEach((r, i) => rowOf.set(r.id, i + 1));
+
+  // #15B: which (resourceId, 30-min slot) cells are covered by a session or
+  // block, so droppable empty cells skip them (the bar wins the drop). The
+  // actively-dragged session's own footprint is excluded so a shift-in-place
+  // is allowed. Blocked times always count as occupied.
+  const occupiedCells = new Set<string>();
+  if (dragEnabled) {
+    for (const s of sessions) {
+      if (s.id === draggingId) continue;
+      const p = placeOnGrid(s.startAt, s.endAt);
+      if (!p) continue;
+      for (let i = 0; i < p.span; i++) {
+        occupiedCells.add(`${s.resourceId}-${p.col - 2 + i}`);
+      }
+    }
+    for (const b of blocks) {
+      const p = placeOnGrid(b.startAt, b.endAt);
+      if (!p) continue;
+      for (let i = 0; i < p.span; i++) {
+        occupiedCells.add(`${b.resourceId}-${p.col - 2 + i}`);
+      }
+    }
+  }
 
   return (
     <div
@@ -311,6 +376,30 @@ function ResourceGrid({
                 aria-hidden
                 className={cellClass}
                 style={cellStyle}
+              />
+            );
+          }
+          // #15B: when drag is enabled the empty cell is BOTH a click-to-add
+          // button AND a droppable move target. distance:5 on the wrapper's
+          // PointerSensor lets a plain click through as a click. Occupied
+          // cells skip the droppable so the bar's own footprint wins.
+          if (dragEnabled) {
+            return (
+              <ResourceDroppableCell
+                key={`cell-${r.id}-${slotIdx}`}
+                resourceId={r.id}
+                resourceName={r.name}
+                slotIdx={slotIdx}
+                cellClass={cellClass}
+                cellStyle={cellStyle}
+                isOccupied={occupiedCells.has(`${r.id}-${slotIdx}`)}
+                onCreate={() =>
+                  onEmptyCellClick({
+                    section: "resource",
+                    rowId: r.id,
+                    slotIndex: slotIdx,
+                  })
+                }
               />
             );
           }
@@ -406,6 +495,26 @@ function ResourceGrid({
             <span className="truncate font-medium">{s.coachName}</span>
           </>
         );
+        // #15B: drag enabled → draggable bar that ALSO opens the edit dialog
+        // on a plain click (distance:5 sensor distinguishes click vs drag).
+        if (dragEnabled) {
+          return (
+            <DraggableSessionBar
+              key={`s-${s.id}`}
+              session={s}
+              barClass={barClass}
+              barStyle={barStyle}
+              tooltip={tooltip}
+              onEdit={
+                onBlockClick
+                  ? () => onBlockClick({ kind: "session", id: s.id })
+                  : undefined
+              }
+            >
+              {inner}
+            </DraggableSessionBar>
+          );
+        }
         if (onBlockClick) {
           return (
             <button
@@ -435,6 +544,111 @@ function ResourceGrid({
   );
 }
 
+// #15B: a cage SESSION bar that is draggable (move) and clickable (edit). The
+// distance:5 PointerSensor on the wrapper's DndContext lets a short click
+// reach onEdit while a >5px drag becomes a move. Mirrors the cage grid's
+// DraggableSession (translate3d transform + opacity while dragging).
+function DraggableSessionBar({
+  session,
+  barClass,
+  barStyle,
+  tooltip,
+  onEdit,
+  children,
+}: {
+  session: MasterSession;
+  barClass: string;
+  barStyle: React.CSSProperties;
+  tooltip: string;
+  onEdit?: () => void;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({
+      id: `session-${session.id}`,
+      data: {
+        type: "session",
+        id: session.id,
+        startAt: session.startAt.toISOString(),
+        endAt: session.endAt.toISOString(),
+      } satisfies MasterSessionDragData,
+    });
+
+  const dragTransform = transform
+    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
+    : null;
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={onEdit}
+      {...listeners}
+      {...attributes}
+      className={`${barClass} text-left transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50 ${
+        isDragging ? "opacity-40 cursor-grabbing" : "cursor-grab"
+      }`}
+      style={{
+        ...barStyle,
+        zIndex: isDragging ? 30 : (barStyle.zIndex as number | undefined),
+        ...dragTransform,
+      }}
+      title={onEdit ? `${tooltip} (click for details, drag to move)` : tooltip}
+    >
+      {children}
+    </button>
+  );
+}
+
+// #15B: a droppable empty CAGE cell. Drop data carries the 30-min slot index +
+// resource so the wrapper can compute the new start time and (possibly new)
+// resource row. Occupied cells set `disabled` so the bar's footprint wins.
+function ResourceDroppableCell({
+  resourceId,
+  resourceName,
+  slotIdx,
+  cellClass,
+  cellStyle,
+  isOccupied,
+  onCreate,
+}: {
+  resourceId: string;
+  resourceName: string;
+  slotIdx: number;
+  cellClass: string;
+  cellStyle: React.CSSProperties;
+  isOccupied: boolean;
+  onCreate: () => void;
+}): React.JSX.Element {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `mdrop-resource-${resourceId}-${slotIdx}`,
+    data: {
+      type: "cell",
+      section: "resource",
+      resourceId,
+      slotIndex: slotIdx,
+    } satisfies MasterCellDropData,
+    disabled: isOccupied,
+  });
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={isOccupied ? undefined : onCreate}
+      disabled={isOccupied}
+      aria-label={isOccupied ? undefined : `Add cage rental for ${resourceName}`}
+      className={`${cellClass} ${
+        isOccupied
+          ? "cursor-default"
+          : `cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gold/40 ${
+              isOver ? "bg-gold/20" : "hover:bg-gold/10"
+            }`
+      }`}
+      style={cellStyle}
+    />
+  );
+}
+
 // QA10 W3.8b: the Programs section is now a SINGLE combined timeline
 // (mirroring the standalone Program Schedule grid, W3.8a) instead of one row
 // per program. Non-overlapping program blocks share a compact lane row;
@@ -447,11 +661,15 @@ function ProgramGrid({
   blocks,
   onEmptyCellClick,
   onBlockClick,
+  dragEnabled,
+  draggingId,
 }: {
   programs: MasterProgramRow[];
   blocks: MasterProgramBlock[];
   onEmptyCellClick?: EmptyCellClick;
   onBlockClick?: BlockClick;
+  dragEnabled?: boolean;
+  draggingId?: string | null;
 }): React.JSX.Element {
   const programNameById = new Map(programs.map((p) => [p.id, p.name]));
 
@@ -468,6 +686,9 @@ function ProgramGrid({
   // clicks only land on free time. Keyed by 0-based slot index.
   const occupiedSlots = new Set<number>();
   for (const b of blocks) {
+    // #15B: exclude the actively-dragged block's own slots so a shift-in-place
+    // (e.g. nudging it 15 min) isn't rejected as "dropping onto itself".
+    if (dragEnabled && b.id === draggingId) continue;
     const placement = placeOnGrid15(b.startAt, b.endAt);
     if (!placement) continue;
     // placeOnGrid15.col is 1-based with NO leading label column (slot 0 →
@@ -513,12 +734,57 @@ function ProgramGrid({
           ].join(" ");
           const cellStyle = { gridRow: laneIdx + 1, gridColumn: slotIdx + 2 };
           if (!onEmptyCellClick || isOccupied) {
+            // #15B: even an "occupied" or read-only cell must still be a drop
+            // target when dragging — a program block can move ONTO a column
+            // another lane's block already covers (they just stack in lanes).
+            // So when drag is enabled we render a droppable backdrop div for
+            // every free cell; occupied cells (covered by a NON-dragging block)
+            // stay plain so they don't intercept the drop meant for the bar.
+            if (dragEnabled && !isOccupied) {
+              return (
+                <ProgramDroppableCell
+                  key={`cell-${laneIdx}-${slotIdx}`}
+                  laneIdx={laneIdx}
+                  slotIdx={slotIdx}
+                  cellClass={cellClass}
+                  cellStyle={cellStyle}
+                  onCreate={
+                    onEmptyCellClick
+                      ? () =>
+                          onEmptyCellClick({
+                            section: "program",
+                            rowId: "",
+                            slotIndex: slotIdx,
+                          })
+                      : undefined
+                  }
+                />
+              );
+            }
             return (
               <div
                 key={`cell-${laneIdx}-${slotIdx}`}
                 aria-hidden
                 className={cellClass}
                 style={cellStyle}
+              />
+            );
+          }
+          if (dragEnabled) {
+            return (
+              <ProgramDroppableCell
+                key={`cell-${laneIdx}-${slotIdx}`}
+                laneIdx={laneIdx}
+                slotIdx={slotIdx}
+                cellClass={cellClass}
+                cellStyle={cellStyle}
+                onCreate={() =>
+                  onEmptyCellClick({
+                    section: "program",
+                    rowId: "",
+                    slotIndex: slotIdx,
+                  })
+                }
               />
             );
           }
@@ -584,6 +850,26 @@ function ProgramGrid({
             </span>
           </>
         );
+        // #15B: drag enabled → draggable program-block bar that ALSO opens its
+        // edit dialog on a plain click.
+        if (dragEnabled) {
+          return (
+            <DraggableProgramBlockBar
+              key={`pb-${b.id}`}
+              block={b}
+              barClass={barClass}
+              barStyle={barStyle}
+              tooltip={tooltip}
+              onEdit={
+                onBlockClick
+                  ? () => onBlockClick({ kind: "program", id: b.id })
+                  : undefined
+              }
+            >
+              {inner}
+            </DraggableProgramBlockBar>
+          );
+        }
         if (onBlockClick) {
           return (
             <button
@@ -610,6 +896,115 @@ function ProgramGrid({
         );
       })}
     </div>
+  );
+}
+
+// #15B: a droppable empty PROGRAM (15-min) cell. Drop data carries only the
+// 15-min slot index (programs have no per-resource rows in this combined
+// timeline — the move preserves the block's program/coach/resources). Click
+// still creates when an onCreate handler is present.
+function ProgramDroppableCell({
+  laneIdx,
+  slotIdx,
+  cellClass,
+  cellStyle,
+  onCreate,
+}: {
+  laneIdx: number;
+  slotIdx: number;
+  cellClass: string;
+  cellStyle: React.CSSProperties;
+  onCreate?: () => void;
+}): React.JSX.Element {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `mdrop-program-${laneIdx}-${slotIdx}`,
+    data: {
+      type: "cell",
+      section: "program",
+      slotIndex: slotIdx,
+    } satisfies MasterCellDropData,
+  });
+  if (!onCreate) {
+    return (
+      <div
+        ref={setNodeRef}
+        aria-hidden
+        className={`${cellClass} ${isOver ? "bg-gold/20" : ""}`}
+        style={cellStyle}
+      />
+    );
+  }
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={onCreate}
+      aria-label={`Add work block at ${formatGridHour(
+        SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIdx / 4),
+      )}${
+        slotIdx % 4 !== 0
+          ? `:${String((slotIdx % 4) * 15).padStart(2, "0")}`
+          : ""
+      }`}
+      className={`${cellClass} cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gold/40 ${
+        isOver ? "bg-gold/20" : "hover:bg-gold/10"
+      }`}
+      style={cellStyle}
+    />
+  );
+}
+
+// #15B: a program-block bar that is draggable (15-min move) and clickable
+// (edit). Mirrors DraggableSessionBar but carries program-block drag data.
+function DraggableProgramBlockBar({
+  block,
+  barClass,
+  barStyle,
+  tooltip,
+  onEdit,
+  children,
+}: {
+  block: MasterProgramBlock;
+  barClass: string;
+  barStyle: React.CSSProperties;
+  tooltip: string;
+  onEdit?: () => void;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({
+      id: `program-block-${block.id}`,
+      data: {
+        type: "program-block",
+        id: block.id,
+        startAt: block.startAt.toISOString(),
+        endAt: block.endAt.toISOString(),
+      } satisfies MasterProgramBlockDragData,
+    });
+
+  const dragTransform = transform
+    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
+    : null;
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={onEdit}
+      {...listeners}
+      {...attributes}
+      className={`${barClass} text-left transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50 ${
+        isDragging ? "opacity-40 cursor-grabbing" : "cursor-grab"
+      }`}
+      style={{
+        ...barStyle,
+        zIndex: isDragging ? 30 : (barStyle.zIndex as number | undefined),
+        ...dragTransform,
+      }}
+      title={onEdit ? `${tooltip} (click for details, drag to move)` : tooltip}
+    >
+      {children}
+    </button>
   );
 }
 

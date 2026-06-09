@@ -77,6 +77,77 @@ export function slotStartAt(selectedDate: Date, slotIndex: number): Date {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// 15-minute variants (PROGRAM / "work" schedules only). #8: programs need
+// 15-min resolution so admins can schedule e.g. 4:15–5:00 work blocks and
+// they render aligned; CAGE rentals stay on the 30-min exports above. The
+// facility window is unchanged (8 AM–10 PM); a 15-min slot is a quarter-hour
+// so the same window splits into 56 slots instead of 28.
+// ─────────────────────────────────────────────────────────────────────────
+
+export const PROGRAM_GRID_SLOTS =
+  (SCHEDULE_GRID_LAST_HOUR - SCHEDULE_GRID_FIRST_HOUR) * 4; // 56
+
+/**
+ * 15-min analog of placeOnGrid. Minutes bucket by 15 (floor on the start,
+ * ceil on the end). `col` is 1-based with NO leading label column
+ * (clippedStart + 1), matching the admin program grid (template is
+ * `repeat(SLOTS, …)`). Returns null if fully outside the 8 AM–10 PM window;
+ * ranges straddling an edge are clipped to it.
+ */
+export function placeOnGrid15(
+  startAt: Date,
+  endAt: Date,
+): { col: number; span: number } | null {
+  const startSlots =
+    (pfaHour(startAt) - SCHEDULE_GRID_FIRST_HOUR) * 4 +
+    Math.floor(pfaMinute(startAt) / 15);
+  const endSlots =
+    (pfaHour(endAt) - SCHEDULE_GRID_FIRST_HOUR) * 4 +
+    Math.ceil(pfaMinute(endAt) / 15);
+  const clippedStart = Math.max(startSlots, 0);
+  const clippedEnd = Math.min(endSlots, PROGRAM_GRID_SLOTS);
+  if (clippedEnd <= clippedStart) return null;
+  return { col: clippedStart + 1, span: clippedEnd - clippedStart };
+}
+
+/**
+ * Vertical 15-min analog of placeVerticalOnGrid. `row` is 1-based over the
+ * 56 slot rows (the caller adds any leading header row). Same 15-min bucket
+ * math + clamping as placeOnGrid15.
+ */
+export function placeVerticalOnGrid15(
+  startAt: Date,
+  endAt: Date,
+): { row: number; rowSpan: number } | null {
+  const startSlots =
+    (pfaHour(startAt) - SCHEDULE_GRID_FIRST_HOUR) * 4 +
+    Math.floor(pfaMinute(startAt) / 15);
+  const endSlots =
+    (pfaHour(endAt) - SCHEDULE_GRID_FIRST_HOUR) * 4 +
+    Math.ceil(pfaMinute(endAt) / 15);
+  const clippedStart = Math.max(startSlots, 0);
+  const clippedEnd = Math.min(endSlots, PROGRAM_GRID_SLOTS);
+  if (clippedEnd <= clippedStart) return null;
+  return {
+    row: clippedStart + 1,
+    rowSpan: Math.max(1, clippedEnd - clippedStart),
+  };
+}
+
+/**
+ * The UTC instant at the START of 15-min program slot `slotIndex` on the PFA
+ * day of `selectedDate`. Slot 0 = 8:00, slot 1 = 8:15, slot 2 = 8:30, … —
+ * the inverse of placeOnGrid15's slot math, used by click-to-add.
+ */
+export function slotStartAt15(selectedDate: Date, slotIndex: number): Date {
+  return pfaWallClockAt(
+    selectedDate,
+    SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIndex / 4),
+    (slotIndex % 4) * 15,
+  );
+}
+
 /**
  * 24-hour hour number → "8 AM" / "12 PM" / "10 PM". Copied from
  * schedule-grid.tsx formatHour.

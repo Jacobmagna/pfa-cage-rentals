@@ -34,8 +34,6 @@ export type MasterSession = {
   coachName: string;
   startAt: Date;
   endAt: Date;
-  useType: "hitting" | "pitching" | null;
-  isTeamRental: boolean;
 };
 
 export type MasterBlockedTime = {
@@ -102,10 +100,6 @@ function statusAccent(status: MasterProgramBlock["status"]): string {
     default:
       return "border-l-gold bg-surface-2";
   }
-}
-
-function cap(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function inRange(when: Date): boolean {
@@ -387,12 +381,7 @@ function ResourceGrid({
         const timeLabel = `${formatPfaTime12h(s.startAt)}–${formatPfaTime12h(
           s.endAt,
         )}`;
-        const tooltip = [
-          s.coachName,
-          timeLabel,
-          s.isTeamRental ? "Team rental" : null,
-          s.useType ? cap(s.useType) : null,
-        ]
+        const tooltip = [s.coachName, timeLabel]
           .filter(Boolean)
           .join(" · ");
         const barClass = [
@@ -408,16 +397,6 @@ function ResourceGrid({
         const inner = (
           <>
             <span className="truncate font-medium">{s.coachName}</span>
-            {s.isTeamRental ? (
-              <span className="text-[9px] uppercase tracking-wider text-gold-strong shrink-0">
-                Team
-              </span>
-            ) : null}
-            {s.useType ? (
-              <span className="text-[9px] uppercase tracking-wider text-fg-subtle shrink-0">
-                {s.useType[0]}
-              </span>
-            ) : null}
           </>
         );
         if (onBlockClick) {

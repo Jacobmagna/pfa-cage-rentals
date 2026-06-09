@@ -56,11 +56,7 @@ export async function fetchReportData(
       resourceType: resources.type,
       startAt: sessionsBilling.startAt,
       endAt: sessionsBilling.endAt,
-      useType: sessionsBilling.useType,
       note: sessionsBilling.note,
-      isTeamRental: sessionsBilling.isTeamRental,
-      pfaReferred: sessionsBilling.pfaReferred,
-      isOnline: sessionsBilling.isOnline,
       ratePer30MinCents: sessionsBilling.ratePer30MinCents,
     })
     .from(sessionsBilling)
@@ -119,11 +115,7 @@ export async function fetchReportData(
     resourceType: r.resourceType,
     startAt: r.startAt,
     endAt: r.endAt,
-    useType: r.useType,
     note: r.note,
-    isTeamRental: r.isTeamRental,
-    pfaReferred: r.pfaReferred,
-    isOnline: r.isOnline,
     ratePer30MinCents: r.ratePer30MinCents,
   }));
 

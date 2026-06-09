@@ -1,7 +1,6 @@
 // Zod schemas for billing-session mutations. Shape validation only —
-// the cross-cutting business rules (useType-required-for-cage,
-// block-vs-session overlap) live in the server action because they
-// require a DB lookup before validating.
+// the cross-cutting business rule (block-vs-session overlap) lives in
+// the server action because it requires a DB lookup before validating.
 //
 // `z.coerce.date()` accepts ISO strings from form submissions and
 // JSON-style API calls alike, then hands the action a real Date.
@@ -17,23 +16,12 @@ const sessionShape = {
   resourceId: z.string().min(1, "resourceId is required"),
   startAt: z.coerce.date(),
   endAt: z.coerce.date(),
-  useType: z.enum(["hitting", "pitching"]).nullish(),
   // nullish so the UPDATE form can send null to actually clear the
   // note — `optional()` alone would reject null at Zod parse, and a
   // missing-vs-undefined-vs-null distinction matters: updateSessionInternal
   // skips the column when the parsed value is `undefined` and writes
   // when it's `null`. See form-actions.ts buildSessionInput.
   note: z.string().max(500).nullish(),
-  // Team-rental flag. Optional on create (defaults to false); on
-  // update, omitted = keep existing, explicit value = overwrite.
-  isTeamRental: z.boolean().optional(),
-  // PFA-referred flag. Same semantics as isTeamRental — Dad's
-  // bookkeeping marker, no billing impact.
-  pfaReferred: z.boolean().optional(),
-  // Prepaid online lesson: PFA collected from the client directly.
-  // Forces the snapshot rate to $0 (PFA nets the rental against the
-  // payout to the coach, off-app).
-  isOnline: z.boolean().optional(),
 };
 
 const sessionBase = z.object(sessionShape);
@@ -63,16 +51,15 @@ export const updateSessionSchema = sessionBase
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 export type UpdateSessionInput = z.infer<typeof updateSessionSchema>;
 
-// Batch-create: one coach + one resource + one useType, with N
-// per-slot rows (each with its own start/end/note/teamRental).
-// Used by the multi-slot UI on /coach/sessions/new and the admin
-// session dialogs. Hard cap at 50 slots — a half-day of back-to-
-// back 30-min lessons is ~20, so 50 covers any reasonable case
-// while preventing pathological inputs from blowing up the server.
+// Batch-create: one coach + one resource, with N per-slot rows (each
+// with its own start/end/note). Used by the multi-slot UI on
+// /coach/sessions/new and the admin session dialogs. Hard cap at 50
+// slots — a half-day of back-to-back 30-min lessons is ~20, so 50
+// covers any reasonable case while preventing pathological inputs from
+// blowing up the server.
 export const createSessionBatchSchema = z.object({
   coachId: z.string().min(1, "coachId is required"),
   resourceId: z.string().min(1, "resourceId is required"),
-  useType: z.enum(["hitting", "pitching"]).nullish(),
   slots: z
     .array(
       z
@@ -80,9 +67,6 @@ export const createSessionBatchSchema = z.object({
           startAt: z.coerce.date(),
           endAt: z.coerce.date(),
           note: z.string().max(500).nullish(),
-          isTeamRental: z.boolean().optional(),
-          pfaReferred: z.boolean().optional(),
-          isOnline: z.boolean().optional(),
         })
         .refine(maxDur, maxDurError),
     )

@@ -5,9 +5,6 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import { SessionFormDialog, type SessionFormInitialValues } from "./session-form-dialog";
 import { deleteSessionAction } from "../form-actions";
 import { PFA_TIMEZONE } from "@/lib/timezone";
-import { TeamRentalBadge } from "@/app/_components/team-rental-badge";
-import { PfaReferredBadge } from "@/app/_components/pfa-referred-badge";
-import { OnlineBadge } from "@/app/_components/online-badge";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 
 // Top-level client island for the admin sessions page. Owns the
@@ -30,11 +27,7 @@ export type SessionRow = {
   resourceType: "cage" | "bullpen" | "weight_room";
   startAt: Date;
   endAt: Date;
-  useType: "hitting" | "pitching" | null;
   note: string | null;
-  isTeamRental: boolean;
-  pfaReferred: boolean;
-  isOnline: boolean;
   ratePer30MinCents: number;
 };
 
@@ -101,11 +94,7 @@ export function SessionsClient({
           resourceId: dialogState.row.resourceId,
           startAt: dialogState.row.startAt,
           endAt: dialogState.row.endAt,
-          useType: dialogState.row.useType,
           note: dialogState.row.note,
-          isTeamRental: dialogState.row.isTeamRental,
-          pfaReferred: dialogState.row.pfaReferred,
-          isOnline: dialogState.row.isOnline,
         }
       : undefined;
 
@@ -146,7 +135,6 @@ export function SessionsClient({
                 <th scope="col" className="px-4 py-3 text-left font-semibold">When</th>
                 <th scope="col" className="px-4 py-3 text-left font-semibold">Coach</th>
                 <th scope="col" className="px-4 py-3 text-left font-semibold">Resource</th>
-                <th scope="col" className="px-4 py-3 text-left font-semibold">Use</th>
                 <th scope="col" className="px-4 py-3 text-right font-semibold">Duration</th>
                 <th scope="col" className="px-4 py-3 text-right font-semibold sr-only">
                   Actions
@@ -171,9 +159,6 @@ export function SessionsClient({
                         <span className="text-fg">
                           {row.coachName ?? row.coachEmail}
                         </span>
-                        {row.isTeamRental ? <TeamRentalBadge /> : null}
-                        {row.pfaReferred ? <PfaReferredBadge /> : null}
-                        {row.isOnline ? <OnlineBadge /> : null}
                       </span>
                       {row.note ? (
                         <span className="block text-xs text-fg-subtle mt-0.5">
@@ -183,15 +168,6 @@ export function SessionsClient({
                     </td>
                     <td className="px-4 py-3 text-sm text-fg-muted">
                       {row.resourceName}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      {row.useType ? (
-                        <span className="inline-block rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-fg-muted">
-                          {row.useType}
-                        </span>
-                      ) : (
-                        <span className="text-fg-subtle">—</span>
-                      )}
                     </td>
                     <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right text-fg-muted whitespace-nowrap">
                       {formatDuration(row.startAt, row.endAt)}

@@ -9,7 +9,6 @@ import {
 import type { ResourceOption } from "./types";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
-import { SessionFlagsRow } from "@/app/_components/session-flags-row";
 import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 
 // Edit dialog for a coach's existing session. Mirrors the admin
@@ -22,11 +21,7 @@ export type SessionInitial = {
   resourceId: string;
   startAt: Date;
   endAt: Date;
-  useType: "hitting" | "pitching" | null;
   note: string | null;
-  isTeamRental: boolean;
-  pfaReferred: boolean;
-  isOnline: boolean;
 };
 
 const INITIAL_STATE: EditActionResult = { ok: true };
@@ -94,11 +89,7 @@ export function EditSessionDialog({
         date: toDateInput(initial.startAt),
         startTime: toTimeInput(initial.startAt),
         endTime: toTimeInput(initial.endAt),
-        useType: initial.useType ?? "",
         note: initial.note ?? "",
-        isTeamRental: initial.isTeamRental,
-        pfaReferred: initial.pfaReferred,
-        isOnline: initial.isOnline,
       };
     }
     return {
@@ -106,11 +97,7 @@ export function EditSessionDialog({
       date: "",
       startTime: "",
       endTime: "",
-      useType: "",
       note: "",
-      isTeamRental: false,
-      pfaReferred: false,
-      isOnline: false,
     };
   }, [initial, state]);
 
@@ -230,21 +217,6 @@ export function EditSessionDialog({
             </Field>
           </div>
 
-          <Field
-            label="Use type"
-            hint="Required for cages. Leave blank for bullpens and weight rooms."
-          >
-            <select
-              name="useType"
-              defaultValue={defaults.useType}
-              className={selectStyles}
-            >
-              <option value="">— None (bullpen / weight room)</option>
-              <option value="hitting">Hitting</option>
-              <option value="pitching">Pitching</option>
-            </select>
-          </Field>
-
           <Field label="Note" optional>
             <input
               type="text"
@@ -255,14 +227,6 @@ export function EditSessionDialog({
               className={inputStyles}
             />
           </Field>
-
-          <SessionFlagsRow
-            showTeamRental={false}
-            defaults={{
-              pfaReferred: defaults.pfaReferred,
-              isOnline: defaults.isOnline,
-            }}
-          />
         </div>
 
         <div className="flex items-center justify-end gap-2 pt-2">

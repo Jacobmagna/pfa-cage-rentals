@@ -2,11 +2,11 @@
 // the URL is the source of truth — refresh, deep-link, browser-back
 // all just work. Server re-renders with the filtered query result.
 //
-// Coach / Resource / Use type use the shared MultiSelect popover so
-// the page scales past a few coaches without growing a checkbox
-// thicket (see /admin/reports for the older inline-checkbox style).
-// Date range stays as two typable DateInput fields because a date
-// range isn't really multi-select — it's two endpoints.
+// Coach / Resource use the shared MultiSelect popover so the page
+// scales past a few coaches without growing a checkbox thicket (see
+// /admin/reports for the older inline-checkbox style). Date range stays
+// as two typable DateInput fields because a date range isn't really
+// multi-select — it's two endpoints.
 //
 // "No filter" semantics: a MultiSelect with nothing checked renders
 // no hidden inputs, so the URL omits that param, which the page
@@ -35,9 +35,6 @@ type FilterValues = {
   to: string;
   coachIds: string[];
   resourceIds: string[];
-  useTypes: ("hitting" | "pitching")[];
-  teamRental: ("yes" | "no")[];
-  pfaReferred: ("yes" | "no")[];
 };
 
 export function FiltersForm({
@@ -59,18 +56,6 @@ export function FiltersForm({
     value: r.id,
     label: r.name,
   }));
-  const useTypeOptions = [
-    { value: "hitting", label: "Hitting" },
-    { value: "pitching", label: "Pitching" },
-  ];
-  const teamRentalOptions = [
-    { value: "yes", label: "Team rentals only" },
-    { value: "no", label: "Private lessons only" },
-  ];
-  const pfaReferredOptions = [
-    { value: "yes", label: "PFA-referred only" },
-    { value: "no", label: "Coach-sourced only" },
-  ];
 
   return (
     <form
@@ -78,7 +63,7 @@ export function FiltersForm({
       action="/admin/sessions"
       className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] p-5 mb-6"
     >
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-7 lg:items-end">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
         <Field label="From">
           <DateInput
             name="from"
@@ -113,36 +98,6 @@ export function FiltersForm({
             placeholder="All resources"
             searchPlaceholder="Search resources…"
             aria-label="Filter by resource"
-          />
-        </Field>
-
-        <Field label="Use type">
-          <MultiSelect
-            name="useTypes"
-            options={useTypeOptions}
-            defaultSelected={values.useTypes}
-            placeholder="All uses"
-            aria-label="Filter by use type"
-          />
-        </Field>
-
-        <Field label="Team rental">
-          <MultiSelect
-            name="teamRental"
-            options={teamRentalOptions}
-            defaultSelected={values.teamRental}
-            placeholder="All bookings"
-            aria-label="Filter by team rental"
-          />
-        </Field>
-
-        <Field label="PFA-referred">
-          <MultiSelect
-            name="pfaReferred"
-            options={pfaReferredOptions}
-            defaultSelected={values.pfaReferred}
-            placeholder="All sources"
-            aria-label="Filter by PFA-referred"
           />
         </Field>
       </div>

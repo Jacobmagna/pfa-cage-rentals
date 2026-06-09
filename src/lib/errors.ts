@@ -37,14 +37,6 @@ export class BlockedTimeError extends Error {
   }
 }
 
-export class UseTypeValidationError extends Error {
-  readonly code = "USE_TYPE_INVALID" as const;
-  constructor(message: string) {
-    super(message);
-    this.name = "UseTypeValidationError";
-  }
-}
-
 export class SessionNotFoundError extends Error {
   readonly code = "SESSION_NOT_FOUND" as const;
   constructor(public readonly sessionId: string) {

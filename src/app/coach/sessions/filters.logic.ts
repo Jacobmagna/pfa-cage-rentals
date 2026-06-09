@@ -8,11 +8,6 @@
 // UTC instants happens in the page via parsePfaInput/pfaDayEnd) so this stays
 // a pure string module — no Date construction, no timezone math.
 
-/** Use-type values a coach session can carry; anything else is ignored. */
-export const VALID_USE_TYPES = new Set(["hitting", "pitching"] as const);
-
-export type HistoryUseType = "hitting" | "pitching";
-
 /** The validated filter set the page builds its WHERE clause from. */
 export type HistoryFilters = {
   /** Inclusive lower date bound "YYYY-MM-DD", or null when unset/blank/invalid. */
@@ -21,8 +16,6 @@ export type HistoryFilters = {
   to: string | null;
   /** A resourceId validated against the active set, or null. */
   resourceId: string | null;
-  /** A valid use-type, or null. */
-  useType: HistoryUseType | null;
   /** True when any filter is active (drives the "Clear" affordance). */
   isFiltered: boolean;
 };
@@ -32,7 +25,6 @@ export type HistoryParamsInput = {
   from?: string | string[];
   to?: string | string[];
   resourceId?: string | string[];
-  useType?: string | string[];
 };
 
 function pickFirst(v: string | string[] | undefined): string | undefined {
@@ -48,8 +40,8 @@ function isDateInput(v: string | undefined): v is string {
  * Validate + normalize the raw query params into a HistoryFilters. The caller
  * supplies the set of valid (active) resource ids so an unknown/stale
  * resourceId in the URL is silently dropped rather than yielding an empty
- * result. Bad dates / unknown use-types collapse to null. Default (nothing
- * supplied) = all sessions, isFiltered=false.
+ * result. Bad dates collapse to null. Default (nothing supplied) = all
+ * sessions, isFiltered=false.
  */
 export function parseHistoryFilters(
   input: HistoryParamsInput,
@@ -58,21 +50,15 @@ export function parseHistoryFilters(
   const fromRaw = pickFirst(input.from);
   const toRaw = pickFirst(input.to);
   const resourceRaw = pickFirst(input.resourceId);
-  const useTypeRaw = pickFirst(input.useType);
 
   const from = isDateInput(fromRaw) ? fromRaw : null;
   const to = isDateInput(toRaw) ? toRaw : null;
   const resourceId =
     resourceRaw && validResourceIds.has(resourceRaw) ? resourceRaw : null;
-  const useType =
-    useTypeRaw && VALID_USE_TYPES.has(useTypeRaw as HistoryUseType)
-      ? (useTypeRaw as HistoryUseType)
-      : null;
 
-  const isFiltered =
-    from !== null || to !== null || resourceId !== null || useType !== null;
+  const isFiltered = from !== null || to !== null || resourceId !== null;
 
-  return { from, to, resourceId, useType, isFiltered };
+  return { from, to, resourceId, isFiltered };
 }
 
 /** Inputs to the query-string builder: the active filters + a target page. */
@@ -80,7 +66,6 @@ export type HistoryQueryInput = {
   from?: string | null;
   to?: string | null;
   resourceId?: string | null;
-  useType?: string | null;
   page?: number | null;
 };
 
@@ -91,7 +76,7 @@ export type HistoryQueryInput = {
  * with a leading "?" when any param is present, else the bare path — so it can
  * be dropped straight into a pagination href that must PRESERVE the filters.
  *
- * Order is stable (from, to, resourceId, useType, page) so links round-trip
+ * Order is stable (from, to, resourceId, page) so links round-trip
  * predictably and tests can assert exact strings.
  */
 export function buildHistoryQuery(input: HistoryQueryInput): string {
@@ -104,7 +89,6 @@ export function buildHistoryQuery(input: HistoryQueryInput): string {
   add("from", input.from);
   add("to", input.to);
   add("resourceId", input.resourceId);
-  add("useType", input.useType);
   if (input.page != null && input.page > 1) {
     params.set("page", String(input.page));
   }

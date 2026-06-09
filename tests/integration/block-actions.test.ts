@@ -203,7 +203,6 @@ describe("createBlockInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
-      useType: "hitting",
     });
 
     try {
@@ -302,7 +301,6 @@ describe("updateBlockInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(15),
       endAt: tomorrowAt(16),
-      useType: "pitching",
     });
     const block = await createBlockInternal(fixtures.admin, {
       resourceId: seeded.cage1.id,

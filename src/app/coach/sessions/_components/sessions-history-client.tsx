@@ -12,9 +12,6 @@ import {
 import { HistoryFilters } from "./history-filters";
 import type { ResourceOption } from "./types";
 import { buildHistoryQuery, type HistoryFilters as HistoryFilterSet } from "../filters.logic";
-import { TeamRentalBadge } from "@/app/_components/team-rental-badge";
-import { PfaReferredBadge } from "@/app/_components/pfa-referred-badge";
-import { OnlineBadge } from "@/app/_components/online-badge";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 
 // Renders the history list, owns the edit-dialog open/close + the
@@ -29,11 +26,7 @@ export type HistoryRow = {
   resourceType: "cage" | "bullpen" | "weight_room";
   startAt: Date;
   endAt: Date;
-  useType: "hitting" | "pitching" | null;
   note: string | null;
-  isTeamRental: boolean;
-  pfaReferred: boolean;
-  isOnline: boolean;
 };
 
 export function SessionsHistoryClient({
@@ -80,11 +73,7 @@ export function SessionsHistoryClient({
         resourceId: editingRow.resourceId,
         startAt: editingRow.startAt,
         endAt: editingRow.endAt,
-        useType: editingRow.useType,
         note: editingRow.note,
-        isTeamRental: editingRow.isTeamRental,
-        pfaReferred: editingRow.pfaReferred,
-        isOnline: editingRow.isOnline,
       }
     : null;
 
@@ -109,7 +98,6 @@ export function SessionsHistoryClient({
           from: filters.from,
           to: filters.to,
           resourceId: filters.resourceId,
-          useType: filters.useType,
         }}
         isFiltered={filters.isFiltered}
       />
@@ -147,16 +135,7 @@ export function SessionsHistoryClient({
                     </span>
                     <span className="text-sm text-fg-muted truncate">
                       {row.resourceName}
-                      {row.useType ? (
-                        <>
-                          {" · "}
-                          <span className="capitalize">{row.useType}</span>
-                        </>
-                      ) : null}
                     </span>
-                    {row.isTeamRental ? <TeamRentalBadge /> : null}
-                    {row.pfaReferred ? <PfaReferredBadge /> : null}
-                    {row.isOnline ? <OnlineBadge /> : null}
                   </div>
                   {row.note ? (
                     <p

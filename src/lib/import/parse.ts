@@ -1,11 +1,8 @@
 import ExcelJS from "exceljs";
 
-export type UseTypeHint = "hitting" | "pitching" | null;
-
 export type RawSession = {
   date: string;
   resourceName: string;
-  useTypeHint: UseTypeHint;
   rawName: string;
   startTime: string;
   endTime: string;
@@ -50,8 +47,8 @@ function parseSheet(ws: ExcelJS.Worksheet): RawSession[] {
       const row = ws.getRow(resourceRowIdx);
       const label = cellText(row.getCell(1));
       if (label === "") continue;
-      const { resourceName, useTypeHint } = classifyResource(label, wrCounter, ws.name, resourceRowIdx);
-      out.push(...emitRowRuns(row, dateStr, resourceName, useTypeHint, ws.name));
+      const { resourceName } = classifyResource(label, wrCounter, ws.name, resourceRowIdx);
+      out.push(...emitRowRuns(row, dateStr, resourceName, ws.name));
     }
   }
   return out;
@@ -61,7 +58,6 @@ function emitRowRuns(
   row: ExcelJS.Row,
   date: string,
   resourceName: string,
-  useTypeHint: UseTypeHint,
   sourceTab: string,
 ): RawSession[] {
   const out: RawSession[] = [];
@@ -73,7 +69,6 @@ function emitRowRuns(
     out.push({
       date,
       resourceName,
-      useTypeHint,
       rawName: runValue,
       startTime: slotStart(runStart),
       endTime: slotStart(endColInclusive + 1),
@@ -118,24 +113,24 @@ function classifyResource(
   wrCounter: { n: number },
   tabName: string,
   rowIdx: number,
-): { resourceName: string; useTypeHint: UseTypeHint } {
+): { resourceName: string } {
   const trimmed = label.trim();
+  // Cage labels carry a "(Hitting)" / "(Pitching)" parenthetical in the
+  // source workbook; we still match it to extract the cage number, but
+  // no longer derive a use type from it.
   const cage = trimmed.match(/^Cage\s+([1-5])\s*\(\s*(Hitting|Pitching)\s*\)$/i);
   if (cage) {
-    return {
-      resourceName: `Cage ${cage[1]}`,
-      useTypeHint: cage[2].toLowerCase() as "hitting" | "pitching",
-    };
+    return { resourceName: `Cage ${cage[1]}` };
   }
   const bullpen = trimmed.match(/^Bullpen\s+([12])$/i);
-  if (bullpen) return { resourceName: `Bullpen ${bullpen[1]}`, useTypeHint: null };
+  if (bullpen) return { resourceName: `Bullpen ${bullpen[1]}` };
 
   if (/^Weight\s+Room$/i.test(trimmed)) {
     wrCounter.n += 1;
     if (wrCounter.n > 3) {
       throw new Error(`Parser error: more than 3 Weight Room rows in tab "${tabName}" at row ${rowIdx}`);
     }
-    return { resourceName: `Weight Room ${wrCounter.n}`, useTypeHint: null };
+    return { resourceName: `Weight Room ${wrCounter.n}` };
   }
 
   throw new Error(`Parser error: unknown resource label "${label}" in tab "${tabName}" at row ${rowIdx}`);

@@ -6,9 +6,9 @@ import {
 
 // Locks the pure filter parsing + the pagination query-string builder for the
 // coach "My sessions" page. The builder must (a) omit empty/blank params,
-// (b) round-trip all four filters plus the page, and (c) keep page 1 out of
-// the URL. The parser must validate dates, drop unknown resource ids, and
-// reject junk use-types — so a hand-edited URL can't break the WHERE clause.
+// (b) round-trip all filters plus the page, and (c) keep page 1 out of the
+// URL. The parser must validate dates and drop unknown resource ids — so a
+// hand-edited URL can't break the WHERE clause.
 
 const VALID_RESOURCES = new Set(["r1", "r2", "r3"]);
 
@@ -26,17 +26,16 @@ describe("buildHistoryQuery", () => {
     expect(buildHistoryQuery({ page: 2 })).toBe("/coach/sessions?page=2");
   });
 
-  it("round-trips all four filters plus the page in stable order", () => {
+  it("round-trips all filters plus the page in stable order", () => {
     expect(
       buildHistoryQuery({
         from: "2026-05-01",
         to: "2026-05-31",
         resourceId: "r2",
-        useType: "hitting",
         page: 3,
       }),
     ).toBe(
-      "/coach/sessions?from=2026-05-01&to=2026-05-31&resourceId=r2&useType=hitting&page=3",
+      "/coach/sessions?from=2026-05-01&to=2026-05-31&resourceId=r2&page=3",
     );
   });
 
@@ -57,18 +56,16 @@ describe("parseHistoryFilters", () => {
       from: null,
       to: null,
       resourceId: null,
-      useType: null,
       isFiltered: false,
     });
   });
 
-  it("accepts valid ISO dates and a known resource + use-type", () => {
+  it("accepts valid ISO dates and a known resource", () => {
     const f = parseHistoryFilters(
       {
         from: "2026-05-01",
         to: "2026-05-31",
         resourceId: "r2",
-        useType: "pitching",
       },
       VALID_RESOURCES,
     );
@@ -76,18 +73,16 @@ describe("parseHistoryFilters", () => {
       from: "2026-05-01",
       to: "2026-05-31",
       resourceId: "r2",
-      useType: "pitching",
       isFiltered: true,
     });
   });
 
-  it("drops malformed dates, unknown resources, and junk use-types", () => {
+  it("drops malformed dates and unknown resources", () => {
     const f = parseHistoryFilters(
       {
         from: "05/01/2026",
         to: "not-a-date",
         resourceId: "r-unknown",
-        useType: "weightlifting",
       },
       VALID_RESOURCES,
     );
@@ -95,15 +90,11 @@ describe("parseHistoryFilters", () => {
       from: null,
       to: null,
       resourceId: null,
-      useType: null,
       isFiltered: false,
     });
   });
 
   it("flags isFiltered when only one filter is active", () => {
-    expect(
-      parseHistoryFilters({ useType: "hitting" }, VALID_RESOURCES).isFiltered,
-    ).toBe(true);
     expect(
       parseHistoryFilters({ resourceId: "r3" }, VALID_RESOURCES).isFiltered,
     ).toBe(true);
@@ -114,10 +105,9 @@ describe("parseHistoryFilters", () => {
 
   it("picks the first value when a param arrives as an array", () => {
     const f = parseHistoryFilters(
-      { resourceId: ["r1", "r2"], useType: ["hitting", "pitching"] },
+      { resourceId: ["r1", "r2"] },
       VALID_RESOURCES,
     );
     expect(f.resourceId).toBe("r1");
-    expect(f.useType).toBe("hitting");
   });
 });

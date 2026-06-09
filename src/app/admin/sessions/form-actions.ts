@@ -25,7 +25,6 @@ import {
   ResourceNotFoundError,
   SessionNotFoundError,
   SessionOverlapError,
-  UseTypeValidationError,
 } from "@/lib/errors";
 import { parsePfaInput } from "@/lib/timezone";
 
@@ -35,11 +34,7 @@ export type SubmittedFormValues = {
   date: string;
   startTime: string;
   endTime: string;
-  useType: string;
   note: string;
-  isTeamRental: boolean;
-  pfaReferred: boolean;
-  isOnline: boolean;
 };
 
 export type ActionResult =
@@ -60,11 +55,7 @@ function snapshotFormValues(formData: FormData): SubmittedFormValues {
     date: formData.get("date")?.toString() ?? "",
     startTime: formData.get("startTime")?.toString() ?? "",
     endTime: formData.get("endTime")?.toString() ?? "",
-    useType: formData.get("useType")?.toString() ?? "",
     note: formData.get("note")?.toString() ?? "",
-    isTeamRental: formData.get("isTeamRental") === "on",
-    pfaReferred: formData.get("pfaReferred") === "on",
-    isOnline: formData.get("isOnline") === "on",
   };
 }
 
@@ -79,27 +70,18 @@ function buildSessionInput(formData: FormData) {
   }
   const startAt = parsePfaInput(dateStr, startStr);
   const endAt = parsePfaInput(dateStr, endStr);
-  const useTypeRaw = formData.get("useType")?.toString().trim();
   return {
     coachId: formData.get("coachId")?.toString() ?? "",
     resourceId: formData.get("resourceId")?.toString() ?? "",
     startAt,
     endAt,
-    // Send `null` (not undefined) for empty values so the UPDATE path
-    // actually clears the column. updateSessionInternal treats
-    // undefined as "don't touch this column" and null as "set to NULL"
-    // — using undefined here previously caused silent no-ops when an
-    // admin tried to remove a note or switch a cage's useType to
-    // "— None". Create path is unaffected (the internal coerces
+    // Send `null` (not undefined) for an empty note so the UPDATE path
+    // actually clears the column. updateSessionInternal treats undefined
+    // as "don't touch this column" and null as "set to NULL" — using
+    // undefined here previously caused silent no-ops when an admin tried
+    // to remove a note. Create path is unaffected (the internal coerces
     // undefined/null to null at insert).
-    useType:
-      useTypeRaw === "hitting" || useTypeRaw === "pitching"
-        ? useTypeRaw
-        : null,
     note: formData.get("note")?.toString().trim() || null,
-    isTeamRental: formData.get("isTeamRental") === "on",
-    pfaReferred: formData.get("pfaReferred") === "on",
-    isOnline: formData.get("isOnline") === "on",
   };
 }
 
@@ -110,7 +92,6 @@ function translateError(
   if (
     err instanceof SessionOverlapError ||
     err instanceof BlockedTimeError ||
-    err instanceof UseTypeValidationError ||
     err instanceof SessionNotFoundError ||
     err instanceof ResourceNotFoundError
   ) {

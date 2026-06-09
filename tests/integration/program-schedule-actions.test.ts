@@ -454,8 +454,7 @@ describe("deleteProgramScheduleBlockInternal", () => {
 
 // QA10 W3.3: program block occupies cage resources via linked blocked_times.
 describe("program block occupies cage resources (W3.3)", () => {
-  // Insert a coach session directly on a resource/time (bypasses the cage
-  // useType zod rule — fine for a fixture).
+  // Insert a coach session directly on a resource/time.
   async function createSessionAt(
     resourceId: string,
     coachId: string,
@@ -469,7 +468,6 @@ describe("program block occupies cage resources (W3.3)", () => {
         resourceId,
         startAt,
         endAt,
-        useType: "hitting",
         createdBy: fixtures.admin.id,
       })
       .returning();

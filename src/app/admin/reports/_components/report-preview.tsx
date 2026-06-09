@@ -7,8 +7,6 @@
 // form's GET submit; this just re-renders against the new data.
 
 import type { DetailRow, SummaryRow } from "@/lib/reports/aggregate";
-import { TeamRentalBadge } from "@/app/_components/team-rental-badge";
-import { OnlineBadge } from "@/app/_components/online-badge";
 
 export function ReportPreview({
   detail,
@@ -71,9 +69,6 @@ export function ReportPreview({
                 {includeCageSessions ? (
                   <th scope="col" className="px-4 py-3 text-right font-semibold">Rental owed</th>
                 ) : null}
-                {includeCageSessions ? (
-                  <th scope="col" className="px-4 py-3 text-center font-semibold">Prepaid online</th>
-                ) : null}
               </tr>
             </thead>
             <tbody>
@@ -114,17 +109,6 @@ export function ReportPreview({
                       {formatCents(row.totalCents)}
                     </td>
                   ) : null}
-                  {includeCageSessions ? (
-                    <td className="px-4 py-3 text-center">
-                      {row.onlineSessions > 0 ? (
-                        <span className="inline-block rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-success ring-1 ring-inset ring-success/30 tnum">
-                          {row.onlineSessions}
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-fg-subtle">—</span>
-                      )}
-                    </td>
-                  ) : null}
                 </tr>
               ))}
             </tbody>
@@ -147,7 +131,6 @@ export function ReportPreview({
                 <th scope="col" className="px-3 py-3 text-left font-semibold">Start</th>
                 <th scope="col" className="px-3 py-3 text-left font-semibold">End</th>
                 <th scope="col" className="px-3 py-3 text-left font-semibold">Resource</th>
-                <th scope="col" className="px-3 py-3 text-left font-semibold">Use</th>
                 <th scope="col" className="px-3 py-3 text-left font-semibold">Coach</th>
                 <th scope="col" className="px-3 py-3 text-right font-semibold">Slots</th>
                 <th scope="col" className="px-3 py-3 text-right font-semibold">Rate</th>
@@ -169,14 +152,9 @@ export function ReportPreview({
                     {row.endTime}
                   </td>
                   <td className="px-3 py-3 text-fg">{row.resourceName}</td>
-                  <td className="px-3 py-3 text-fg-muted capitalize">
-                    {row.useType ?? "—"}
-                  </td>
                   <td className="px-3 py-3 text-fg">
                     <span className="inline-flex items-center gap-1.5 flex-wrap">
                       {row.coachName}
-                      {row.isTeamRental ? <TeamRentalBadge /> : null}
-                      {row.isOnline ? <OnlineBadge /> : null}
                     </span>
                   </td>
                   <NumCell value={row.slots} />

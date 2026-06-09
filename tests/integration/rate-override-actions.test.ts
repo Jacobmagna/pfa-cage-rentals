@@ -161,7 +161,6 @@ describe("upsertRateOverrideInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
-      useType: "hitting",
     });
     expect(session.ratePer30MinCents).toBe(1700);
 
@@ -192,7 +191,6 @@ describe("upsertRateOverrideInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
-      useType: "hitting",
     });
 
     await upsertRateOverrideInternal(fixtures.admin, {
@@ -205,7 +203,6 @@ describe("upsertRateOverrideInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(13),
       endAt: tomorrowAt(14),
-      useType: "hitting",
     });
 
     expect(past.ratePer30MinCents).toBe(1700);
@@ -314,7 +311,6 @@ describe("deleteRateOverrideInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
-      useType: "hitting",
     });
     // Default cage rate is 2200 (DEFAULT_RATES_PER_SLOT_CENTS in
     // billing.ts; seeded into rate_defaults). Asserting against the

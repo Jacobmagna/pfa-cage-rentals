@@ -32,10 +32,6 @@ function typeBorder(type: ResourceType): string {
   }
 }
 
-function cap(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
 type AgendaItem =
   | { kind: "block"; startAt: Date; block: CoachGridProgramBlock }
   | { kind: "session"; startAt: Date; session: CoachGridSession };
@@ -173,22 +169,7 @@ function SessionRow({
         <p className="font-medium leading-tight text-fg">
           {session.resourceName}
         </p>
-        <div className="mt-0.5 flex flex-wrap items-center gap-1">
-          {session.useType ? (
-            <Badge label={cap(session.useType)} />
-          ) : null}
-          {session.isTeamRental ? <Badge label="Team" /> : null}
-          {session.isOnline ? <Badge label="Online" /> : null}
-        </div>
       </div>
     </li>
-  );
-}
-
-function Badge({ label }: { label: string }): React.JSX.Element {
-  return (
-    <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-fg-subtle">
-      {label}
-    </span>
   );
 }

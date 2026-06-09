@@ -44,9 +44,6 @@ export type CoachGridSession = {
   dayIndex: number;
   resourceName: string;
   resourceType: ResourceType;
-  useType: "hitting" | "pitching" | null;
-  isTeamRental: boolean;
-  isOnline: boolean;
   startAt: Date;
   endAt: Date;
 };
@@ -64,10 +61,6 @@ function typeBorder(type: ResourceType): string {
     case "weight_room":
       return "border-l-4 border-l-warning";
   }
-}
-
-function cap(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 // Columns: 64px sticky time-label column + 7 equal day columns.
@@ -207,13 +200,7 @@ export function CoachWeekGrid({
             const timeLabel = `${formatPfaTime12h(s.startAt)}–${formatPfaTime12h(
               s.endAt,
             )}`;
-            const tooltip = [
-              s.resourceName,
-              s.useType ? cap(s.useType) : null,
-              timeLabel,
-              s.isTeamRental ? "Team rental" : null,
-              s.isOnline ? "Online" : null,
-            ]
+            const tooltip = [s.resourceName, timeLabel]
               .filter(Boolean)
               .join(" · ");
             return (
@@ -235,26 +222,9 @@ export function CoachWeekGrid({
                   <span className="truncate font-medium leading-tight">
                     {s.resourceName}
                   </span>
-                  {s.useType ? (
-                    <span className="shrink-0 text-[8px] uppercase tracking-wider text-fg-subtle">
-                      {s.useType[0]}
-                    </span>
-                  ) : null}
                 </span>
                 <span className="truncate text-[9px] tabular-nums text-fg-subtle">
                   {timeLabel}
-                </span>
-                <span className="flex items-center gap-1">
-                  {s.isTeamRental ? (
-                    <span className="text-[8px] uppercase tracking-wider text-gold-strong">
-                      Team
-                    </span>
-                  ) : null}
-                  {s.isOnline ? (
-                    <span className="text-[8px] uppercase tracking-wider text-fg-subtle">
-                      Online
-                    </span>
-                  ) : null}
                 </span>
               </div>
             );

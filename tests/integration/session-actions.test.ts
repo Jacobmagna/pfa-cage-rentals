@@ -22,7 +22,6 @@ import {
 import {
   BlockedTimeError,
   SessionOverlapError,
-  UseTypeValidationError,
 } from "@/lib/errors";
 import {
   ensureFixtureUsers,
@@ -63,13 +62,11 @@ describe("createSessionInternal", () => {
       resourceId: seeded.cage1.id,
       startAt,
       endAt,
-      useType: "hitting",
       note: "happy path",
     });
 
     expect(created.id).toBeTruthy();
     expect(created.coachId).toBe(fixtures.coach.id);
-    expect(created.useType).toBe("hitting");
 
     const audit = await db
       .select()
@@ -82,32 +79,12 @@ describe("createSessionInternal", () => {
     expect(audit[0].entityType).toBe("session");
   });
 
-  it("rejects useType=null on a cage with UseTypeValidationError", async () => {
-    await expect(
-      createSessionInternal(fixtures.admin, {
-        coachId: fixtures.coach.id,
-        resourceId: seeded.cage1.id,
-        startAt: tomorrowAt(10),
-        endAt: tomorrowAt(11),
-        useType: null,
-      }),
-    ).rejects.toBeInstanceOf(UseTypeValidationError);
-
-    // No partial writes — failed validation must not have created
-    // a session row or an audit row.
-    const sessions = await db.select().from(sessionsBilling);
-    expect(sessions).toHaveLength(0);
-    const audits = await db.select().from(auditLog);
-    expect(audits).toHaveLength(0);
-  });
-
   it("rejects an overlapping window with SessionOverlapError naming the conflicting coach", async () => {
     await createSessionInternal(fixtures.admin, {
       coachId: fixtures.coach.id,
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
-      useType: "hitting",
     });
 
     const promise = createSessionInternal(fixtures.admin, {
@@ -115,7 +92,6 @@ describe("createSessionInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(10, 30),
       endAt: tomorrowAt(11, 30),
-      useType: "hitting",
     });
 
     await expect(promise).rejects.toBeInstanceOf(SessionOverlapError);
@@ -147,7 +123,6 @@ describe("createSessionInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
-      useType: "hitting",
     });
 
     await expect(promise).rejects.toBeInstanceOf(BlockedTimeError);
@@ -171,13 +146,11 @@ describe("updateSessionInternal", () => {
       resourceId: seeded.cage1.id,
       startAt: tomorrowAt(10),
       endAt: tomorrowAt(11),
-      useType: "hitting",
       note: "before",
     });
 
     await updateSessionInternal(fixtures.admin, created.id, {
       note: "after",
-      useType: "pitching",
     });
 
     const updateRows = await db
@@ -197,8 +170,6 @@ describe("updateSessionInternal", () => {
     // we just assert the keys we changed are present with correct values.
     expect(diff.before.note).toBe("before");
     expect(diff.after.note).toBe("after");
-    expect(diff.before.useType).toBe("hitting");
-    expect(diff.after.useType).toBe("pitching");
 
     // Unchanged keys must NOT appear in the diff.
     expect(diff.before).not.toHaveProperty("coachId");
@@ -214,8 +185,6 @@ describe("deleteSessionInternal", () => {
       resourceId: seeded.bullpen1.id,
       startAt: tomorrowAt(14),
       endAt: tomorrowAt(15),
-      // bullpens must have useType = null (validated app-layer)
-      useType: null,
     });
 
     await deleteSessionInternal(fixtures.admin, created.id);

@@ -103,30 +103,37 @@ export function computeSlotState(args: {
 }
 
 /**
- * Whether a 1-hour booking is allowed starting at `slotIndex` on a
- * resource. True iff:
- *   - this slot is free, AND
- *   - the NEXT 30-min slot is also free, AND
- *   - the next slot is still within the 8 AM–10 PM window (i.e. this
- *     slot is not the last slot of the day).
+ * Count the consecutive "free" 30-min slots starting AT `slotIndex` on a
+ * resource. The tapped slot itself counts (it's free — only free slots
+ * are bookable), so the minimum useful return is 1. Scanning stops at the
+ * first non-free slot OR the end of the day (`totalSlots`), whichever
+ * comes first.
  *
- * `slotState(i)` returns the state of slot index `i`; `totalSlots` is
- * the number of slots in the day (SCHEDULE_GRID_SLOTS = 28). The caller
- * supplies a state accessor so this stays pure and decoupled from how
- * the grid stores its slots.
+ * This is the available headroom for a booking that begins at this slot:
+ * a duration may occupy up to `maxConsecutiveFreeSlots * 30` minutes
+ * without colliding with a busy slot or running past the 8 AM–10 PM
+ * window. (e.g. this slot + the next two free, then a taken slot → 3.)
+ *
+ * `slotState(i)` returns the state of slot index `i`; `totalSlots` is the
+ * number of slots in the day (SCHEDULE_GRID_SLOTS = 28). The caller
+ * supplies a state accessor so this stays pure and decoupled from how the
+ * grid stores its slots.
+ *
+ * If the tapped slot itself is somehow not free, returns 0 (nothing
+ * bookable). Callers only pass free slots, so in practice this is >= 1.
  */
-export function canBookOneHour(args: {
+export function maxConsecutiveFreeSlots(args: {
   slotIndex: number;
   totalSlots: number;
   slotState: (slotIndex: number) => SlotState;
-}): boolean {
+}): number {
   const { slotIndex, totalSlots, slotState } = args;
-  const nextIndex = slotIndex + 1;
-  // Last slot of the day → no room for a back-to-back hour.
-  if (nextIndex >= totalSlots) return false;
-  if (slotState(slotIndex) !== "free") return false;
-  if (slotState(nextIndex) !== "free") return false;
-  return true;
+  let count = 0;
+  for (let i = slotIndex; i < totalSlots; i++) {
+    if (slotState(i) !== "free") break;
+    count++;
+  }
+  return count;
 }
 
 // A single selected slot resolved to its [startHour, startMinute] +

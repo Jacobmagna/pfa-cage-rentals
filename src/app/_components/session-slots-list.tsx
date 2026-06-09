@@ -2,13 +2,12 @@
 
 // Per-slot notecard list for the multi-slot session flow. Renders N
 // cards, one per generated time range, each with its own optional
-// note and team-rental checkbox. Coach (or admin) picks a date +
-// start + end + slot length on the parent form; this component
-// renders an editor over the `slots` array.
+// note. Coach (or admin) picks a date + start + end + slot length on
+// the parent form; this component renders an editor over the `slots`
+// array.
 //
-// State strategy: per-slot notes + team-rental flags live in the
-// parent's state. The canonical slot derivation lives in `deriveSlots`
-// (exported below).
+// State strategy: per-slot notes live in the parent's state. The
+// canonical slot derivation lives in `deriveSlots` (exported below).
 //
 // Two integration modes:
 //   1. Self-deriving (legacy, admin forms): pass `rangeStart` /
@@ -38,13 +37,10 @@ export type SlotInput = {
   startAt: Date;
   endAt: Date;
   note: string;
-  isTeamRental: boolean;
-  pfaReferred: boolean;
-  isOnline: boolean;
 };
 
 // Canonical slot derivation. Given the computed range + slot length,
-// produce the N slot inputs. Each slot keeps its existing note/flags
+// produce the N slot inputs. Each slot keeps its existing note
 // ONLY if its (startAt, endAt) signature is unchanged vs.
 // `priorSlots` — so a range tweak that produces overlapping slot
 // signatures keeps typed notes. Returns [] for any invalid range (no
@@ -56,7 +52,7 @@ export type SlotInput = {
 export function deriveSlots(
   rangeStart: Date | null,
   rangeEnd: Date | null,
-  slotLengthMinutes: 30 | 60,
+  slotLengthMinutes: number,
   priorSlots: SlotInput[] = [],
 ): SlotInput[] {
   if (!rangeStart || !rangeEnd) return [];
@@ -71,17 +67,11 @@ export function deriveSlots(
     string,
     {
       note: string;
-      isTeamRental: boolean;
-      pfaReferred: boolean;
-      isOnline: boolean;
     }
   >();
   for (const s of priorSlots) {
     priorByKey.set(slotKey(s.startAt, s.endAt), {
       note: s.note,
-      isTeamRental: s.isTeamRental,
-      pfaReferred: s.pfaReferred,
-      isOnline: s.isOnline,
     });
   }
 
@@ -94,9 +84,6 @@ export function deriveSlots(
       startAt,
       endAt,
       note: prior?.note ?? "",
-      isTeamRental: prior?.isTeamRental ?? false,
-      pfaReferred: prior?.pfaReferred ?? false,
-      isOnline: prior?.isOnline ?? false,
     });
   }
   return out;
@@ -111,14 +98,12 @@ type Props = {
   rangeStart?: Date | null;
   /** Computed UTC instant for the LAST slot end (exclusive). */
   rangeEnd?: Date | null;
-  /** 30 or 60. */
-  slotLengthMinutes?: 30 | 60;
+  /** Slot length in minutes (30, 60, or a custom positive integer). */
+  slotLengthMinutes?: number;
   /** Current per-slot inputs. Parent owns the array. */
   slots: SlotInput[];
-  /** Emit a new slots array when the user edits a note or toggle. */
+  /** Emit a new slots array when the user edits a note. */
   onChange: (slots: SlotInput[]) => void;
-  /** Hide the "Team rental" toggle on coach surfaces. */
-  showTeamRental?: boolean;
 };
 
 export function SessionSlotsList({
@@ -127,7 +112,6 @@ export function SessionSlotsList({
   slotLengthMinutes,
   slots,
   onChange,
-  showTeamRental = true,
 }: Props) {
   // Legacy self-deriving mode: only active when the parent supplies the
   // range props. The coach form omits them (it owns derivation), so
@@ -154,16 +138,10 @@ export function SessionSlotsList({
   useEffect(() => {
     if (!selfDeriving) return;
     const sig = computed
-      .map(
-        (s) =>
-          `${s.startAt.toISOString()}|${s.note}|${s.isTeamRental ? 1 : 0}|${s.pfaReferred ? 1 : 0}|${s.isOnline ? 1 : 0}`,
-      )
+      .map((s) => `${s.startAt.toISOString()}|${s.note}`)
       .join("·");
     const current = slots
-      .map(
-        (s) =>
-          `${s.startAt.toISOString()}|${s.note}|${s.isTeamRental ? 1 : 0}|${s.pfaReferred ? 1 : 0}|${s.isOnline ? 1 : 0}`,
-      )
+      .map((s) => `${s.startAt.toISOString()}|${s.note}`)
       .join("·");
     if (sig !== current && sig !== lastEmittedRef.current) {
       lastEmittedRef.current = sig;
@@ -175,22 +153,6 @@ export function SessionSlotsList({
 
   const updateNote = (i: number, note: string) => {
     const next = slots.map((s, idx) => (idx === i ? { ...s, note } : s));
-    onChange(next);
-  };
-  const updateTeam = (i: number, isTeamRental: boolean) => {
-    const next = slots.map((s, idx) =>
-      idx === i ? { ...s, isTeamRental } : s,
-    );
-    onChange(next);
-  };
-  const updatePfaReferred = (i: number, pfaReferred: boolean) => {
-    const next = slots.map((s, idx) =>
-      idx === i ? { ...s, pfaReferred } : s,
-    );
-    onChange(next);
-  };
-  const updateOnline = (i: number, isOnline: boolean) => {
-    const next = slots.map((s, idx) => (idx === i ? { ...s, isOnline } : s));
     onChange(next);
   };
 
@@ -210,25 +172,6 @@ export function SessionSlotsList({
               <p className="text-sm font-mono tabular-nums text-fg">
                 {formatRangeShort(slot.startAt, slot.endAt)}
               </p>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {showTeamRental ? (
-                  <SlotPill
-                    checked={slot.isTeamRental}
-                    onChange={(v) => updateTeam(i, v)}
-                    label="Team"
-                  />
-                ) : null}
-                <SlotPill
-                  checked={slot.isOnline}
-                  onChange={(v) => updateOnline(i, v)}
-                  label="Prepaid online"
-                />
-                <SlotPill
-                  checked={slot.pfaReferred}
-                  onChange={(v) => updatePfaReferred(i, v)}
-                  label="PFA"
-                />
-              </div>
             </div>
             <input
               type="text"
@@ -247,34 +190,6 @@ export function SessionSlotsList({
 
 function slotKey(start: Date, end: Date): string {
   return `${start.toISOString()}|${end.toISOString()}`;
-}
-
-function SlotPill({
-  checked,
-  onChange,
-  label,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-}) {
-  return (
-    <label
-      className={`inline-flex items-center gap-1 cursor-pointer select-none rounded-full border px-2.5 h-6 text-[11px] font-medium transition-colors ${
-        checked
-          ? "border-gold/40 bg-gold/10 text-gold-strong"
-          : "border-line bg-surface text-fg-muted hover:border-line-strong hover:text-fg"
-      }`}
-    >
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="sr-only"
-      />
-      <span>{label}</span>
-    </label>
-  );
 }
 
 // Compact label like "10:00 AM – 10:30 AM" (date is implied by the

@@ -12,7 +12,6 @@ function ns(overrides: Partial<NormalizedSession>): NormalizedSession {
   return {
     date: "2026-05-01",
     resourceName: "Cage 1",
-    useTypeHint: "pitching",
     rawName: "D. Lusk",
     startTime: "14:30",
     endTime: "15:00",

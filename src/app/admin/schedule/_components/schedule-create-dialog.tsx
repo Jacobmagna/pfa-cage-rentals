@@ -25,7 +25,6 @@ import {
 } from "../form-actions";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
-import { SessionFlagsRow } from "@/app/_components/session-flags-row";
 import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
 import {
   SessionSlotsList,
@@ -34,7 +33,7 @@ import {
 import { formatPfaDate, formatPfaTime, parsePfaInput } from "@/lib/timezone";
 
 // Unified "create on the grid" dialog. Two tabs:
-//   - Session: full session form (coach dropdown + use type + note)
+//   - Session: full session form (coach dropdown + note)
 //   - Block:   simpler form (free-text reason — for summer camps,
 //              team rentals, HVAC repairs, etc.)
 // Both pre-fill resource + date + start/end from the cell click,
@@ -158,11 +157,7 @@ export function ScheduleCreateDialog({
       date: prefill ? toDateInput(prefill.startAt) : "",
       startTime: prefill ? toTimeInput(prefill.startAt) : "09:00",
       endTime: prefill ? toTimeInput(prefill.endAt) : "10:00",
-      useType: "",
       note: "",
-      isTeamRental: false,
-      pfaReferred: false,
-      isOnline: false,
     };
   }, [prefill, sessionState]);
 
@@ -294,11 +289,7 @@ function SessionTab({
     date: string;
     startTime: string;
     endTime: string;
-    useType: string;
     note: string;
-    isTeamRental: boolean;
-    pfaReferred: boolean;
-    isOnline: boolean;
   };
   coaches: CoachOption[];
   resources: ResourceOption[];
@@ -312,7 +303,6 @@ function SessionTab({
     date: defaults.date,
     startTime: defaults.startTime,
     endTime: defaults.endTime,
-    useType: defaults.useType,
   });
   const [prevDefaults, setPrevDefaults] = useState(defaults);
   if (defaults !== prevDefaults) {
@@ -323,11 +313,10 @@ function SessionTab({
       date: defaults.date,
       startTime: defaults.startTime,
       endTime: defaults.endTime,
-      useType: defaults.useType,
     });
   }
 
-  const [slotLengthMinutes, setSlotLengthMinutes] = useState<30 | 60>(30);
+  const [slotLengthMinutes, setSlotLengthMinutes] = useState<number>(30);
   const [slots, setSlots] = useState<SlotInput[]>([]);
   const [batchPending, startBatchTransition] = useTransition();
   const [batchError, setBatchError] = useState<string | null>(null);
@@ -396,17 +385,10 @@ function SessionTab({
         await createSessionsBatch({
           coachId: live.coachId,
           resourceId: live.resourceId,
-          useType:
-            live.useType === "hitting" || live.useType === "pitching"
-              ? live.useType
-              : null,
           slots: slots.map((s) => ({
             startAt: s.startAt,
             endAt: s.endAt,
             note: s.note.trim() || null,
-            isTeamRental: s.isTeamRental,
-            pfaReferred: s.pfaReferred,
-            isOnline: s.isOnline,
           })),
         });
         setSlots([]);
@@ -547,42 +529,17 @@ function SessionTab({
         </p>
       ) : null}
 
-      <Field
-        label="Use type"
-        hint="Required for cages (hitting or pitching). Leave blank for bullpens and weight rooms."
-      >
-        <select
-          name="useType"
-          value={live.useType}
-          onChange={(e) => setLive((p) => ({ ...p, useType: e.target.value }))}
-          className={selectStyles}
-        >
-          <option value="">— None (bullpen / weight room)</option>
-          <option value="hitting">Hitting</option>
-          <option value="pitching">Pitching</option>
-        </select>
-      </Field>
-
       {!isMultiSlot ? (
-        <>
-          <Field label="Note" optional>
-            <input
-              type="text"
-              name="note"
-              defaultValue={defaults.note}
-              maxLength={500}
-              placeholder="Optional context"
-              className={inputStyles}
-            />
-          </Field>
-          <SessionFlagsRow
-            defaults={{
-              isTeamRental: defaults.isTeamRental,
-              pfaReferred: defaults.pfaReferred,
-              isOnline: defaults.isOnline,
-            }}
+        <Field label="Note" optional>
+          <input
+            type="text"
+            name="note"
+            defaultValue={defaults.note}
+            maxLength={500}
+            placeholder="Optional context"
+            className={inputStyles}
           />
-        </>
+        </Field>
       ) : (
         <SessionSlotsList
           rangeStart={rangeStart}

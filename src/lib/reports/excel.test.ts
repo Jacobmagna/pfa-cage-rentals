@@ -28,13 +28,9 @@ function makeReport(): ReportData {
         coachId: "c1",
         coachName: "Alice Coach",
         coachEmail: "alice@x.com",
-        useType: "hitting",
         ratePerSlotCents: 1800,
         totalCents: 3600,
         note: "warm-up",
-        isTeamRental: false,
-        pfaReferred: true,
-        isOnline: false,
       },
       {
         sessionId: "s2",
@@ -49,13 +45,9 @@ function makeReport(): ReportData {
         coachId: "c2",
         coachName: "Bob Coach",
         coachEmail: "bob@x.com",
-        useType: null,
         ratePerSlotCents: 700,
         totalCents: 1400,
         note: null,
-        isTeamRental: true,
-        pfaReferred: false,
-        isOnline: false,
       },
       {
         sessionId: "s3",
@@ -70,13 +62,9 @@ function makeReport(): ReportData {
         coachId: "c1",
         coachName: "Alice Coach",
         coachEmail: "alice@x.com",
-        useType: "hitting",
         ratePerSlotCents: 0,
         totalCents: 0,
         note: null,
-        isTeamRental: false,
-        pfaReferred: false,
-        isOnline: true,
       },
     ],
     summary: [
@@ -93,7 +81,6 @@ function makeReport(): ReportData {
         programSlots: 0,
         programTotalCents: 0,
         totalCents: 3600,
-        onlineSessions: 1,
       },
       {
         coachId: "c2",
@@ -108,7 +95,6 @@ function makeReport(): ReportData {
         programSlots: 0,
         programTotalCents: 0,
         totalCents: 1400,
-        onlineSessions: 0,
       },
     ],
     grandTotalCents: 5000,
@@ -172,7 +158,6 @@ describe("buildReportWorkbook", () => {
         "Work Slots",
         "Work $",
         "Rental Owed $",
-        "Online Sessions",
       ]);
     });
 
@@ -184,7 +169,6 @@ describe("buildReportWorkbook", () => {
       expect(row2.getCell(1).value).toBe("Alice Coach");
       expect(row2.getCell(4).value).toBe(36); // cage $ = 3600 cents / 100
       expect(row2.getCell(11).value).toBe(36); // Rental Owed $ (cage receivable, col 11)
-      expect(row2.getCell(12).value).toBe(1); // 1 online session
 
       expect(sheet.getColumn(4).numFmt).toBe('"$"#,##0.00');
       expect(sheet.getColumn(11).numFmt).toBe('"$"#,##0.00');
@@ -263,7 +247,6 @@ describe("buildReportWorkbook", () => {
         "WeightRoom Slots",
         "WeightRoom $",
         "Rental Owed $",
-        "Online Sessions",
       ]);
       expect(headers).not.toContain("Work Slots");
     });
@@ -291,11 +274,10 @@ describe("buildReportWorkbook", () => {
       expect(sheet.rowCount).toBe(4); // header + 3 sessions
     });
 
-    // Detail column layout (1-based) after the rate-snapshot refactor:
+    // Detail column layout (1-based) after the cage-flag removal:
     //   1 Date · 2 Day · 3 Start · 4 End · 5 Duration · 6 Resource
-    //   7 Use · 8 Coach · 9 Team Rental · 10 PFA-Referred · 11 Online
-    //   12 Slots · 13 Rate · 14 $ · 15 Note
-    it("writes flags + dollar amounts per session", async () => {
+    //   7 Coach · 8 Slots · 9 Rate · 10 $ · 11 Note
+    it("writes dollar amounts per session", async () => {
       const buf = await build(makeReport());
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Detail")!;
@@ -303,21 +285,15 @@ describe("buildReportWorkbook", () => {
       const row2 = sheet.getRow(2);
       expect(row2.getCell(1).value).toBe("2026-05-05");
       expect(row2.getCell(6).value).toBe("Cage 1");
-      expect(row2.getCell(8).value).toBe("Alice Coach");
-      const teamRentalVal2 = row2.getCell(9).value;
-      expect(teamRentalVal2 === "" || teamRentalVal2 === null).toBe(true);
-      expect(row2.getCell(10).value).toBe("Yes"); // pfa-referred
-      const onlineVal2 = row2.getCell(11).value;
-      expect(onlineVal2 === "" || onlineVal2 === null).toBe(true);
-      expect(row2.getCell(12).value).toBe(2);
-      expect(row2.getCell(13).value).toBe(18); // 1800 / 100
-      expect(row2.getCell(14).value).toBe(36);
-      expect(row2.getCell(15).value).toBe("warm-up");
+      expect(row2.getCell(7).value).toBe("Alice Coach");
+      expect(row2.getCell(8).value).toBe(2); // slots
+      expect(row2.getCell(9).value).toBe(18); // 1800 / 100
+      expect(row2.getCell(10).value).toBe(36);
+      expect(row2.getCell(11).value).toBe("warm-up");
 
-      const row4 = sheet.getRow(4); // s3 — online session
-      expect(row4.getCell(11).value).toBe("Yes"); // online
-      expect(row4.getCell(13).value).toBe(0); // rate 0
-      expect(row4.getCell(14).value).toBe(0); // total 0
+      const row4 = sheet.getRow(4); // s3 — zero-rate session
+      expect(row4.getCell(9).value).toBe(0); // rate 0
+      expect(row4.getCell(10).value).toBe(0); // total 0
     });
   });
 

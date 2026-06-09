@@ -65,7 +65,7 @@ function addSummarySheet(
     { header: "Email", key: "email", width: 28 },
   ];
   // Cage rental sessions (money the coach owes PFA) — session-only
-  // categories, including the Online sessions count.
+  // categories.
   if (includeCageSessions) {
     columns.push(
       { header: "Cage Slots", key: "cageSlots", width: 12, kind: "num" },
@@ -104,14 +104,6 @@ function addSummarySheet(
       kind: "dollar",
     });
   }
-  // Online is a session-only count — only when cage scope is on.
-  if (includeCageSessions) {
-    columns.push({
-      header: "Online Sessions",
-      key: "onlineSessions",
-      width: 16,
-    });
-  }
 
   sheet.columns = columns.map(({ header, key, width }) => ({
     header,
@@ -132,7 +124,6 @@ function addSummarySheet(
       data.weightRoomSlots = row.weightRoomSlots;
       data.weightRoomDollars = row.weightRoomTotalCents / 100;
       data.cageOwed = row.totalCents / 100; // cage-side receivable subtotal
-      data.onlineSessions = row.onlineSessions || "";
     }
     if (includeProgramHours) {
       data.programSlots = row.programSlots;
@@ -192,11 +183,7 @@ function addDetailSheet(workbook: ExcelJS.Workbook, report: ReportData) {
     { header: "End", key: "end", width: 8 },
     { header: "Duration (min)", key: "duration", width: 14 },
     { header: "Resource", key: "resource", width: 14 },
-    { header: "Use", key: "use", width: 10 },
     { header: "Coach", key: "coach", width: 24 },
-    { header: "Team Rental", key: "teamRental", width: 12 },
-    { header: "PFA-Referred", key: "pfaReferred", width: 14 },
-    { header: "Prepaid online", key: "online", width: 14 },
     { header: "Slots", key: "slots", width: 8 },
     { header: "Rate", key: "rate", width: 10 },
     { header: "$", key: "total", width: 12 },
@@ -211,11 +198,7 @@ function addDetailSheet(workbook: ExcelJS.Workbook, report: ReportData) {
       end: row.endTime,
       duration: row.durationMinutes,
       resource: row.resourceName,
-      use: row.useType ?? "",
       coach: row.coachName,
-      teamRental: row.isTeamRental ? "Yes" : "",
-      pfaReferred: row.pfaReferred ? "Yes" : "",
-      online: row.isOnline ? "Yes" : "",
       slots: row.slots,
       rate: row.ratePerSlotCents / 100,
       total: row.totalCents / 100,

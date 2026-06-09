@@ -31,7 +31,6 @@ import {
 import type { ResourceType } from "@/lib/billing";
 import { updateSession } from "@/app/admin/sessions/actions";
 import { SessionFormDialog } from "@/app/admin/sessions/_components/session-form-dialog";
-import { TeamRentalBadge } from "@/app/_components/team-rental-badge";
 import type {
   CoachOption,
   ResourceOption as SessionResourceOption,
@@ -60,11 +59,7 @@ export type ScheduleSession = {
   resourceId: string;
   startAt: Date;
   endAt: Date;
-  useType: "hitting" | "pitching" | null;
   note: string | null;
-  isTeamRental: boolean;
-  pfaReferred: boolean;
-  isOnline: boolean;
 };
 
 export type ScheduleBlock = {
@@ -453,11 +448,7 @@ export function ScheduleGrid({
           resourceId: dialog.session.resourceId,
           startAt: dialog.session.startAt,
           endAt: dialog.session.endAt,
-          useType: dialog.session.useType,
           note: dialog.session.note,
-          isTeamRental: dialog.session.isTeamRental,
-          pfaReferred: dialog.session.pfaReferred,
-          isOnline: dialog.session.isOnline,
         }
       : undefined;
 
@@ -794,12 +785,7 @@ function DraggableSession({
     });
 
   const accent = resource ? typeBorder(resource.type) : "";
-  const tooltip = [
-    session.coachName,
-    session.isTeamRental ? "Team rental" : null,
-    session.useType ? cap(session.useType) : null,
-    session.note,
-  ]
+  const tooltip = [session.coachName, session.note]
     .filter(Boolean)
     .join(" · ");
 
@@ -830,12 +816,6 @@ function DraggableSession({
       title={tooltip}
     >
       <span className="truncate font-medium">{session.coachName}</span>
-      {session.isTeamRental ? <TeamRentalBadge variant="compact" /> : null}
-      {session.useType ? (
-        <span className="text-[9px] uppercase tracking-wider text-fg-subtle shrink-0">
-          {session.useType[0]}
-        </span>
-      ) : null}
     </button>
   );
 }
@@ -884,10 +864,6 @@ function formatHour(hour24: number): string {
   if (hour24 === 12) return "12 PM";
   if (hour24 < 12) return `${hour24} AM`;
   return `${hour24 - 12} PM`;
-}
-
-function cap(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function LegendDot({

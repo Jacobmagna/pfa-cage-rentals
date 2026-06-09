@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  canBookOneHour,
   computeSlotState,
+  maxConsecutiveFreeSlots,
   selectionToSortedRanges,
   type SlotBlock,
   type SlotSession,
@@ -135,77 +135,102 @@ describe("computeSlotState", () => {
   });
 });
 
-describe("canBookOneHour", () => {
+describe("maxConsecutiveFreeSlots", () => {
   const TOTAL = 28; // SCHEDULE_GRID_SLOTS
 
   // Build a slotState accessor from explicit per-index states.
   const accessor = (states: Record<number, SlotState>) => (i: number): SlotState =>
     states[i] ?? "free";
 
-  it("allows a 1-hr booking when this slot and the next are both free", () => {
+  it("counts the tapped slot itself when it's the only free one (next is taken)", () => {
     expect(
-      canBookOneHour({ slotIndex: 5, totalSlots: TOTAL, slotState: accessor({}) }),
-    ).toBe(true);
-  });
-
-  it("disallows when the next slot is taken", () => {
-    expect(
-      canBookOneHour({
+      maxConsecutiveFreeSlots({
         slotIndex: 5,
         totalSlots: TOTAL,
         slotState: accessor({ 6: "taken" }),
       }),
-    ).toBe(false);
+    ).toBe(1);
   });
 
-  it("disallows when the next slot is blocked", () => {
+  it("counts two consecutive free slots, then stops at a taken slot", () => {
     expect(
-      canBookOneHour({
+      maxConsecutiveFreeSlots({
         slotIndex: 5,
         totalSlots: TOTAL,
-        slotState: accessor({ 6: "blocked" }),
+        slotState: accessor({ 7: "taken" }),
       }),
-    ).toBe(false);
+    ).toBe(2);
   });
 
-  it("disallows when the next slot is the coach's own session", () => {
+  it("counts three consecutive free slots, then stops at a blocked slot", () => {
     expect(
-      canBookOneHour({
+      maxConsecutiveFreeSlots({
+        slotIndex: 5,
+        totalSlots: TOTAL,
+        slotState: accessor({ 8: "blocked" }),
+      }),
+    ).toBe(3);
+  });
+
+  it("stops at the coach's own adjacent session", () => {
+    expect(
+      maxConsecutiveFreeSlots({
         slotIndex: 5,
         totalSlots: TOTAL,
         slotState: accessor({ 6: "own" }),
       }),
-    ).toBe(false);
+    ).toBe(1);
   });
 
-  it("disallows when this slot itself isn't free", () => {
+  it("returns 0 when the tapped slot itself isn't free", () => {
     expect(
-      canBookOneHour({
+      maxConsecutiveFreeSlots({
         slotIndex: 5,
         totalSlots: TOTAL,
         slotState: accessor({ 5: "taken" }),
       }),
-    ).toBe(false);
+    ).toBe(0);
   });
 
-  it("disallows on the last slot of the day (no next slot)", () => {
+  it("returns 1 on the last slot of the day (nothing after it)", () => {
     expect(
-      canBookOneHour({
+      maxConsecutiveFreeSlots({
         slotIndex: TOTAL - 1,
         totalSlots: TOTAL,
         slotState: accessor({}),
       }),
-    ).toBe(false);
+    ).toBe(1);
   });
 
-  it("allows on the second-to-last slot when both it and the last are free", () => {
+  it("returns 2 on the second-to-last slot when both it and the last are free", () => {
     expect(
-      canBookOneHour({
+      maxConsecutiveFreeSlots({
         slotIndex: TOTAL - 2,
         totalSlots: TOTAL,
         slotState: accessor({}),
       }),
-    ).toBe(true);
+    ).toBe(2);
+  });
+
+  it("clamps the run at the end of the day even when all remaining slots are free", () => {
+    // From slot 25 there are exactly 3 slots left (25, 26, 27).
+    expect(
+      maxConsecutiveFreeSlots({
+        slotIndex: 25,
+        totalSlots: TOTAL,
+        slotState: accessor({}),
+      }),
+    ).toBe(3);
+  });
+
+  it("counts the full day when every slot is free from index 0", () => {
+    expect(
+      maxConsecutiveFreeSlots({
+        slotIndex: 0,
+        totalSlots: TOTAL,
+        slotState: accessor({}),
+      }),
+    ).toBe(TOTAL);
   });
 });
 

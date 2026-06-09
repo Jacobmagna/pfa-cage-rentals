@@ -41,7 +41,6 @@ describeWithFixture("parseWorkbook (real source_data.xlsx)", () => {
     expect(lusk[0]).toEqual({
       date: "2026-05-01",
       resourceName: "Cage 1",
-      useTypeHint: "pitching",
       rawName: "D. Lusk",
       startTime: "14:30",
       endTime: "21:30",
@@ -56,22 +55,16 @@ describeWithFixture("parseWorkbook (real source_data.xlsx)", () => {
     expect(rawNames).toEqual(["Shannon", "Shannon v"]);
   });
 
-  it("assigns useTypeHint from the row label (cages get pitching/hitting; others null)", async () => {
+  it("classifies cage labels (with a hitting/pitching parenthetical) to a bare 'Cage N' name", async () => {
     const sessions = await loadFixture();
-    const seen = new Map<string, Set<string>>();
-    for (const s of sessions) {
-      const key = `${s.useTypeHint}`;
-      if (!seen.has(s.resourceName)) seen.set(s.resourceName, new Set());
-      seen.get(s.resourceName)!.add(key);
+    const names = new Set(sessions.map((s) => s.resourceName));
+    for (const n of ["Cage 1", "Cage 2", "Cage 3", "Cage 4", "Cage 5"]) {
+      expect(names.has(n)).toBe(true);
     }
-    expect(Array.from(seen.get("Cage 1") ?? [])).toEqual(["pitching"]);
-    expect(Array.from(seen.get("Cage 2") ?? [])).toEqual(["pitching"]);
-    expect(Array.from(seen.get("Cage 3") ?? [])).toEqual(["pitching"]);
-    expect(Array.from(seen.get("Cage 4") ?? [])).toEqual(["hitting"]);
-    expect(Array.from(seen.get("Cage 5") ?? [])).toEqual(["hitting"]);
-    expect(Array.from(seen.get("Bullpen 1") ?? [])).toEqual(["null"]);
-    expect(Array.from(seen.get("Bullpen 2") ?? [])).toEqual(["null"]);
-    expect(Array.from(seen.get("Weight Room 1") ?? [])).toEqual(["null"]);
+    // No parenthetical leaks into the resource name.
+    for (const n of names) {
+      expect(n).not.toMatch(/Hitting|Pitching/i);
+    }
   });
 
   it("disambiguates the three Weight Room rows by position", async () => {
@@ -144,7 +137,6 @@ describe("parseWorkbook (synthetic edge cases)", () => {
     expect(sessions[0]).toEqual({
       date: "2026-05-01",
       resourceName: "Cage 1",
-      useTypeHint: "pitching",
       rawName: "Test Coach",
       startTime: "09:00",
       endTime: "10:30",

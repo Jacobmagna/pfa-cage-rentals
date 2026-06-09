@@ -28,16 +28,11 @@ import { SessionsClient } from "./_components/sessions-client";
 
 const MAX_ROWS = 500;
 
-const VALID_USE_TYPES = new Set(["hitting", "pitching"] as const);
-
 type RawSearchParams = Promise<{
   from?: string | string[];
   to?: string | string[];
   coachIds?: string | string[];
   resourceIds?: string | string[];
-  useTypes?: string | string[];
-  teamRental?: string | string[];
-  pfaReferred?: string | string[];
 }>;
 
 export default async function AdminSessionsPage({
@@ -60,22 +55,6 @@ export default async function AdminSessionsPage({
   if (filters.resourceIds.length > 0) {
     whereClauses.push(inArray(sessionsBilling.resourceId, filters.resourceIds));
   }
-  if (filters.useTypes.length > 0) {
-    whereClauses.push(inArray(sessionsBilling.useType, filters.useTypes));
-  }
-  // teamRental filter: ["yes"] → only team rentals, ["no"] → only non,
-  // ["yes","no"] or empty → no filter. Anything else (e.g. junk URL
-  // param) collapses to no filter via the normalizer.
-  if (filters.teamRental.length === 1) {
-    whereClauses.push(
-      eq(sessionsBilling.isTeamRental, filters.teamRental[0] === "yes"),
-    );
-  }
-  if (filters.pfaReferred.length === 1) {
-    whereClauses.push(
-      eq(sessionsBilling.pfaReferred, filters.pfaReferred[0] === "yes"),
-    );
-  }
 
   const [rows, coachOptions, resourceOptions, allCoaches] = await Promise.all([
     db
@@ -89,11 +68,7 @@ export default async function AdminSessionsPage({
         resourceType: resources.type,
         startAt: sessionsBilling.startAt,
         endAt: sessionsBilling.endAt,
-        useType: sessionsBilling.useType,
         note: sessionsBilling.note,
-        isTeamRental: sessionsBilling.isTeamRental,
-        pfaReferred: sessionsBilling.pfaReferred,
-        isOnline: sessionsBilling.isOnline,
         ratePer30MinCents: sessionsBilling.ratePer30MinCents,
       })
       .from(sessionsBilling)
@@ -154,9 +129,6 @@ export default async function AdminSessionsPage({
           to: filters.to,
           coachIds: filters.coachIds,
           resourceIds: filters.resourceIds,
-          useTypes: filters.useTypes,
-          teamRental: filters.teamRental,
-          pfaReferred: filters.pfaReferred,
         }}
         isFiltered={filters.isFiltered}
       />
@@ -179,25 +151,15 @@ type NormalizedFilters = {
   toInstantExclusive: Date;
   coachIds: string[];
   resourceIds: string[];
-  useTypes: ("hitting" | "pitching")[];
-  /** ["yes"] / ["no"] / ["yes","no"] or empty. Length 1 → filter; otherwise no filter. */
-  teamRental: ("yes" | "no")[];
-  /** Same yes/no semantics as teamRental. */
-  pfaReferred: ("yes" | "no")[];
-  /** True if any filter differs from the default (last 14 days → next 14 days, all coaches/resources/uses/rentals). */
+  /** True if any filter differs from the default (last 14 days → next 14 days, all coaches/resources). */
   isFiltered: boolean;
 };
-
-const VALID_YES_NO = new Set(["yes", "no"] as const);
 
 function normalizeFilters(input: {
   from?: string | string[];
   to?: string | string[];
   coachIds?: string | string[];
   resourceIds?: string | string[];
-  useTypes?: string | string[];
-  teamRental?: string | string[];
-  pfaReferred?: string | string[];
 }): NormalizedFilters {
   const fromInput = pickFirst(input.from);
   const toInput = pickFirst(input.to);
@@ -214,16 +176,6 @@ function normalizeFilters(input: {
 
   const coachIds = toArray(input.coachIds).filter(Boolean);
   const resourceIds = toArray(input.resourceIds).filter(Boolean);
-  const useTypes = toArray(input.useTypes).filter(
-    (t): t is "hitting" | "pitching" =>
-      VALID_USE_TYPES.has(t as "hitting" | "pitching"),
-  );
-  const teamRental = toArray(input.teamRental).filter(
-    (t): t is "yes" | "no" => VALID_YES_NO.has(t as "yes" | "no"),
-  );
-  const pfaReferred = toArray(input.pfaReferred).filter(
-    (t): t is "yes" | "no" => VALID_YES_NO.has(t as "yes" | "no"),
-  );
 
   const fromInstant = parsePfaInput(from, "00:00");
   // `to` is inclusive — convert to exclusive upper bound at next PFA midnight.
@@ -233,10 +185,7 @@ function normalizeFilters(input: {
     from !== defaults.from ||
     to !== defaults.to ||
     coachIds.length > 0 ||
-    resourceIds.length > 0 ||
-    useTypes.length > 0 ||
-    teamRental.length === 1 ||
-    pfaReferred.length === 1;
+    resourceIds.length > 0;
 
   return {
     from,
@@ -245,9 +194,6 @@ function normalizeFilters(input: {
     toInstantExclusive,
     coachIds,
     resourceIds,
-    useTypes,
-    teamRental,
-    pfaReferred,
     isFiltered,
   };
 }

@@ -582,6 +582,42 @@ export const athletePrograms = pgTable(
   ],
 );
 
+// Persisted "these two athletes are NOT duplicates" decisions (#17 roster
+// dedup). Detection groups athletes by normalized name + compatible
+// birthday; an admin can dismiss a falsely-flagged pair so it never
+// re-surfaces. The pair is stored UNORDERED in a canonical form
+// (athleteAId = the lexicographically smaller id, athleteBId the larger;
+// enforced in the app layer) so (X,Y) and (Y,X) dedupe to one row via the
+// unique index. Both athlete FKs cascade so merging/deleting either
+// athlete auto-clears the dismissal; dismissedBy set-null keeps the row if
+// the acting admin is later removed.
+export const athleteMergeDismissals = pgTable(
+  "athlete_merge_dismissals",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    athleteAId: text("athlete_a_id")
+      .notNull()
+      .references(() => athletes.id, { onDelete: "cascade" }),
+    athleteBId: text("athlete_b_id")
+      .notNull()
+      .references(() => athletes.id, { onDelete: "cascade" }),
+    dismissedBy: text("dismissed_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    dismissedAt: timestamp("dismissed_at", { mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("athlete_merge_dismissals_pair_unique").on(
+      table.athleteAId,
+      table.athleteBId,
+    ),
+  ],
+);
+
 // Many-to-many: which coaches may access which programs. Composite PK
 // enforces one assignment per (coach, program).
 export const coachPrograms = pgTable(

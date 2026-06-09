@@ -168,6 +168,17 @@ export class MergeTargetSameAsSourceError extends Error {
   }
 }
 
+// Athlete merge (#17 roster dedup) listed the survivor among its own
+// sources — a no-op that would delete the record being kept. Rejected
+// before any write.
+export class MergeAthleteSameError extends Error {
+  readonly code = "MERGE_ATHLETE_SAME" as const;
+  constructor(public readonly athleteId: string) {
+    super(`Merge survivor cannot also be a source athlete`);
+    this.name = "MergeAthleteSameError";
+  }
+}
+
 // Hour-log create referenced a program id that doesn't exist (stale
 // client option, or a direct RPC call with a bogus id).
 export class ProgramNotFoundError extends Error {

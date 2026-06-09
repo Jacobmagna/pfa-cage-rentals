@@ -68,7 +68,7 @@ export async function buildHourLogWorkbook(
   meta: HourLogWorkbookMeta,
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = "PFA Baseball";
+  workbook.creator = "PFA Engine";
   workbook.created = new Date();
   workbook.subject = `Hours ${meta.from} to ${meta.to}`;
 
@@ -100,7 +100,7 @@ function addSummarySheet(
   sheet.columns = [
     { header: "Coach", key: "coach", width: 28 },
     { header: "Entries", key: "entries", width: 10 },
-    { header: "Total Hours", key: "totalHours", width: 14 },
+    { header: "Total Work Hours", key: "totalHours", width: 18 },
   ];
 
   // One row per coach, preserving the sorted order. Aggregate the
@@ -153,11 +153,11 @@ function addDetailSheet(
 
   sheet.columns = [
     { header: "Coach", key: "coach", width: 24 },
-    { header: "Program", key: "program", width: 24 },
+    { header: "Work", key: "program", width: 24 },
     { header: "Date", key: "date", width: 12 },
     { header: "Start", key: "start", width: 10 },
     { header: "End", key: "end", width: 10 },
-    { header: "Hours", key: "hours", width: 10 },
+    { header: "Work Hours", key: "hours", width: 12 },
     { header: "Note", key: "note", width: 40 },
     { header: "Schedule", key: "scheduleNote", width: 32 },
   ];

@@ -94,7 +94,7 @@ export default async function CoachHourLogHistoryPage() {
       <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] py-16 text-center">
         <Clock className="h-8 w-8 text-gold" aria-hidden="true" />
         <p className="text-fg-muted">
-          No hours logged yet — log your first from the Log hours tab.
+          No hours logged yet — log your first from the Log work tab.
         </p>
       </div>
     );

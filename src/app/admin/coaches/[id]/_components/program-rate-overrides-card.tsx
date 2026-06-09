@@ -43,9 +43,9 @@ export function ProgramRateOverridesCard({
   return (
     <section className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] overflow-hidden mt-6">
       <header className="px-5 py-4 border-b border-line">
-        <h3 className="text-base font-semibold text-fg">Program rates</h3>
+        <h3 className="text-base font-semibold text-fg">Work rates</h3>
         <p className="mt-1 text-xs text-fg-muted leading-relaxed">
-          Override the standard pay rate for this coach per program.
+          Override the standard pay rate for this coach per work type.
           Changes apply to{" "}
           <span className="text-fg">future hours only</span> — past logged
           hours stay at the rate they were stamped with.
@@ -209,10 +209,10 @@ function Row({
         onOpenChange={(next) => {
           if (!removing) setConfirmOpen(next);
         }}
-        title="Remove this program rate override?"
+        title="Remove this work rate override?"
         description={
           <>
-            Future hours for {row.programName} will pay at the program
+            Future work for {row.programName} will pay at the program
             default
             {defaultDollars !== null
               ? ` of $${defaultDollars} per 30 min`

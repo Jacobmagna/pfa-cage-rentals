@@ -710,7 +710,7 @@ export function ProgramBlockDialog({
                 ) : null}
               </div>
               <h2 className="text-xl font-semibold tracking-tight mt-0.5">
-                Program block
+                Work block
               </h2>
               {isSeries && recurrenceLine ? (
                 <p className="text-xs text-fg-muted mt-1">{recurrenceLine}</p>
@@ -749,7 +749,7 @@ export function ProgramBlockDialog({
           ) : null}
 
           <dl className="space-y-3">
-            <DetailRow label="Program" value={programName} />
+            <DetailRow label="Work" value={programName} />
             <DetailRow label="Coach" value={coachName} />
             <DetailRow
               label="Date"
@@ -835,7 +835,7 @@ export function ProgramBlockDialog({
                 Edit series
               </p>
               <h2 className="text-xl font-semibold tracking-tight mt-0.5">
-                Recurring program block
+                Recurring work block
               </h2>
               <p className="text-xs text-fg-muted mt-1">
                 Saving updates the whole series and regenerates future dates.
@@ -861,7 +861,7 @@ export function ProgramBlockDialog({
           ) : null}
 
           <div className="space-y-3">
-            <Field label="Program">
+            <Field label="Work">
               <select
                 name="programId"
                 required
@@ -869,7 +869,7 @@ export function ProgramBlockDialog({
                 className={selectStyles}
               >
                 <option value="" disabled>
-                  Choose a program…
+                  Choose work…
                 </option>
                 {programs.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -1141,7 +1141,7 @@ export function ProgramBlockDialog({
               {isEdit ? "Edit" : "Schedule"}
             </p>
             <h2 className="text-xl font-semibold tracking-tight mt-0.5">
-              Program block
+              Work block
             </h2>
           </div>
           <button
@@ -1177,7 +1177,7 @@ export function ProgramBlockDialog({
         ) : null}
 
         <div className="space-y-3">
-          <Field label="Program">
+          <Field label="Work">
             <select
               name="programId"
               required
@@ -1185,7 +1185,7 @@ export function ProgramBlockDialog({
               className={selectStyles}
             >
               <option value="" disabled>
-                Choose a program…
+                Choose work…
               </option>
               {programs.map((p) => (
                 <option key={p.id} value={p.id}>

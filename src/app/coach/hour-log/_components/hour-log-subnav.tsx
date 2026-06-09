@@ -23,7 +23,7 @@ type SubTab = {
 const SUB_TABS: SubTab[] = [
   {
     href: "/coach/hour-log",
-    label: "Log hours",
+    label: "Log work",
     isActive: (p) => p === "/coach/hour-log",
   },
   {
@@ -38,7 +38,7 @@ export function HourLogSubnav() {
 
   return (
     <nav
-      aria-label="Hour Log sections"
+      aria-label="Work Log sections"
       className="border-b border-line bg-surface"
     >
       <ul className="flex gap-1 overflow-x-auto whitespace-nowrap -mb-px">

@@ -81,14 +81,14 @@ export function FiltersForm({
           </select>
         </Field>
 
-        <Field label="Program">
+        <Field label="Work">
           <select
             name="programId"
             defaultValue={values.programId}
-            aria-label="Filter by program"
+            aria-label="Filter by work"
             className={selectStyles}
           >
-            <option value="">All programs</option>
+            <option value="">All work</option>
             {programs.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}

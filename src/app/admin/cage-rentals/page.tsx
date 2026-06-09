@@ -107,7 +107,7 @@ export default async function AdminHome() {
       >
         <StatCard
           icon={<CalendarDays className="h-4 w-4" />}
-          label="Sessions today"
+          label="Rentals today"
           value={sessionsToday.toString()}
           sub={sessionsToday === 0 ? "Quiet day so far" : "Booked"}
         />
@@ -115,7 +115,7 @@ export default async function AdminHome() {
           icon={<Coins className="h-4 w-4" />}
           label={`Owed in ${formatPfaMonthYear(now)}`}
           value={formatDollars(monthCents)}
-          sub={`${monthSessionRows.length} ${monthSessionRows.length === 1 ? "session" : "sessions"} this month`}
+          sub={`${monthSessionRows.length} ${monthSessionRows.length === 1 ? "rental" : "rentals"} this month`}
           accent
         />
         <StatCard
@@ -141,13 +141,13 @@ export default async function AdminHome() {
             stat={
               sessionsToday === 0 && blocksToday === 0
                 ? "Nothing on today"
-                : `${sessionsToday} session${sessionsToday === 1 ? "" : "s"}${blocksToday > 0 ? ` · ${blocksToday} block${blocksToday === 1 ? "" : "s"}` : ""} today`
+                : `${sessionsToday} rental${sessionsToday === 1 ? "" : "s"}${blocksToday > 0 ? ` · ${blocksToday} block${blocksToday === 1 ? "" : "s"}` : ""} today`
             }
           />
           <NavCard
             href="/admin/sessions"
             icon={<ClipboardList className="h-4 w-4" />}
-            title="Sessions"
+            title="Rentals"
             stat="Log, edit, review"
           />
         </div>

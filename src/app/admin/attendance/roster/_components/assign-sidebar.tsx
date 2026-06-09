@@ -240,7 +240,7 @@ export function AssignSidebar({
               </div>
               <p className="mt-2 text-[11px] text-fg-subtle">
                 {mode === "add"
-                  ? "Adds the selected program(s); any current assignments stay."
+                  ? "Adds the selected work; any current assignments stay."
                   : "Removes all current assignments, then adds the selected program(s)."}
               </p>
             </fieldset>
@@ -320,7 +320,7 @@ export function AssignSidebar({
                     >
                       <option value="week">Per week</option>
                       <option value="month">Per month</option>
-                      <option value="total">Total per program</option>
+                      <option value="total">Total</option>
                     </select>
                   </div>
                   <p className="text-[11px] text-fg-subtle">
@@ -352,12 +352,8 @@ export function AssignSidebar({
               {pending
                 ? "Saving…"
                 : mode === "add"
-                  ? programIds.length > 1
-                    ? "Add to programs"
-                    : "Add to program"
-                  : programIds.length > 1
-                    ? "Move to programs"
-                    : "Move to program"}
+                  ? "Add to work"
+                  : "Move to work"}
             </button>
           </div>
         </form>

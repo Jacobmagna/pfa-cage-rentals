@@ -114,7 +114,7 @@ export function SessionsClient({
       <div className="mb-4 flex items-center justify-between">
         <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
           <span className="tnum tabular-nums">{rows.length}</span>{" "}
-          {rows.length === 1 ? "session" : "sessions"}
+          {rows.length === 1 ? "rental" : "rentals"}
           {truncated && maxRows ? (
             <span className="ml-2 normal-case tracking-normal text-fg-subtle">
               · showing first {maxRows}, narrow filters to see more
@@ -127,14 +127,14 @@ export function SessionsClient({
           className="inline-flex items-center gap-1.5 rounded-lg bg-gold px-4 h-9 text-sm font-medium text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
           <Plus className="h-4 w-4" strokeWidth={2.5} />
-          New session
+          New rental
         </button>
       </div>
 
       {rows.length === 0 ? (
         <div className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] p-12 text-center">
           <p className="text-sm text-fg-muted">
-            No sessions match these filters. Try widening the date range or
+            No rentals match these filters. Try widening the date range or
             clearing some filters.
           </p>
         </div>
@@ -203,7 +203,7 @@ export function SessionsClient({
                           onClick={() => openEdit(row)}
                           disabled={isPendingDelete}
                           className="inline-flex items-center justify-center h-10 w-10 sm:h-8 sm:w-8 rounded-lg text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
-                          aria-label="Edit session"
+                          aria-label="Edit rental"
                           title="Edit"
                         >
                           <Pencil className="h-4 w-4" />
@@ -213,7 +213,7 @@ export function SessionsClient({
                           onClick={() => onDelete(row)}
                           disabled={isPendingDelete}
                           className="inline-flex items-center justify-center h-10 w-10 sm:h-8 sm:w-8 rounded-lg text-fg-muted hover:text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors disabled:opacity-40"
-                          aria-label="Delete session"
+                          aria-label="Delete rental"
                           title="Delete"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -242,13 +242,13 @@ export function SessionsClient({
         onOpenChange={(next) => {
           if (!next) setConfirmRow(null);
         }}
-        title="Delete this session?"
+        title="Delete this rental?"
         description={
           confirmRow
             ? `${confirmRow.coachName ?? confirmRow.coachEmail} · ${confirmRow.resourceName} · ${formatWhen(confirmRow.startAt, confirmRow.endAt)}. This can't be undone.`
             : undefined
         }
-        confirmLabel={isDeleting ? "Deleting…" : "Delete session"}
+        confirmLabel={isDeleting ? "Deleting…" : "Delete rental"}
         onConfirm={handleConfirmDelete}
         isPending={isDeleting}
       />

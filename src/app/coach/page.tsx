@@ -80,7 +80,7 @@ export default async function CoachHome() {
       >
         <Stat
           icon={<CalendarDays className="h-4 w-4" />}
-          label={`Sessions in ${formatPfaMonthYear(now)}`}
+          label={`Rentals in ${formatPfaMonthYear(now)}`}
           value={monthCount.toString()}
           sub={
             monthCount === 0
@@ -90,12 +90,12 @@ export default async function CoachHome() {
         />
         <Stat
           icon={<Clock className="h-4 w-4" />}
-          label={`Hours in ${formatPfaMonthYear(now)}`}
+          label={`Work hours in ${formatPfaMonthYear(now)}`}
           value={formatHours(monthMinutes)}
           sub={
             monthMinutes === 0
               ? "—"
-              : "Sum of your logged session durations"
+              : "Sum of your logged rental durations"
           }
           accent
         />
@@ -105,13 +105,13 @@ export default async function CoachHome() {
         <NavCard
           href="/coach/sessions/new"
           icon={<CalendarPlus className="h-4 w-4" />}
-          title="Log a session"
+          title="Log a cage rental"
           body="Date, time, resource, optional note."
         />
         <NavCard
           href="/coach/sessions"
           icon={<ClipboardList className="h-4 w-4" />}
-          title="My sessions"
+          title="My rentals"
           body="Review history, fix a slot."
         />
       </div>

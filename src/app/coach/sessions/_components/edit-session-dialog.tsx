@@ -138,7 +138,7 @@ export function EditSessionDialog({
               Edit
             </p>
             <h2 className="text-xl font-semibold tracking-tight mt-0.5">
-              Session details
+              Rental details
             </h2>
           </div>
           <button

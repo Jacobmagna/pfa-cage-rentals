@@ -86,7 +86,7 @@ describe("buildHourLogWorkbook", () => {
       to: "2026-05-31",
     });
     const wb = await loadWorkbook(buf);
-    expect(wb.creator).toBe("PFA Baseball");
+    expect(wb.creator).toBe("PFA Engine");
     expect(wb.subject).toBe("Hours 2026-05-01 to 2026-05-31");
   });
 
@@ -99,7 +99,11 @@ describe("buildHourLogWorkbook", () => {
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Summary")!;
       const headers = sheet.getRow(1).values as unknown[];
-      expect(headers.slice(1)).toEqual(["Coach", "Entries", "Total Hours"]);
+      expect(headers.slice(1)).toEqual([
+        "Coach",
+        "Entries",
+        "Total Work Hours",
+      ]);
     });
 
     it("has one row per coach with correct entry count + total hours", async () => {
@@ -163,11 +167,11 @@ describe("buildHourLogWorkbook", () => {
       const headers = sheet.getRow(1).values as unknown[];
       expect(headers.slice(1)).toEqual([
         "Coach",
-        "Program",
+        "Work",
         "Date",
         "Start",
         "End",
-        "Hours",
+        "Work Hours",
         "Note",
         "Schedule",
       ]);

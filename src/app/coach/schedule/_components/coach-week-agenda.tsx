@@ -142,7 +142,7 @@ function BlockRow({
           {block.programName}
         </p>
         <p className="text-[10px] uppercase tracking-wider text-gold-strong">
-          Program
+          Work
         </p>
         {block.note ? (
           <p className="mt-0.5 truncate text-xs text-fg-subtle">

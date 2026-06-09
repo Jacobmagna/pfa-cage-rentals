@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     to: filters.to,
   });
 
-  const filename = `pfa-hours-${filters.from}_to_${filters.to}.xlsx`;
+  const filename = `pfa-work-${filters.from}_to_${filters.to}.xlsx`;
 
   return new Response(new Uint8Array(buffer), {
     status: 200,

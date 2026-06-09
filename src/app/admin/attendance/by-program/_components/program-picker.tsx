@@ -52,7 +52,7 @@ export function ProgramPicker({
               onChange={autoSubmit}
               className={`${inputStyles} appearance-none pr-8`}
             >
-              <option value="">Choose a program…</option>
+              <option value="">Choose work…</option>
               {programs.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}

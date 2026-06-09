@@ -151,7 +151,7 @@ export function CoachesTable({
               onClick={onHeaderClick}
             />
             <SortHeader
-              label="Owed"
+              label="Owes PFA"
               col="owedThisMonthCents"
               align="right"
               sort={sort}

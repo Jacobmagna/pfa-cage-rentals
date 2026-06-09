@@ -150,7 +150,7 @@ describe("buildReportWorkbook", () => {
   it("writes workbook metadata (creator + subject) from the inputs", async () => {
     const buf = await build(makeReport());
     const wb = await loadWorkbook(buf);
-    expect(wb.creator).toBe("PFA Cage Rentals");
+    expect(wb.creator).toBe("PFA Engine");
     expect(wb.subject).toBe("Billing 2026-05-01 to 2026-05-31");
   });
 
@@ -169,9 +169,9 @@ describe("buildReportWorkbook", () => {
         "Bullpen $",
         "WeightRoom Slots",
         "WeightRoom $",
-        "Program Slots",
-        "Program $",
-        "Cage Owed $",
+        "Work Slots",
+        "Work $",
+        "Rental Owed $",
         "Online Sessions",
       ]);
     });
@@ -183,7 +183,7 @@ describe("buildReportWorkbook", () => {
       const row2 = sheet.getRow(2);
       expect(row2.getCell(1).value).toBe("Alice Coach");
       expect(row2.getCell(4).value).toBe(36); // cage $ = 3600 cents / 100
-      expect(row2.getCell(11).value).toBe(36); // Cage Owed $ (cage receivable, col 11)
+      expect(row2.getCell(11).value).toBe(36); // Rental Owed $ (cage receivable, col 11)
       expect(row2.getCell(12).value).toBe(1); // 1 online session
 
       expect(sheet.getColumn(4).numFmt).toBe('"$"#,##0.00');
@@ -198,8 +198,8 @@ describe("buildReportWorkbook", () => {
       const footer = sheet.getRow(4);
       expect(String(footer.getCell(1).value)).toContain("Grand total");
       expect(String(footer.getCell(1).value)).toContain("3 sessions");
-      // Cage-side grand sits under "Cage Owed $" (col 11), NOT merged with
-      // program pay. Program $ (col 10) holds the (here zero) program grand.
+      // Cage-side grand sits under "Rental Owed $" (col 11), NOT merged with
+      // program pay. Work $ (col 10) holds the (here zero) program grand.
       expect(footer.getCell(11).value).toBe(50); // cage grand: 5000 cents / 100
       const programGrand = footer.getCell(10).value;
       expect(programGrand === 0 || programGrand === null || programGrand === "").toBe(true);
@@ -216,7 +216,7 @@ describe("buildReportWorkbook", () => {
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Summary")!;
       const footer = sheet.getRow(4);
-      // Program $ grand under col 10, Cage Owed $ grand under col 11 — the
+      // Work $ grand under col 10, Rental Owed $ grand under col 11 — the
       // two opposite money directions are reported side by side, not added.
       expect(footer.getCell(10).value).toBe(60); // program pay grand: 6000 / 100
       expect(footer.getCell(11).value).toBe(50); // cage receivable grand: 5000 / 100
@@ -237,14 +237,14 @@ describe("buildReportWorkbook", () => {
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Summary")!;
       const headers = (sheet.getRow(1).values as unknown[]).slice(1);
-      // Cage scope off → no cage columns AND no "Cage Owed $" / Online.
+      // Cage scope off → no cage columns AND no "Rental Owed $" / Online.
       expect(headers).toEqual([
         "Coach",
         "Email",
-        "Program Slots",
-        "Program $",
+        "Work Slots",
+        "Work $",
       ]);
-      expect(headers).not.toContain("Cage Owed $");
+      expect(headers).not.toContain("Rental Owed $");
       expect(headers).not.toContain("Online Sessions");
     });
 
@@ -262,20 +262,20 @@ describe("buildReportWorkbook", () => {
         "Bullpen $",
         "WeightRoom Slots",
         "WeightRoom $",
-        "Cage Owed $",
+        "Rental Owed $",
         "Online Sessions",
       ]);
-      expect(headers).not.toContain("Program Slots");
+      expect(headers).not.toContain("Work Slots");
     });
 
-    it("writes Program Slots/$ and applies currency format to Program $", async () => {
+    it("writes Work Slots/$ and applies currency format to Work $", async () => {
       const report = makeReport();
       report.summary[0].programSlots = 3;
       report.summary[0].programTotalCents = 7500;
       const buf = await build(report, false, true);
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Summary")!;
-      // Columns: 1 Coach, 2 Email, 3 Program Slots, 4 Program $, 5 Total
+      // Columns: 1 Coach, 2 Email, 3 Work Slots, 4 Work $, 5 Total
       const row2 = sheet.getRow(2);
       expect(row2.getCell(3).value).toBe(3); // program slots
       expect(row2.getCell(4).value).toBe(75); // 7500 cents / 100

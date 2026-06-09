@@ -13,7 +13,7 @@ export default function NotFound() {
         <div className="mb-8 flex items-center justify-center gap-2.5">
           <DiamondMark className="h-2.5 w-2.5 text-gold-strong" filled />
           <span className="text-base font-bold tracking-tight text-fg">
-            PFA Cage Rentals
+            PFA Engine
           </span>
         </div>
 

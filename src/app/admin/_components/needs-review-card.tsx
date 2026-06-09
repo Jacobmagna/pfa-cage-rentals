@@ -226,7 +226,7 @@ export function NeedsReviewCard({
           href="/admin/hour-log"
           className="mt-4 inline-flex items-center text-xs font-medium text-fg-muted hover:text-fg transition-colors"
         >
-          Review all in Hour Log →
+          Review all in Work Log →
         </Link>
       </div>
     </section>

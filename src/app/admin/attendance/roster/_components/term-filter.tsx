@@ -68,7 +68,7 @@ export function TermFilter({
       {programs.length > 0 ? (
         <label className="block">
           <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">
-            Program
+            Work
           </span>
           <div className="relative">
             <select
@@ -78,7 +78,7 @@ export function TermFilter({
               onChange={autoSubmit}
               className={`${inputStyles} appearance-none pr-8`}
             >
-              <option value="">All programs</option>
+              <option value="">All work</option>
               {programs.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}

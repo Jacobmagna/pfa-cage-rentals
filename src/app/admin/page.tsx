@@ -769,24 +769,24 @@ export default async function AdminHome({
           icon={<Coins className="h-4 w-4" />}
           label="Coaches owe PFA"
           value={formatDollars(cageOwedMonthCents)}
-          sub="Cage rentals this month"
+          sub="Rentals this month"
           accent
         />
         <StatCard
           icon={<Wallet className="h-4 w-4" />}
           label="PFA owes coaches"
           value={formatDollars(programPayMonthCents)}
-          sub="Program pay this month"
+          sub="Work pay this month"
         />
         <StatCard
           icon={<CalendarDays className="h-4 w-4" />}
-          label="Cage sessions today"
+          label="Rentals today"
           value={String(cageSessionsToday)}
           sub={cageSessionsToday > 0 ? "Booked" : "Quiet day so far"}
         />
         <StatCard
           icon={<ClipboardList className="h-4 w-4" />}
-          label="Program sessions today"
+          label="Work scheduled today"
           value={String(programSessionsToday)}
           sub={programSessionsToday > 0 ? "Scheduled" : "Nothing scheduled"}
         />

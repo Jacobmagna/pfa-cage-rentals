@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { PublicShell } from "../_components/public-shell";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy — PFA Cage Rentals",
-  description: "How PFA Cage Rentals handles your data.",
+  title: "Privacy Policy — PFA Engine",
+  description: "How PFA Engine handles your data.",
 };
 
 const EFFECTIVE_DATE = "May 24, 2026";
@@ -18,7 +18,7 @@ export default function PrivacyPage() {
 
         <Section title="Who we are">
           <p>
-            PFA Cage Rentals is an internal billing tool operated by PFA Sports
+            PFA Engine is an internal billing tool operated by PFA Sports
             for tracking cage, bullpen, and weight-room rentals at the
             facility. The site lives at{" "}
             <code className="text-fg">pfaengine.com</code>. Contact for

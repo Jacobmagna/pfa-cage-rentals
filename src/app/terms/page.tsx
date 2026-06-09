@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { PublicShell } from "../_components/public-shell";
 
 export const metadata: Metadata = {
-  title: "Terms of Service — PFA Cage Rentals",
-  description: "The rules for using PFA Cage Rentals.",
+  title: "Terms of Service — PFA Engine",
+  description: "The rules for using PFA Engine.",
 };
 
 const EFFECTIVE_DATE = "May 24, 2026";
@@ -18,7 +18,7 @@ export default function TermsPage() {
 
         <Section title="Who can use this site">
           <p>
-            PFA Cage Rentals is an internal tool for coaches authorized by PFA
+            PFA Engine is an internal tool for coaches authorized by PFA
             Sports to rent and log time in PFA&apos;s cages, bullpens, and
             weight-room facilities. By signing in, you confirm you have that
             authorization. PFA Sports may revoke your access at any time.

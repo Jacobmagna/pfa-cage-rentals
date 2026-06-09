@@ -33,12 +33,12 @@ const SUB_TABS: SubTab[] = [
   },
   {
     href: "/admin/hour-log/programs",
-    label: "Programs",
+    label: "Work",
     isActive: (p) => p.startsWith("/admin/hour-log/programs"),
   },
   {
     href: "/admin/hour-log/schedule",
-    label: "Program Schedule",
+    label: "Work Schedule",
     isActive: (p) => p.startsWith("/admin/hour-log/schedule"),
   },
 ];
@@ -48,7 +48,7 @@ export function HourLogSubnav() {
 
   return (
     <nav
-      aria-label="Hour Log sections"
+      aria-label="Work Log sections"
       className="border-b border-line bg-surface"
     >
       <ul className="flex gap-1 overflow-x-auto whitespace-nowrap -mb-px">

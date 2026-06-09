@@ -92,14 +92,14 @@ export function SessionsHistoryClient({
     <>
       <div className="mb-5 flex items-center justify-between gap-3">
         <p className="text-xs uppercase tracking-[0.14em] text-fg-subtle">
-          {totalCount} {totalCount === 1 ? "session" : "sessions"}
+          {totalCount} {totalCount === 1 ? "rental" : "rentals"}
         </p>
         <Link
           href="/coach/sessions/new"
           className="inline-flex items-center gap-1.5 rounded-lg bg-gold shadow-[var(--shadow-sm)] px-4 h-9 text-sm font-medium text-gold-ink hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
           <Plus className="h-4 w-4" strokeWidth={2.5} />
-          Log session
+          Log rental
         </Link>
       </div>
 
@@ -117,7 +117,7 @@ export function SessionsHistoryClient({
       {rows.length === 0 ? (
         <div className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] p-8 text-center">
           <p className="text-sm text-fg-muted">
-            No sessions match these filters.
+            No rentals match these filters.
           </p>
           <Link
             href="/coach/sessions"
@@ -178,7 +178,7 @@ export function SessionsHistoryClient({
                     onClick={() => setEditingRow(row)}
                     disabled={isPendingDelete}
                     className="inline-flex items-center justify-center h-9 w-9 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
-                    aria-label="Edit session"
+                    aria-label="Edit rental"
                     title="Edit"
                   >
                     <Pencil className="h-4 w-4" />
@@ -188,7 +188,7 @@ export function SessionsHistoryClient({
                     onClick={() => onDelete(row)}
                     disabled={isPendingDelete}
                     className="inline-flex items-center justify-center h-9 w-9 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors disabled:opacity-40"
-                    aria-label="Delete session"
+                    aria-label="Delete rental"
                     title="Delete"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -241,13 +241,13 @@ export function SessionsHistoryClient({
         onOpenChange={(next) => {
           if (!next) setConfirmRow(null);
         }}
-        title="Delete this session?"
+        title="Delete this rental?"
         description={
           confirmRow
             ? `${confirmRow.resourceName} · ${formatWhen(confirmRow.startAt, confirmRow.endAt)}. This can't be undone.`
             : undefined
         }
-        confirmLabel={isDeleting ? "Deleting…" : "Delete session"}
+        confirmLabel={isDeleting ? "Deleting…" : "Delete rental"}
         onConfirm={handleConfirmDelete}
         isPending={isDeleting}
       />

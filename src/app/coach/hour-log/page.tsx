@@ -161,7 +161,7 @@ export default async function CoachHourLogPage() {
         <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] py-16 text-center">
           <Clock className="h-8 w-8 text-gold" aria-hidden="true" />
           <p className="text-fg-muted">
-            No active programs yet — ask an admin to add one.
+            No active work yet — ask an admin to add some.
           </p>
         </div>
       ) : (

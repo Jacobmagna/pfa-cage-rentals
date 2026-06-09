@@ -15,7 +15,7 @@ import {
   type PlayerSession,
   type PlayerRecordInput,
 } from "@/lib/server/athlete-attendance";
-import { formatGridDate } from "@/lib/server/attendance-grid";
+import { formatGridDateWithWeekday } from "@/lib/server/attendance-grid";
 import { AthletePicker, type AthleteOption } from "./_components/athlete-picker";
 
 // Admin Attendance "By player" view (QA10 W2.3). Read-only,
@@ -209,7 +209,7 @@ export default async function AttendanceByPlayerPage({
                           className="tnum font-mono text-sm text-fg"
                           title={row.sessionDate}
                         >
-                          {formatGridDate(row.sessionDate)}
+                          {formatGridDateWithWeekday(row.sessionDate)}
                         </span>
                         {row.status === "present" ? (
                           <span className="font-mono font-semibold text-success">

@@ -18,7 +18,7 @@
 
 import { useRef, useState } from "react";
 import {
-  formatGridDate,
+  formatGridDateWithWeekday,
   type AttendanceGrid as AttendanceGridData,
 } from "@/lib/server/attendance-grid";
 import type { OverCapFlags } from "@/lib/server/attendance-flags";
@@ -52,7 +52,7 @@ export function AttendanceGrid({
                 className="tnum px-3 py-3 text-center font-semibold font-mono whitespace-nowrap"
                 title={s.sessionDate}
               >
-                {formatGridDate(s.sessionDate)}
+                {formatGridDateWithWeekday(s.sessionDate)}
               </th>
             ))}
           </tr>

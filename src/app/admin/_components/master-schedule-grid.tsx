@@ -98,7 +98,7 @@ function statusAccent(status: MasterProgramBlock["status"]): string {
     case "no_show":
       return "border-l-danger bg-danger/10";
     default:
-      return "border-l-gold bg-surface-2";
+      return "border-l-blue bg-blue/10";
   }
 }
 
@@ -635,7 +635,7 @@ function Legend(): React.JSX.Element {
           label="Off schedule"
         />
         <LegendDot
-          className="border-l-4 border-l-gold"
+          className="border-l-4 border-l-blue"
           label="Pending"
         />
       </div>

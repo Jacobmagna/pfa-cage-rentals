@@ -36,12 +36,14 @@ import {
   coachRateOverrides,
   rateDefaults,
   resources,
+  sessionCancellations,
   sessionsBilling,
   users,
 } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import type { AuthedSession } from "@/lib/authz";
 import { computeRate, type ResourceType } from "@/lib/billing";
+import { leadTimeMinutes } from "@/lib/cancellation";
 import {
   BlockedTimeError,
   ResourceNotFoundError,
@@ -364,6 +366,47 @@ export async function deleteSessionInternal(
     action: "delete",
     before: existing as unknown as Record<string, unknown>,
   });
+  // 1b #26/27: record the cancellation for the admin pattern dashboard.
+  // Best-effort (mirrors safeLogAudit) — a recording failure must NEVER
+  // break the user's delete, which has already committed above. This is
+  // the SINGLE delete point, so it covers both the coach self-delete and
+  // the admin delete path.
+  await safeRecordCancellation(actor, existing);
+}
+
+// Best-effort insert of a session_cancellations row after a rental is
+// deleted. neon-http has no transactions, so the delete commits first and
+// this runs as a separate statement; swallow-and-Sentry so the user's
+// delete never fails on a recording hiccup. Idempotent via the sessionId
+// unique index (.onConflictDoNothing) — a double-confirm is a no-op.
+async function safeRecordCancellation(
+  actor: AuthedSession["user"],
+  existing: typeof sessionsBilling.$inferSelect,
+): Promise<void> {
+  try {
+    const now = new Date();
+    await db
+      .insert(sessionCancellations)
+      .values({
+        sessionId: existing.id,
+        coachId: existing.coachId,
+        resourceId: existing.resourceId,
+        startAt: existing.startAt,
+        endAt: existing.endAt,
+        ratePer30MinCents: existing.ratePer30MinCents,
+        note: existing.note,
+        cancelledAt: now,
+        cancelledBy: actor.id,
+        leadTimeMins: leadTimeMinutes(existing.startAt, now),
+      })
+      .onConflictDoNothing({ target: sessionCancellations.sessionId });
+  } catch (recordErr) {
+    Sentry.captureException(recordErr, {
+      tags: { component: "session-cancellation", sessionId: existing.id },
+      extra: { actorId: actor.id },
+    });
+    console.error("[cancellation] record failed:", recordErr);
+  }
 }
 
 /**

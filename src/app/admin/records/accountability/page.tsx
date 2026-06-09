@@ -3,8 +3,11 @@ import { ArrowLeft, ShieldAlert } from "lucide-react";
 import { requireRole } from "@/lib/authz";
 import {
   loadAccountabilityScorecard,
+  loadOverdueBalances,
   type AccountabilityEventKind,
+  type OverdueRow,
 } from "@/lib/server/accountability-data";
+import { formatDollars } from "@/lib/format-money";
 import { formatPfaDateMedium, formatPfaTime12h } from "@/lib/timezone";
 
 // /admin/records/accountability — per-coach behavioral SCORECARD (1b add-on).
@@ -38,12 +41,88 @@ const EVENT_BADGE: Record<
   },
 };
 
+// Why-chips for an overdue row. A coach can trip the balance threshold,
+// the age threshold, or both — render one chip per reason.
+const OVERDUE_REASON_CHIP: Record<OverdueRow["reasons"][number], string> = {
+  balance: "Over $350",
+  age: "30+ days",
+};
+
+function OverdueSection({ rows }: { rows: OverdueRow[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <section aria-labelledby="overdue-heading">
+      <h2
+        id="overdue-heading"
+        className="mb-3 text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted"
+      >
+        Overdue balances
+      </h2>
+      <div className="overflow-x-auto rounded-xl border border-danger/30 bg-surface shadow-[var(--shadow-sm)]">
+        <table className="w-full min-w-[640px] text-sm">
+          <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-danger/5">
+            <tr>
+              <th className="px-4 py-3 text-left">Coach</th>
+              <th className="px-4 py-3 text-right">Balance</th>
+              <th className="px-4 py-3 text-right">Oldest unpaid</th>
+              <th className="px-4 py-3 text-left">Why</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line">
+            {rows.map((c) => (
+              <tr key={c.coachId}>
+                <td className="px-4 py-3 font-medium text-fg">
+                  {c.coachName ?? "Unknown coach"}
+                </td>
+                <td className="px-4 py-3 text-right font-mono tnum tabular-nums font-semibold text-danger">
+                  {formatDollars(c.balanceCents)}
+                </td>
+                <td
+                  className={`px-4 py-3 text-right font-mono tnum tabular-nums ${
+                    c.reasons.includes("age")
+                      ? "text-danger font-semibold"
+                      : "text-fg-muted"
+                  }`}
+                >
+                  {c.oldestUnpaidAt
+                    ? `${c.oldestUnpaidDays} ${
+                        c.oldestUnpaidDays === 1 ? "day" : "days"
+                      }`
+                    : "—"}
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-1.5">
+                    {c.reasons.map((r) => (
+                      <span
+                        key={r}
+                        className="inline-flex shrink-0 items-center rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger"
+                      >
+                        {OVERDUE_REASON_CHIP[r]}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 export default async function AccountabilityPage() {
   await requireRole("admin");
 
-  const { rows, recent, window, totals } = await loadAccountabilityScorecard();
+  const [{ rows, recent, window, totals }, overdue] = await Promise.all([
+    loadAccountabilityScorecard(),
+    loadOverdueBalances(),
+  ]);
 
-  const isEmpty = totals.totalConcerns === 0 && recent.length === 0;
+  const isEmpty =
+    totals.totalConcerns === 0 &&
+    recent.length === 0 &&
+    overdue.count === 0;
 
   return (
     <>
@@ -64,7 +143,8 @@ export default async function AccountabilityPage() {
         </h1>
         <p className="text-sm text-fg-muted">
           Per-coach patterns over the last {window.sinceDays} days — no-shows,
-          late cancellations, late logging, and over-logged hours.
+          late cancellations, late logging, and over-logged hours — plus
+          coaches with an overdue cage-rental balance.
         </p>
       </div>
 
@@ -83,6 +163,10 @@ export default async function AccountabilityPage() {
         </div>
       ) : (
         <div className="space-y-10">
+          {/* Overdue cage balances — coaches past the policy thresholds
+              (balance > $350 OR oldest unpaid rental > 30 days). */}
+          <OverdueSection rows={overdue.rows} />
+
           {/* Per-coach scorecard. Rows arrive sorted most-concerning first;
               clean coaches (totalConcerns 0) are muted at the bottom. */}
           <section aria-labelledby="scorecard-heading">

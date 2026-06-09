@@ -12,7 +12,10 @@ import { db } from "@/db";
 import { auditLog, coachPayments, sessionsBilling, users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import { NavCard } from "@/app/_components/nav-card";
-import { loadAccountabilityScorecard } from "@/lib/server/accountability-data";
+import {
+  loadAccountabilityScorecard,
+  loadOverdueBalances,
+} from "@/lib/server/accountability-data";
 import { totalFromSnapshot } from "@/lib/billing";
 import { formatDollars } from "@/lib/format-money";
 import {
@@ -53,6 +56,7 @@ export default async function BillingRecordsHome() {
     confirmedPaymentRows,
     [{ count: pendingPaymentsCount }],
     accountability,
+    overdueBalances,
   ] = await Promise.all([
     db
       .select({ count: drizzleSql<number>`count(*)::int` })
@@ -108,6 +112,7 @@ export default async function BillingRecordsHome() {
         ),
       ),
     loadAccountabilityScorecard(),
+    loadOverdueBalances(),
   ]);
 
   // Month + lifetime totals read the snapshotted rate from each session
@@ -160,11 +165,10 @@ export default async function BillingRecordsHome() {
           href="/admin/records/accountability"
           icon={<ShieldAlert className="h-4 w-4" />}
           title="Accountability"
-          stat={
-            accountability.totals.coachesFlagged > 0
-              ? `${accountability.totals.coachesFlagged} flagged`
-              : "All on track"
-          }
+          stat={accountabilityStat(
+            accountability.totals.coachesFlagged,
+            overdueBalances.count,
+          )}
         />
         <NavCard
           href="/admin/reports"
@@ -207,6 +211,15 @@ export default async function BillingRecordsHome() {
       </section>
     </>
   );
+}
+
+// Accountability NavCard stat: behavioral flags and overdue cage balances
+// are distinct signals, so surface both. "All on track" only when neither.
+function accountabilityStat(flagged: number, overdue: number): string {
+  const parts: string[] = [];
+  if (flagged > 0) parts.push(`${flagged} flagged`);
+  if (overdue > 0) parts.push(`${overdue} overdue`);
+  return parts.length > 0 ? parts.join(" · ") : "All on track";
 }
 
 function formatRelative(then: Date, now: Date): string {

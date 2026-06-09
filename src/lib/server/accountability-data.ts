@@ -27,6 +27,7 @@ import {
 } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  coachPayments,
   hourLogs,
   programBlockCoachFlags,
   programScheduleBlockCoaches,
@@ -34,6 +35,7 @@ import {
   programs,
   resources,
   sessionCancellations,
+  sessionsBilling,
   users,
 } from "@/db/schema";
 import {
@@ -43,6 +45,11 @@ import {
   type CoachScorecardRow,
   type CoachSignalCounts,
 } from "@/lib/accountability";
+import {
+  computeAging,
+  type OverdueReason,
+} from "@/lib/ar-aging";
+import { totalFromSnapshot } from "@/lib/billing";
 import {
   categorizeCancellation,
   summarizeByCoach,
@@ -435,4 +442,100 @@ async function buildNoShowEvents(
     });
   }
   return events;
+}
+
+// --- Overdue cage-balance / AR aging (1b security C) -------------------------
+//
+// Surfaces coaches who owe PFA for rentals and are past the locked policy
+// thresholds (balance > $350 OR oldest unpaid rental > 30 days). The balance
+// math is IDENTICAL to /admin/payments: lifetime cage owed (each rental's
+// totalFromSnapshot) minus that coach's CONFIRMED, non-deleted payments.
+// Program/work pay is a payout in the other direction and is intentionally
+// NOT part of this balance. Pure thresholding/FIFO lives in src/lib/ar-aging.
+
+export type OverdueRow = {
+  coachId: string;
+  coachName: string | null;
+  balanceCents: number;
+  oldestUnpaidAt: Date | null;
+  oldestUnpaidDays: number;
+  reasons: OverdueReason[];
+};
+
+export type OverdueBalancesResult = {
+  rows: OverdueRow[]; // only overdue coaches, biggest balance first
+  count: number;
+};
+
+export async function loadOverdueBalances(opts?: {
+  now?: Date;
+}): Promise<OverdueBalancesResult> {
+  const now = opts?.now ?? new Date();
+
+  // Run the three independent reads in parallel.
+  const [activeCoaches, sessionRows, confirmedPaymentRows] = await Promise.all([
+    // Active coaches — same filter as /admin/payments.
+    db
+      .select({ id: users.id, name: users.name, email: users.email })
+      .from(users)
+      .where(and(eq(users.role, "coach"), isNull(users.deletedAt))),
+    // Every cage rental (resource receivable). startAt drives FIFO aging.
+    db
+      .select({
+        coachId: sessionsBilling.coachId,
+        startAt: sessionsBilling.startAt,
+        endAt: sessionsBilling.endAt,
+        ratePer30MinCents: sessionsBilling.ratePer30MinCents,
+      })
+      .from(sessionsBilling),
+    // Confirmed, non-deleted payments — mirrors /admin/payments EXACTLY.
+    db
+      .select({
+        coachId: coachPayments.coachId,
+        amountCents: coachPayments.amountCents,
+      })
+      .from(coachPayments)
+      .where(
+        and(
+          isNull(coachPayments.deletedAt),
+          eq(coachPayments.status, "confirmed"),
+        ),
+      ),
+  ]);
+
+  // Per-coach rental list (each carrying its owed cents off the snapshot) so
+  // computeAging can run its FIFO oldest-unpaid walk over real rental dates.
+  const rentalsByCoach = new Map<string, { startAt: Date; owedCents: number }[]>();
+  for (const s of sessionRows) {
+    const owedCents = totalFromSnapshot(s.startAt, s.endAt, s.ratePer30MinCents);
+    const list = rentalsByCoach.get(s.coachId) ?? [];
+    list.push({ startAt: s.startAt, owedCents });
+    rentalsByCoach.set(s.coachId, list);
+  }
+
+  const paidByCoach = new Map<string, number>();
+  for (const p of confirmedPaymentRows) {
+    paidByCoach.set(p.coachId, (paidByCoach.get(p.coachId) ?? 0) + p.amountCents);
+  }
+
+  const rows: OverdueRow[] = [];
+  for (const c of activeCoaches) {
+    const aging = computeAging(
+      rentalsByCoach.get(c.id) ?? [],
+      paidByCoach.get(c.id) ?? 0,
+      now,
+    );
+    if (!aging.overdue) continue;
+    rows.push({
+      coachId: c.id,
+      coachName: c.name ?? c.email,
+      balanceCents: aging.balanceCents,
+      oldestUnpaidAt: aging.oldestUnpaidAt,
+      oldestUnpaidDays: aging.oldestUnpaidDays,
+      reasons: aging.reasons,
+    });
+  }
+  rows.sort((a, b) => b.balanceCents - a.balanceCents);
+
+  return { rows, count: rows.length };
 }

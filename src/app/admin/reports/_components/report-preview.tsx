@@ -99,8 +99,8 @@ export function ReportPreview({
                     </>
                   ) : null}
                   {includeProgramHours ? (
-                    <SlotsAndCashCell
-                      slots={row.programSlots}
+                    <HoursAndCashCell
+                      hours={row.programHours}
                       cents={row.programTotalCents}
                     />
                   ) : null}
@@ -276,6 +276,37 @@ function SlotsAndCashCell({
       </span>
     </td>
   );
+}
+
+// Program/work cell: exact fractional HOURS (not 30-min slots) over the
+// dollars. Program pay bills per-hour × exact duration, so a 45-min block
+// shows "0.75 hr". 1 decimal, trailing ".0" stripped ("2 hr", "1.5 hr").
+function HoursAndCashCell({
+  hours,
+  cents,
+}: {
+  hours: number;
+  cents: number;
+}) {
+  if (hours === 0 && cents === 0) {
+    return (
+      <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-subtle">
+        —
+      </td>
+    );
+  }
+  return (
+    <td className="px-4 py-3 text-right font-mono tnum tabular-nums leading-tight">
+      <span className="block text-fg">{formatHours(hours)} hr</span>
+      <span className="block text-[11px] text-fg-subtle">
+        {formatCents(cents)}
+      </span>
+    </td>
+  );
+}
+
+function formatHours(hours: number): string {
+  return hours.toFixed(2).replace(/\.?0+$/, "");
 }
 
 function CashCell({ cents }: { cents: number }) {

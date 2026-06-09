@@ -9,7 +9,7 @@ import {
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
-import { totalFromSnapshot } from "@/lib/billing";
+import { programPayFromSnapshot, totalFromSnapshot } from "@/lib/billing";
 import { PaymentsClient, type CoachOption, type RecentPaymentRow } from "./_components/payments-client";
 
 // /admin/payments — coach-to-PFA ledger. Three stacked sections:
@@ -153,7 +153,9 @@ export default async function AdminPaymentsPage() {
   }
   const owedProgramByCoach = new Map<string, number>();
   for (const h of hourLogRows) {
-    const total = totalFromSnapshot(
+    // Program pay = per-hour × EXACT duration (not the 30-min cage slot
+    // model). The cage loop above keeps totalFromSnapshot.
+    const total = programPayFromSnapshot(
       h.startAt,
       h.endAt,
       h.ratePer30MinCents ?? 0,

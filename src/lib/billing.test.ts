@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_RATES_PER_SLOT_CENTS,
   computeRate,
+  programMinutes,
+  programPayFromSnapshot,
   rateForProgram,
   rateForSlot,
   slotsBetween,
@@ -242,6 +244,133 @@ describe("totalFromSnapshot", () => {
         historicalRate,
       ),
     ).toBe(5100);
+  });
+});
+
+describe("programMinutes", () => {
+  it("returns exact minutes for a 30-min block", () => {
+    expect(programMinutes(d("2026-05-24T09:00:00Z"), d("2026-05-24T09:30:00Z"))).toBe(30);
+  });
+
+  it("returns exact minutes for a 45-min block (15-min granular)", () => {
+    expect(programMinutes(d("2026-05-24T09:00:00Z"), d("2026-05-24T09:45:00Z"))).toBe(45);
+  });
+
+  it("returns exact minutes for a 90-min block", () => {
+    expect(programMinutes(d("2026-05-24T09:00:00Z"), d("2026-05-24T10:30:00Z"))).toBe(90);
+  });
+
+  it("returns exact minutes for a 15-min block", () => {
+    expect(programMinutes(d("2026-05-24T09:00:00Z"), d("2026-05-24T09:15:00Z"))).toBe(15);
+  });
+
+  it("absorbs sub-minute drift with Math.round", () => {
+    expect(programMinutes(d("2026-05-24T09:00:00Z"), d("2026-05-24T09:30:20Z"))).toBe(30);
+  });
+
+  it("throws when endAt equals startAt", () => {
+    expect(() =>
+      programMinutes(d("2026-05-24T09:00:00Z"), d("2026-05-24T09:00:00Z")),
+    ).toThrow(/after/);
+  });
+
+  it("throws when endAt is before startAt", () => {
+    expect(() =>
+      programMinutes(d("2026-05-24T10:00:00Z"), d("2026-05-24T09:00:00Z")),
+    ).toThrow(/after/);
+  });
+});
+
+describe("programPayFromSnapshot", () => {
+  // Historical guarantee: 30-min-aligned blocks bill identically to the
+  // old slotsBetween × rate model, so past pay is unchanged.
+  it("matches the old slot model for a 60-min block (2 slots)", () => {
+    const start = d("2026-05-24T09:00:00Z");
+    const end = d("2026-05-24T10:00:00Z");
+    expect(programPayFromSnapshot(start, end, 2200)).toBe(4400);
+    expect(programPayFromSnapshot(start, end, 2200)).toBe(
+      totalFromSnapshot(start, end, 2200),
+    );
+  });
+
+  it("matches the old slot model for a 30-min block (1 slot)", () => {
+    const start = d("2026-05-24T09:00:00Z");
+    const end = d("2026-05-24T09:30:00Z");
+    expect(programPayFromSnapshot(start, end, 2200)).toBe(2200);
+    expect(programPayFromSnapshot(start, end, 2200)).toBe(
+      totalFromSnapshot(start, end, 2200),
+    );
+  });
+
+  it("bills a 45-min block at 0.75× the hourly rate", () => {
+    expect(
+      programPayFromSnapshot(
+        d("2026-05-24T09:00:00Z"),
+        d("2026-05-24T09:45:00Z"),
+        2200,
+      ),
+    ).toBe(3300);
+  });
+
+  it("bills a 15-min block at 0.25× the hourly rate", () => {
+    expect(
+      programPayFromSnapshot(
+        d("2026-05-24T09:00:00Z"),
+        d("2026-05-24T09:15:00Z"),
+        2200,
+      ),
+    ).toBe(1100);
+  });
+
+  it("bills a 75-min block at 1.25× the hourly rate", () => {
+    expect(
+      programPayFromSnapshot(
+        d("2026-05-24T09:00:00Z"),
+        d("2026-05-24T10:15:00Z"),
+        2200,
+      ),
+    ).toBe(5500);
+  });
+
+  it("rounds odd-cent rates to the nearest cent", () => {
+    // 2151 per 30 min × 15 min / 30 = 1075.5 → round → 1076.
+    expect(
+      programPayFromSnapshot(
+        d("2026-05-24T09:00:00Z"),
+        d("2026-05-24T09:15:00Z"),
+        2151,
+      ),
+    ).toBe(1076);
+  });
+
+  it("treats a null snapshot rate as $0", () => {
+    expect(
+      programPayFromSnapshot(
+        d("2026-05-24T09:00:00Z"),
+        d("2026-05-24T09:45:00Z"),
+        null,
+      ),
+    ).toBe(0);
+  });
+
+  it("returns 0 when the snapshot rate is 0", () => {
+    expect(
+      programPayFromSnapshot(
+        d("2026-05-24T09:00:00Z"),
+        d("2026-05-24T09:45:00Z"),
+        0,
+      ),
+    ).toBe(0);
+  });
+
+  it("throws when endAt is not after startAt", () => {
+    expect(() =>
+      programPayFromSnapshot(
+        d("2026-05-24T09:00:00Z"),
+        d("2026-05-24T09:00:00Z"),
+        2200,
+      ),
+    ).toThrow(/after/);
   });
 });
 

@@ -128,7 +128,7 @@ describe("aggregateReport — summary roll-up", () => {
 
   it("defaults program fields to 0 when no hour logs are passed", () => {
     const { summary } = aggregateReport([session()]);
-    expect(summary[0].programSlots).toBe(0);
+    expect(summary[0].programHours).toBe(0);
     expect(summary[0].programTotalCents).toBe(0);
   });
 });
@@ -142,7 +142,7 @@ function hourLog(
     coachName: "Coach A",
     coachEmail: "a@example.com",
     startAt: new Date("2026-05-01T16:00:00Z"),
-    endAt: new Date("2026-05-01T17:00:00Z"), // 1 hour = 2 slots
+    endAt: new Date("2026-05-01T17:00:00Z"), // 1 hour → 1.0 program hours
     ratePer30MinCents: 1500,
     ...overrides,
   };
@@ -158,7 +158,7 @@ describe("aggregateReport — program hours", () => {
     expect(summary).toHaveLength(1);
     const row = summary[0];
     expect(row.cageTotalCents).toBe(4400);
-    expect(row.programSlots).toBe(2);
+    expect(row.programHours).toBe(1);
     expect(row.programTotalCents).toBe(3000);
     // totalCents is the cage-side receivable ONLY — program pay is the
     // opposite money direction and is never added in.
@@ -189,7 +189,7 @@ describe("aggregateReport — program hours", () => {
       [],
       [hourLog({ ratePer30MinCents: 0 })],
     );
-    expect(summary[0].programSlots).toBe(2);
+    expect(summary[0].programHours).toBe(1);
     expect(summary[0].programTotalCents).toBe(0);
     expect(summary[0].totalCents).toBe(0);
     expect(programGrandTotalCents).toBe(0);
@@ -201,5 +201,37 @@ describe("aggregateReport — program hours", () => {
       [hourLog({ coachName: null, coachEmail: "noname@example.com" })],
     );
     expect(summary[0].coachName).toBe("noname@example.com");
+  });
+
+  it("bills a 45-min program block as 0.75 hr × per-hour rate (exact minute)", () => {
+    // 45 min at 2200 per 30 min ($44/hr) → round(2200 × 45 / 30) = 3300.
+    const { summary, programGrandTotalCents } = aggregateReport(
+      [],
+      [
+        hourLog({
+          startAt: new Date("2026-05-01T16:00:00Z"),
+          endAt: new Date("2026-05-01T16:45:00Z"),
+          ratePer30MinCents: 2200,
+        }),
+      ],
+    );
+    expect(summary[0].programHours).toBe(0.75);
+    expect(summary[0].programTotalCents).toBe(3300);
+    expect(programGrandTotalCents).toBe(3300);
+  });
+
+  it("bills a 90-min program block as 1.5 hr (was over-rounded by the slot model)", () => {
+    const { summary } = aggregateReport(
+      [],
+      [
+        hourLog({
+          startAt: new Date("2026-05-01T16:00:00Z"),
+          endAt: new Date("2026-05-01T17:30:00Z"),
+          ratePer30MinCents: 2200,
+        }),
+      ],
+    );
+    expect(summary[0].programHours).toBe(1.5);
+    expect(summary[0].programTotalCents).toBe(6600);
   });
 });

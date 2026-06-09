@@ -78,7 +78,7 @@ function makeReport(): ReportData {
         bullpenTotalCents: 0,
         weightRoomSlots: 0,
         weightRoomTotalCents: 0,
-        programSlots: 0,
+        programHours: 0,
         programTotalCents: 0,
         totalCents: 3600,
       },
@@ -92,7 +92,7 @@ function makeReport(): ReportData {
         bullpenTotalCents: 0,
         weightRoomSlots: 2,
         weightRoomTotalCents: 1400,
-        programSlots: 0,
+        programHours: 0,
         programTotalCents: 0,
         totalCents: 1400,
       },
@@ -155,7 +155,7 @@ describe("buildReportWorkbook", () => {
         "Bullpen $",
         "WeightRoom Slots",
         "WeightRoom $",
-        "Work Slots",
+        "Work Hours",
         "Work $",
         "Rental Owed $",
       ]);
@@ -193,7 +193,7 @@ describe("buildReportWorkbook", () => {
     it("puts cage and program grand totals in SEPARATE columns, never summed", async () => {
       const report = makeReport();
       // Give a coach program pay so both grand totals are non-zero.
-      report.summary[0].programSlots = 4;
+      report.summary[0].programHours = 2;
       report.summary[0].programTotalCents = 6000;
       report.programGrandTotalCents = 6000;
       const buf = await build(report, true, true);
@@ -225,7 +225,7 @@ describe("buildReportWorkbook", () => {
       expect(headers).toEqual([
         "Coach",
         "Email",
-        "Work Slots",
+        "Work Hours",
         "Work $",
       ]);
       expect(headers).not.toContain("Rental Owed $");
@@ -248,19 +248,19 @@ describe("buildReportWorkbook", () => {
         "WeightRoom $",
         "Rental Owed $",
       ]);
-      expect(headers).not.toContain("Work Slots");
+      expect(headers).not.toContain("Work Hours");
     });
 
-    it("writes Work Slots/$ and applies currency format to Work $", async () => {
+    it("writes Work Hours/$ and applies currency format to Work $", async () => {
       const report = makeReport();
-      report.summary[0].programSlots = 3;
+      report.summary[0].programHours = 1.5;
       report.summary[0].programTotalCents = 7500;
       const buf = await build(report, false, true);
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Summary")!;
-      // Columns: 1 Coach, 2 Email, 3 Work Slots, 4 Work $, 5 Total
+      // Columns: 1 Coach, 2 Email, 3 Work Hours, 4 Work $, 5 Total
       const row2 = sheet.getRow(2);
-      expect(row2.getCell(3).value).toBe(3); // program slots
+      expect(row2.getCell(3).value).toBe(1.5); // exact program hours
       expect(row2.getCell(4).value).toBe(75); // 7500 cents / 100
       expect(sheet.getColumn(4).numFmt).toBe('"$"#,##0.00');
     });

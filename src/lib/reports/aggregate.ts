@@ -12,8 +12,9 @@
 // Cents discipline: every monetary number stays in integer cents.
 
 import {
+  programMinutes,
+  programPayFromSnapshot,
   slotsBetween,
-  totalFromSnapshot,
   type ResourceType,
 } from "@/lib/billing";
 import {
@@ -84,8 +85,12 @@ export type SummaryRow = {
   bullpenTotalCents: number;
   weightRoomSlots: number;
   weightRoomTotalCents: number;
-  /** Program-hour slots logged in range (additive; never a resource type). */
-  programSlots: number;
+  /**
+   * Exact program/work HOURS logged in range (fractional — a 45-min block
+   * is 0.75). Additive; never a resource type. Program pay bills on the
+   * exact duration (per-hour rate), unlike the 30-min cage slot model.
+   */
+  programHours: number;
   programTotalCents: number;
   /**
    * Cage-side receivable subtotal (cage + bullpen + weight_room) — money the
@@ -171,7 +176,7 @@ export function aggregateReport(
         bullpenTotalCents: 0,
         weightRoomSlots: 0,
         weightRoomTotalCents: 0,
-        programSlots: 0,
+        programHours: 0,
         programTotalCents: 0,
         totalCents: 0,
       };
@@ -199,8 +204,10 @@ export function aggregateReport(
   }
 
   // Fold program hours into the same per-coach summary as an additive
-  // "Program hours" category. Snapshot rate × slot count, same as
-  // sessions; null snapshots already arrive as 0 from the caller.
+  // "Program hours" category. Program pay is per-hour × EXACT duration
+  // (not the 30-min cage slot model), so use the program-only helpers:
+  // exact fractional hours for display, exact-minute pay. Null snapshots
+  // contribute $0.
   let programGrandTotalCents = 0;
   for (const log of hourLogs) {
     const entry = ensureEntry(
@@ -208,13 +215,12 @@ export function aggregateReport(
       log.coachName ?? log.coachEmail,
       log.coachEmail,
     );
-    const slots = slotsBetween(log.startAt, log.endAt);
-    const totalCents = totalFromSnapshot(
+    const totalCents = programPayFromSnapshot(
       log.startAt,
       log.endAt,
       log.ratePer30MinCents,
     );
-    entry.programSlots += slots;
+    entry.programHours += programMinutes(log.startAt, log.endAt) / 60;
     entry.programTotalCents += totalCents;
     // Program pay is a payout (PFA owes the coach) — the OPPOSITE money
     // direction from the cage receivable in `totalCents`. Never net them:

@@ -12,7 +12,7 @@
 // new item appears on the server-rendered Home grid. The grid file itself
 // imports no dialogs — the onEmptyCellClick handler is passed in from here.
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   DndContext,
@@ -34,6 +34,8 @@ import {
   type MasterResourceRow,
   type MasterSession,
   type MasterSessionDragData,
+  type PaintOverlay,
+  type PaintPointerDown,
 } from "./master-schedule-grid";
 import { updateSession } from "@/app/admin/sessions/actions";
 import { updateProgramScheduleBlock } from "@/app/admin/hour-log/schedule/actions";
@@ -62,7 +64,14 @@ import {
   type SeriesView,
 } from "@/app/admin/hour-log/schedule/_components/program-block-dialog";
 import type { BlockReconciliation } from "@/lib/server/reconciliation";
-import { slotStartAt, slotStartAt15 } from "@/lib/schedule-grid-utils";
+import {
+  PROGRAM_GRID_SLOTS,
+  SCHEDULE_GRID_SLOTS,
+  placeOnGrid,
+  placeOnGrid15,
+  slotStartAt,
+  slotStartAt15,
+} from "@/lib/schedule-grid-utils";
 import { formatPfaTime, pfaHour, pfaMinute, pfaWallClockAt } from "@/lib/timezone";
 
 // Drag id prefix (e.g. "session-…" / "program-block-…") → bare entity id, so
@@ -155,6 +164,261 @@ export function EditableMasterSchedule({
       activationConstraint: { delay: 200, tolerance: 5 },
     }),
   );
+
+  // ── #15 drag-to-CREATE ("paint") ──────────────────────────────────────────
+  // Press on an empty cell and drag across a time range → on release a create
+  // dialog opens prefilled with that start→end range. Mirrors the proven cage
+  // schedule-grid paint pattern, made SECTION-AWARE for the master grid's two
+  // granularities (cage = 30-min / 28 slots, program = 15-min / 56 slots), each
+  // with its own 120px label column. The single source of slot resolution is
+  // slotIndexFromClientX, which measures the SECTION'S OWN grid node.
+  //
+  // paintOverlay drives the dashed highlight (null = not painting); it carries
+  // the section so the matching sub-grid renders it in the right place/color.
+  const [paintOverlay, setPaintOverlay] = useState<PaintOverlay>(null);
+
+  // Per-section grid DOM nodes, registered by the grid via registerGridNode, so
+  // slotIndexFromClientX measures the correct bounding rect + slot count.
+  const gridNodes = useRef<{
+    resource: HTMLDivElement | null;
+    program: HTMLDivElement | null;
+  }>({ resource: null, program: null });
+  const registerGridNode = (
+    section: "resource" | "program",
+    node: HTMLDivElement | null,
+  ) => {
+    gridNodes.current[section] = node;
+  };
+
+  // The pointerdown anchor, held between pointerdown and the first pointermove
+  // that crosses the 5px activation threshold. A ref (no re-render per move).
+  const paintStartRef = useRef<{
+    section: "resource" | "program";
+    rowId: string; // resourceId for cage; "" for program
+    slotIndex: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  // Set when paint activated this pointer cycle, so the trailing cell click
+  // (fires AFTER pointerup) skips its single-cell create. Cleared on next click.
+  const suppressNextClickRef = useRef(false);
+
+  // Latest-ref pattern: the window pointer handlers are bound once but must see
+  // the freshest props/state. Synced in a no-dep post-commit effect — assigning
+  // to ref.current during render is impure (react-hooks/refs in React 19).
+  const paintOverlayRef = useRef(paintOverlay);
+  const sessionsRef = useRef(sessions);
+  const blockedTimesRef = useRef(blockedTimes);
+  const programBlocksRef = useRef(programBlocks);
+  const selectedDateRef = useRef(selectedDate);
+  useEffect(() => {
+    paintOverlayRef.current = paintOverlay;
+    sessionsRef.current = sessions;
+    blockedTimesRef.current = blockedTimes;
+    programBlocksRef.current = programBlocks;
+    selectedDateRef.current = selectedDate;
+  });
+
+  // Is the given slot occupied in the painting section? Cage = per-resource
+  // (sessions + blocked times on that resourceId); program = any visible block
+  // covers that 15-min column (lane-agnostic). Excludes nothing — these are
+  // empty-cell paints, so any occupied slot is a hard stop.
+  const isSlotOccupied = (
+    section: "resource" | "program",
+    rowId: string,
+    slotIndex: number,
+  ): boolean => {
+    if (section === "resource") {
+      for (const s of sessionsRef.current) {
+        if (s.resourceId !== rowId) continue;
+        const p = placeOnGrid(s.startAt, s.endAt);
+        if (p && slotIndex >= p.col - 2 && slotIndex < p.col - 2 + p.span) {
+          return true;
+        }
+      }
+      for (const b of blockedTimesRef.current) {
+        if (b.resourceId !== rowId) continue;
+        const p = placeOnGrid(b.startAt, b.endAt);
+        if (p && slotIndex >= p.col - 2 && slotIndex < p.col - 2 + p.span) {
+          return true;
+        }
+      }
+      return false;
+    }
+    for (const b of programBlocksRef.current) {
+      const p = placeOnGrid15(b.startAt, b.endAt);
+      // placeOnGrid15.col is 1-based with NO leading label column (slot 0 →
+      // col 1). Recover the 0-based slot index.
+      if (p && slotIndex >= p.col - 1 && slotIndex < p.col - 1 + p.span) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Map a pointer clientX to a slot index within `section`'s own grid. Both
+  // sub-grids template "120px repeat(SLOTS, …)" — the first column is the label,
+  // then SLOTS equal fractions fill the rest. SLOTS differs per section (28 vs
+  // 56), so we read the section's bounding rect + its own slot count.
+  const slotIndexFromClientX = (
+    section: "resource" | "program",
+    clientX: number,
+  ): number | null => {
+    const grid = gridNodes.current[section];
+    if (!grid) return null;
+    const slots =
+      section === "resource" ? SCHEDULE_GRID_SLOTS : PROGRAM_GRID_SLOTS;
+    const rect = grid.getBoundingClientRect();
+    const cellsLeft = rect.left + 120;
+    const cellsWidth = rect.right - cellsLeft;
+    if (cellsWidth <= 0) return null;
+    if (clientX < cellsLeft) return 0;
+    if (clientX >= rect.right) return slots - 1;
+    const idx = Math.floor(((clientX - cellsLeft) / cellsWidth) * slots);
+    return Math.max(0, Math.min(slots - 1, idx));
+  };
+
+  const handleCellPaintPointerDown: PaintPointerDown = ({
+    section,
+    rowId,
+    slotIndex,
+    clientX,
+    clientY,
+  }) => {
+    // Clear any stale suppress flag from a prior gesture whose trailing click
+    // never landed (dialog took focus, pointer moved off, etc.).
+    suppressNextClickRef.current = false;
+    paintStartRef.current = { section, rowId, slotIndex, x: clientX, y: clientY };
+  };
+
+  // Wrap the single-cell create so a completed paint swallows the trailing
+  // click (which fires AFTER pointerup) instead of ALSO opening the 1-slot
+  // create dialog.
+  const handleCellClickWrapped = (run: () => void) => {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      return;
+    }
+    run();
+  };
+
+  // Open the matching create dialog for a committed paint range. Reuses the
+  // exact prefill shapes handleEmptyCellClick builds for a single empty cell.
+  const openPaintCreate = (
+    section: "resource" | "program",
+    rowId: string,
+    minSlot: number,
+    maxSlot: number,
+  ) => {
+    const date = selectedDateRef.current;
+    if (section === "resource") {
+      const startAt = slotStartAt(date, minSlot);
+      // maxSlot is inclusive → block runs through the END of slot maxSlot.
+      const endAt = slotStartAt(date, maxSlot + 1);
+      setDialog({
+        kind: "cage",
+        prefill: { resourceId: rowId, startAt, endAt },
+      });
+    } else {
+      const startAt = slotStartAt15(date, minSlot);
+      const endAt = slotStartAt15(date, maxSlot + 1);
+      setDialog({
+        kind: "program",
+        prefill: {
+          programId: rowId,
+          startTime: formatPfaTime(startAt),
+          endTime: formatPfaTime(endAt),
+        },
+      });
+    }
+  };
+
+  // Window-level pointer handlers for paint. Bound once on mount; everything
+  // dynamic flows through refs (latest-ref pattern).
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const start = paintStartRef.current;
+      if (!start) return;
+      const current = paintOverlayRef.current;
+
+      // Cross the 5px activation threshold → enter paint mode.
+      if (current === null) {
+        const dx = Math.abs(e.clientX - start.x);
+        const dy = Math.abs(e.clientY - start.y);
+        if (dx <= 5 && dy <= 5) return;
+        suppressNextClickRef.current = true;
+        setPaintOverlay(
+          start.section === "resource"
+            ? {
+                section: "resource",
+                resourceId: start.rowId,
+                minSlot: start.slotIndex,
+                maxSlot: start.slotIndex,
+              }
+            : {
+                section: "program",
+                minSlot: start.slotIndex,
+                maxSlot: start.slotIndex,
+              },
+        );
+        return;
+      }
+
+      // Already painting — extend toward the pointer, clamped at the first
+      // occupied slot between the anchor and the pointer's slot.
+      const targetSlot = slotIndexFromClientX(start.section, e.clientX);
+      if (targetSlot === null) return;
+      const anchor = start.slotIndex;
+      const dir = targetSlot >= anchor ? 1 : -1;
+      let clamped = anchor;
+      for (
+        let i = anchor + dir;
+        dir > 0 ? i <= targetSlot : i >= targetSlot;
+        i += dir
+      ) {
+        if (isSlotOccupied(start.section, start.rowId, i)) break;
+        clamped = i;
+      }
+      // current is the active overlay; the anchor slot lives in start.slotIndex,
+      // the moving end is `clamped`. Re-derive min/max for the highlight.
+      const min = Math.min(anchor, clamped);
+      const max = Math.max(anchor, clamped);
+      if (current.minSlot !== min || current.maxSlot !== max) {
+        setPaintOverlay(
+          start.section === "resource"
+            ? {
+                section: "resource",
+                resourceId: start.rowId,
+                minSlot: min,
+                maxSlot: max,
+              }
+            : { section: "program", minSlot: min, maxSlot: max },
+        );
+      }
+    };
+
+    const onUp = () => {
+      const start = paintStartRef.current;
+      paintStartRef.current = null;
+      const current = paintOverlayRef.current;
+      if (!start || current === null) return;
+      const min = Math.min(current.minSlot, current.maxSlot);
+      const max = Math.max(current.minSlot, current.maxSlot);
+      setPaintOverlay(null);
+      openPaintCreate(start.section, start.rowId, min, max);
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+    return () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    };
+    // Bound once; everything dynamic flows through refs.
+     
+  }, []);
 
   const handleDragEnd = (event: DragEndEvent) => {
     setDraggingId(null);
@@ -317,8 +581,8 @@ export function EditableMasterSchedule({
   return (
     <>
       <p className="mb-2 text-xs text-fg-subtle">
-        Click an empty slot to add, a block to view/edit, or drag a block to
-        move it.
+        Click an empty slot to add, drag across empty slots to paint a time
+        range, click a block to view/edit, or drag a block to move it.
       </p>
 
       {dragError ? (
@@ -353,6 +617,10 @@ export function EditableMasterSchedule({
           onBlockClick={handleBlockClick}
           dragEnabled
           draggingId={draggingId}
+          onCellPaintPointerDown={handleCellPaintPointerDown}
+          onCellClickWrapped={handleCellClickWrapped}
+          registerGridNode={registerGridNode}
+          paintOverlay={paintOverlay}
         />
       </DndContext>
 

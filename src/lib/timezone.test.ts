@@ -126,6 +126,57 @@ describe("pfaDayStart / pfaDayEnd", () => {
     const lateNight = new Date("2026-06-01T03:30:00Z");
     expect(formatPfaDate(pfaDayStart(lateNight))).toBe("2026-05-31");
   });
+
+  it("dayEnd is next-day PFA midnight regardless of time-of-day", () => {
+    // Three instants all on the SAME PFA calendar day (Mon 2026-05-04):
+    //   early morning, midday, and LATE EVENING (11:30 PM PT).
+    // All must yield the SAME next-day-00:00 result (Tue 2026-05-05
+    // 00:00 PT = 07:00 UTC, PDT UTC-7) — proving the late-evening input
+    // no longer overshoots to Wed.
+    const expected = "2026-05-05T07:00:00.000Z";
+    // 6:15 AM PT Mon = 13:15 UTC
+    const earlyMorning = new Date("2026-05-04T13:15:00Z");
+    // 1:00 PM PT Mon = 20:00 UTC
+    const midday = new Date("2026-05-04T20:00:00Z");
+    // 11:30 PM PT Mon = Tue 06:30 UTC (the bug case)
+    const lateEvening = new Date("2026-05-05T06:30:00Z");
+    // Sanity: all three are the same PFA calendar day.
+    expect(formatPfaDate(earlyMorning)).toBe("2026-05-04");
+    expect(formatPfaDate(midday)).toBe("2026-05-04");
+    expect(formatPfaDate(lateEvening)).toBe("2026-05-04");
+    expect(pfaDayEnd(earlyMorning).toISOString()).toBe(expected);
+    expect(pfaDayEnd(midday).toISOString()).toBe(expected);
+    expect(pfaDayEnd(lateEvening).toISOString()).toBe(expected);
+    // And the result is in fact a PFA midnight on the next day.
+    expect(formatPfaDate(pfaDayEnd(lateEvening))).toBe("2026-05-05");
+    expect(formatPfaTime(pfaDayEnd(lateEvening))).toBe("00:00");
+  });
+
+  it("dayEnd snaps across the March spring-forward (23h day)", () => {
+    // 2026 US DST begins Sun 2026-03-08 02:00 PT (PST UTC-8 -> PDT UTC-7).
+    // Late-evening input on the SHORT (23h) day, Sun 2026-03-08 11:30 PM
+    // PDT = Mon 2026-03-09 06:30 UTC. Next-day 00:00 PT (PDT, UTC-7) =
+    // Mon 2026-03-09 07:00 UTC.
+    const lateEvening = new Date("2026-03-09T06:30:00Z");
+    expect(formatPfaDate(lateEvening)).toBe("2026-03-08");
+    const end = pfaDayEnd(lateEvening);
+    expect(end.toISOString()).toBe("2026-03-09T07:00:00.000Z");
+    expect(formatPfaDate(end)).toBe("2026-03-09");
+    expect(formatPfaTime(end)).toBe("00:00");
+  });
+
+  it("dayEnd snaps across the November fall-back (25h day)", () => {
+    // 2026 US DST ends Sun 2026-11-01 02:00 PT (PDT UTC-7 -> PST UTC-8).
+    // Late-evening input on the LONG (25h) day, Sun 2026-11-01 11:30 PM
+    // PST = Mon 2026-11-02 07:30 UTC. Next-day 00:00 PT (PST, UTC-8) =
+    // Mon 2026-11-02 08:00 UTC.
+    const lateEvening = new Date("2026-11-02T07:30:00Z");
+    expect(formatPfaDate(lateEvening)).toBe("2026-11-01");
+    const end = pfaDayEnd(lateEvening);
+    expect(end.toISOString()).toBe("2026-11-02T08:00:00.000Z");
+    expect(formatPfaDate(end)).toBe("2026-11-02");
+    expect(formatPfaTime(end)).toBe("00:00");
+  });
 });
 
 describe("pfaMonthStart / pfaMonthEnd", () => {

@@ -42,15 +42,12 @@ import type { NeedsReviewItem } from "@/app/admin/_components/needs-review-card"
  * calendar day AFTER the block's end. Pure + deterministic so it can be
  * unit-tested against fixed UTC instants.
  *
- * We anchor on `pfaDayStart(blockEndAt)` (PFA midnight of the block's own
- * Pacific day) BEFORE calling `pfaDayEnd`: pfaDayEnd's "+25h then snap"
- * trick over-shoots by a day for late-evening Pacific inputs (e.g. an
- * 11:30 PM block), so feeding it the day-start (a near-midnight instant)
- * keeps the +25h safely inside the next Pacific day. `pfaWallClockAt` then
- * places 8:00 AM on that next day.
+ * `pfaDayEnd(blockEndAt)` is the next Pacific day's 00:00 (correct for any
+ * time-of-day, including late-evening blocks); `pfaWallClockAt(.., 8, 0)`
+ * then places 8:00 AM on that next day.
  */
 export function noShowDueAt(blockEndAt: Date): Date {
-  const nextDayMidnight = pfaDayEnd(pfaDayStart(blockEndAt));
+  const nextDayMidnight = pfaDayEnd(blockEndAt);
   return pfaWallClockAt(nextDayMidnight, 8, 0);
 }
 

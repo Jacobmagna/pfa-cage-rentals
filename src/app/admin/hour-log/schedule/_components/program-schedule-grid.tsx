@@ -16,7 +16,7 @@
 //     untouched, and moves linked cage blocked_times to the new time).
 //     Touch-friendly via @dnd-kit's TouchSensor.
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
   DndContext,
   PointerSensor,
@@ -86,6 +86,24 @@ type DialogState =
   | { kind: "closed" }
   | { kind: "create"; prefill: CreatePrefill }
   | { kind: "edit"; block: ProgramScheduleBlockView };
+
+// #15 drag-to-CREATE ("paint"). Coexists with the dnd-kit drag-to-MOVE on
+// block bars: pressing an EMPTY cell records an anchor; if the pointer then
+// moves >5px we enter paint mode and drag across the time axis to define a
+// range; a sub-5px press that releases falls through to the normal
+// click-to-create (1-hour default). Programs aren't pinned to a resource
+// row (they lane-stack), so the anchor is just a slot index + the lane row
+// pressed (used only to position the highlight overlay).
+type PaintState =
+  | { kind: "idle" }
+  | {
+      kind: "active";
+      laneIdx: number;
+      // Inclusive endpoints; start can exceed end while painting leftward.
+      // Commit normalizes to min..max.
+      startSlot: number;
+      endSlot: number;
+    };
 
 // @dnd-kit serializes drag/drop `data`; ISO strings travel cleaner than
 // Date objects. The droppable target is a slot COLUMN (lane-agnostic) —
@@ -164,7 +182,26 @@ export function ProgramScheduleGrid({
   const [dialog, setDialog] = useState<DialogState>({ kind: "closed" });
   const [dragError, setDragError] = useState<string | null>(null);
   const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
+  const [paint, setPaint] = useState<PaintState>({ kind: "idle" });
   const [, startTransition] = useTransition();
+
+  // Holds the pointerdown anchor between pointerdown and the first
+  // pointermove that crosses the 5px activation threshold. A ref so we
+  // don't re-render on every pointermove.
+  const paintStartRef = useRef<{
+    laneIdx: number;
+    slotIdx: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  // Set when paint activated for the current pointer cycle, so the cell's
+  // onClick (which fires AFTER pointerup) skips its single-cell create.
+  const suppressNextClickRef = useRef(false);
+  // The grid DOM node — used by the paint pointermove handler to convert
+  // clientX into a slot index via getBoundingClientRect. (elementFromPoint
+  // would be wrong: block bars sit above the cells, so painting across them
+  // would lose the underlying slot — geometry math doesn't care.)
+  const gridRef = useRef<HTMLDivElement | null>(null);
 
   const close = () => setDialog({ kind: "closed" });
 
@@ -177,6 +214,132 @@ export function ProgramScheduleGrid({
       activationConstraint: { delay: 200, tolerance: 5 },
     }),
   );
+
+  // Latest-ref pattern: the window-level pointer handlers (paint) are bound
+  // once on mount but need the freshest state. These refs sync in a no-dep
+  // post-commit effect below; the handler closures read .current so they
+  // never see stale React state. (`occupiedSlotsRef`/`selectedDateRef` are
+  // assigned later, after those values are computed in render.)
+  const paintRef = useRef(paint);
+  const occupiedSlotsRef = useRef<Set<number>>(new Set());
+  const selectedDateRef = useRef(selectedDate);
+
+  // Convert pointer.clientX → a 15-min slot index by measuring the grid's
+  // bounding rect. The program grid template is `repeat(56, minmax(18px,
+  // 1fr))` with NO leading label column, so the whole rect width maps
+  // linearly onto the 56 slots (unlike the cage grid's 120px label offset).
+  const slotIndexFromClientX = (clientX: number): number | null => {
+    const grid = gridRef.current;
+    if (!grid) return null;
+    const rect = grid.getBoundingClientRect();
+    if (clientX < rect.left) return 0;
+    if (clientX >= rect.right) return SLOTS - 1;
+    const idx = Math.floor(((clientX - rect.left) / rect.width) * SLOTS);
+    return Math.max(0, Math.min(SLOTS - 1, idx));
+  };
+
+  const handleCellPointerDown = (
+    laneIdx: number,
+    slotIdx: number,
+    e: React.PointerEvent<HTMLButtonElement>,
+  ) => {
+    if (e.button !== 0) return; // left click only
+    // Clear any stale suppress flag from a previous gesture whose trailing
+    // click never landed (dialog took focus, pointer elsewhere, etc.).
+    suppressNextClickRef.current = false;
+    paintStartRef.current = { laneIdx, slotIdx, x: e.clientX, y: e.clientY };
+  };
+
+  const handleCellClick = (onCreate: () => void) => {
+    // A paint just committed in pointerup → swallow the trailing click so we
+    // don't ALSO open the single-cell (1-hour) create dialog.
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      return;
+    }
+    onCreate();
+  };
+
+  // Window-level pointer handlers for paint mode. Bound once on mount; all
+  // dynamic data flows through refs (latest-ref pattern).
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const start = paintStartRef.current;
+      if (!start) return;
+
+      const current = paintRef.current;
+      // Cross the 5px activation threshold → enter paint mode.
+      if (current.kind === "idle") {
+        const dx = Math.abs(e.clientX - start.x);
+        const dy = Math.abs(e.clientY - start.y);
+        if (dx <= 5 && dy <= 5) return;
+        suppressNextClickRef.current = true;
+        setPaint({
+          kind: "active",
+          laneIdx: start.laneIdx,
+          startSlot: start.slotIdx,
+          endSlot: start.slotIdx,
+        });
+        return;
+      }
+
+      // Already painting — update endSlot to the pointer's slot, clamped at
+      // the first OCCUPIED slot between startSlot and the pointer so you
+      // can't paint across an existing block.
+      const targetSlot = slotIndexFromClientX(e.clientX);
+      if (targetSlot === null) return;
+      const occupied = occupiedSlotsRef.current;
+      const dir = targetSlot >= current.startSlot ? 1 : -1;
+      let clampedEnd = current.startSlot;
+      for (
+        let i = current.startSlot + dir;
+        dir > 0 ? i <= targetSlot : i >= targetSlot;
+        i += dir
+      ) {
+        if (occupied.has(i)) break;
+        clampedEnd = i;
+      }
+      if (clampedEnd !== current.endSlot) {
+        setPaint({ ...current, endSlot: clampedEnd });
+      }
+    };
+
+    const onUp = () => {
+      const start = paintStartRef.current;
+      paintStartRef.current = null;
+      const current = paintRef.current;
+      if (!start) return;
+
+      if (current.kind === "active") {
+        const min = Math.min(current.startSlot, current.endSlot);
+        const max = Math.max(current.startSlot, current.endSlot);
+        // start = beginning of the first painted slot; end = end of the LAST
+        // painted slot (end-exclusive → slotStartAt15 of max + 1).
+        const startAt = slotStartAt15(selectedDateRef.current, min);
+        const endAt = slotStartAt15(selectedDateRef.current, max + 1);
+        setDialog({
+          kind: "create",
+          prefill: {
+            programId: "",
+            startTime: formatPfaTime(startAt),
+            endTime: formatPfaTime(endAt),
+          },
+        });
+        setPaint({ kind: "idle" });
+      }
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+    return () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    };
+    // Bound once; everything dynamic flows through refs.
+     
+  }, []);
 
   // Drag-to-MOVE: read the dragged block's [startAt, endAt) to get its
   // duration, derive the new start from the dropped slot index, keep the
@@ -285,6 +448,16 @@ export function ProgramScheduleGrid({
     }
   }
 
+  // Sync the latest-ref values for the window paint handlers. A no-dep
+  // effect runs post-commit every render so the once-bound listeners read
+  // fresh state without re-binding. (Assigning during render would be impure
+  // and is flagged by react-hooks in React 19.)
+  useEffect(() => {
+    paintRef.current = paint;
+    occupiedSlotsRef.current = occupiedSlots;
+    selectedDateRef.current = selectedDate;
+  });
+
   const gridStyle: React.CSSProperties = {
     // 56 fifteen-min columns; half the per-cell min width of the 30-min grid
     // so the total width stays comparable.
@@ -335,7 +508,11 @@ export function ProgramScheduleGrid({
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-line shadow-[var(--shadow-sm)]">
-          <div className="relative grid bg-surface min-w-fit" style={gridStyle}>
+          <div
+            ref={gridRef}
+            className="relative grid bg-surface min-w-fit"
+            style={gridStyle}
+          >
             {/* Time-slot headers. */}
             {Array.from({ length: SLOTS }).map((_, slotIdx) => {
               const col = slotIdx + 1;
@@ -372,9 +549,32 @@ export function ProgramScheduleGrid({
                   isOccupied={occupiedSlots.has(slotIdx)}
                   isDragging={draggingBlockId !== null}
                   onCreate={() => openCreateAt(slotIdx)}
+                  onPointerDown={handleCellPointerDown}
+                  onClickWrapped={handleCellClick}
                 />
               )),
             )}
+
+            {/* Paint highlight — a blue dashed overlay (work = blue) across
+                the painted slot range in the pressed lane row, while active. */}
+            {paint.kind === "active"
+              ? (() => {
+                  const min = Math.min(paint.startSlot, paint.endSlot);
+                  const max = Math.max(paint.startSlot, paint.endSlot);
+                  return (
+                    <div
+                      aria-hidden
+                      style={{
+                        gridRow: paint.laneIdx + 2,
+                        gridColumn: `${min + 1} / span ${max - min + 1}`,
+                        pointerEvents: "none",
+                        zIndex: 5,
+                      }}
+                      className="m-0.5 rounded border-2 border-dashed border-blue/80 bg-blue/15"
+                    />
+                  );
+                })()
+              : null}
 
             {/* Block bars. QA10 W3.8a: row = the block's assigned lane + 2
                 (header is row 1); primary label = the PROGRAM name. */}
@@ -436,9 +636,10 @@ export function ProgramScheduleGrid({
           <LegendDot className="bg-blue" label="Pending" />
         </div>
         <p className="text-fg-subtle">
-          Click an empty area to schedule a program block (pick the program in
-          the dialog). Click a block to edit or delete it, or drag it to a new
-          time (its length is kept). Each bar shows the program, time, and
+          Click an empty area to schedule a program block, or drag across empty
+          time to set the range (pick the program in the dialog). Click a block
+          to edit or delete it, or drag it to a new time (its length is kept).
+          Each bar shows the program, time, and
           reconciliation status (how the logged hours compare to the schedule);
           the scheduled coach(es) appear in the tooltip and the edit dialog.
         </p>
@@ -494,12 +695,20 @@ function DroppableCell({
   isOccupied,
   isDragging,
   onCreate,
+  onPointerDown,
+  onClickWrapped,
 }: {
   laneIdx: number;
   slotIdx: number;
   isOccupied: boolean;
   isDragging: boolean;
   onCreate: () => void;
+  onPointerDown: (
+    laneIdx: number,
+    slotIdx: number,
+    e: React.PointerEvent<HTMLButtonElement>,
+  ) => void;
+  onClickWrapped: (onCreate: () => void) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `drop-${laneIdx}-${slotIdx}`,
@@ -516,7 +725,10 @@ function DroppableCell({
     <button
       ref={setNodeRef}
       type="button"
-      onClick={isOccupied ? undefined : onCreate}
+      onClick={isOccupied ? undefined : () => onClickWrapped(onCreate)}
+      onPointerDown={
+        isOccupied ? undefined : (e) => onPointerDown(laneIdx, slotIdx, e)
+      }
       disabled={isOccupied}
       tabIndex={isOccupied ? -1 : 0}
       aria-label={

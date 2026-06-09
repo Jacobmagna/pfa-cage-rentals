@@ -12,18 +12,31 @@
 // new item appears on the server-rendered Home grid. The grid file itself
 // imports no dialogs — the onEmptyCellClick handler is passed in from here.
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import {
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
 import {
   MasterScheduleGrid,
   type BlockClick,
   type EmptyCellClick,
   type MasterBlockedTime,
+  type MasterCellDropData,
   type MasterProgramBlock,
+  type MasterProgramBlockDragData,
   type MasterProgramRow,
   type MasterResourceRow,
   type MasterSession,
+  type MasterSessionDragData,
 } from "./master-schedule-grid";
+import { updateSession } from "@/app/admin/sessions/actions";
+import { updateProgramScheduleBlock } from "@/app/admin/hour-log/schedule/actions";
 import {
   ScheduleCreateDialog,
   type CreatePrefill,
@@ -51,6 +64,18 @@ import {
 import type { BlockReconciliation } from "@/lib/server/reconciliation";
 import { slotStartAt, slotStartAt15 } from "@/lib/schedule-grid-utils";
 import { formatPfaTime, pfaHour, pfaMinute, pfaWallClockAt } from "@/lib/timezone";
+
+// Drag id prefix (e.g. "session-…" / "program-block-…") → bare entity id, so
+// the grid's draggingId prop (which excludes the dragged item's own footprint
+// from the occupied set) can compare against the plain MasterSession.id /
+// MasterProgramBlock.id. The draggable ids are namespaced to avoid collisions.
+function bareDragId(activeId: string): string {
+  if (activeId.startsWith("session-")) return activeId.slice("session-".length);
+  if (activeId.startsWith("program-block-")) {
+    return activeId.slice("program-block-".length);
+  }
+  return activeId;
+}
 
 type ProgramCreatePrefill = {
   programId: string;
@@ -110,6 +135,108 @@ export function EditableMasterSchedule({
 }): React.JSX.Element {
   const router = useRouter();
   const [dialog, setDialog] = useState<DialogState>({ kind: "closed" });
+
+  // #15B drag-to-MOVE. A SINGLE DndContext spans BOTH grid sections even
+  // though they have different granularities (cage = 30-min, program = 15-min)
+  // and different server actions. The droppable cells carry their section +
+  // slot index in their data, so handleDragEnd reads the section off the DROP
+  // target and picks the matching slot→time helper; it reads the entity kind
+  // off the DRAG source to pick the action. No pointer-X math is needed.
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragError, setDragError] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
+
+  // distance:5 lets a plain click through (→ edit/create) while a >5px drag
+  // becomes a move. Touch gets a short delay so list scrolling still works.
+  // Mirrors the cage schedule grid exactly.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 200, tolerance: 5 },
+    }),
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    setDraggingId(null);
+    const { active, over } = event;
+    if (!over) return;
+
+    const dragData = active.data.current as
+      | MasterSessionDragData
+      | MasterProgramBlockDragData
+      | undefined;
+    const dropData = over.data.current as MasterCellDropData | undefined;
+    if (!dragData || dropData?.type !== "cell") return;
+
+    const oldStart = new Date(dragData.startAt);
+    const oldEnd = new Date(dragData.endAt);
+    const durationMs = oldEnd.getTime() - oldStart.getTime();
+
+    // CAGE session: drop target must be a resource cell (30-min). New start =
+    // start of that 30-min slot; resource may change (the drop cell's row).
+    if (dragData.type === "session" && dropData.section === "resource") {
+      const newStart = slotStartAt(selectedDate, dropData.slotIndex);
+      const newEnd = new Date(newStart.getTime() + durationMs);
+      const oldResourceId = sessions.find((s) => s.id === dragData.id)
+        ?.resourceId;
+      // No-op when nothing moved (same slot AND same resource row).
+      if (
+        newStart.getTime() === oldStart.getTime() &&
+        dropData.resourceId === oldResourceId
+      ) {
+        return;
+      }
+      startTransition(async () => {
+        try {
+          await updateSession(dragData.id, {
+            resourceId: dropData.resourceId,
+            startAt: newStart,
+            endAt: newEnd,
+          });
+          setDragError(null);
+        } catch (err) {
+          surfaceDragError(err);
+        }
+      });
+      return;
+    }
+
+    // PROGRAM block: drop target must be a program cell (15-min). New start =
+    // start of that 15-min slot. Only the times are sent → the action leaves
+    // program / coaches / occupied resources / note untouched (and auto-moves
+    // any linked cage blocked_times to the new time).
+    if (dragData.type === "program-block" && dropData.section === "program") {
+      const newStart = slotStartAt15(selectedDate, dropData.slotIndex);
+      const newEnd = new Date(newStart.getTime() + durationMs);
+      if (newStart.getTime() === oldStart.getTime()) return; // no-op
+      startTransition(async () => {
+        try {
+          await updateProgramScheduleBlock(dragData.id, {
+            startAt: newStart,
+            endAt: newEnd,
+          });
+          setDragError(null);
+        } catch (err) {
+          surfaceDragError(err);
+        }
+      });
+      return;
+    }
+
+    // Mismatched section (e.g. a cage bar dropped on a program cell): ignore;
+    // the bar snaps back automatically when the dnd-kit transform clears.
+  };
+
+  // Friendly, auto-dismissing drag-error toast (snap-back is automatic — a
+  // failed action doesn't revalidate, and the transform clears on dragEnd).
+  const surfaceDragError = (err: unknown) => {
+    const message =
+      err instanceof Error && err.message
+        ? err.message
+        : "Couldn't move that. Try a different slot.";
+    setDragError(message);
+    setTimeout(() => setDragError(null), 6_000);
+  };
 
   const handleEmptyCellClick: EmptyCellClick = ({
     section,
@@ -190,18 +317,44 @@ export function EditableMasterSchedule({
   return (
     <>
       <p className="mb-2 text-xs text-fg-subtle">
-        Click an empty slot to add, or a block to view/edit.
+        Click an empty slot to add, a block to view/edit, or drag a block to
+        move it.
       </p>
 
-      <MasterScheduleGrid
-        resources={resources}
-        sessions={sessions}
-        blockedTimes={blockedTimes}
-        programs={programs}
-        programBlocks={programBlocks}
-        onEmptyCellClick={handleEmptyCellClick}
-        onBlockClick={handleBlockClick}
-      />
+      {dragError ? (
+        <div
+          role="alert"
+          className="mb-2 flex items-start justify-between gap-2 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+        >
+          <span>{dragError}</span>
+          <button
+            type="button"
+            onClick={() => setDragError(null)}
+            className="text-[10px] uppercase tracking-wider text-danger/70 hover:text-danger"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
+      <DndContext
+        sensors={sensors}
+        onDragStart={(e) => setDraggingId(bareDragId(String(e.active.id)))}
+        onDragCancel={() => setDraggingId(null)}
+        onDragEnd={handleDragEnd}
+      >
+        <MasterScheduleGrid
+          resources={resources}
+          sessions={sessions}
+          blockedTimes={blockedTimes}
+          programs={programs}
+          programBlocks={programBlocks}
+          onEmptyCellClick={handleEmptyCellClick}
+          onBlockClick={handleBlockClick}
+          dragEnabled
+          draggingId={draggingId}
+        />
+      </DndContext>
 
       <ScheduleCreateDialog
         open={dialog.kind === "cage"}

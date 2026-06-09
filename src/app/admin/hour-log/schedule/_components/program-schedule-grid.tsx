@@ -10,16 +10,30 @@
 //   - Click an empty timeline cell → create dialog with the clicked time
 //     prefilled but NO program preselected (admin picks the program there).
 //   - Click a block bar → edit dialog (edit + delete).
-// NO drag-to-create or drag-to-move (the admin sets precise start/end
-// times in the dialog).
+//   - Drag a block bar → updateProgramScheduleBlock with a new start time,
+//     preserving the block's duration (and its program/coaches/resources/
+//     note — the update action leaves any field omitted from the payload
+//     untouched, and moves linked cage blocked_times to the new time).
+//     Touch-friendly via @dnd-kit's TouchSensor.
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import {
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
 import { assignLanes } from "@/lib/schedule-lanes";
 import {
   PROGRAM_GRID_SLOTS,
   placeOnGrid15,
   slotStartAt15,
 } from "@/lib/schedule-grid-utils";
+import { updateProgramScheduleBlock } from "../actions";
 import {
   pfaHour,
   pfaMinute,
@@ -72,6 +86,22 @@ type DialogState =
   | { kind: "closed" }
   | { kind: "create"; prefill: CreatePrefill }
   | { kind: "edit"; block: ProgramScheduleBlockView };
+
+// @dnd-kit serializes drag/drop `data`; ISO strings travel cleaner than
+// Date objects. The droppable target is a slot COLUMN (lane-agnostic) —
+// program blocks aren't pinned to a resource row, so any lane can receive
+// the move and the server refresh re-stacks the lanes.
+type BlockDragData = {
+  type: "program-block";
+  id: string;
+  startAt: string; // ISO
+  endAt: string; // ISO
+};
+
+type CellDropData = {
+  type: "cell";
+  slotIndex: number;
+};
 
 // Maps a reconciliation status → the bar's left-accent + bg-tint classes
 // and the tiny status-label text. `pending`/missing use the neutral blue
@@ -132,8 +162,67 @@ export function ProgramScheduleGrid({
   statuses: Record<string, BlockReconciliation>;
 }) {
   const [dialog, setDialog] = useState<DialogState>({ kind: "closed" });
+  const [dragError, setDragError] = useState<string | null>(null);
+  const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
 
   const close = () => setDialog({ kind: "closed" });
+
+  // distance: 5 lets short clicks through as clicks (click-to-edit keeps
+  // working); only after the pointer moves 5px does @dnd-kit activate a
+  // drag. Touch has a small delay so scrolling on a touchscreen still works.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 200, tolerance: 5 },
+    }),
+  );
+
+  // Drag-to-MOVE: read the dragged block's [startAt, endAt) to get its
+  // duration, derive the new start from the dropped slot index, keep the
+  // duration, and persist. The update action leaves program/coaches/
+  // resources/note untouched when those fields are omitted, and propagates
+  // any linked cage blocked_times to the new time — so we send ONLY the
+  // times. Snap-back on error is automatic (revalidate doesn't re-render on
+  // throw, and the dnd-kit transform clears on dragEnd).
+  const handleDragEnd = (event: DragEndEvent) => {
+    setDraggingBlockId(null);
+    const { active, over } = event;
+    if (!over) return;
+
+    const blockData = active.data.current as BlockDragData | undefined;
+    const dropData = over.data.current as CellDropData | undefined;
+    if (blockData?.type !== "program-block" || dropData?.type !== "cell") {
+      return;
+    }
+
+    const oldStart = new Date(blockData.startAt);
+    const oldEnd = new Date(blockData.endAt);
+    const durationMs = oldEnd.getTime() - oldStart.getTime();
+
+    const newStart = slotStartAt15(selectedDate, dropData.slotIndex);
+    const newEnd = new Date(newStart.getTime() + durationMs);
+
+    // No-op if dropped on the same start slot.
+    if (newStart.getTime() === oldStart.getTime()) return;
+
+    startTransition(async () => {
+      try {
+        await updateProgramScheduleBlock(blockData.id, {
+          startAt: newStart,
+          endAt: newEnd,
+        });
+        setDragError(null);
+      } catch (err) {
+        const message =
+          err instanceof Error && err.message
+            ? err.message
+            : "Couldn't move that block. Try a different time.";
+        setDragError(message);
+        setTimeout(() => setDragError(null), 6_000);
+      }
+    });
+  };
 
   // QA10 W3.8a: empty-cell create no longer preselects a program — the admin
   // picks it in the dialog. Prefill carries only the clicked time.
@@ -182,8 +271,13 @@ export function ProgramScheduleGrid({
   // QA10 W3.8a: occupancy is now by TIME (not per program). A slot column is
   // occupied if ANY visible block covers it, so empty-cell clicks only land
   // on free time. Keyed by slot index.
+  //
+  // Skip the actively-dragged block's own footprint so its current slots
+  // stay droppable (a small shift within its own span would otherwise be
+  // impossible — mirrors the cage grid's draggingSessionId exclusion).
   const occupiedSlots = new Set<number>();
   for (const b of visibleBlocks) {
+    if (b.id === draggingBlockId) continue;
     const placement = placeOnGrid15(b.startAt, b.endAt);
     if (!placement) continue;
     for (let i = 0; i < placement.span; i++) {
@@ -199,6 +293,12 @@ export function ProgramScheduleGrid({
   };
 
   return (
+    <DndContext
+      sensors={sensors}
+      onDragStart={(e) => setDraggingBlockId(String(e.active.id))}
+      onDragCancel={() => setDraggingBlockId(null)}
+      onDragEnd={handleDragEnd}
+    >
     <div className="space-y-3">
       {hiddenCount > 0 ? (
         <div
@@ -207,6 +307,22 @@ export function ProgramScheduleGrid({
         >
           {hiddenCount} {hiddenCount === 1 ? "block is" : "blocks are"} outside
           the 8 AM – 10 PM range and not shown here.
+        </div>
+      ) : null}
+
+      {dragError ? (
+        <div
+          role="alert"
+          className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger flex items-start justify-between gap-2"
+        >
+          <span>{dragError}</span>
+          <button
+            type="button"
+            onClick={() => setDragError(null)}
+            className="text-danger/70 hover:text-danger text-[10px] uppercase tracking-wider"
+          >
+            Dismiss
+          </button>
         </div>
       ) : null}
 
@@ -248,43 +364,16 @@ export function ProgramScheduleGrid({
                 time is not covered by any block. Occupied cells skip the
                 click so the bar above wins it. */}
             {Array.from({ length: laneRows }).map((_, laneIdx) =>
-              Array.from({ length: SLOTS }).map((_, slotIdx) => {
-                const isOccupied = occupiedSlots.has(slotIdx);
-                const baseBorders =
-                  slotIdx % 4 === 0
-                    ? "border-l border-line-strong"
-                    : "border-l border-line/40";
-                return (
-                  <button
-                    key={`cell-${laneIdx}-${slotIdx}`}
-                    type="button"
-                    onClick={
-                      isOccupied ? undefined : () => openCreateAt(slotIdx)
-                    }
-                    disabled={isOccupied}
-                    tabIndex={isOccupied ? -1 : 0}
-                    aria-label={
-                      isOccupied
-                        ? undefined
-                        : `Schedule a program at ${formatHour(
-                            FIRST_HOUR + Math.floor(slotIdx / 4),
-                          )}${
-                            slotIdx % 4 !== 0
-                              ? `:${String((slotIdx % 4) * 15).padStart(2, "0")}`
-                              : ""
-                          }`
-                    }
-                    className={[
-                      "border-b border-line text-left",
-                      baseBorders,
-                      isOccupied
-                        ? "cursor-default bg-surface-2/40"
-                        : "bg-surface-2/40 transition-colors hover:bg-gold/5 focus-visible:outline-none focus-visible:bg-gold/10",
-                    ].join(" ")}
-                    style={{ gridRow: laneIdx + 2, gridColumn: slotIdx + 1 }}
-                  />
-                );
-              }),
+              Array.from({ length: SLOTS }).map((_, slotIdx) => (
+                <DroppableCell
+                  key={`cell-${laneIdx}-${slotIdx}`}
+                  laneIdx={laneIdx}
+                  slotIdx={slotIdx}
+                  isOccupied={occupiedSlots.has(slotIdx)}
+                  isDragging={draggingBlockId !== null}
+                  onCreate={() => openCreateAt(slotIdx)}
+                />
+              )),
             )}
 
             {/* Block bars. QA10 W3.8a: row = the block's assigned lane + 2
@@ -317,37 +406,18 @@ export function ProgramScheduleGrid({
                 .filter(Boolean)
                 .join(" · ");
               return (
-                <button
+                <DraggableBlock
                   key={`block-${b.id}`}
-                  type="button"
-                  onClick={() => openEdit(b)}
-                  className={[
-                    "m-0.5 rounded-md border border-line px-2 py-1 text-[11px] text-fg shadow-[var(--shadow-sm)]",
-                    "flex flex-col justify-center min-w-0 text-left border-l-4",
-                    statusAccent(status),
-                    "transition hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40",
-                  ].join(" ")}
-                  style={{
-                    gridRow: lane + 2,
-                    gridColumn: `${placement.col} / span ${placement.span}`,
-                    zIndex: 2,
-                  }}
-                  title={`${tooltip} (click to edit)`}
-                >
-                  <span className="truncate font-medium">{programLabel}</span>
-                  <span className="truncate text-[9px] uppercase tracking-wider text-fg-subtle">
-                    {timeLabel}
-                  </span>
-                  {status ? (
-                    <span
-                      className={`truncate text-[9px] uppercase tracking-wider font-medium ${statusTextColor(
-                        status,
-                      )}`}
-                    >
-                      {STATUS_LABELS[status]}
-                    </span>
-                  ) : null}
-                </button>
+                  block={b}
+                  row={lane + 2}
+                  placement={placement}
+                  accentClass={statusAccent(status)}
+                  title={`${tooltip} (click to edit or drag to move)`}
+                  programLabel={programLabel}
+                  timeLabel={timeLabel}
+                  status={status}
+                  onEdit={() => openEdit(b)}
+                />
               );
             })}
           </div>
@@ -367,10 +437,10 @@ export function ProgramScheduleGrid({
         </div>
         <p className="text-fg-subtle">
           Click an empty area to schedule a program block (pick the program in
-          the dialog). Click a block to edit or delete it. Each bar shows the
-          program, time, and reconciliation status (how the logged hours
-          compare to the schedule); the scheduled coach(es) appear in the
-          tooltip and the edit dialog.
+          the dialog). Click a block to edit or delete it, or drag it to a new
+          time (its length is kept). Each bar shows the program, time, and
+          reconciliation status (how the logged hours compare to the schedule);
+          the scheduled coach(es) appear in the tooltip and the edit dialog.
         </p>
       </div>
 
@@ -408,6 +478,149 @@ export function ProgramScheduleGrid({
         }
       />
     </div>
+    </DndContext>
+  );
+}
+
+// A single timeline cell: droppable for drag-to-move and clickable to
+// create when its slot time is free. The droppable target is the slot
+// COLUMN (lane-agnostic) — program blocks aren't pinned to a row, so any
+// lane in the column accepts the move; the server refresh re-stacks lanes.
+// Occupied cells aren't droppable (a block already covers that time) and
+// skip the click so the bar above wins it.
+function DroppableCell({
+  laneIdx,
+  slotIdx,
+  isOccupied,
+  isDragging,
+  onCreate,
+}: {
+  laneIdx: number;
+  slotIdx: number;
+  isOccupied: boolean;
+  isDragging: boolean;
+  onCreate: () => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `drop-${laneIdx}-${slotIdx}`,
+    data: { type: "cell", slotIndex: slotIdx } as CellDropData,
+    disabled: isOccupied,
+  });
+
+  const baseBorders =
+    slotIdx % 4 === 0
+      ? "border-l border-line-strong"
+      : "border-l border-line/40";
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={isOccupied ? undefined : onCreate}
+      disabled={isOccupied}
+      tabIndex={isOccupied ? -1 : 0}
+      aria-label={
+        isOccupied
+          ? undefined
+          : `Schedule a program at ${formatHour(
+              FIRST_HOUR + Math.floor(slotIdx / 4),
+            )}${
+              slotIdx % 4 !== 0
+                ? `:${String((slotIdx % 4) * 15).padStart(2, "0")}`
+                : ""
+            }`
+      }
+      className={[
+        "border-b border-line text-left",
+        baseBorders,
+        isOccupied
+          ? "cursor-default bg-surface-2/40"
+          : isDragging
+            ? isOver
+              ? "bg-gold/20"
+              : "bg-page/40"
+            : "bg-surface-2/40 transition-colors hover:bg-gold/5 focus-visible:outline-none focus-visible:bg-gold/10",
+      ].join(" ")}
+      style={{ gridRow: laneIdx + 2, gridColumn: slotIdx + 1 }}
+    />
+  );
+}
+
+// A program block bar: draggable to MOVE (keeps duration) and clickable to
+// edit. distance:5 on the PointerSensor lets a plain click still fire
+// openEdit; only a 5px drag activates the move.
+function DraggableBlock({
+  block,
+  row,
+  placement,
+  accentClass,
+  title,
+  programLabel,
+  timeLabel,
+  status,
+  onEdit,
+}: {
+  block: ProgramScheduleBlockView;
+  row: number;
+  placement: { col: number; span: number };
+  accentClass: string;
+  title: string;
+  programLabel: string;
+  timeLabel: string;
+  status: BlockStatus | undefined;
+  onEdit: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({
+      id: block.id,
+      data: {
+        type: "program-block",
+        id: block.id,
+        startAt: block.startAt.toISOString(),
+        endAt: block.endAt.toISOString(),
+      } as BlockDragData,
+    });
+
+  const dragTransform = transform
+    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
+    : null;
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={onEdit}
+      {...listeners}
+      {...attributes}
+      className={[
+        "m-0.5 rounded-md border border-line px-2 py-1 text-[11px] text-fg shadow-[var(--shadow-sm)]",
+        "flex flex-col justify-center min-w-0 text-left border-l-4",
+        accentClass,
+        "transition hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40",
+        isDragging ? "opacity-40 cursor-grabbing" : "cursor-grab",
+      ].join(" ")}
+      style={{
+        gridRow: row,
+        gridColumn: `${placement.col} / span ${placement.span}`,
+        zIndex: isDragging ? 30 : 2,
+        ...dragTransform,
+      }}
+      title={title}
+    >
+      <span className="truncate font-medium">{programLabel}</span>
+      <span className="truncate text-[9px] uppercase tracking-wider text-fg-subtle">
+        {timeLabel}
+      </span>
+      {status ? (
+        <span
+          className={`truncate text-[9px] uppercase tracking-wider font-medium ${statusTextColor(
+            status,
+          )}`}
+        >
+          {STATUS_LABELS[status]}
+        </span>
+      ) : null}
+    </button>
   );
 }
 

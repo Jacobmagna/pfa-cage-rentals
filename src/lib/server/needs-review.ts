@@ -6,13 +6,16 @@
 //     kind='cancelled' that no admin has resolved yet, i.e. reviewedAt is
 //     NULL). These are stored, so we just fetch the open ones.
 //
-//   • no_show — DERIVED (no stored row): a scheduled block that ENDED more
-//     than 1 hr ago, where a coach who is a MEMBER of the block has NO
-//     matching hour-log (same program, overlapping time), AND there is no
-//     existing flag for that (block, coach) — neither a 'cancelled' (the
-//     coach told us in advance) nor a 'no_show' (an admin already
-//     acknowledged it). Acknowledging a no-show inserts a stored 'no_show'
-//     flag, which is why an already-acknowledged one drops off here.
+//   • no_show — DERIVED (no stored row): a scheduled block that has ENDED,
+//     where a coach who is a MEMBER of the block has NO matching hour-log
+//     (same program, overlapping time), AND there is no existing flag for
+//     that (block, coach) — neither a 'cancelled' (the coach told us in
+//     advance) nor a 'no_show' (an admin already acknowledged it).
+//     Acknowledging a no-show inserts a stored 'no_show' flag, which is why
+//     an already-acknowledged one drops off here. A no-show only becomes
+//     visible once the current time is at/after 8:00 AM Pacific on the
+//     calendar day AFTER the block ended (see `noShowDueAt`) — so a block
+//     that just ended doesn't alarm during the same business day.
 //
 // Everything is bounded to a 30-day lookback window so the derivation stays
 // cheap and the queue never grows without bound.
@@ -28,6 +31,28 @@ import {
   users,
 } from "@/db/schema";
 import { isLogScheduled } from "@/lib/coach-hour-log";
+import { findOverlappingLogIds } from "@/lib/hour-log-overlap";
+import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
+import type { NormalizedHourLogFilters } from "@/lib/reports/hour-log-filters";
+import { pfaDayEnd, pfaDayStart, pfaWallClockAt } from "@/lib/timezone";
+import type { NeedsReviewItem } from "@/app/admin/_components/needs-review-card";
+
+/**
+ * The instant a block first counts as a no-show: 8:00 AM Pacific on the
+ * calendar day AFTER the block's end. Pure + deterministic so it can be
+ * unit-tested against fixed UTC instants.
+ *
+ * We anchor on `pfaDayStart(blockEndAt)` (PFA midnight of the block's own
+ * Pacific day) BEFORE calling `pfaDayEnd`: pfaDayEnd's "+25h then snap"
+ * trick over-shoots by a day for late-evening Pacific inputs (e.g. an
+ * 11:30 PM block), so feeding it the day-start (a near-midnight instant)
+ * keeps the +25h safely inside the next Pacific day. `pfaWallClockAt` then
+ * places 8:00 AM on that next day.
+ */
+export function noShowDueAt(blockEndAt: Date): Date {
+  const nextDayMidnight = pfaDayEnd(pfaDayStart(blockEndAt));
+  return pfaWallClockAt(nextDayMidnight, 8, 0);
+}
 
 export type CancelledAlert = {
   type: "cancelled";
@@ -50,13 +75,11 @@ export type NoShowAlert = {
 };
 
 const LOOKBACK_MS = 30 * 24 * 60 * 60_000;
-const GRACE_MS = 60 * 60_000;
 
 export async function fetchBlockAccountabilityAlerts(
   now: Date,
 ): Promise<{ cancelled: CancelledAlert[]; noShow: NoShowAlert[] }> {
   const windowStart = new Date(now.getTime() - LOOKBACK_MS);
-  const noShowCutoff = new Date(now.getTime() - GRACE_MS);
 
   // --- cancelled: stored, unresolved 'cancelled' flags ---
   const cancelledRows = await db
@@ -94,8 +117,11 @@ export async function fetchBlockAccountabilityAlerts(
   }));
 
   // --- no_show: derived ---
-  // 1. candidate (block, coach) pairs: blocks that ended >1h ago, within
-  //    the lookback window, for every member coach.
+  // 1. candidate (block, coach) pairs: blocks that have ENDED, within the
+  //    lookback window, for every member coach. The per-block "is it due
+  //    yet" threshold (8 AM Pacific the next day, via `noShowDueAt`) can't
+  //    be a single SQL cutoff, so we fetch ended blocks here and filter the
+  //    rows in JS below.
   const candidates = await db
     .select({
       blockId: programScheduleBlocks.id,
@@ -117,7 +143,7 @@ export async function fetchBlockAccountabilityAlerts(
     .where(
       and(
         gte(programScheduleBlocks.endAt, windowStart),
-        lt(programScheduleBlocks.endAt, noShowCutoff),
+        lt(programScheduleBlocks.endAt, now),
       ),
     );
 
@@ -177,7 +203,11 @@ export async function fetchBlockAccountabilityAlerts(
   }
 
   const noShow: NoShowAlert[] = [];
+  const nowMs = now.getTime();
   for (const c of candidates) {
+    // Per-block threshold: a block isn't a no-show until 8 AM Pacific the
+    // day after it ended. Until then, skip it (the coach may still log).
+    if (nowMs < noShowDueAt(c.endAt).getTime()) continue;
     const key = `${c.blockId}:${c.coachId}`;
     if (cancelledKeys.has(key) || noShowKeys.has(key)) continue;
     const scheduled = isLogScheduled(
@@ -201,4 +231,90 @@ export async function fetchBlockAccountabilityAlerts(
   }
 
   return { cancelled, noShow };
+}
+
+/**
+ * The full merged admin "Needs review" queue, newest-first (startAt desc).
+ * Combines the hour-log-derived alerts (unscheduled / double_logged /
+ * wrong_time, from `fetchHourLogRowsWithScheduleNotes`) with the
+ * block-accountability alerts (cancelled + no_show, from
+ * `fetchBlockAccountabilityAlerts`). Shared by the admin Home dashboard and
+ * the admin Work Log page so the merge logic lives in exactly one place.
+ *
+ * The hour-log review window is the FULL backlog of still-unreviewed rows
+ * (a fixed floor that predates the app through today's PFA end, no
+ * coach/program narrowing) — identical to what Home passed inline.
+ */
+export async function fetchNeedsReviewItems(
+  now: Date,
+): Promise<NeedsReviewItem[]> {
+  const reviewFloor = pfaDayStart(new Date("2024-01-01T12:00:00Z"));
+  const reviewCeiling = pfaDayEnd(now);
+  const reviewFilter: NormalizedHourLogFilters = {
+    from: "2024-01-01",
+    to: "2024-01-01",
+    fromDate: reviewFloor,
+    toDateExclusive: reviewCeiling,
+    coachId: undefined,
+    programId: undefined,
+    isFiltered: true,
+  };
+
+  const [reviewWindowRows, blockAlerts] = await Promise.all([
+    fetchHourLogRowsWithScheduleNotes(reviewFilter),
+    fetchBlockAccountabilityAlerts(now),
+  ]);
+
+  // Bucket each UNREVIEWED row into exactly one hour-log alert type, by
+  // priority, so no log shows under two tags:
+  //   • unscheduled — logged program hours with no matching block
+  //   • double_logged — a non-unscheduled log overlapping ANOTHER log of the
+  //     same coach (double-pay / duplicate-entry risk)
+  //   • wrong_time — a non-unscheduled, non-overlapping log that
+  //     reconciliation flagged with a scheduleNote
+  const reviewable = reviewWindowRows.filter((r) => !r.reviewedAt);
+  const unscheduledRows = reviewable.filter((r) => r.unscheduled);
+  const rest = reviewable.filter((r) => !r.unscheduled);
+  const doubleIds = findOverlappingLogIds(
+    reviewable.map((r) => ({
+      id: r.id,
+      coachId: r.coachId,
+      startMs: r.startAt.getTime(),
+      endMs: r.endAt.getTime(),
+    })),
+  );
+  const doubleRows = rest.filter((r) => doubleIds.has(r.id));
+  const wrongTimeRows = rest.filter(
+    (r) => !doubleIds.has(r.id) && r.scheduleNote,
+  );
+
+  return [
+    ...unscheduledRows.map((r) => ({
+      type: "unscheduled" as const,
+      id: r.id,
+      coachName: r.coachName,
+      programName: r.programName,
+      startAt: r.startAt,
+      endAt: r.endAt,
+    })),
+    ...doubleRows.map((r) => ({
+      type: "double_logged" as const,
+      id: r.id,
+      coachName: r.coachName,
+      programName: r.programName,
+      startAt: r.startAt,
+      endAt: r.endAt,
+    })),
+    ...wrongTimeRows.map((r) => ({
+      type: "wrong_time" as const,
+      id: r.id,
+      coachName: r.coachName,
+      programName: r.programName,
+      startAt: r.startAt,
+      endAt: r.endAt,
+      detail: r.scheduleNote,
+    })),
+    ...blockAlerts.cancelled,
+    ...blockAlerts.noShow,
+  ].sort((a, b) => b.startAt.getTime() - a.startAt.getTime());
 }

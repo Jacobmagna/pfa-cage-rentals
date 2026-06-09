@@ -40,14 +40,5 @@ export const editHourLogSchema = z
   .refine(endAfterStart, endAfterStartError)
   .refine(underMaxDuration, underMaxDurationError);
 
-// QA10 W3-polish15: a coach cancelling their assignment to a scheduled
-// program block. reason is optional free text (trimmed, capped) explaining
-// why the block won't happen for them.
-export const cancelBlockSchema = z.object({
-  blockId: z.string().min(1, "blockId is required"),
-  reason: z.string().trim().max(500).optional(),
-});
-
 export type CreateHourLogInput = z.infer<typeof createHourLogSchema>;
 export type EditHourLogInput = z.infer<typeof editHourLogSchema>;
-export type CancelBlockInput = z.infer<typeof cancelBlockSchema>;

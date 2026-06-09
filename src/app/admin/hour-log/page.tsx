@@ -13,7 +13,9 @@ import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch"
 import { slotsBetween, totalFromSnapshot } from "@/lib/billing";
 import { formatDollars } from "@/lib/format-money";
 import { pfaDayEnd, pfaDayStart, pfaMonthEnd, pfaMonthStart } from "@/lib/timezone";
+import { fetchNeedsReviewItems } from "@/lib/server/needs-review";
 import { StatCard } from "@/app/_components/stat-card";
+import { NeedsReviewCard } from "@/app/admin/_components/needs-review-card";
 import { FiltersForm } from "./_components/filters-form";
 import { HoursClient } from "./_components/hours-client";
 
@@ -63,6 +65,7 @@ export default async function AdminHourLogPage({
     programOptions,
     monthHourLogRows,
     [{ count: programsScheduledToday }],
+    reviewItems,
   ] = await Promise.all([
     fetchHourLogRowsWithScheduleNotes(filters),
     // Filter dropdown — coaches role only, active only.
@@ -101,6 +104,10 @@ export default async function AdminHourLogPage({
           lt(programScheduleBlocks.startAt, dayEnd),
         ),
       ),
+    // QA1b-p4 #16: the unified Needs-review queue, surfaced on this page too
+    // (same merged list the Home dashboard shows), so admins can triage from
+    // the Work Log without bouncing back to Home.
+    fetchNeedsReviewItems(now),
   ]);
 
   // Card 1: program hours this month. Each 30-min slot = 0.5 hr.
@@ -149,6 +156,13 @@ export default async function AdminHourLogPage({
           laptop for the full experience.
         </p>
       </header>
+
+      {reviewItems.length > 0 ? (
+        <NeedsReviewCard
+          items={reviewItems.slice(0, 5)}
+          totalCount={reviewItems.length}
+        />
+      ) : null}
 
       <section
         aria-label="Work hours at a glance"

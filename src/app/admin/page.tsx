@@ -35,9 +35,6 @@ import {
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import { totalFromSnapshot } from "@/lib/billing";
-import { findOverlappingLogIds } from "@/lib/hour-log-overlap";
-import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
-import type { NormalizedHourLogFilters } from "@/lib/reports/hour-log-filters";
 import { listActiveCoaches } from "@/lib/server/coaches";
 import { formatDollars } from "@/lib/format-money";
 import { formatRelative } from "@/lib/format-relative";
@@ -61,11 +58,8 @@ import {
   type ActivityFeedItem,
 } from "@/app/admin/_components/activity-feed";
 import { describeActivity } from "@/app/admin/_components/activity-feed.logic";
-import {
-  NeedsReviewCard,
-  type NeedsReviewItem,
-} from "@/app/admin/_components/needs-review-card";
-import { fetchBlockAccountabilityAlerts } from "@/lib/server/needs-review";
+import { NeedsReviewCard } from "@/app/admin/_components/needs-review-card";
+import { fetchNeedsReviewItems } from "@/lib/server/needs-review";
 import {
   type MasterBlockedTime,
   type MasterProgramBlock,
@@ -140,27 +134,11 @@ export default async function AdminHome({
   const schedDayStart = pfaDayStart(selectedDate);
   const schedDayEnd = pfaDayEnd(selectedDate);
 
-  // QA10 W3-polish13b: wide-window filter for the "Unscheduled hours — needs
-  // review" attention card. We want the FULL backlog of still-unreviewed
-  // unscheduled logs, not just this month, so nothing stale is missed. Floor
-  // at a fixed date that predates the app through today's PFA end, with NO
-  // coach/program narrowing. Reuses the SAME `fetchHourLogRowsWithScheduleNotes`
-  // the Hour Log table uses so the `unscheduled` flag matches exactly.
-  //
-  // Known small-data simplification: this loads every program hour-log + every
-  // scheduled block on each dashboard render. Fine at current scale; revisit
-  // (e.g. push the unscheduled+unreviewed filter into SQL) if data grows.
-  const reviewFloor = pfaDayStart(new Date("2024-01-01T12:00:00Z"));
-  const reviewCeiling = pfaDayEnd(now);
-  const reviewFilter: NormalizedHourLogFilters = {
-    from: "2024-01-01",
-    to: "2024-01-01",
-    fromDate: reviewFloor,
-    toDateExclusive: reviewCeiling,
-    coachId: undefined,
-    programId: undefined,
-    isFiltered: true,
-  };
+  // QA10 W3-polish15b-ii / polish16: the unified Needs-review queue (hour-log
+  // alerts + block-accountability alerts) is built by the shared
+  // `fetchNeedsReviewItems` helper, which Home and the Work Log page both call
+  // so the merge logic lives in exactly one place.
+  const mergedReview = await fetchNeedsReviewItems(now);
 
   const [
     cageMonthRows,
@@ -176,8 +154,6 @@ export default async function AdminHome({
     coachAuditRows,
     coachAccountRows,
     activeCoaches,
-    reviewWindowRows,
-    blockAlerts,
   ] = await Promise.all([
     // Cage rentals this month → coaches OWE PFA (receivable).
     db
@@ -347,68 +323,7 @@ export default async function AdminHome({
     // Same canonical list both dialogs' coach pickers use on the standalone
     // pages; the {id,name,email} shape satisfies both dialog prop types.
     listActiveCoaches(),
-    // QA10 W3-polish13b: full-backlog rows for the unscheduled-hours card.
-    fetchHourLogRowsWithScheduleNotes(reviewFilter),
-    // QA10 W3-polish15b-ii: block-accountability alerts (cancelled + no-show)
-    // for the unified Needs-review card.
-    fetchBlockAccountabilityAlerts(now),
   ]);
-
-  // QA10 W3-polish16: bucket each UNREVIEWED review-window row into exactly one
-  // hour-log alert type, by priority, so no log shows under two tags:
-  //   • unscheduled — logged program hours with no matching block (as before)
-  //   • double_logged — a non-unscheduled log overlapping ANOTHER log of the
-  //     same coach (double-pay / duplicate-entry risk)
-  //   • wrong_time — a non-unscheduled, non-overlapping log that reconciliation
-  //     flagged with a scheduleNote (overlaps a block but mismatches it)
-  const reviewable = reviewWindowRows.filter((r) => !r.reviewedAt);
-  const unscheduledRows = reviewable.filter((r) => r.unscheduled);
-  const rest = reviewable.filter((r) => !r.unscheduled);
-  const doubleIds = findOverlappingLogIds(
-    reviewable.map((r) => ({
-      id: r.id,
-      coachId: r.coachId,
-      startMs: r.startAt.getTime(),
-      endMs: r.endAt.getTime(),
-    })),
-  );
-  const doubleRows = rest.filter((r) => doubleIds.has(r.id));
-  const wrongTimeRows = rest.filter(
-    (r) => !doubleIds.has(r.id) && r.scheduleNote,
-  );
-
-  // QA10 W3-polish15b-ii / polish16: merge the hour-log alerts with the
-  // block-accountability alerts (cancelled + no-show) into one Needs-review
-  // queue, newest-first.
-  const mergedReview: NeedsReviewItem[] = [
-    ...unscheduledRows.map((r) => ({
-      type: "unscheduled" as const,
-      id: r.id,
-      coachName: r.coachName,
-      programName: r.programName,
-      startAt: r.startAt,
-      endAt: r.endAt,
-    })),
-    ...doubleRows.map((r) => ({
-      type: "double_logged" as const,
-      id: r.id,
-      coachName: r.coachName,
-      programName: r.programName,
-      startAt: r.startAt,
-      endAt: r.endAt,
-    })),
-    ...wrongTimeRows.map((r) => ({
-      type: "wrong_time" as const,
-      id: r.id,
-      coachName: r.coachName,
-      programName: r.programName,
-      startAt: r.startAt,
-      endAt: r.endAt,
-      detail: r.scheduleNote,
-    })),
-    ...blockAlerts.cancelled,
-    ...blockAlerts.noShow,
-  ].sort((a, b) => b.startAt.getTime() - a.startAt.getTime());
 
   // Money totals read each row's snapshotted rate directly — never
   // recompute from current overrides.

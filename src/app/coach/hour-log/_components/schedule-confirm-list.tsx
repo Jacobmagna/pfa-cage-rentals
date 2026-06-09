@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { CalendarClock, Check } from "lucide-react";
-import { logOwnHour, cancelScheduledBlock } from "../actions";
+import { logOwnHour } from "../actions";
 
 // QA10 W3.7 — "Confirm your scheduled hours". One card per scheduled
 // program block whose end is within 15 min of now (the server filters
@@ -50,8 +50,7 @@ export function ScheduleConfirmList({
           Confirm your scheduled hours
         </p>
         <p className="text-sm text-fg-muted">
-          Your scheduled work hours — confirm each, or cancel if it
-          didn&rsquo;t happen.
+          Your scheduled work hours — confirm each once it&rsquo;s done.
         </p>
       </div>
 
@@ -83,17 +82,11 @@ function ConfirmCard({
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  // Separate transition + state for the cancel flow so it never collides
-  // with the confirm button's pending state.
-  const [cancelPending, startCancelTransition] = useTransition();
-  const [cancelError, setCancelError] = useState<string | null>(null);
-  const [reason, setReason] = useState("");
 
-  const busy = pending || cancelPending;
+  const busy = pending;
 
   const handleConfirm = () => {
     setError(null);
-    setCancelError(null);
     startTransition(async () => {
       try {
         await logOwnHour({
@@ -109,25 +102,6 @@ function ConfirmCard({
         // can retry or fall back to the manual form below.
         setError(
           "Couldn't log these hours — the work may no longer be active. Try again, or use the manual form below.",
-        );
-      }
-    });
-  };
-
-  const handleCancel = () => {
-    setError(null);
-    setCancelError(null);
-    startCancelTransition(async () => {
-      try {
-        await cancelScheduledBlock({
-          blockId: block.id,
-          reason: reason.trim() || undefined,
-        });
-        // Reuse the same callback — removing the card from the list.
-        onConfirmed();
-      } catch {
-        setCancelError(
-          "Couldn't cancel this block — try again in a moment.",
         );
       }
     });
@@ -168,32 +142,6 @@ function ConfirmCard({
           className="mt-2.5 rounded-md border border-danger/30 bg-danger/10 px-2.5 py-2 text-xs text-danger"
         >
           {error}
-        </p>
-      ) : null}
-      <div className="mt-2.5 flex items-center gap-2">
-        <input
-          type="text"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          disabled={busy}
-          placeholder="Reason (optional)"
-          className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-2.5 h-9 text-xs text-fg placeholder:text-fg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 disabled:opacity-50"
-        />
-        <button
-          type="button"
-          onClick={handleCancel}
-          disabled={busy}
-          className="inline-flex shrink-0 items-center rounded-lg border border-line-strong bg-surface px-3 h-9 text-sm font-medium text-fg-muted hover:text-fg disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
-        >
-          {cancelPending ? "Cancelling…" : "Cancel"}
-        </button>
-      </div>
-      {cancelError ? (
-        <p
-          role="alert"
-          className="mt-2.5 rounded-md border border-danger/30 bg-danger/10 px-2.5 py-2 text-xs text-danger"
-        >
-          {cancelError}
         </p>
       ) : null}
     </li>

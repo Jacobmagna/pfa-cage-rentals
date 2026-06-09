@@ -24,21 +24,17 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
   hourLogs,
-  programBlockCoachFlags,
   programRateOverrides,
-  programScheduleBlockCoaches,
   programs,
 } from "@/db/schema";
 import { type AuthedSession } from "@/lib/authz";
 import { rateForProgram } from "@/lib/billing";
 import {
-  BlockMembershipError,
   HourLogNotFoundError,
   ProgramInactiveError,
   ProgramNotFoundError,
 } from "@/lib/errors";
 import {
-  cancelBlockSchema,
   createHourLogSchema,
   editHourLogSchema,
 } from "@/lib/schemas/hour-log";
@@ -157,60 +153,6 @@ export async function logHourInternal(
     after: inserted as unknown as Record<string, unknown>,
   });
   return inserted;
-}
-
-// QA10 W3-polish15: coach cancels their assignment to a scheduled program
-// block. Mirrors logHourInternal's shape (zod-parse → membership check →
-// insert → audit). Membership is verified against
-// program_schedule_block_coaches so a coach can only cancel a block they
-// actually run; the insert is idempotent (one 'cancelled' row per
-// block/coach via onConflictDoNothing on the unique index), so a
-// double-tap is harmless. The flag stays unreviewed until an admin
-// resolves it (slice 2b, not built here).
-export async function cancelScheduledBlockInternal(
-  actor: AuthedSession["user"],
-  input: unknown,
-) {
-  const parsed = cancelBlockSchema.parse(input);
-
-  const [membership] = await db
-    .select({ coachId: programScheduleBlockCoaches.coachId })
-    .from(programScheduleBlockCoaches)
-    .where(
-      and(
-        eq(programScheduleBlockCoaches.blockId, parsed.blockId),
-        eq(programScheduleBlockCoaches.coachId, actor.id),
-      ),
-    )
-    .limit(1);
-  if (!membership) throw new BlockMembershipError(parsed.blockId);
-
-  const [flag] = await db
-    .insert(programBlockCoachFlags)
-    .values({
-      blockId: parsed.blockId,
-      coachId: actor.id,
-      kind: "cancelled",
-      note: parsed.reason ?? null,
-      createdBy: actor.id,
-    })
-    .onConflictDoNothing({
-      target: [
-        programBlockCoachFlags.blockId,
-        programBlockCoachFlags.coachId,
-        programBlockCoachFlags.kind,
-      ],
-    })
-    .returning();
-
-  await safeLogAudit(db, {
-    actorUserId: actor.id,
-    entityType: "program_block_coach_flag",
-    entityId: flag?.id ?? parsed.blockId,
-    action: "create",
-    after: flag as unknown as Record<string, unknown>,
-  });
-  return flag;
 }
 
 // Admin-only edit of an existing hour-log row. Mirrors

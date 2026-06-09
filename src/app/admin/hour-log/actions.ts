@@ -49,20 +49,23 @@ export async function resolveUnscheduledHourLog(id: string) {
 }
 
 // Resolve a coach-cancelled block flag (mark reviewed/acknowledged). These
-// never appear in the hour-log table — they surface on the /admin
-// needs-review card — so we only revalidate /admin.
+// surface on the Needs-review card, which now renders on BOTH /admin and
+// /admin/hour-log, so revalidate both so the card refreshes wherever it was
+// resolved from.
 export async function resolveCancellation(flagId: string) {
   const session = await requireRole("admin");
   const result = await resolveCancellationInternal(session.user, flagId);
   revalidatePath("/admin");
+  revalidatePath("/admin/hour-log");
   return result;
 }
 
 // Acknowledge a derived no-show (inserts a stored 'no_show' flag). Same
-// surface as above — only /admin needs revalidating.
+// surfaces as above — revalidate both /admin and /admin/hour-log.
 export async function resolveNoShow(blockId: string, coachId: string) {
   const session = await requireRole("admin");
   const result = await resolveNoShowInternal(session.user, blockId, coachId);
   revalidatePath("/admin");
+  revalidatePath("/admin/hour-log");
   return result;
 }

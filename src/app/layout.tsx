@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "PFA Engine",
   description:
-    "Cage, bullpen, and weight-room rental tracking for PFA Baseball.",
+    "Facility rentals, work logging, and attendance for PFA Sports.",
   // iOS standalone PWA — without these, "Add to Home Screen" still works
   // but opens the page in Safari with the URL bar instead of as an app.
   appleWebApp: {

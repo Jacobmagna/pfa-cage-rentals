@@ -50,7 +50,7 @@ export function ScheduleConfirmList({
           Confirm your scheduled hours
         </p>
         <p className="text-sm text-fg-muted">
-          Your scheduled program hours — confirm each, or cancel if it
+          Your scheduled work hours — confirm each, or cancel if it
           didn&rsquo;t happen.
         </p>
       </div>
@@ -108,7 +108,7 @@ function ConfirmCard({
         // friendly, actionable message and leave the card so the coach
         // can retry or fall back to the manual form below.
         setError(
-          "Couldn't log these hours — the program may no longer be active. Try again, or use the manual form below.",
+          "Couldn't log these hours — the work may no longer be active. Try again, or use the manual form below.",
         );
       }
     });

@@ -38,7 +38,7 @@ export function AddProgramForm() {
       <div className="mb-4 flex items-center gap-2">
         <FolderPlus className="h-4 w-4 text-gold" aria-hidden="true" />
         <h2 className="text-sm font-semibold tracking-tight text-fg">
-          Add program
+          Add work
         </h2>
       </div>
 
@@ -48,7 +48,7 @@ export function AddProgramForm() {
           className="mb-4 flex items-center gap-2 rounded-md border border-success/30 bg-success/10 px-3 py-2.5 text-sm text-success"
         >
           <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>Program added.</span>
+          <span>Work added.</span>
         </div>
       ) : null}
 
@@ -69,7 +69,7 @@ export function AddProgramForm() {
             disabled={pending}
             className="h-10 rounded-md bg-gold px-4 text-sm font-semibold text-gold-ink shadow-[var(--shadow-sm)] transition-colors hover:bg-gold-hover disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
           >
-            {pending ? "Adding…" : "Add program"}
+            {pending ? "Adding…" : "Add work"}
           </button>
         </div>
       </form>

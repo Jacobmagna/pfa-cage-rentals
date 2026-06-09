@@ -193,7 +193,7 @@ export function CoachWeekGrid({
                   {timeLabel}
                 </span>
                 <span className="text-[8px] uppercase tracking-wider text-gold-strong">
-                  Program
+                  Work
                 </span>
               </div>
             );
@@ -271,13 +271,13 @@ function Legend(): React.JSX.Element {
   return (
     <div className="space-y-2 border-t border-line px-3 py-3 text-[11px] text-fg-muted">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-        <LegendDot className="border-l-4 border-l-gold bg-surface-2" label="Program" />
+        <LegendDot className="border-l-4 border-l-gold bg-surface-2" label="Work" />
         <LegendDot className="border-l-4 border-l-gold" label="Cage" />
         <LegendDot className="border-l-4 border-l-success" label="Bullpen" />
         <LegendDot className="border-l-4 border-l-warning" label="Weight room" />
       </div>
       <p className="text-fg-subtle">
-        Read-only overview of your program blocks and cage rentals this week.
+        Read-only overview of your work blocks and rentals this week.
       </p>
     </div>
   );

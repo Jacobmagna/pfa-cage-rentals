@@ -28,7 +28,7 @@ export async function buildReportWorkbook(
   includeProgramHours: boolean,
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = "PFA Cage Rentals";
+  workbook.creator = "PFA Engine";
   workbook.created = new Date();
   workbook.subject = `Billing ${meta.from} to ${meta.to}`;
 
@@ -90,15 +90,15 @@ function addSummarySheet(
   // the amount PFA owes the coach. NEVER summed with the cage receivable.
   if (includeProgramHours) {
     columns.push(
-      { header: "Program Slots", key: "programSlots", width: 13, kind: "num" },
-      { header: "Program $", key: "programDollars", width: 12, kind: "dollar" },
+      { header: "Work Slots", key: "programSlots", width: 13, kind: "num" },
+      { header: "Work $", key: "programDollars", width: 12, kind: "dollar" },
     );
   }
   // Cage-side receivable subtotal (cage + bullpen + weight room — coach owes
   // PFA). Only when cage scope is on; never merged with program pay.
   if (includeCageSessions) {
     columns.push({
-      header: "Cage Owed $",
+      header: "Rental Owed $",
       key: "cageOwed",
       width: 13,
       kind: "dollar",

@@ -64,8 +64,8 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
     return (
       <div className="space-y-4">
         <CompletionPanel
-          message="Hour logged."
-          actionLabel="Log another hour"
+          message="Work logged."
+          actionLabel="Log more work"
           onAction={() => setAckedNonce(successNonce)}
         />
       </div>
@@ -84,7 +84,7 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
       ) : null}
 
       <form action={formAction} key={formKey} className="space-y-5">
-        <Field label="Program">
+        <Field label="Work">
           <SelectWrapper>
             <select
               name="programId"
@@ -93,7 +93,7 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
               className={selectStyles}
             >
               <option value="" disabled>
-                Choose a program…
+                Choose work…
               </option>
               {programs.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -148,7 +148,7 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
           disabled={pending}
           className="w-full sm:w-auto rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-12 px-6 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
-          {pending ? "Logging…" : "Log hour"}
+          {pending ? "Logging…" : "Log work"}
         </button>
       </form>
     </div>

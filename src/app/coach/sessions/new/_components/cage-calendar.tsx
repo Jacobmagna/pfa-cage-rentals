@@ -301,7 +301,7 @@ export function CageCalendar({
   const handleBooked = () => {
     setSelected(null);
     setFormOpen(false);
-    setConfirmation("Session logged. The slot is now yours (gold).");
+    setConfirmation("Rental logged. The slot is now yours (gold).");
     refresh(dateStr);
   };
 
@@ -311,7 +311,7 @@ export function CageCalendar({
     clearSelection();
     setFormOpen(false);
     setConfirmation(
-      `${count} ${count === 1 ? "session" : "sessions"} logged. Those slots are now yours (gold).`,
+      `${count} ${count === 1 ? "rental" : "rentals"} logged. Those slots are now yours (gold).`,
     );
     refresh(dateStr);
   };

@@ -139,9 +139,9 @@ export default async function AdminHourLogPage({
         <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
           Admin
         </p>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight">Hour Log</h1>
+        <h1 className="mt-2 text-3xl font-bold tracking-tight">Work Log</h1>
         <p className="text-sm text-fg-muted">
-          Program hours logged by coaches. Filter and edit below; defaults
+          Work hours logged by coaches. Filter and edit below; defaults
           to the current month.
         </p>
         <p className="text-xs italic text-fg-subtle md:hidden">
@@ -151,25 +151,25 @@ export default async function AdminHourLogPage({
       </header>
 
       <section
-        aria-label="Program hours at a glance"
+        aria-label="Work hours at a glance"
         className="mb-10 grid gap-4 sm:grid-cols-3"
       >
         <StatCard
           icon={<Clock className="h-4 w-4" />}
-          label="Program hours this month"
+          label="Work hours this month"
           value={monthHoursLabel}
           sub={`${monthEntryCount} ${monthEntryCount === 1 ? "entry" : "entries"} this month`}
         />
         <StatCard
           icon={<Wallet className="h-4 w-4" />}
-          label="Owed to coaches — program"
+          label="Owed to coaches — work"
           value={formatDollars(owedProgramCents)}
-          sub="PFA owes coaches for program hours"
+          sub="PFA owes coaches for work hours"
           accent
         />
         <StatCard
           icon={<CalendarDays className="h-4 w-4" />}
-          label="Programs scheduled today"
+          label="Work scheduled today"
           value={programsScheduledToday.toString()}
           sub={programsScheduledToday > 0 ? "Scheduled" : "Nothing scheduled"}
         />

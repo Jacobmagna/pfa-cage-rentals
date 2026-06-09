@@ -43,10 +43,10 @@ export default async function NewSessionPage() {
 
         <div className="space-y-1.5 mb-7">
           <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
-            Log a session
+            Log a cage rental
           </p>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-            New session
+            New rental
           </h1>
           <p className="text-sm text-fg-muted">
             Logged for{" "}

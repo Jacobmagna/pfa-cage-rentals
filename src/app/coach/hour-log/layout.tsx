@@ -17,7 +17,7 @@ export default async function CoachHourLogLayout({
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-semibold tracking-tight">Hour Log</h1>
+      <h1 className="text-3xl font-semibold tracking-tight">Work Log</h1>
       <HourLogSubnav />
       <div>{children}</div>
     </div>

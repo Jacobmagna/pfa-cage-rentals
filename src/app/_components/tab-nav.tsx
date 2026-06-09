@@ -13,8 +13,8 @@ type Tab = {
 // now lives at its own /admin/cage-rentals route.
 const ADMIN_TABS: Tab[] = [
   { key: "home", label: "Home" },
-  { key: "cage", label: "Cage Rentals" },
-  { key: "hour-log", label: "Hour Log" },
+  { key: "cage", label: "Rentals" },
+  { key: "hour-log", label: "Work Log" },
   { key: "attendance", label: "Attendance" },
   { key: "records", label: "Billing & Records" },
 ];
@@ -22,8 +22,8 @@ const ADMIN_TABS: Tab[] = [
 // Coach tab list: no Home tab; Schedule is coach-only (admin reaches its
 // schedule via /admin/schedule, which keeps lighting Cage Rentals).
 const COACH_TABS: Tab[] = [
-  { key: "cage", label: "Cage Rentals" },
-  { key: "hour-log", label: "Hour Log" },
+  { key: "cage", label: "Rentals" },
+  { key: "hour-log", label: "Work Log" },
   { key: "attendance", label: "Attendance" },
   { key: "schedule", label: "Schedule" },
 ];

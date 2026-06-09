@@ -117,7 +117,7 @@ export default async function AdminSchedulePage({
         className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
-        Back to Cage Rentals
+        Back to Rentals
       </Link>
 
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">

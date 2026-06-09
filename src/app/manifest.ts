@@ -7,9 +7,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "PFA Cage Rentals",
-    short_name: "PFA Rentals",
-    description: "Cage, bullpen, and weight-room rental tracking for PFA Baseball.",
+    name: "PFA Engine",
+    short_name: "PFA Engine",
+    description: "Facility rentals, work logging, and attendance for PFA Sports.",
     start_url: "/",
     display: "standalone",
     // FEAT-04 light rebrand: PWA splash + chrome match the white app

@@ -35,7 +35,7 @@ export default function GlobalError({
               <path d="M12 2.5 L21.5 12 L12 21.5 L2.5 12 Z" />
             </svg>
             <span className="text-base font-bold tracking-tight text-fg">
-              PFA Cage Rentals
+              PFA Engine
             </span>
           </div>
 

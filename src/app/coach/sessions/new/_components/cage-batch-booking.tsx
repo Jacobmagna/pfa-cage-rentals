@@ -123,7 +123,7 @@ export function CageBatchBooking({
           <p className="text-sm font-semibold text-fg">{resource.name}</p>
           <p className="text-sm text-fg-muted">
             {sessions.map((s) => formatPfaTime12h(s.startAt)).join(", ")} —{" "}
-            {count} {count === 1 ? "session" : "sessions"} of 30 min
+            {count} {count === 1 ? "rental" : "rentals"} of 30 min
           </p>
         </div>
         <button

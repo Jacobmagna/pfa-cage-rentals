@@ -36,7 +36,7 @@ function translateError(err: unknown): string {
   ) {
     return err.message;
   }
-  return "Couldn't log that session. Try again or pick a different slot.";
+  return "Couldn't log that rental. Try again or pick a different slot.";
 }
 
 function slotHourMinute(slotIndex: number): { hour: number; minute: number } {

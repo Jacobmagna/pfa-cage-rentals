@@ -5,15 +5,15 @@ describe("describeActivity", () => {
   it("maps session create/update/delete to cage labels", () => {
     expect(describeActivity("session", "create")).toEqual({
       kind: "cage",
-      label: "Logged cage rental",
+      label: "Logged rental",
     });
     expect(describeActivity("session", "update")).toEqual({
       kind: "cage",
-      label: "Edited cage rental",
+      label: "Edited rental",
     });
     expect(describeActivity("session", "delete")).toEqual({
       kind: "cage",
-      label: "Removed cage rental",
+      label: "Removed rental",
     });
   });
 

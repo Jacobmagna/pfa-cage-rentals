@@ -68,7 +68,7 @@ export function ProgramsClient({ programs }: { programs: ProgramRow[] }) {
       {programs.length === 0 ? (
         <div className="rounded-xl border border-line bg-surface p-12 text-center shadow-[var(--shadow-sm)]">
           <p className="text-sm text-fg-muted">
-            No programs yet. Add your first program above.
+            No work types yet. Add your first above.
           </p>
         </div>
       ) : (
@@ -77,7 +77,7 @@ export function ProgramsClient({ programs }: { programs: ProgramRow[] }) {
             <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line">
               <tr>
                 <th scope="col" className="px-4 py-3 text-left font-semibold">
-                  Program
+                  Work
                 </th>
                 <th scope="col" className="px-4 py-3 text-left font-semibold">
                   Status
@@ -172,7 +172,7 @@ export function ProgramsClient({ programs }: { programs: ProgramRow[] }) {
           if (!next) setConfirmRow(null);
         }}
         title={
-          confirmRow ? `Deactivate ${confirmRow.name}?` : "Deactivate program?"
+          confirmRow ? `Deactivate ${confirmRow.name}?` : "Deactivate work?"
         }
         description="It'll be hidden from new logs/attendance but history is kept."
         confirmLabel={isPending ? "Deactivating…" : "Deactivate"}

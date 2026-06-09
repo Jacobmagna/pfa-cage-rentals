@@ -42,17 +42,16 @@ export default async function ProgramsPage() {
         className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
-        Back to Hour Log
+        Back to Work Log
       </Link>
 
       <div className="mb-6 space-y-1.5">
         <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
           Admin
         </p>
-        <h1 className="text-3xl font-semibold tracking-tight">Programs</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Work</h1>
         <p className="text-sm text-fg-muted">
-          Create and manage training programs. {activeCount}{" "}
-          {activeCount === 1 ? "program" : "programs"} active.
+          Create and manage work types. {activeCount} active.
         </p>
         <p className="text-xs italic text-fg-subtle md:hidden">
           This page is designed for desktop. Rotate your device or use a

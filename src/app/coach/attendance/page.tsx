@@ -120,7 +120,7 @@ export default async function CoachAttendancePage({
         <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] py-16 text-center">
           <CalendarCheck className="h-8 w-8 text-gold" aria-hidden="true" />
           <p className="text-fg-muted">
-            No active programs yet — ask an admin to add one.
+            No active work yet — ask an admin to add some.
           </p>
         </div>
       ) : (
@@ -133,7 +133,7 @@ export default async function CoachAttendancePage({
 
           {!selectedProgramId ? (
             <p className="text-sm text-fg-muted">
-              Pick a program to take attendance.
+              Pick work to take attendance.
             </p>
           ) : roster && roster.length > 0 ? (
             <AttendanceForm
@@ -144,7 +144,7 @@ export default async function CoachAttendancePage({
             />
           ) : (
             <p className="text-sm text-fg-muted">
-              No athletes assigned to this program yet.
+              No athletes assigned to this work yet.
             </p>
           )}
         </div>

@@ -20,10 +20,10 @@ export function describeActivity(
         kind: "cage",
         label:
           action === "create"
-            ? "Logged cage rental"
+            ? "Logged rental"
             : action === "update"
-              ? "Edited cage rental"
-              : "Removed cage rental",
+              ? "Edited rental"
+              : "Removed rental",
       };
     case "hour_log":
       return {

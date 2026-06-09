@@ -120,8 +120,8 @@ export function LogSessionForm({
   const batchNonce = batchResult.status === "success" ? batchResult.at : 0;
   const successMessage =
     batchResult.status === "success"
-      ? `${batchResult.count} sessions logged.`
-      : "Session logged.";
+      ? `${batchResult.count} rentals logged.`
+      : "Rental logged.";
   const successNonce = batchNonce > 0 ? batchNonce : singleNonce;
   const [ackedNonce, setAckedNonce] = useState(0);
   const [resetNonce, setResetNonce] = useState(0);
@@ -253,9 +253,9 @@ export function LogSessionForm({
 
   const submitLabel = (() => {
     if (pending || batchPending) return "Logging…";
-    if (slotCount === 0) return "Log session";
-    if (slotCount === 1) return "Log session";
-    return `Log ${slotCount} sessions`;
+    if (slotCount === 0) return "Log rental";
+    if (slotCount === 1) return "Log rental";
+    return `Log ${slotCount} rentals`;
   })();
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -359,7 +359,7 @@ export function LogSessionForm({
       <div className="space-y-4">
         <CompletionPanel
           message={successMessage}
-          actionLabel="Log another session"
+          actionLabel="Log another rental"
           onAction={handleAckSuccess}
         />
         <AvailabilityPanel

@@ -54,16 +54,16 @@ export function ProgramDatePicker({
       className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] p-5"
     >
       <div className="grid gap-4 sm:grid-cols-[1fr_auto_auto] sm:items-end">
-        <Field label="Program">
+        <Field label="Work">
           <div className="relative">
             <select
               name="programId"
               defaultValue={selectedProgramId}
-              aria-label="Program"
+              aria-label="Work"
               onChange={autoSubmit}
               className={`${inputStyles} appearance-none pr-8`}
             >
-              <option value="">Choose a program…</option>
+              <option value="">Choose work…</option>
               {programs.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}

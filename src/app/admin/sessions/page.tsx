@@ -128,14 +128,14 @@ export default async function AdminSessionsPage({
         className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
-        Back to Cage Rentals
+        Back to Rentals
       </Link>
 
       <div className="mb-8 space-y-2">
         <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
           Admin
         </p>
-        <h1 className="text-3xl font-semibold tracking-tight">Sessions</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Rentals</h1>
         <p className="text-sm text-fg-muted">
           Filter and edit individual bookings. Defaults to the last{" "}
           {DEFAULT_RANGE_DAYS} days through the next {DEFAULT_RANGE_DAYS} days.

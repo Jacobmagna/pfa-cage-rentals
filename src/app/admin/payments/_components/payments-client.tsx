@@ -276,7 +276,7 @@ function BalancesTable({
                 Coach
               </th>
               <th scope="col" className="px-4 py-3 text-right font-semibold">
-                Owed (cage)
+                Owed (rentals)
               </th>
               <th scope="col" className="px-4 py-3 text-right font-semibold">
                 Paid
@@ -288,7 +288,7 @@ function BalancesTable({
                 scope="col"
                 className="px-4 py-3 text-right font-semibold border-l border-line"
               >
-                Program pay
+                Work pay
                 <span className="block text-[10px] font-normal normal-case tracking-normal text-fg-subtle">
                   PFA owes coach
                 </span>

@@ -66,10 +66,10 @@ export function ReportPreview({
                   </>
                 ) : null}
                 {includeProgramHours ? (
-                  <th scope="col" className="px-4 py-3 text-right font-semibold">Program hours</th>
+                  <th scope="col" className="px-4 py-3 text-right font-semibold">Work hours</th>
                 ) : null}
                 {includeCageSessions ? (
-                  <th scope="col" className="px-4 py-3 text-right font-semibold">Cage owed</th>
+                  <th scope="col" className="px-4 py-3 text-right font-semibold">Rental owed</th>
                 ) : null}
                 {includeCageSessions ? (
                   <th scope="col" className="px-4 py-3 text-center font-semibold">Prepaid online</th>
@@ -241,7 +241,7 @@ function GrandTotal({
       {includeCageSessions ? (
         <div>
           <p className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
-            Cage owed
+            Rental owed
           </p>
           <p className="text-xl font-semibold font-mono tnum tabular-nums text-fg">
             {formatCents(cageCents)}
@@ -254,7 +254,7 @@ function GrandTotal({
       {includeProgramHours ? (
         <div>
           <p className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
-            Program pay
+            Work pay
           </p>
           <p className="text-xl font-semibold font-mono tnum tabular-nums text-fg">
             {formatCents(programCents)}

@@ -55,7 +55,7 @@ export function CoachPaymentsCard({
       </div>
 
       <dl className="grid grid-cols-2 sm:grid-cols-4 gap-px rounded-lg border border-line bg-line overflow-hidden mb-5">
-        <Stat label="Owed" value={formatDollars(owedCents)} />
+        <Stat label="Owes PFA" value={formatDollars(owedCents)} />
         <Stat label="Paid" value={formatDollars(paidCents)} />
         <Stat
           label="Balance"

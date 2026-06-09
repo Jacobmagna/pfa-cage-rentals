@@ -189,9 +189,9 @@ export function MasterScheduleGrid({
         )}
 
         {/* Programs section. */}
-        <SectionLabel>Programs</SectionLabel>
+        <SectionLabel>Work</SectionLabel>
         {programs.length === 0 ? (
-          <EmptyRow>No programs scheduled</EmptyRow>
+          <EmptyRow>No work scheduled</EmptyRow>
         ) : (
           <ProgramGrid
             programs={programs}
@@ -547,7 +547,7 @@ function ProgramGrid({
                   slotIndex: slotIdx,
                 })
               }
-              aria-label={`Add program block at ${formatGridHour(
+              aria-label={`Add work block at ${formatGridHour(
                 SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIdx / 2),
               )}${slotIdx % 2 === 1 ? ":30" : ""}`}
               className={`${cellClass} cursor-pointer transition-colors hover:bg-gold/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gold/40`}
@@ -661,8 +661,8 @@ function Legend(): React.JSX.Element {
         />
       </div>
       <p className="text-fg-subtle">
-        Read-only overview of today&apos;s cage rentals and program blocks.
-        Manage them from the Schedule and Hour Log pages.
+        Read-only overview of today&apos;s rentals and work blocks.
+        Manage them from the Schedule and Work Log pages.
       </p>
     </div>
   );

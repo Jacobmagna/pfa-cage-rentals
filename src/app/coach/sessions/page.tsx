@@ -187,7 +187,7 @@ function PageHeader() {
       <p className="text-xs uppercase tracking-[0.18em] text-fg-muted">
         History
       </p>
-      <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">My sessions</h1>
+      <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">My rentals</h1>
     </div>
   );
 }
@@ -198,15 +198,15 @@ function EmptyState() {
       <div className="inline-flex items-center justify-center h-10 w-10 rounded-full border border-line bg-surface-2 text-gold mb-4">
         <CalendarPlus className="h-5 w-5" />
       </div>
-      <h2 className="text-base font-semibold text-fg">No sessions yet</h2>
+      <h2 className="text-base font-semibold text-fg">No rentals yet</h2>
       <p className="mt-1.5 text-sm text-fg-muted max-w-xs mx-auto">
-        Log your first session and it&apos;ll show up here.
+        Log your first rental and it&apos;ll show up here.
       </p>
       <Link
         href="/coach/sessions/new"
         className="mt-5 inline-flex items-center justify-center rounded-lg border border-gold/40 bg-gold/10 text-gold-strong hover:bg-gold/20 px-4 h-10 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
       >
-        Log your first session
+        Log your first rental
       </Link>
     </div>
   );

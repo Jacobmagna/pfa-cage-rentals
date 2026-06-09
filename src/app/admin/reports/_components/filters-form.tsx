@@ -123,7 +123,7 @@ export function FiltersForm({
             <CheckboxChip
               name="includeProgram"
               value="1"
-              label="Program hours"
+              label="Work hours"
               defaultChecked={values.includeProgramHours}
             />
           </div>

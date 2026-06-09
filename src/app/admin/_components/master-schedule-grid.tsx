@@ -161,6 +161,39 @@ export type BlockClick = (b: {
   id: string;
 }) => void;
 
+// #15 drag-to-CREATE ("paint"). The paint state + window pointer listeners +
+// dialog opening all live in the editable wrapper (editable-master-schedule.tsx);
+// this grid just (a) reports an empty-cell pointerdown so the wrapper can record
+// the paint anchor, (b) registers each sub-grid's DOM node so the wrapper's
+// pointermove math can map clientX → slot index at the RIGHT granularity, and
+// (c) renders a dashed paint overlay descriptor the wrapper hands back down.
+// All three are OPTIONAL props — when absent (read-only / click-only usages),
+// nothing paint-related renders.
+export type PaintPointerDown = (args: {
+  section: "resource" | "program";
+  // resourceId for the cage section; "" for the program (lane-stacked) section.
+  rowId: string;
+  slotIndex: number;
+  clientX: number;
+  clientY: number;
+}) => void;
+
+// Section-aware grid-node registration. The wrapper keeps one ref per section so
+// slotIndexFromClientX can measure that section's own bounding rect (both have a
+// 120px label column, but cage = 28 cols, program = 56).
+export type RegisterGridNode = (
+  section: "resource" | "program",
+  node: HTMLDivElement | null,
+) => void;
+
+// The currently-painted range to highlight, as resolved by the wrapper. For the
+// cage section `resourceId` pins the row; for the program section it spans the
+// whole section (all lane rows) since programs aren't per-resource.
+export type PaintOverlay =
+  | { section: "resource"; resourceId: string; minSlot: number; maxSlot: number }
+  | { section: "program"; minSlot: number; maxSlot: number }
+  | null;
+
 export function MasterScheduleGrid({
   resources,
   sessions,
@@ -178,6 +211,11 @@ export function MasterScheduleGrid({
   // its own footprint is excluded from the "occupied" set — otherwise a
   // half-slot shift in place is rejected because the source cells read as busy.
   draggingId = null,
+  // #15 paint-to-create. All optional — absent ⇒ no paint behavior renders.
+  onCellPaintPointerDown,
+  onCellClickWrapped,
+  registerGridNode,
+  paintOverlay = null,
 }: {
   resources: MasterResourceRow[];
   sessions: MasterSession[];
@@ -188,6 +226,10 @@ export function MasterScheduleGrid({
   onBlockClick?: BlockClick;
   dragEnabled?: boolean;
   draggingId?: string | null;
+  onCellPaintPointerDown?: PaintPointerDown;
+  onCellClickWrapped?: (run: () => void) => void;
+  registerGridNode?: RegisterGridNode;
+  paintOverlay?: PaintOverlay;
 }): React.JSX.Element {
   // Row index per resource / program. Row 1 is the time header; section
   // label rows are inserted between, so we lay each section out in its
@@ -217,6 +259,10 @@ export function MasterScheduleGrid({
             onBlockClick={onBlockClick}
             dragEnabled={dragEnabled}
             draggingId={draggingId}
+            onCellPaintPointerDown={onCellPaintPointerDown}
+            onCellClickWrapped={onCellClickWrapped}
+            registerGridNode={registerGridNode}
+            paintOverlay={paintOverlay}
           />
         )}
 
@@ -232,6 +278,10 @@ export function MasterScheduleGrid({
             onBlockClick={onBlockClick}
             dragEnabled={dragEnabled}
             draggingId={draggingId}
+            onCellPaintPointerDown={onCellPaintPointerDown}
+            onCellClickWrapped={onCellClickWrapped}
+            registerGridNode={registerGridNode}
+            paintOverlay={paintOverlay}
           />
         )}
 
@@ -299,6 +349,10 @@ function ResourceGrid({
   onBlockClick,
   dragEnabled,
   draggingId,
+  onCellPaintPointerDown,
+  onCellClickWrapped,
+  registerGridNode,
+  paintOverlay,
 }: {
   resources: MasterResourceRow[];
   sessions: MasterSession[];
@@ -307,9 +361,17 @@ function ResourceGrid({
   onBlockClick?: BlockClick;
   dragEnabled?: boolean;
   draggingId?: string | null;
+  onCellPaintPointerDown?: PaintPointerDown;
+  onCellClickWrapped?: (run: () => void) => void;
+  registerGridNode?: RegisterGridNode;
+  paintOverlay?: PaintOverlay;
 }): React.JSX.Element {
   const rowOf = new Map<string, number>();
   resources.forEach((r, i) => rowOf.set(r.id, i + 1));
+
+  // #15: the cage paint overlay only applies to THIS section + a specific row.
+  const cagePaint =
+    paintOverlay && paintOverlay.section === "resource" ? paintOverlay : null;
 
   // #15B: which (resourceId, 30-min slot) cells are covered by a session or
   // block, so droppable empty cells skip them (the bar wins the drop). The
@@ -336,6 +398,7 @@ function ResourceGrid({
 
   return (
     <div
+      ref={registerGridNode ? (node) => registerGridNode("resource", node) : undefined}
       className="grid bg-surface"
       style={{
         gridTemplateColumns,
@@ -383,6 +446,28 @@ function ResourceGrid({
           // button AND a droppable move target. distance:5 on the wrapper's
           // PointerSensor lets a plain click through as a click. Occupied
           // cells skip the droppable so the bar's own footprint wins.
+          // #15: wrap the single-cell create so a completed paint can swallow
+          // the trailing click; pass the pointerdown so the wrapper can record
+          // a paint anchor for this (resource, slot).
+          const runCreate = () =>
+            onEmptyCellClick({
+              section: "resource",
+              rowId: r.id,
+              slotIndex: slotIdx,
+            });
+          const handleClick = onCellClickWrapped
+            ? () => onCellClickWrapped(runCreate)
+            : runCreate;
+          const handlePaintDown = onCellPaintPointerDown
+            ? (e: React.PointerEvent<HTMLButtonElement>) =>
+                onCellPaintPointerDown({
+                  section: "resource",
+                  rowId: r.id,
+                  slotIndex: slotIdx,
+                  clientX: e.clientX,
+                  clientY: e.clientY,
+                })
+            : undefined;
           if (dragEnabled) {
             return (
               <ResourceDroppableCell
@@ -393,13 +478,8 @@ function ResourceGrid({
                 cellClass={cellClass}
                 cellStyle={cellStyle}
                 isOccupied={occupiedCells.has(`${r.id}-${slotIdx}`)}
-                onCreate={() =>
-                  onEmptyCellClick({
-                    section: "resource",
-                    rowId: r.id,
-                    slotIndex: slotIdx,
-                  })
-                }
+                onCreate={handleClick}
+                onPaintPointerDown={handlePaintDown}
               />
             );
           }
@@ -407,12 +487,13 @@ function ResourceGrid({
             <button
               key={`cell-${r.id}-${slotIdx}`}
               type="button"
-              onClick={() =>
-                onEmptyCellClick({
-                  section: "resource",
-                  rowId: r.id,
-                  slotIndex: slotIdx,
-                })
+              onClick={handleClick}
+              onPointerDown={
+                handlePaintDown
+                  ? (e) => {
+                      if (e.button === 0) handlePaintDown(e);
+                    }
+                  : undefined
               }
               aria-label={`Add cage rental for ${r.name}`}
               className={`${cellClass} cursor-pointer transition-colors hover:bg-gold/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gold/40`}
@@ -421,6 +502,29 @@ function ResourceGrid({
           );
         }),
       )}
+
+      {/* #15: cage paint highlight — a gold dashed overlay across the painted
+          30-min range on the painted resource row. */}
+      {cagePaint
+        ? (() => {
+            const row = rowOf.get(cagePaint.resourceId);
+            if (!row) return null;
+            const min = Math.min(cagePaint.minSlot, cagePaint.maxSlot);
+            const max = Math.max(cagePaint.minSlot, cagePaint.maxSlot);
+            return (
+              <div
+                aria-hidden
+                style={{
+                  gridRow: row,
+                  gridColumn: `${min + 2} / span ${max - min + 1}`,
+                  pointerEvents: "none",
+                  zIndex: 5,
+                }}
+                className="m-0.5 rounded border-2 border-dashed border-gold/80 bg-gold/15"
+              />
+            );
+          })()
+        : null}
 
       {/* Blocked-time bars (read-only, dashed red). */}
       {blocks.map((b) => {
@@ -611,6 +715,7 @@ function ResourceDroppableCell({
   cellStyle,
   isOccupied,
   onCreate,
+  onPaintPointerDown,
 }: {
   resourceId: string;
   resourceName: string;
@@ -619,6 +724,7 @@ function ResourceDroppableCell({
   cellStyle: React.CSSProperties;
   isOccupied: boolean;
   onCreate: () => void;
+  onPaintPointerDown?: (e: React.PointerEvent<HTMLButtonElement>) => void;
 }): React.JSX.Element {
   const { setNodeRef, isOver } = useDroppable({
     id: `mdrop-resource-${resourceId}-${slotIdx}`,
@@ -635,6 +741,13 @@ function ResourceDroppableCell({
       ref={setNodeRef}
       type="button"
       onClick={isOccupied ? undefined : onCreate}
+      onPointerDown={
+        isOccupied || !onPaintPointerDown
+          ? undefined
+          : (e) => {
+              if (e.button === 0) onPaintPointerDown(e);
+            }
+      }
       disabled={isOccupied}
       aria-label={isOccupied ? undefined : `Add cage rental for ${resourceName}`}
       className={`${cellClass} ${
@@ -663,6 +776,10 @@ function ProgramGrid({
   onBlockClick,
   dragEnabled,
   draggingId,
+  onCellPaintPointerDown,
+  onCellClickWrapped,
+  registerGridNode,
+  paintOverlay,
 }: {
   programs: MasterProgramRow[];
   blocks: MasterProgramBlock[];
@@ -670,8 +787,16 @@ function ProgramGrid({
   onBlockClick?: BlockClick;
   dragEnabled?: boolean;
   draggingId?: string | null;
+  onCellPaintPointerDown?: PaintPointerDown;
+  onCellClickWrapped?: (run: () => void) => void;
+  registerGridNode?: RegisterGridNode;
+  paintOverlay?: PaintOverlay;
 }): React.JSX.Element {
   const programNameById = new Map(programs.map((p) => [p.id, p.name]));
+
+  // #15: program paint overlay only applies when this section is being painted.
+  const programPaint =
+    paintOverlay && paintOverlay.section === "program" ? paintOverlay : null;
 
   // Dynamic lane-stacking across ALL visible program blocks. Lane index →
   // grid row (lane + 1; this section's grid has no header row of its own).
@@ -701,6 +826,7 @@ function ProgramGrid({
 
   return (
     <div
+      ref={registerGridNode ? (node) => registerGridNode("program", node) : undefined}
       className="grid bg-surface"
       style={{
         gridTemplateColumns: programGridTemplateColumns,
@@ -733,6 +859,32 @@ function ProgramGrid({
               : "border-l border-line/40",
           ].join(" ");
           const cellStyle = { gridRow: laneIdx + 1, gridColumn: slotIdx + 2 };
+          // #15: paint handlers (free cells only). Programs have no per-row
+          // dimension here, so paint anchors carry rowId "". Wrap the click so
+          // a completed paint swallows its trailing click.
+          const runCreate = onEmptyCellClick
+            ? () =>
+                onEmptyCellClick({
+                  section: "program",
+                  rowId: "",
+                  slotIndex: slotIdx,
+                })
+            : undefined;
+          const handleClick =
+            runCreate && onCellClickWrapped
+              ? () => onCellClickWrapped(runCreate)
+              : runCreate;
+          const handlePaintDown =
+            onCellPaintPointerDown && !isOccupied
+              ? (e: React.PointerEvent<HTMLButtonElement>) =>
+                  onCellPaintPointerDown({
+                    section: "program",
+                    rowId: "",
+                    slotIndex: slotIdx,
+                    clientX: e.clientX,
+                    clientY: e.clientY,
+                  })
+              : undefined;
           if (!onEmptyCellClick || isOccupied) {
             // #15B: even an "occupied" or read-only cell must still be a drop
             // target when dragging — a program block can move ONTO a column
@@ -748,16 +900,8 @@ function ProgramGrid({
                   slotIdx={slotIdx}
                   cellClass={cellClass}
                   cellStyle={cellStyle}
-                  onCreate={
-                    onEmptyCellClick
-                      ? () =>
-                          onEmptyCellClick({
-                            section: "program",
-                            rowId: "",
-                            slotIndex: slotIdx,
-                          })
-                      : undefined
-                  }
+                  onCreate={handleClick}
+                  onPaintPointerDown={handlePaintDown}
                 />
               );
             }
@@ -778,13 +922,8 @@ function ProgramGrid({
                 slotIdx={slotIdx}
                 cellClass={cellClass}
                 cellStyle={cellStyle}
-                onCreate={() =>
-                  onEmptyCellClick({
-                    section: "program",
-                    rowId: "",
-                    slotIndex: slotIdx,
-                  })
-                }
+                onCreate={handleClick}
+                onPaintPointerDown={handlePaintDown}
               />
             );
           }
@@ -792,12 +931,13 @@ function ProgramGrid({
             <button
               key={`cell-${laneIdx}-${slotIdx}`}
               type="button"
-              onClick={() =>
-                onEmptyCellClick({
-                  section: "program",
-                  rowId: "",
-                  slotIndex: slotIdx,
-                })
+              onClick={handleClick}
+              onPointerDown={
+                handlePaintDown
+                  ? (e) => {
+                      if (e.button === 0) handlePaintDown(e);
+                    }
+                  : undefined
               }
               aria-label={`Add work block at ${formatGridHour(
                 SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIdx / 4),
@@ -812,6 +952,27 @@ function ProgramGrid({
           );
         }),
       )}
+
+      {/* #15: program paint highlight — a blue dashed overlay across the painted
+          15-min range, spanning all lane rows (programs aren't per-resource). */}
+      {programPaint
+        ? (() => {
+            const min = Math.min(programPaint.minSlot, programPaint.maxSlot);
+            const max = Math.max(programPaint.minSlot, programPaint.maxSlot);
+            return (
+              <div
+                aria-hidden
+                style={{
+                  gridRow: `1 / span ${laneRows}`,
+                  gridColumn: `${min + 2} / span ${max - min + 1}`,
+                  pointerEvents: "none",
+                  zIndex: 5,
+                }}
+                className="m-0.5 rounded border-2 border-dashed border-blue/80 bg-blue/15"
+              />
+            );
+          })()
+        : null}
 
       {/* Program block bars (read-only, colored by status). Row = the block's
           assigned lane + 1; primary label = the PROGRAM name. */}
@@ -909,12 +1070,14 @@ function ProgramDroppableCell({
   cellClass,
   cellStyle,
   onCreate,
+  onPaintPointerDown,
 }: {
   laneIdx: number;
   slotIdx: number;
   cellClass: string;
   cellStyle: React.CSSProperties;
   onCreate?: () => void;
+  onPaintPointerDown?: (e: React.PointerEvent<HTMLButtonElement>) => void;
 }): React.JSX.Element {
   const { setNodeRef, isOver } = useDroppable({
     id: `mdrop-program-${laneIdx}-${slotIdx}`,
@@ -939,6 +1102,13 @@ function ProgramDroppableCell({
       ref={setNodeRef}
       type="button"
       onClick={onCreate}
+      onPointerDown={
+        onPaintPointerDown
+          ? (e) => {
+              if (e.button === 0) onPaintPointerDown(e);
+            }
+          : undefined
+      }
       aria-label={`Add work block at ${formatGridHour(
         SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIdx / 4),
       )}${

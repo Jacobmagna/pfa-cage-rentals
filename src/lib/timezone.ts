@@ -179,12 +179,18 @@ export function pfaDayStart(d: Date): Date {
 }
 
 /**
- * First UTC instant of the PFA calendar day AFTER `d`. DST-safe: walks
- * forward by 25h then snaps to PFA midnight, so spring-forward (23h
- * day) and fall-back (25h day) both land on the right boundary.
+ * First UTC instant of the PFA calendar day AFTER `d`. DST-safe: anchors
+ * on the START of d's PFA day, walks forward by 25h, then snaps to PFA
+ * midnight — so spring-forward (23h day) and fall-back (25h day) both land
+ * on the right boundary, for ANY wall-clock time-of-day in `d`.
+ *
+ * The day-start anchor matters: adding 25h to a late-evening `d`
+ * (e.g. 11:30 PM PT) directly would overshoot into the day-AFTER-next.
+ * Anchoring on 00:00 first keeps the +25h landing squarely in the next
+ * calendar day regardless of `d`'s time-of-day.
  */
 export function pfaDayEnd(d: Date): Date {
-  const tomorrow = new Date(d.getTime() + 25 * 60 * 60 * 1000);
+  const tomorrow = new Date(pfaDayStart(d).getTime() + 25 * 60 * 60 * 1000);
   return pfaDayStart(tomorrow);
 }
 

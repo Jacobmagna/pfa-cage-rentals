@@ -23,7 +23,12 @@ import {
   users,
 } from "@/db/schema";
 import { getSmsConfig } from "@/lib/sms/config";
-import { renderReminderBody, SmsSendError, sendSms } from "@/lib/sms/client";
+import {
+  renderReminderBody,
+  SMS_LOG_URL,
+  SmsSendError,
+  sendSms,
+} from "@/lib/sms/client";
 import {
   normalizeUsPhoneE164,
   selectRecipients,
@@ -213,8 +218,7 @@ export async function runSmsReminders(opts?: {
   }
 
   // 4. Real send. Claim → send → update status, per coach.
-  const link = `${process.env.AUTH_URL ?? ""}/coach/hour-log`;
-  const body = renderReminderBody(link);
+  const body = renderReminderBody(SMS_LOG_URL);
 
   let sent = 0;
   let failed = 0;

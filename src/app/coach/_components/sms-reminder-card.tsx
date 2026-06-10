@@ -144,6 +144,8 @@ export function SmsReminderCard({
             label="Text me work reminders"
             description="Off by default. We only text about your own unlogged scheduled work."
           />
+
+          <ConsentNote />
         </div>
 
         {error ? (
@@ -256,6 +258,7 @@ export function SmsReminderCard({
               : "Off — turn on to get a reminder for unlogged scheduled work."
           }
         />
+        <ConsentNote className="mt-3" />
       </div>
 
       <div className="mt-4 border-t border-line pt-4">
@@ -331,6 +334,25 @@ export function SmsReminderCard({
         </p>
       ) : null}
     </section>
+  );
+}
+
+// Carrier-required consent microcopy shown next to both opt-in toggles, with
+// an inline link to the full /sms-terms page. Text is exact per the A2P brief.
+function ConsentNote({ className }: { className?: string }) {
+  return (
+    <p className={`text-xs text-fg-subtle leading-snug ${className ?? ""}`}>
+      Turn on to receive SMS work reminders from PFA Engine. Msg &amp; data
+      rates may apply; up to ~1 msg/day. Reply STOP to opt out.{" "}
+      <a
+        href="/sms-terms"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-medium text-fg-muted underline underline-offset-2 hover:text-fg"
+      >
+        See SMS Terms.
+      </a>
+    </p>
   );
 }
 

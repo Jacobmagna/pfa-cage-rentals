@@ -161,6 +161,12 @@ export default async function Home({
               Terms
             </Link>
           </p>
+          <Link
+            href="/coach-guide"
+            className="text-[11px] text-white/40 transition-colors hover:text-white/75"
+          >
+            New here? Read the Coach Guide
+          </Link>
           <p className="text-[10px] uppercase tracking-[0.14em] text-white/30">
             Built by Magna Software LLC
           </p>

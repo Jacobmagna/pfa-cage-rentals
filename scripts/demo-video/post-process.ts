@@ -57,6 +57,8 @@ const H = 1080;
 const FPS = 30;
 const XFADE = 0.4; // crossfade duration between screens (seconds)
 const TRIM_LEAD_SECONDS = 1.0; // feature lead-in trim
+const TEXT_XFADE = 0.3; // caption text crossfade (alpha in/out) duration (s)
+const MIN_CAPTION_WINDOW = 5.0; // every feature caption must be on screen ≥ this
 const BAR_H = Math.round(H * 0.22); // ~237px — same look as the old bar
 const BRAND_YELLOW = "#FFC400";
 const BRAND_BLACK = "#0a0a0a";
@@ -242,6 +244,60 @@ async function main() {
     mp4s.push(dest);
   }
 
+  // --- 1b. 5s caption SAFETY NET --------------------------------------------
+  // Each FEATURE caption's base on-screen window equals that segment's
+  // contribution to the xfaded timeline: interior features = dur − XFADE
+  // (the next screen's xfade eats XFADE off the tail), the LAST feature = its
+  // full dur (its caption runs to barEnd). The text crossfade only ADDS ~0.3s
+  // of edge-to-edge visibility on top, so guarding the base window ≥ 5.0s is
+  // conservative. If recording jitter left any feature short, pad it by
+  // cloning its last frame (tpad) up to the duration that yields a ≥5.0s
+  // window. Re-probe afterwards so all downstream timing uses the padded
+  // durations. Cards (intro/outro) are never padded.
+  const featureIdxForPad = slugs
+    .map((s, i) => (isCard(s) ? -1 : i))
+    .filter((i) => i >= 0);
+  const lastFeaturePadIdx = featureIdxForPad[featureIdxForPad.length - 1];
+  for (const i of featureIdxForPad) {
+    const dur = probeDuration(mp4s[i]);
+    // window = dur − XFADE for interior features, dur for the last feature.
+    const required =
+      i === lastFeaturePadIdx
+        ? MIN_CAPTION_WINDOW
+        : MIN_CAPTION_WINDOW + XFADE;
+    if (dur + 1e-3 >= required) continue;
+    const pad = required - dur;
+    console.log(
+      `[post] 5s SAFETY NET: ${slugs[i]} window ${(
+        dur - (i === lastFeaturePadIdx ? 0 : XFADE)
+      ).toFixed(2)}s < ${MIN_CAPTION_WINDOW}s — padding +${pad.toFixed(
+        2,
+      )}s (clone last frame).`,
+    );
+    const padded = path.join(OUT_SEGMENTS, `_pad_${slugs[i]}.mp4`);
+    run([
+      "-y",
+      "-i",
+      mp4s[i],
+      "-vf",
+      `tpad=stop_mode=clone:stop_duration=${pad.toFixed(4)}`,
+      "-c:v",
+      "libx264",
+      "-pix_fmt",
+      "yuv420p",
+      "-r",
+      String(FPS),
+      "-crf",
+      "20",
+      "-an",
+      "-movflags",
+      "+faststart",
+      padded,
+    ]);
+    rmSync(mp4s[i], { force: true });
+    execFileSync("/bin/mv", [padded, mp4s[i]]);
+  }
+
   // --- 2. measure normalized durations + compute xfade-timeline windows -----
   const durations = mp4s.map((p) => probeDuration(p));
   // start_i in the xfaded timeline: start_0 = 0; start_i = start_{i-1} +
@@ -302,28 +358,68 @@ async function main() {
   // Single-screen edge case: no xfade ran, alias s0 → screens.
   if (mp4s.length === 1) fc.push(`[s0]null[screens]`);
 
-  // Overlay the CONSTANT bar over the feature span, full opacity, no fade.
-  fc.push(`[${barInputIdx}:v]format=rgba,setsar=1[bar]`);
+  // Overlay the CONSTANT bar over the feature span. It is SOLID for the whole
+  // span EXCEPT: it ALPHA-FADES IN over the intro→seg01 xfade (so the bar and
+  // the first screen arrive together) and ALPHA-FADES OUT over the
+  // seg14→outro xfade (so it leaves with the last screen). The first feature's
+  // xfade-in runs over [barStart−XFADE, barStart]; the outro xfade runs over
+  // [barEnd−XFADE, barEnd]. We extend the bar's visible window to start at
+  // barStart−XFADE and fade in across XFADE, then fade out across the final
+  // XFADE. Between those endpoints alpha stays 1.0 (never dims on feature↔
+  // feature transitions). Implemented on the looped PNG via fade (input-PTS
+  // relative), then setpts to shift the faded ramp onto the absolute timeline.
+  const barWinStart = Math.max(0, barStart - XFADE);
+  const barWinLen = barEnd - barWinStart;
   fc.push(
-    `[screens][bar]overlay=0:0:enable='between(t,${barStart.toFixed(4)},${barEnd.toFixed(4)})'[withbar]`,
+    `[${barInputIdx}:v]format=yuva420p,` +
+      `fade=t=in:st=0:d=${XFADE}:alpha=1,` +
+      `fade=t=out:st=${(barWinLen - XFADE).toFixed(4)}:d=${XFADE}:alpha=1,` +
+      `setpts=PTS+${barWinStart.toFixed(4)}/TB,setsar=1[bar]`,
+  );
+  fc.push(
+    `[screens][bar]overlay=0:0:enable='between(t,${barWinStart.toFixed(
+      4,
+    )},${barEnd.toFixed(4)})'[withbar]`,
   );
 
-  // Overlay each feature segment's text, windowed [start_i, start_{i+1}) —
-  // i.e. until the next segment begins (last feature extends to its end).
-  // The bar underneath stays solid through every transition.
+  // Overlay each feature segment's text. The caption text CROSSFADES between
+  // sections (no hard cut): each text layer ALPHA-FADES IN over its first
+  // TEXT_XFADE seconds and ALPHA-FADES OUT over its last TEXT_XFADE seconds,
+  // and adjacent windows OVERLAP by TEXT_XFADE so the outgoing text dissolves
+  // while the incoming one appears. The constant BAR underneath does NOT
+  // change during the swap — only this text layer crossfades.
+  //
+  // Base window: [start_i, start_{i+1}) — until the next segment begins; the
+  // LAST feature extends to barEnd. To overlap, every window EXCEPT the last
+  // is EXTENDED by TEXT_XFADE past the next segment's start, so its fade-out
+  // runs concurrently with the next caption's fade-in. The fade is applied on
+  // the looped PNG (input-PTS relative) then setpts-shifted onto the timeline.
   let chain = "withbar";
   featureSlugs.forEach((slug, fi) => {
     const i = slugs.indexOf(slug);
     const tStart = starts[i];
-    // window ends where the NEXT segment starts; for the last feature, at the
-    // feature span end (the outro xfade begins right after).
-    const tEnd = i + 1 < starts.length ? starts[i + 1] : barEnd;
-    const tIdx = textInputIdx[slug];
     const last = fi === featureSlugs.length - 1;
+    // window ends where the NEXT segment starts; for the last feature, at the
+    // feature span end. Extend non-last windows by TEXT_XFADE for the overlap.
+    const baseEnd = i + 1 < starts.length ? starts[i + 1] : barEnd;
+    const tEnd = last ? baseEnd : baseEnd + TEXT_XFADE;
+    const winLen = tEnd - tStart;
+    const tIdx = textInputIdx[slug];
     const outLabel = last ? "vout" : `t${fi}`;
-    fc.push(`[${tIdx}:v]format=rgba,setsar=1[txt${fi}]`);
+    // The very first caption fades in together with the bar+first screen
+    // (its tStart === barStart, so its 0.3s fade-in overlaps the bar fade-in).
     fc.push(
-      `[${chain}][txt${fi}]overlay=0:0:enable='between(t,${tStart.toFixed(4)},${tEnd.toFixed(4)})'[${outLabel}]`,
+      `[${tIdx}:v]format=yuva420p,` +
+        `fade=t=in:st=0:d=${TEXT_XFADE}:alpha=1,` +
+        `fade=t=out:st=${(winLen - TEXT_XFADE).toFixed(
+          4,
+        )}:d=${TEXT_XFADE}:alpha=1,` +
+        `setpts=PTS+${tStart.toFixed(4)}/TB,setsar=1[txt${fi}]`,
+    );
+    fc.push(
+      `[${chain}][txt${fi}]overlay=0:0:enable='between(t,${tStart.toFixed(
+        4,
+      )},${tEnd.toFixed(4)})'[${outLabel}]`,
     );
     chain = outLabel;
   });

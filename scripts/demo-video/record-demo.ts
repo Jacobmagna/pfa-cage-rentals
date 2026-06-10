@@ -507,7 +507,11 @@ async function main() {
           "Your whole facility's day on one schedule — drag to book, click to edit.",
         leadIn: ADMIN_LEAD,
       });
-      await sleep(2800);
+      // Dwell raised so the normalized (post-1s-trim) duration is ≥ ~5.6s,
+      // i.e. caption window (normDur − XFADE 0.4) ≥ ~5.2s — clears the 5s floor.
+      await sleep(2400);
+      await gentleScroll(page, 350);
+      await sleep(2400);
     });
 
     // 02 — Home: scroll to Needs review + Recent activity.
@@ -688,7 +692,10 @@ async function main() {
         caption: "Take attendance for a session in a few checkboxes.",
         leadIn: COACH_LEAD,
       });
+      // Raised dwell to clear the 5s caption-window floor (post-trim ≥ ~5.6s).
       await sleep(2800);
+      await gentleScroll(page, 350);
+      await sleep(2200);
     });
 
     // 13 — coach: schedule week.
@@ -702,7 +709,10 @@ async function main() {
         caption: "Their whole week — programs and rentals — in one view.",
         leadIn: COACH_LEAD,
       });
+      // Raised dwell to clear the 5s caption-window floor (post-trim ≥ ~5.6s).
       await sleep(2600);
+      await gentleScroll(page, 350);
+      await sleep(2200);
     });
 
     // 14 — coach: what you owe (scroll to the card).
@@ -715,8 +725,11 @@ async function main() {
         caption: "And exactly what they owe the facility, always current.",
         leadIn: COACH_LEAD,
       });
+      // Raised dwell to clear the 5s caption-window floor (post-trim ≥ ~5.6s).
       await gentleScroll(page, 600);
       await sleep(2400);
+      await gentleScroll(page, -300);
+      await sleep(2000);
     });
 
     // 99 — outro card

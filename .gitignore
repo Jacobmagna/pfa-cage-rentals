@@ -68,5 +68,10 @@ source_data.xlsx
 # Magna internal build orchestration (not a customer deliverable)
 /build/
 
+# demo-video generated artifacts (raw recordings; commit only the scripts)
+scripts/demo-video/segments/
+scripts/demo-video/**/*.webm
+scripts/demo-video/**/*.mp4
+
 # worklog rotation backups
 worklog/*.bak.*

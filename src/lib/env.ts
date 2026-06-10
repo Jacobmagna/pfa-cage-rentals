@@ -54,6 +54,22 @@ const PRODUCTION_ONLY_SCHEMA = z.object({
   AUTH_URL: z.string().url(),
 });
 
+// Data-Safe Snapshot job (src/lib/data-safe/*) + Vercel cron auth. These
+// are ALL OPTIONAL and parsed SEPARATELY from REQUIRED_SCHEMA so an absent
+// var never fails validation or /api/health — the whole capability is
+// dormant until go-live. getDataSafeConfig() reads process.env lazily; this
+// schema exists only to document + loosely shape the vars (it is NOT wired
+// into getMissingRequiredEnv, by design).
+export const DATA_SAFE_SCHEMA = z.object({
+  DATA_SAFE_ENABLED: z.string().optional(),
+  DATA_SAFE_DATABASE_URL: z.string().optional(),
+  DATA_SAFE_CLIENT_ID: z.string().optional(),
+  DATA_SAFE_VERTICAL: z.string().optional(),
+  DATA_SAFE_SALT: z.string().optional(),
+  DATA_SAFE_K: z.string().optional(),
+  CRON_SECRET: z.string().optional(),
+});
+
 export type MissingEnv = {
   key: string;
   reason: string;

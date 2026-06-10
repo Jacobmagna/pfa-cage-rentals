@@ -22,6 +22,8 @@
 //    no_show/pending. The scheduled coach's own log always wins over
 //    another coach's overlapping log.
 
+import { isOverLogged } from "@/lib/accountability";
+
 const TOLERANCE_MS = 15 * 60_000; // ±15 min — DEC-29 "within ~15 min"
 const NO_SHOW_BUFFER_MS = 60 * 60_000; // 1 hr buffer — SCR-1b
 
@@ -314,4 +316,58 @@ export function annotateLogs(
   }
 
   return result;
+}
+
+// 1b security B: the manual-log anomaly verdict. "clean" posts normally;
+// the other three are HELD-for-approval kinds, each carrying a coach-facing
+// message naming the specific issue (`heldReason` stores the kind).
+export type ManualLogAnomaly =
+  | { kind: "clean" }
+  | { kind: "unscheduled"; message: string }
+  | { kind: "wrong_time"; message: string }
+  | { kind: "over_logged"; message: string };
+
+/**
+ * Classifies ONE manual hour-log against the scheduled blocks the logging
+ * coach is a MEMBER of (all passed `blocks` already have the coach in-set,
+ * so in-set checks are implicit). Pure + deterministic — no DB, no `now`.
+ * Reuses matchLogToBlock (the single source of truth for "which block did
+ * this log belong to"), withinTol (±15 on both ends), and isOverLogged
+ * (logged > scheduled by > the 30-min margin) so the held-then-approve gate
+ * agrees with the reconciliation overlay + the accountability scorecard.
+ */
+export function classifyManualLog(
+  log: { coachId: string; programId: string; startAt: Date; endAt: Date },
+  blocks: ReconBlock[],
+  formatTime: (d: Date) => string,
+): ManualLogAnomaly {
+  const match = matchLogToBlock(log, blocks);
+
+  // No same-program block overlaps the log window — ad-hoc / off-schedule.
+  if (match === null) {
+    return {
+      kind: "unscheduled",
+      message: "This time isn't on your work schedule.",
+    };
+  }
+
+  // Within ±15 on both ends ⇒ the over-log can be at most 30 min ⇒ never
+  // over-logged here, so this clean check comes first.
+  if (withinTol(log, match)) {
+    return { kind: "clean" };
+  }
+
+  // Off-time AND logged materially longer than the block → over-logged.
+  if (isOverLogged(log.startAt, log.endAt, match.startAt, match.endAt)) {
+    return {
+      kind: "over_logged",
+      message: `You logged longer than the scheduled block (${formatTime(match.startAt)}–${formatTime(match.endAt)}).`,
+    };
+  }
+
+  // Overlaps a block but the times are off by more than tolerance.
+  return {
+    kind: "wrong_time",
+    message: `That doesn't match your scheduled block (${formatTime(match.startAt)}–${formatTime(match.endAt)}).`,
+  };
 }

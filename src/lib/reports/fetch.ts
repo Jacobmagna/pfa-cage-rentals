@@ -74,6 +74,8 @@ export async function fetchReportData(
     filters.includeProgramHours &&
     (filters.resourceTypes.length === 0 || filters.resourceTypes.length === 3);
   const hourLogConditions = [
+    // 1b security B: held (awaiting-approval) logs are not yet payable.
+    eq(hourLogs.status, "posted"),
     gte(hourLogs.startAt, filters.fromDate),
     lt(hourLogs.startAt, filters.toDateExclusive),
   ];

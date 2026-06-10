@@ -81,7 +81,9 @@ export default async function AdminPaymentsPage() {
         endAt: hourLogs.endAt,
         ratePer30MinCents: hourLogs.ratePer30MinCents,
       })
-      .from(hourLogs),
+      // 1b security B: held logs are not part of the lifetime program-pay total.
+      .from(hourLogs)
+      .where(eq(hourLogs.status, "posted")),
     db
       .select({
         coachId: coachPayments.coachId,

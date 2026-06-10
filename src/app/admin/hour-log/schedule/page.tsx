@@ -100,7 +100,14 @@ export default async function ProgramsSchedulePage({
       })
       .from(hourLogs)
       .innerJoin(users, eq(hourLogs.coachId, users.id))
-      .where(and(lt(hourLogs.startAt, dayEnd), gt(hourLogs.endAt, dayStart))),
+      .where(
+        and(
+          // 1b security B: held logs stay off the reconciliation overlay.
+          eq(hourLogs.status, "posted"),
+          lt(hourLogs.startAt, dayEnd),
+          gt(hourLogs.endAt, dayStart),
+        ),
+      ),
     // QA10 W3.3: active cage resources, ordered, for the occupancy picker.
     db
       .select({

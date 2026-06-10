@@ -32,6 +32,7 @@ export default async function CoachHourLogHistoryPage() {
       startAt: hourLogs.startAt,
       endAt: hourLogs.endAt,
       note: hourLogs.note,
+      status: hourLogs.status,
     })
     .from(hourLogs)
     .innerJoin(programs, eq(hourLogs.programId, programs.id))
@@ -118,7 +119,11 @@ export default async function CoachHourLogHistoryPage() {
               <span className="text-sm text-fg-muted truncate">
                 {row.programName}
               </span>
-              {!row.scheduled ? <UnscheduledBadge /> : null}
+              {row.status === "held" ? (
+                <PendingApprovalBadge />
+              ) : !row.scheduled ? (
+                <UnscheduledBadge />
+              ) : null}
             </div>
             {row.note ? (
               <p
@@ -136,6 +141,17 @@ export default async function CoachHourLogHistoryPage() {
         </li>
       ))}
     </ul>
+  );
+}
+
+// Muted pill for a HELD log awaiting admin approval — not yet payable or
+// counted anywhere. Neutral tone (no red/danger): it's a pending state, not
+// an error.
+function PendingApprovalBadge() {
+  return (
+    <span className="inline-flex items-center rounded-full border border-line-strong bg-surface-2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted whitespace-nowrap">
+      Pending approval
+    </span>
   );
 }
 

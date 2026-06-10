@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useMemo, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, AlertTriangle } from "lucide-react";
 import {
   logOwnHourFormAction,
   type HourLogActionResult,
@@ -30,6 +30,8 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
   );
 
   const defaults = useMemo(() => {
+    // Both non-ok variants (plain error AND requiresHold) echo the coach's
+    // entered values back into the fields so nothing is lost.
     if (!state.ok) {
       return state.values;
     }
@@ -42,7 +44,17 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
     };
   }, [state]);
 
-  const showError = !state.ok;
+  const requiresHold = !state.ok && "requiresHold" in state;
+  const showError = !state.ok && !requiresHold;
+
+  // Local dismissal for the hold warning: "Go back and edit" hides the banner
+  // without submitting, keeping the entered values editable. We pin the
+  // dismissal to the CURRENT warning's state OBJECT (useActionState hands us a
+  // new object every submit), so a fresh anomaly from the next plain submit
+  // re-shows the banner. Pure compare — no setState-in-effect.
+  const [dismissedState, setDismissedState] =
+    useState<HourLogActionResult | null>(null);
+  const showHoldWarning = requiresHold && dismissedState !== state;
 
   // Collapse-to-confirmation: on a successful submit we hide the form
   // and render CompletionPanel in its place. `loggedAt` is the success
@@ -54,17 +66,29 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
   const [ackedNonce, setAckedNonce] = useState(0);
   const showDone = successNonce > 0 && successNonce !== ackedNonce;
 
+  // Stable form key so the fields don't unexpectedly remount/clear. The
+  // requiresHold variant keys off the reason (not error.code, which it lacks).
   const formKey = state.ok
     ? state.loggedAt > 0
       ? `ok-${state.loggedAt}`
       : "fresh"
-    : `err-${state.error.code}-${state.error.message}`;
+    : "requiresHold" in state
+      ? `hold-${state.reason}`
+      : `err-${state.error.code}-${state.error.message}`;
+
+  // On a successful submit we collapse to a confirmation. A HELD log gets a
+  // distinct "sent for approval" message; a normal post gets "Work logged."
+  const wasHeld = state.ok && state.held === true;
 
   if (showDone) {
     return (
       <div className="space-y-4">
         <CompletionPanel
-          message="Work logged."
+          message={
+            wasHeld
+              ? "Sent for approval — your admin will review it."
+              : "Work logged."
+          }
           actionLabel="Log more work"
           onAction={() => setAckedNonce(successNonce)}
         />
@@ -74,12 +98,35 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
 
   return (
     <div className="space-y-4">
-      {showError ? (
+      {showError && !state.ok && "error" in state ? (
         <div
           role="alert"
           className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2.5 text-sm text-danger"
         >
           {state.error.message}
+        </div>
+      ) : null}
+
+      {showHoldWarning && !state.ok && "requiresHold" in state ? (
+        <div
+          role="alert"
+          className="rounded-lg border border-line-strong bg-surface-2 px-3.5 py-3 text-sm text-fg"
+        >
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle
+              className="mt-0.5 h-4 w-4 shrink-0 text-fg-muted"
+              aria-hidden="true"
+            />
+            <div className="space-y-1">
+              <p className="font-semibold">Needs admin approval</p>
+              <p className="text-fg-muted leading-snug">{state.message}</p>
+              <p className="text-fg-muted leading-snug">
+                You can send this log to your admin for approval — it
+                won&apos;t count or pay out until they review it — or go back
+                and adjust the times.
+              </p>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -143,13 +190,40 @@ export function HourLogForm({ programs }: { programs: ProgramOption[] }) {
           />
         </Field>
 
-        <button
-          type="submit"
-          disabled={pending}
-          className="w-full sm:w-auto rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-12 px-6 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
-        >
-          {pending ? "Logging…" : "Log work"}
-        </button>
+        {showHoldWarning ? (
+          // Hold actions live INSIDE the form so they carry the entered
+          // values. "Send to admin" is a named submit button → its
+          // name/value pair (acknowledgeHold=true) rides in the FormData,
+          // so the resubmit holds the row. "Go back and edit" only dismisses
+          // the banner locally (no submit), leaving the fields editable.
+          <div className="flex flex-col gap-2.5 sm:flex-row">
+            <button
+              type="submit"
+              name="acknowledgeHold"
+              value="true"
+              disabled={pending}
+              className="w-full sm:w-auto rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-12 px-6 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            >
+              {pending ? "Sending…" : "Send to admin for approval"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDismissedState(state)}
+              disabled={pending}
+              className="w-full sm:w-auto rounded-lg border border-line-strong bg-surface text-fg-muted hover:text-fg hover:bg-surface-2 h-12 px-6 text-sm font-medium disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            >
+              Go back and edit
+            </button>
+          </div>
+        ) : (
+          <button
+            type="submit"
+            disabled={pending}
+            className="w-full sm:w-auto rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-12 px-6 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          >
+            {pending ? "Logging…" : "Log work"}
+          </button>
+        )}
       </form>
     </div>
   );

@@ -232,6 +232,13 @@
       "when": 1781045014096,
       "tag": "0032_complete_blonde_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1781048239815,
+      "tag": "0033_furry_gunslinger",
+      "breakpoints": true
     }
   ]
 }

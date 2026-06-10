@@ -18,7 +18,9 @@ import {
   resolveNoShowInternal,
 } from "@/lib/server/block-flag-actions";
 import {
+  approveHeldHourLogInternal,
   deleteHourInternal,
+  rejectHeldHourLogInternal,
   resolveHourLogInternal,
   updateHourInternal,
 } from "@/lib/server/hour-log-actions";
@@ -67,5 +69,35 @@ export async function resolveNoShow(blockId: string, coachId: string) {
   const result = await resolveNoShowInternal(session.user, blockId, coachId);
   revalidatePath("/admin");
   revalidatePath("/admin/hour-log");
+  return result;
+}
+
+// 1b security B — APPROVE a held manual log: flips it to posted (payable +
+// counted) and stamps it reviewed so it also leaves the needs-review queue.
+// Revalidates every surface that now counts it, the held queue itself, and
+// the coach's history (chip flips from "Pending approval" to scheduled/unsch).
+export async function approveHeldHourLog(id: string) {
+  const session = await requireRole("admin");
+  const result = await approveHeldHourLogInternal(session.user, id);
+  revalidatePath("/admin/hour-log");
+  revalidatePath("/admin/hour-log/held");
+  revalidatePath("/admin/payments");
+  revalidatePath("/admin");
+  revalidatePath("/admin/records/accountability");
+  revalidatePath("/coach/hour-log");
+  return result;
+}
+
+// 1b security B — REJECT a held manual log: deletes the row (coach must
+// re-enter). Same revalidate set as approve.
+export async function rejectHeldHourLog(id: string, adminNote?: string) {
+  const session = await requireRole("admin");
+  const result = await rejectHeldHourLogInternal(session.user, id, adminNote);
+  revalidatePath("/admin/hour-log");
+  revalidatePath("/admin/hour-log/held");
+  revalidatePath("/admin/payments");
+  revalidatePath("/admin");
+  revalidatePath("/admin/records/accountability");
+  revalidatePath("/coach/hour-log");
   return result;
 }

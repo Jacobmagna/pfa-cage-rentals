@@ -83,6 +83,7 @@ async function seedHour(): Promise<{
     startAt: tomorrowAt(10),
     endAt: tomorrowAt(11),
     note: "before",
+    source: "schedule-confirm",
   });
   return {
     id: created.id,

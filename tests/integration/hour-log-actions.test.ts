@@ -83,6 +83,7 @@ describe("logHourInternal", () => {
       startAt,
       endAt,
       note: "happy path",
+      source: "schedule-confirm",
     });
 
     expect(created.id).toBeTruthy();
@@ -166,6 +167,7 @@ describe("logHourInternal", () => {
       startAt: tomorrowAt(13),
       endAt: tomorrowAt(14),
       note: "any-program",
+      source: "schedule-confirm",
     });
 
     expect(created.coachId).toBe(fixtures.coach.id);

@@ -162,6 +162,9 @@ export async function fetchBlockAccountabilityAlerts(
     .from(hourLogs)
     .where(
       and(
+        // 1b security B: a held log must NOT suppress a no-show — it's not
+        // yet a real log until an admin approves it.
+        eq(hourLogs.status, "posted"),
         inArray(hourLogs.coachId, coachIds),
         gte(hourLogs.startAt, windowStart),
       ),
@@ -288,6 +291,9 @@ export async function countNoShowsByCoach(
     .from(hourLogs)
     .where(
       and(
+        // 1b security B: held logs don't feed the scorecard late/over-logged
+        // signal — only approved (posted) logs count.
+        eq(hourLogs.status, "posted"),
         inArray(hourLogs.coachId, coachIds),
         gte(hourLogs.startAt, windowStart),
       ),

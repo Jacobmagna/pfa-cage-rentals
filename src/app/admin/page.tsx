@@ -179,6 +179,8 @@ export default async function AdminHome({
       .from(hourLogs)
       .where(
         and(
+          // 1b security B: held logs are not payable until approved.
+          eq(hourLogs.status, "posted"),
           gte(hourLogs.startAt, monthStart),
           lt(hourLogs.startAt, monthEndExclusive),
         ),
@@ -287,7 +289,13 @@ export default async function AdminHome({
       .from(hourLogs)
       .innerJoin(users, eq(hourLogs.coachId, users.id))
       .where(
-        and(lt(hourLogs.startAt, schedDayEnd), gt(hourLogs.endAt, schedDayStart)),
+        and(
+          // 1b security B: a held log must not appear on the reconciliation
+          // overlay (it's not yet a real log).
+          eq(hourLogs.status, "posted"),
+          lt(hourLogs.startAt, schedDayEnd),
+          gt(hourLogs.endAt, schedDayStart),
+        ),
       ),
     // Recent activity feed (QA6-2): the latest things COACHES have done.
     // Join the audit log to its actor and keep only coach actors so admin

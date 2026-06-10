@@ -149,7 +149,8 @@ export async function loadAccountabilityScorecard(opts?: {
     .from(hourLogs)
     .innerJoin(users, eq(hourLogs.coachId, users.id))
     .innerJoin(programs, eq(hourLogs.programId, programs.id))
-    .where(gte(hourLogs.endAt, since))
+    // 1b security B: held logs don't feed the late/over-logged feed.
+    .where(and(eq(hourLogs.status, "posted"), gte(hourLogs.endAt, since)))
     .orderBy(asc(hourLogs.startAt));
 
   // Scheduled blocks overlapping the same window — built into ReconBlock[]
@@ -384,6 +385,8 @@ async function buildNoShowEvents(
     .from(hourLogs)
     .where(
       and(
+        // 1b security B: a held log must NOT suppress a no-show in the feed.
+        eq(hourLogs.status, "posted"),
         inArray(hourLogs.coachId, coachIds),
         gte(hourLogs.startAt, windowStart),
       ),

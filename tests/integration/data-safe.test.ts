@@ -11,7 +11,10 @@
 //   2. The exporter (pushFacts) against a REAL op_facts table we create on
 //      the dev branch via the raw neon() client (the table is intentionally
 //      absent from this app's Drizzle schema). Exercises the text→jsonb
-//      dims cast and the ON CONFLICT idempotency path.
+//      dims cast and the unique-violation (23505) idempotency path — the
+//      exporter uses a plain INSERT (no ON CONFLICT, which would need SELECT
+//      privilege the write-only prod role lacks) and dedupes by catching the
+//      unique-index violation.
 //
 // truncateMutables() truncates sessions_billing / blocked_times /
 // audit_log / coach_payments / coach_rate_overrides only. hour_logs,
@@ -448,7 +451,8 @@ describe("pushFacts against a real op_facts table", () => {
     expect(dimless.dims_hash).toBe("");
     expect(dimless.dims_hash).toBe(dimsHash(undefined));
 
-    // Re-push the SAME facts → ON CONFLICT DO NOTHING → 0 inserted.
+    // Re-push the SAME facts → both INSERTs raise unique-violation (23505),
+    // caught as idempotent no-ops → 0 inserted.
     const second = await pushFacts(facts, ctx);
     expect(second.attempted).toBe(2);
     expect(second.inserted).toBe(0);

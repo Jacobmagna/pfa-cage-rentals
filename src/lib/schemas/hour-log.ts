@@ -12,6 +12,16 @@ const hourLogShape = {
   note: z.string().max(2000).nullish(),
 };
 
+// 1b security B: create-only fields that drive the held-then-approve gate.
+// Both OPTIONAL so existing callers are unaffected. `source` discriminates
+// the trusted auto-confirm path ("schedule-confirm", never anomaly-checked)
+// from manual entry (default, anomaly-checked); `acknowledgeHold` is the
+// coach's "yes, send this anomalous log to an admin for approval" consent.
+const createOnlyShape = {
+  source: z.enum(["manual", "schedule-confirm"]).optional(),
+  acknowledgeHold: z.boolean().optional(),
+};
+
 const endAfterStart = (v: { startAt: Date; endAt: Date }) =>
   v.startAt < v.endAt;
 const endAfterStartError = {
@@ -31,7 +41,7 @@ const underMaxDurationError = {
 };
 
 export const createHourLogSchema = z
-  .object(hourLogShape)
+  .object({ ...hourLogShape, ...createOnlyShape })
   .refine(endAfterStart, endAfterStartError)
   .refine(underMaxDuration, underMaxDurationError);
 

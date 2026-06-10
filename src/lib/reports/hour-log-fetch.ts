@@ -33,6 +33,9 @@ export async function fetchHourLogRows(
   filters: NormalizedHourLogFilters,
 ): Promise<HourLogWorkbookRow[]> {
   const conditions = [
+    // 1b security B: exclude held (awaiting-approval) logs from the admin
+    // Work Log table + workbook — they're not real logs until approved.
+    eq(hourLogs.status, "posted"),
     gte(hourLogs.startAt, filters.fromDate),
     lt(hourLogs.startAt, filters.toDateExclusive),
   ];

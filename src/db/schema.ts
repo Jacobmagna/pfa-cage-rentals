@@ -49,6 +49,14 @@ export const recurrenceFrequency = pgEnum("recurrence_frequency", [
   "monthly",
 ]);
 
+// 1b security B: lifecycle status of an hour_logs row. "posted" = a real,
+// payable, counted log (the default — every pre-existing row + the
+// auto-confirm + clean-manual paths). "held" = a manual log whose times
+// are anomalous (unscheduled / wrong-time / over-logged) that the coach
+// flagged for admin approval; it is NOT payable and EXCLUDED from every
+// counting read until an admin approves it (flips it to "posted").
+export const hourLogStatus = pgEnum("hour_log_status", ["posted", "held"]);
+
 // QA10 W3-polish15: a coach flag on a scheduled program block. "cancelled"
 // = the coach proactively says they will NOT run a block they're assigned
 // to (optional reason); stays unreviewed until an admin resolves it.
@@ -773,6 +781,14 @@ export const hourLogs = pgTable(
     // stay NULL = unreviewed.
     reviewedAt: timestamp("reviewed_at", { mode: "date" }),
     reviewedBy: text("reviewed_by").references(() => users.id),
+    // 1b security B: lifecycle status. "posted" (default) = a real payable
+    // log counted everywhere; "held" = a manual anomalous log awaiting admin
+    // approval (excluded from every counting read until approved). Existing
+    // rows default to "posted" — purely additive, no backfill.
+    status: hourLogStatus("status").notNull().default("posted"),
+    // The anomaly kind for HELD rows: "unscheduled" | "wrong_time" |
+    // "over_logged". NULL for posted rows.
+    heldReason: text("held_reason"),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),
@@ -786,6 +802,9 @@ export const hourLogs = pgTable(
     index("hour_logs_coach_start_idx").on(table.coachId, table.startAt),
     index("hour_logs_program_start_idx").on(table.programId, table.startAt),
     index("hour_logs_start_idx").on(table.startAt),
+    // 1b security B: powers the admin held-queue + the posted-only exclusion
+    // predicate added to every counting read.
+    index("hour_logs_status_idx").on(table.status),
     // Prevents duplicate hour-logs from a double-confirm/double-tap: a coach
     // can't log the same program at the same exact start/end time twice
     // (an exact (coach, program, start, end) match is always a true dup).
@@ -1090,6 +1109,7 @@ export type CoachProgram = typeof coachPrograms.$inferSelect;
 export type NewCoachProgram = typeof coachPrograms.$inferInsert;
 export type HourLog = typeof hourLogs.$inferSelect;
 export type NewHourLog = typeof hourLogs.$inferInsert;
+export type HourLogStatus = (typeof hourLogStatus.enumValues)[number];
 export type AttendanceSession = typeof attendanceSessions.$inferSelect;
 export type NewAttendanceSession = typeof attendanceSessions.$inferInsert;
 export type AttendanceRecord = typeof attendanceRecords.$inferSelect;

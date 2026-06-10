@@ -20,16 +20,21 @@
 // captures audit failures so a logging hiccup never loses a logged
 // hour). Same shape as the session create path.
 
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, gte, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
   hourLogs,
   programRateOverrides,
+  programScheduleBlockCoaches,
+  programScheduleBlocks,
   programs,
+  users,
 } from "@/db/schema";
 import { type AuthedSession } from "@/lib/authz";
 import { rateForProgram } from "@/lib/billing";
 import {
+  HeldHourLogNotFoundError,
+  HeldLogReviewRequiredError,
   HourLogNotFoundError,
   ProgramInactiveError,
   ProgramNotFoundError,
@@ -38,6 +43,11 @@ import {
   createHourLogSchema,
   editHourLogSchema,
 } from "@/lib/schemas/hour-log";
+import {
+  classifyManualLog,
+  type ReconBlock,
+} from "@/lib/server/reconciliation";
+import { formatPfaTime12h } from "@/lib/timezone";
 import { safeLogAudit } from "./audit-helpers";
 
 // Resolves the per-30-min cents pay rate to stamp on a new hour_logs
@@ -100,6 +110,70 @@ export async function logHourInternal(
     programDefaultCents: program.defaultRatePer30MinCents,
   });
 
+  // 1b security B — held-then-approve gate. Only MANUAL entries (the
+  // default source) are anomaly-checked; the trusted auto-confirm hotlink
+  // passes source:"schedule-confirm" with the block's exact times and is
+  // always posted. For a manual log we fetch the actor's scheduled MEMBER
+  // blocks overlapping the log window (same join as the coach history page)
+  // and classify it. A clean log posts as today; an anomalous one is either
+  // held (coach acknowledged) or refused with a thrown error the form turns
+  // into a "send for approval / go back and edit" warning.
+  const source = parsed.source ?? "manual";
+  let heldReason: "unscheduled" | "wrong_time" | "over_logged" | null = null;
+  if (source === "manual") {
+    const blockRows = await db
+      .select({
+        id: programScheduleBlocks.id,
+        programId: programScheduleBlocks.programId,
+        startAt: programScheduleBlocks.startAt,
+        endAt: programScheduleBlocks.endAt,
+      })
+      .from(programScheduleBlocks)
+      .innerJoin(
+        programScheduleBlockCoaches,
+        eq(programScheduleBlockCoaches.blockId, programScheduleBlocks.id),
+      )
+      .where(
+        and(
+          eq(programScheduleBlockCoaches.coachId, actor.id),
+          // Half-open overlap with the log window.
+          lt(programScheduleBlocks.startAt, parsed.endAt),
+          gte(programScheduleBlocks.endAt, parsed.startAt),
+        ),
+      );
+    // ReconBlock[] — all blocks are the actor's own (coachId = actor.id),
+    // so the in-set checks inside the classifier are satisfied implicitly.
+    // Names are unused by classifyManualLog, so pass "".
+    const blocks: ReconBlock[] = blockRows.map((b) => ({
+      id: b.id,
+      programId: b.programId,
+      scheduledCoachId: actor.id,
+      scheduledCoachName: "",
+      coaches: [{ coachId: actor.id, coachName: "" }],
+      startAt: b.startAt,
+      endAt: b.endAt,
+    }));
+
+    const anomaly = classifyManualLog(
+      {
+        coachId: actor.id,
+        programId: parsed.programId,
+        startAt: parsed.startAt,
+        endAt: parsed.endAt,
+      },
+      blocks,
+      formatPfaTime12h,
+    );
+
+    if (anomaly.kind !== "clean") {
+      if (parsed.acknowledgeHold !== true) {
+        // No write — the coach must explicitly send it for approval.
+        throw new HeldLogReviewRequiredError(anomaly.kind, anomaly.message);
+      }
+      heldReason = anomaly.kind;
+    }
+  }
+
   // Idempotent insert: the hour_logs_coach_program_start_end_unique index
   // (mig 0029) makes an exact (coach, program, start, end) a true duplicate.
   // onConflictDoNothing means a double-confirm/double-tap (or a race between
@@ -116,6 +190,11 @@ export async function logHourInternal(
       note: parsed.note ?? null,
       ratePer30MinCents,
       createdBy: actor.id,
+      // A clean/auto-confirm log omits status → relies on the "posted"
+      // default. Only the held branch stamps status + heldReason.
+      ...(heldReason !== null
+        ? { status: "held" as const, heldReason }
+        : {}),
     })
     .onConflictDoNothing({
       target: [
@@ -260,4 +339,114 @@ export async function resolveHourLogInternal(
     after: updated as unknown as Record<string, unknown>,
   });
   return updated;
+}
+
+// 1b security B — admin APPROVE of a held manual log. Flips status to
+// "posted" so it becomes payable + counted everywhere. We also stamp
+// reviewedAt/reviewedBy so an approved formerly-unscheduled log ALSO leaves
+// the needs-review queue (same marker resolveHourLogInternal uses). Throws
+// HeldHourLogNotFoundError if the row is missing or no longer held (another
+// tab already resolved it).
+export async function approveHeldHourLogInternal(
+  actor: AuthedSession["user"],
+  id: string,
+) {
+  const [existing] = await db
+    .select()
+    .from(hourLogs)
+    .where(eq(hourLogs.id, id))
+    .limit(1);
+  if (!existing || existing.status !== "held") {
+    throw new HeldHourLogNotFoundError(id);
+  }
+
+  const [updated] = await db
+    .update(hourLogs)
+    .set({ status: "posted", reviewedAt: new Date(), reviewedBy: actor.id })
+    .where(eq(hourLogs.id, id))
+    .returning();
+
+  await safeLogAudit(db, {
+    actorUserId: actor.id,
+    entityType: "hour_log",
+    entityId: id,
+    action: "update",
+    before: existing as unknown as Record<string, unknown>,
+    after: updated as unknown as Record<string, unknown>,
+  });
+  return updated;
+}
+
+// 1b security B — admin REJECT of a held manual log. DELETEs the row (the
+// coach must re-enter corrected data — there's no lingering rejected state)
+// and captures the full `before` snapshot in the audit row, threading the
+// optional admin note into the audit `after` payload. Throws
+// HeldHourLogNotFoundError if the row is missing or no longer held.
+export async function rejectHeldHourLogInternal(
+  actor: AuthedSession["user"],
+  id: string,
+  adminNote?: string,
+) {
+  const [existing] = await db
+    .select()
+    .from(hourLogs)
+    .where(eq(hourLogs.id, id))
+    .limit(1);
+  if (!existing || existing.status !== "held") {
+    throw new HeldHourLogNotFoundError(id);
+  }
+
+  await db.delete(hourLogs).where(eq(hourLogs.id, id));
+  await safeLogAudit(db, {
+    actorUserId: actor.id,
+    entityType: "hour_log",
+    entityId: id,
+    action: "delete",
+    before: existing as unknown as Record<string, unknown>,
+    ...(adminNote ? { after: { adminNote } } : {}),
+  });
+}
+
+// 1b security B — the admin held-approval queue, newest-first by createdAt.
+// Joins the coach name (users) + program name (programs). Returns only the
+// fields the queue UI renders.
+export async function loadHeldHourLogs(): Promise<
+  {
+    id: string;
+    coachName: string | null;
+    programName: string;
+    programId: string;
+    startAt: Date;
+    endAt: Date;
+    heldReason: string | null;
+    note: string | null;
+    createdAt: Date;
+  }[]
+> {
+  return db
+    .select({
+      id: hourLogs.id,
+      coachName: users.name,
+      programName: programs.name,
+      programId: hourLogs.programId,
+      startAt: hourLogs.startAt,
+      endAt: hourLogs.endAt,
+      heldReason: hourLogs.heldReason,
+      note: hourLogs.note,
+      createdAt: hourLogs.createdAt,
+    })
+    .from(hourLogs)
+    .innerJoin(users, eq(hourLogs.coachId, users.id))
+    .innerJoin(programs, eq(hourLogs.programId, programs.id))
+    .where(eq(hourLogs.status, "held"))
+    .orderBy(desc(hourLogs.createdAt));
+}
+
+// 1b security B — held-count for the Work Log entry-point badge.
+export async function countHeldHourLogs(): Promise<number> {
+  const rows = await db
+    .select({ id: hourLogs.id })
+    .from(hourLogs)
+    .where(eq(hourLogs.status, "held"));
+  return rows.length;
 }

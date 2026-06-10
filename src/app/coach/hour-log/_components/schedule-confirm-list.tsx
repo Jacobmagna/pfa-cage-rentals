@@ -93,6 +93,10 @@ function ConfirmCard({
           programId: block.programId,
           startAt: new Date(block.startIso),
           endAt: new Date(block.endIso),
+          // 1b security B: the auto-confirm hotlink is TRUSTED — it carries
+          // the block's exact times, so it skips the manual anomaly check
+          // and always posts immediately.
+          source: "schedule-confirm",
         });
         onConfirmed();
       } catch {

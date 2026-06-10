@@ -224,6 +224,33 @@ export class HourLogNotFoundError extends Error {
   }
 }
 
+// 1b security B: a manual hour-log was anomalous (unscheduled / wrong-time /
+// over-logged) and the coach has NOT yet acknowledged sending it to an admin
+// for approval. Thrown by the manual write path BEFORE any insert; the coach
+// form catches this to show the "send for approval or go back and edit"
+// warning. `reason` names the anomaly kind; `message` is the human copy.
+export class HeldLogReviewRequiredError extends Error {
+  readonly code = "HELD_LOG_REVIEW_REQUIRED" as const;
+  constructor(
+    public readonly reason: "unscheduled" | "wrong_time" | "over_logged",
+    message: string,
+  ) {
+    super(message);
+    this.name = "HeldLogReviewRequiredError";
+  }
+}
+
+// 1b security B: an admin approved/rejected a held hour-log that isn't `held`
+// (missing, or already approved/rejected by another tab). Mirrors
+// HourLogNotFoundError's shape.
+export class HeldHourLogNotFoundError extends Error {
+  readonly code = "HELD_HOUR_LOG_NOT_FOUND" as const;
+  constructor(public readonly hourLogId: string) {
+    super(`Held hour log ${hourLogId} not found or already resolved`);
+    this.name = "HeldHourLogNotFoundError";
+  }
+}
+
 // Admin resolve referenced a program_block_coach_flags id that doesn't
 // exist (stale client row, or a direct RPC call with a bogus id).
 // Mirrors HourLogNotFoundError's shape.

@@ -1,6 +1,14 @@
 import Link from "next/link";
 import { and, asc, eq, gte, lt, sql as drizzleSql } from "drizzle-orm";
-import { ArrowLeft, CalendarDays, Clock, Download, Wallet } from "lucide-react";
+import {
+  ArrowLeft,
+  CalendarDays,
+  ChevronRight,
+  Clock,
+  Download,
+  TimerReset,
+  Wallet,
+} from "lucide-react";
 import { db } from "@/db";
 import { hourLogs, programScheduleBlocks, programs } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
@@ -10,6 +18,7 @@ import {
   normalizeHourLogFilters,
 } from "@/lib/reports/hour-log-filters";
 import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
+import { countHeldHourLogs } from "@/lib/server/hour-log-actions";
 import { programMinutes, programPayFromSnapshot } from "@/lib/billing";
 import { formatDollars } from "@/lib/format-money";
 import { pfaDayEnd, pfaDayStart, pfaMonthEnd, pfaMonthStart } from "@/lib/timezone";
@@ -66,6 +75,7 @@ export default async function AdminHourLogPage({
     monthHourLogRows,
     [{ count: programsScheduledToday }],
     reviewItems,
+    heldCount,
   ] = await Promise.all([
     fetchHourLogRowsWithScheduleNotes(filters),
     // Filter dropdown — coaches role only, active only.
@@ -87,6 +97,8 @@ export default async function AdminHourLogPage({
       .from(hourLogs)
       .where(
         and(
+          // 1b security B: held logs are not payable until approved.
+          eq(hourLogs.status, "posted"),
           gte(hourLogs.startAt, monthStart),
           lt(hourLogs.startAt, monthEndExclusive),
         ),
@@ -108,6 +120,9 @@ export default async function AdminHourLogPage({
     // (same merged list the Home dashboard shows), so admins can triage from
     // the Work Log without bouncing back to Home.
     fetchNeedsReviewItems(now),
+    // 1b security B: count of HELD manual logs awaiting approval — powers the
+    // entry-point card below (rendered only when > 0).
+    countHeldHourLogs(),
   ]);
 
   // Card 1: program hours this month — EXACT duration (a 45-min block is
@@ -157,6 +172,30 @@ export default async function AdminHourLogPage({
           laptop for the full experience.
         </p>
       </header>
+
+      {heldCount > 0 ? (
+        <Link
+          href="/admin/hour-log/held"
+          className="mb-6 flex items-center gap-3 rounded-xl border border-line-strong bg-surface px-4 py-3.5 shadow-[var(--shadow-sm)] hover:bg-surface-2 hover:-translate-y-px hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition"
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gold/10 text-fg">
+            <TimerReset className="h-4.5 w-4.5" aria-hidden="true" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-fg">
+              Held work logs ({heldCount})
+            </span>
+            <span className="block text-xs text-fg-muted">
+              Manual logs coaches flagged for approval — review to make them
+              payable.
+            </span>
+          </span>
+          <ChevronRight
+            className="h-4 w-4 shrink-0 text-fg-subtle"
+            aria-hidden="true"
+          />
+        </Link>
+      ) : null}
 
       {reviewItems.length > 0 ? (
         <NeedsReviewCard

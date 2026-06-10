@@ -9,10 +9,12 @@
 // in that role's context. Two contexts: admin + coach. Session-token
 // rows are cleaned up at the end (users are left — FK dependents).
 //
-// Captions: a fixed bottom-third on-brand overlay, mounted on
-// <html> (document.documentElement) so Next.js hydration / route
-// reconciliation can never wipe it. A MutationObserver + setInterval
-// re-assert text/position/visibility through any DOM rebuild.
+// Captions: NO LONGER baked into the recordings. We record CLEAN app
+// screens (only the app UI) and persist a caption MANIFEST
+// (segments/captions.json) mapping each segment slug → { leadIn, text }.
+// post-process.ts composites a single CONSTANT bottom bar + per-section
+// text ON TOP of the xfaded screen track, so the bar never dims during a
+// crossfade. The old in-page #__demo_caption__ overlay is gone.
 //
 // REVEAL MODEL (rewritten 2026-06): there is NO body-hide style, NO
 // full-screen cover, and NO skeleton-guard re-hide loop. We NEVER hide
@@ -29,7 +31,14 @@
 
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { eq } from "drizzle-orm";
 import { demoDb } from "./db";
@@ -70,86 +79,33 @@ const DEMO_ADMIN_EMAIL = "demo-admin@pfa.invalid";
 const DEMO_COACH_EMAIL = "demo-coach@pfa.invalid";
 
 // ---------------------------------------------------------------------------
-// Caption overlay — mounted on <html>, persistent across the segment.
+// Caption MANIFEST — the recordings are now CLEAN (no baked bar). Each
+// segment's caption metadata is persisted to segments/captions.json so the
+// post step can composite a constant bar + windowed text on top of the
+// xfaded screen track.
 // ---------------------------------------------------------------------------
+interface CaptionEntry {
+  leadIn: string;
+  text: string;
+}
+// slug (NN-slug, no extension) → caption metadata, in recorded order.
+const captionManifest: Record<string, CaptionEntry> = {};
+// The slug of the segment currently being recorded; set by recordSegment.
+let currentSlug: string | null = null;
 
-// Set the caption text + lead on the just-navigated document and confirm it
-// is present, visible, and carrying our text. Uses the init-script setter
-// (which persists state + materializes the bar) with an inline fallback.
-async function setCaption(page: Page, text: string, leadIn?: string) {
-  await page.evaluate(
-    ({ text, leadIn }) => {
-      const setter = (
-        window as unknown as {
-          __demoSetCaption?: (t: string, l: string) => void;
-        }
-      ).__demoSetCaption;
-      if (setter) {
-        setter(text, leadIn);
-        return;
-      }
-      // Defensive fallback (should be unreachable once init script ran).
-      // Mount on <body> (post-hydration) — never on <html>, which corrupts
-      // React hydration.
-      const ID = "__demo_caption__";
-      const root = document.body || document.documentElement;
-      let bar = document.getElementById(ID);
-      if (!bar) {
-        bar = document.createElement("div");
-        bar.id = ID;
-        bar.style.cssText =
-          "position:fixed;left:0;right:0;bottom:0;height:22vh;" +
-          "background:#0a0a0a;border-top:3px solid #FFC400;z-index:2147483647;" +
-          "pointer-events:none;display:flex;flex-direction:column;" +
-          "align-items:center;justify-content:center;gap:10px;" +
-          "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;";
-        const main = document.createElement("div");
-        main.id = ID + "_main";
-        main.style.cssText =
-          "color:#FFC400;font-size:40px;font-weight:700;text-align:center;" +
-          "max-width:80vw;line-height:1.2;";
-        bar.appendChild(main);
-        root.appendChild(bar);
-      }
-      const main = document.getElementById(ID + "_main");
-      if (main) main.textContent = text;
-      bar.style.display = "flex";
-    },
-    { text, leadIn: leadIn ?? "" },
-  );
-  // Confirm the caption node is present + visible + carrying our text.
-  await page
-    .waitForFunction(
-      (expected) => {
-        const b = document.getElementById("__demo_caption__");
-        const m = document.getElementById("__demo_caption___main");
-        return (
-          !!b &&
-          b.style.display !== "none" &&
-          !!m &&
-          m.textContent === expected
-        );
-      },
-      text,
-      { timeout: 4_000, polling: 50 },
-    )
-    .catch(() => {});
+// Record this segment's caption metadata into the manifest. NOTHING is
+// rendered into the page anymore — the recordings stay clean and the bar +
+// text are drawn in post-process.
+function setCaption(text: string, leadIn?: string) {
+  if (currentSlug) {
+    captionManifest[currentSlug] = { leadIn: leadIn ?? "", text };
+  }
 }
 
-// Re-assert the caption stays on top after a scroll. Scrolling can reveal
-// sticky/absolutely-positioned app chrome; this moves the caption back to
-// the end of <body> and forces its z-index, without changing its text.
-async function raiseCaption(page: Page) {
-  await page
-    .evaluate(() => {
-      const bar = document.getElementById("__demo_caption__");
-      if (bar && document.body) {
-        bar.style.zIndex = "2147483647";
-        // Re-pin to <body> (last child) so it stays topmost after a scroll.
-        document.body.appendChild(bar);
-      }
-    })
-    .catch(() => {});
+// No-op kept so the scroll path doesn't need to change: there is no in-page
+// caption to re-pin anymore (the bar is composited in post).
+function raiseCaption() {
+  /* clean recordings — nothing to re-assert */
 }
 
 function sleep(ms: number) {
@@ -258,17 +214,15 @@ async function show(
   await waitForNoSkeleton(page);
   // Settle: let fonts/layout paint.
   await sleep(opts.settleMs ?? 800);
-  // Set the caption over the now-live, populated UI.
-  await setCaption(page, opts.caption, opts.leadIn);
+  // Record this segment's caption metadata (composited in post).
+  setCaption(opts.caption, opts.leadIn);
 }
 
 async function gentleScroll(page: Page, dy: number) {
   await page.mouse.wheel(0, dy);
-  // Scrolling can reveal sticky/absolute app chrome that paints over the
-  // caption; re-assert it stays pinned on top before we dwell.
-  await raiseCaption(page);
+  raiseCaption();
   await sleep(700);
-  await raiseCaption(page);
+  raiseCaption();
 }
 
 // ---------------------------------------------------------------------------
@@ -297,130 +251,10 @@ async function newSegmentContext(
       sameSite: "Lax",
     },
   ]);
-  // Define the caption helpers at document-start, but DO NOT touch the DOM
-  // until the recorder ARMS the caption (via __demoSetCaption) — which only
-  // happens AFTER the page has loaded + hydrated. CRITICAL: injecting a node
-  // before hydration corrupts React 19 hydration (an unexpected extra node
-  // makes React bail out and discard the body subtree → blank reveal). So
-  // the caption is appended to document.body ONLY post-hydration. The
-  // MutationObserver + setInterval re-append/repopulate it if React ever
-  // detaches or blanks it, but they too stay inert until armed.
-  await ctx.addInitScript(
-    ({ yellow, black }) => {
-      const CAP_Z = "2147483647";
-
-      interface OverlayState {
-        capText: string;
-        capLead: string;
-        // armed: the recorder has set a caption at least once → safe to
-        // mount/observe (hydration is done by then).
-        armed: boolean;
-      }
-      const w = window as unknown as { __demoOverlay?: OverlayState };
-      if (!w.__demoOverlay) {
-        w.__demoOverlay = { capText: "", capLead: "", armed: false };
-      }
-      const state = w.__demoOverlay;
-
-      // (Re)build the caption bar mounted on <body>. ALWAYS re-applies the
-      // persisted text/lead from `state`, so if React detaches the node it
-      // comes back fully populated. Only ever called once armed.
-      const ensureCaption = () => {
-        if (!state.armed || !document.body) return;
-        const ID = "__demo_caption__";
-        let bar = document.getElementById(ID);
-        if (!bar) {
-          bar = document.createElement("div");
-          bar.id = ID;
-          bar.style.cssText = [
-            "position:fixed",
-            "left:0",
-            "right:0",
-            "bottom:0",
-            "height:22vh",
-            "background:" + black,
-            "border-top:3px solid " + yellow,
-            "z-index:" + CAP_Z,
-            "pointer-events:none",
-            "display:flex",
-            "flex-direction:column",
-            "align-items:center",
-            "justify-content:center",
-            "gap:10px",
-            "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",
-            "box-shadow:0 -8px 40px rgba(0,0,0,0.55)",
-          ].join(";");
-          const lead = document.createElement("div");
-          lead.id = ID + "_lead";
-          lead.style.cssText =
-            "color:rgba(255,255,255,0.55);font-size:20px;font-weight:600;" +
-            "letter-spacing:0.18em;text-transform:uppercase;";
-          const main = document.createElement("div");
-          main.id = ID + "_main";
-          main.style.cssText =
-            "color:" +
-            yellow +
-            ";font-size:40px;font-weight:700;text-align:center;" +
-            "max-width:80vw;line-height:1.2;";
-          bar.appendChild(lead);
-          bar.appendChild(main);
-        }
-        const lead = document.getElementById(ID + "_lead");
-        const main = document.getElementById(ID + "_main");
-        if (lead) {
-          lead.textContent = state.capLead;
-          lead.style.display = state.capLead ? "block" : "none";
-        }
-        if (main) main.textContent = state.capText;
-        bar.style.display = "flex";
-        bar.style.zIndex = CAP_Z;
-        // Keep the caption the LAST child of <body> so it stays topmost.
-        if (bar.parentElement !== document.body) document.body.appendChild(bar);
-        return bar;
-      };
-
-      // Exposed to the recorder: arm + set caption text/lead, then mount it.
-      // The recorder calls this AFTER networkidle + content waits, so the
-      // page is already hydrated and appending to body is safe.
-      (
-        window as unknown as {
-          __demoSetCaption?: (text: string, lead: string) => void;
-        }
-      ).__demoSetCaption = (text: string, lead: string) => {
-        state.capText = text;
-        state.capLead = lead;
-        state.armed = true;
-        ensureCaption();
-      };
-
-      // Re-append/repopulate if React ever detaches or blanks the node —
-      // only while armed (so it never fires during hydration).
-      const needsFix = () => {
-        if (!state.armed || !document.body) return false;
-        const cap = document.getElementById("__demo_caption__");
-        const main = document.getElementById("__demo_caption___main");
-        if (!cap || cap.parentElement !== document.body) return true;
-        if (cap.style.display === "none" || !main) return true;
-        if (main && main.textContent !== state.capText) return true;
-        return false;
-      };
-      const obs = new MutationObserver(() => {
-        if (needsFix()) ensureCaption();
-      });
-      const startObs = () => {
-        if (document.body) obs.observe(document.body, { childList: true, subtree: true });
-      };
-      if (document.body) startObs();
-      else document.addEventListener("DOMContentLoaded", startObs);
-
-      // Fallback: if observer callbacks are starved during heavy work, this
-      // still keeps the caption attached + populated — but only once armed.
-      setInterval(() => {
-        if (state.armed && needsFix()) ensureCaption();
-      }, 200);
-    },
-    { yellow: BRAND_YELLOW, black: BRAND_BLACK },
-  );
+  // NO in-page caption overlay anymore. The recordings capture ONLY the app
+  // UI (clean screens). The constant bottom bar + per-section text are
+  // composited in post-process.ts as a top layer drawn after the screen
+  // xfade, so the bar can never dim during a crossfade.
   return ctx;
 }
 
@@ -525,12 +359,14 @@ async function recordSegment(
   outName: string,
   fn: (page: Page) => Promise<void>,
 ) {
+  currentSlug = outName.replace(/\.webm$/, "");
   const videoDir = path.join(SEGMENTS_DIR, `_tmp_${outName}`);
   const ctx = await newSegmentContext(browser, cookie, videoDir);
   const page = await ctx.newPage();
   await fn(page);
   await finishSegment(ctx, page, videoDir, outName);
   rmSync(videoDir, { recursive: true, force: true });
+  currentSlug = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -902,6 +738,11 @@ async function main() {
     await db.delete(authSessions).where(eq(authSessions.sessionToken, coachToken));
     console.log("[rec] cleaned up demo session tokens.");
   }
+
+  // Persist the caption manifest for the post step: slug → { leadIn, text }.
+  const manifestPath = path.join(SEGMENTS_DIR, "captions.json");
+  writeFileSync(manifestPath, JSON.stringify(captionManifest, null, 2) + "\n");
+  console.log(`[rec] wrote caption manifest → ${manifestPath}`);
 
   console.log("[rec] all segments recorded.");
 }

@@ -99,6 +99,23 @@ export const users = pgTable("users", {
   // pricing, to avoid a destructive migration.
   venmoHandle: text("venmo_handle"),
   zelleContact: text("zelle_contact"),
+  // 1b #25 — 8 AM SMS work-log reminders (DORMANT until the Twilio env is
+  // set at go-live). All four columns are additive + nullable/defaulted, so
+  // they never affect any existing read.
+  //   • smsOptIn       — coach opted IN to reminder texts (default OFF).
+  //   • smsConsentAt   — stamped when they opt in (NULL = never opted in).
+  //   • smsOptOut      — carrier STOP mirror: a coach who texts STOP is
+  //                      flipped to true and never texted again until they
+  //                      re-opt-in. Distinct from smsOptIn so an admin /
+  //                      coach toggle can't silently re-enable a carrier
+  //                      opt-out.
+  //   • smsPromptAnsweredAt — stamped once the coach saves the first-login
+  //                      setup form (whether they opt in or not), so the
+  //                      one-time setup prompt stops showing (Worker B UI).
+  smsOptIn: boolean("sms_opt_in").notNull().default(false),
+  smsConsentAt: timestamp("sms_consent_at", { mode: "date" }),
+  smsOptOut: boolean("sms_opt_out").notNull().default(false),
+  smsPromptAnsweredAt: timestamp("sms_prompt_answered_at", { mode: "date" }),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { mode: "date" }),
 });
@@ -1068,6 +1085,44 @@ export const attendanceRecords = pgTable(
   ],
 );
 
+// 1b #25 — append-only log of the nightly 8 AM SMS work-log reminder send.
+// ONE row per (coach, Pacific calendar date) — the UNIQUE index is the
+// dedup / idempotency guarantee: runSmsReminders claims a row with
+// onConflictDoNothing FIRST, and only actually texts when the claim
+// inserted, so a doubled cron fire (the two DST-spanning vercel.json
+// entries) can never double-text a coach.
+//
+// `forDate` is the Pacific ISO date the reminder is ABOUT (the day the
+// unlogged work was scheduled, e.g. "2026-06-09"), stored as a text string
+// rather than a timestamp so the dedup key is the human calendar day, not a
+// UTC instant. `status` records the outcome: "sent" (Twilio accepted),
+// "failed" (Twilio error — see `error`), "skipped_optout" (coach was opted
+// out at send time), "no_phone" (no valid phone on file). `twilioSid` is the
+// message SID on a successful send. DORMANT until go-live: nothing writes
+// here while the capability is disabled.
+export const smsReminderLog = pgTable(
+  "sms_reminder_log",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id),
+    forDate: text("for_date").notNull(),
+    sentAt: timestamp("sent_at", { mode: "date" }).notNull().defaultNow(),
+    twilioSid: text("twilio_sid"),
+    status: text("status").notNull(),
+    error: text("error"),
+  },
+  (table) => [
+    uniqueIndex("sms_reminder_log_coach_for_date_unique").on(
+      table.coachId,
+      table.forDate,
+    ),
+  ],
+);
+
 export type CoachPayment = typeof coachPayments.$inferSelect;
 export type NewCoachPayment = typeof coachPayments.$inferInsert;
 
@@ -1133,3 +1188,5 @@ export type BlockCoachFlagKind = (typeof blockCoachFlagKind.enumValues)[number];
 export type SessionCancellation = typeof sessionCancellations.$inferSelect;
 export type NewSessionCancellation =
   typeof sessionCancellations.$inferInsert;
+export type SmsReminderLog = typeof smsReminderLog.$inferSelect;
+export type NewSmsReminderLog = typeof smsReminderLog.$inferInsert;

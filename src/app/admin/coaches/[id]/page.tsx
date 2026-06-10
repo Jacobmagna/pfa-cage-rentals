@@ -63,6 +63,9 @@ export default async function AdminCoachDetailPage({
           createdAt: users.createdAt,
           phone: users.phone,
           zelleContact: users.zelleContact,
+          smsOptIn: users.smsOptIn,
+          smsConsentAt: users.smsConsentAt,
+          smsOptOut: users.smsOptOut,
         })
         .from(users)
         .where(and(eq(users.id, id), isNull(users.deletedAt)))
@@ -213,6 +216,13 @@ export default async function AdminCoachDetailPage({
         initialZelleContact={coach.zelleContact}
       />
 
+      <SmsReminderStatus
+        optIn={coach.smsOptIn}
+        optOut={coach.smsOptOut}
+        phone={coach.phone}
+        consentAt={coach.smsConsentAt}
+      />
+
       <CoachPaymentsCard
         coachId={coach.id}
         owedCents={owedCents}
@@ -228,5 +238,59 @@ export default async function AdminCoachDetailPage({
         isAdmin={false}
       />
     </>
+  );
+}
+
+// 1b #25 — READ-ONLY SMS-reminder status. Admins can SEE whether a coach
+// opted in (and their phone + consent date) but cannot toggle it here:
+// SMS consent is the coach's own deliberate choice (Twilio A2P requires
+// the recipient to opt in), so this surface is purely informational. The
+// coach manages it from /coach.
+function SmsReminderStatus({
+  optIn,
+  optOut,
+  phone,
+  consentAt,
+}: {
+  optIn: boolean;
+  optOut: boolean;
+  phone: string | null;
+  consentAt: Date | null;
+}) {
+  // optOut (carrier STOP) overrides an opt-in: the coach won't receive
+  // texts even if smsOptIn is still true.
+  const reminders = optIn && !optOut ? "On" : "Off";
+  return (
+    <section className="my-8 rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] overflow-hidden">
+      <header className="px-5 py-4 border-b border-line">
+        <h3 className="text-base font-semibold text-fg">Text reminders</h3>
+        <p className="mt-1 text-xs text-fg-muted leading-relaxed">
+          Whether this coach opted in to work-log reminder texts. Read-only —
+          the coach manages this from their own dashboard.
+        </p>
+      </header>
+      <dl className="p-5 space-y-2 text-sm">
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-fg-muted">Reminders</dt>
+          <dd className="font-medium text-fg">{reminders}</dd>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-fg-muted">Phone on file</dt>
+          <dd className="font-medium text-fg">{phone ?? "none"}</dd>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-fg-muted">Consented</dt>
+          <dd className="font-medium text-fg">
+            {consentAt ? formatPfaDateMedium(consentAt) : "—"}
+          </dd>
+        </div>
+        {optOut ? (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-fg-muted">Carrier opt-out</dt>
+            <dd className="font-medium text-danger">Replied STOP</dd>
+          </div>
+        ) : null}
+      </dl>
+    </section>
   );
 }

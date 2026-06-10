@@ -120,6 +120,19 @@ export default function TermsPage() {
           </p>
         </Section>
 
+        <Section title="SMS reminders">
+          <p>
+            PFA Engine offers an optional SMS reminder program for coaches. If
+            you opt in, you may receive text reminders about unlogged work. See
+            our{" "}
+            <a className="text-gold-strong underline underline-offset-2 hover:text-fg-muted" href="/sms-terms">
+              SMS Terms
+            </a>{" "}
+            for the full messaging terms, including frequency, cost, and how to
+            opt out.
+          </p>
+        </Section>
+
         <Section title="Contact">
           <p>
             Questions about these terms?{" "}

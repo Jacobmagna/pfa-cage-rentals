@@ -14,11 +14,21 @@
 export const TWILIO_OPT_OUT_CODE = 21610;
 
 /**
- * The reminder body. EXACT copy — do NOT change wording (it's locked scope).
- * `link` is the deep link to the coach Work Log.
+ * The deep link to the coach Work Log used in the reminder body. PINNED to
+ * the bare production domain (no shortener) because it must match the
+ * registered A2P message sample EXACTLY. Deliberately NOT derived from
+ * `AUTH_URL` (which is the www. canonical host) — the registered sample uses
+ * the bare apex domain.
+ */
+export const SMS_LOG_URL = "https://pfaengine.com/coach/hour-log";
+
+/**
+ * The reminder body. EXACT copy — must match the registered A2P campaign
+ * message sample (do NOT change wording). `link` is the deep link to the
+ * coach Work Log (pass SMS_LOG_URL).
  */
 export function renderReminderBody(link: string): string {
-  return `PFA Engine: You had work scheduled yesterday that hasn't been logged. Please log it: ${link} Reply STOP to opt out.`;
+  return `PFA Engine: Hi Coach — you haven't logged your work for yesterday yet. Log it here: ${link} Reply STOP to opt out, HELP for help.`;
 }
 
 export class SmsSendError extends Error {

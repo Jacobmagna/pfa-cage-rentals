@@ -107,10 +107,38 @@ export default function PrivacyPage() {
               <strong>Upstash</strong> (rate limiting): stores email + IP rate
               counters for ~1 hour windows.
             </li>
+            <li>
+              <strong>Twilio</strong> (SMS): delivers coach reminder texts;
+              receives the mobile number + message content.
+            </li>
           </ul>
           <p>
             We do not sell your data to anyone and do not share it with third
             parties for their own marketing.
+          </p>
+        </Section>
+
+        <Section title="SMS reminders">
+          <p>
+            Coaches can optionally turn on text-message reminders for unlogged
+            scheduled work. If you opt in, you provide a mobile phone number
+            that is used only to send those work-log reminder texts. We deliver
+            these messages through <strong>Twilio</strong>, our SMS provider,
+            which receives your mobile number and the message content.
+          </p>
+          <p>
+            No mobile information will be shared with third parties or
+            affiliates for marketing or promotional purposes. Information
+            collected for SMS reminders is used solely to deliver those
+            messages.
+          </p>
+          <p>
+            Reply <strong>STOP</strong> to any reminder to opt out at any time,
+            or <strong>HELP</strong> for help. See our{" "}
+            <a className="text-gold-strong underline underline-offset-2 hover:text-fg-muted" href="/sms-terms">
+              SMS Terms
+            </a>{" "}
+            for full details.
           </p>
         </Section>
 

@@ -3,6 +3,14 @@
     {
       "path": "/api/cron/data-safe-snapshot",
       "schedule": "0 8 * * 1"
+    },
+    {
+      "path": "/api/cron/sms-reminders",
+      "schedule": "5 15 * * *"
+    },
+    {
+      "path": "/api/cron/sms-reminders",
+      "schedule": "5 16 * * *"
     }
   ]
 }

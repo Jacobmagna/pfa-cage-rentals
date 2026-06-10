@@ -9,7 +9,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { db } from "@/db";
-import { coachPayments, sessionsBilling } from "@/db/schema";
+import { coachPayments, sessionsBilling, users } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
 import { totalFromSnapshot } from "@/lib/billing";
 import {
@@ -19,6 +19,7 @@ import {
   pfaMonthStart,
 } from "@/lib/timezone";
 import { EditableName } from "../_components/editable-name";
+import { SmsReminderCard } from "./_components/sms-reminder-card";
 
 // /coach landing. Two stat tiles + the two actions a coach actually
 // does (log a new session, review history). The /coach/payments
@@ -52,6 +53,7 @@ export default async function CoachHome() {
     [{ count: totalEver }],
     allSessionRows,
     confirmedPaymentRows,
+    [smsRow],
   ] = await Promise.all([
     db
       .select({
@@ -92,6 +94,19 @@ export default async function CoachHome() {
           isNull(coachPayments.deletedAt),
         ),
       ),
+    // 1b #25: this coach's own SMS-reminder prefs (coach-scoped to
+    // session.user.id) — drives the first-login setup prompt + the
+    // compact "Text reminders" settings card.
+    db
+      .select({
+        phone: users.phone,
+        smsOptIn: users.smsOptIn,
+        smsConsentAt: users.smsConsentAt,
+        smsPromptAnsweredAt: users.smsPromptAnsweredAt,
+      })
+      .from(users)
+      .where(eq(users.id, coachId))
+      .limit(1),
   ]);
 
   const monthCount = monthSessionRows.length;
@@ -123,6 +138,12 @@ export default async function CoachHome() {
           <EditableName initialName={displayName} />
         </h1>
       </header>
+
+      <SmsReminderCard
+        initialPhone={smsRow?.phone ?? null}
+        initialOptIn={smsRow?.smsOptIn ?? false}
+        initialPromptAnswered={smsRow?.smsPromptAnsweredAt != null}
+      />
 
       <section
         aria-label="This month"

@@ -239,6 +239,13 @@
       "when": 1781048239815,
       "tag": "0033_furry_gunslinger",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1781060006186,
+      "tag": "0034_flippant_mojo",
+      "breakpoints": true
     }
   ]
 }

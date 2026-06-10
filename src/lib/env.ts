@@ -70,6 +70,20 @@ export const DATA_SAFE_SCHEMA = z.object({
   CRON_SECRET: z.string().optional(),
 });
 
+// 1b #25 — SMS work-log reminder job (src/lib/sms/* + the sms-reminders cron)
+// + Vercel cron auth. ALL OPTIONAL and parsed SEPARATELY (NOT wired into
+// getMissingRequiredEnv) so an absent var never fails validation or
+// /api/health — the whole capability is DORMANT until go-live. getSmsConfig()
+// reads process.env lazily; this schema exists only to document + loosely
+// shape the vars. CRON_SECRET is shared with DATA_SAFE_SCHEMA above (Vercel
+// cron auth for both cron routes).
+export const SMS_SCHEMA = z.object({
+  SMS_ENABLED: z.string().optional(),
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_FROM_NUMBER: z.string().optional(),
+});
+
 export type MissingEnv = {
   key: string;
   reason: string;

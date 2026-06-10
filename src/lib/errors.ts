@@ -381,3 +381,13 @@ export class BlockConflictsWithSessionError extends Error {
     this.name = "BlockConflictsWithSessionError";
   }
 }
+
+// 1b #25 — the coach tried to enable SMS reminders without a valid phone
+// number on file (or supplied a number we couldn't normalize to E.164).
+export class SmsPhoneRequiredError extends Error {
+  readonly code = "SMS_PHONE_REQUIRED" as const;
+  constructor() {
+    super("A valid phone number is required to receive reminder texts");
+    this.name = "SmsPhoneRequiredError";
+  }
+}

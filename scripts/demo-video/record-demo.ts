@@ -526,7 +526,24 @@ async function main() {
           "It flags what needs attention — no-shows, unlogged hours, cancellations.",
         leadIn: ADMIN_LEAD,
       });
-      await gentleScroll(page, 900);
+      // The /admin Home loads scrolled-to-top showing the Master Schedule
+      // first. Scroll DOWN to the Needs-review/stat-cards band and frame it,
+      // then SETTLE so the band is steady (not mid-scroll) before the hold.
+      // We bring the Needs-review card into view rather than guessing a pixel
+      // offset (the master schedule's height varies with seeded blocks).
+      await page
+        .getByText("Needs review", { exact: false })
+        .first()
+        .scrollIntoViewIfNeeded()
+        .catch(() => {});
+      // Nudge up slightly so the stat cards above the Needs-review card are
+      // also in frame (scrollIntoView pins the target to the top edge).
+      await page.mouse.wheel(0, -180);
+      await sleep(900); // settle the framed top-of-dashboard view
+      // HOLD on the alerts/stat-cards band with NO scroll — long enough to
+      // read the Needs-review alerts (~3.5s).
+      await sleep(3500);
+      // THEN gentle-scroll down to the Recent Activity feed and pause there.
       await gentleScroll(page, 700);
       await sleep(2000);
     });

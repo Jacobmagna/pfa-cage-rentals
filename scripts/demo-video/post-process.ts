@@ -50,13 +50,27 @@ function main() {
     throw new Error(`No .webm segments found in ${RAW_DIR}. Run record-demo first.`);
   }
 
+  // FEATURE segments get the first ~1.0s trimmed to remove any brief
+  // loading flash at the very start of the navigation. The intro/outro
+  // brand CARDS (00-intro, 99-outro) are NOT trimmed — they render
+  // instantly and have no lead-in to remove.
+  const TRIM_LEAD_SECONDS = 1.0;
+  const isCard = (webm: string) =>
+    /^00-/.test(webm) || /^99-/.test(webm);
+
   const mp4s: string[] = [];
   for (const webm of webms) {
     const base = webm.replace(/\.webm$/, ".mp4");
     const dest = path.join(OUT_SEGMENTS, base);
-    console.log(`[post] normalize ${webm} → segments/${base}`);
+    const trim = !isCard(webm);
+    console.log(
+      `[post] normalize ${webm} → segments/${base}${trim ? ` (trim ${TRIM_LEAD_SECONDS}s lead)` : ""}`,
+    );
     run([
       "-y",
+      // -ss BEFORE -i seeks the input; for a feature segment this drops the
+      // first ~1.0s (the navigation lead-in) before re-encoding.
+      ...(trim ? ["-ss", String(TRIM_LEAD_SECONDS)] : []),
       "-i",
       path.join(RAW_DIR, webm),
       "-vf",

@@ -9,9 +9,20 @@
 // in that role's context. Two contexts: admin + coach. Session-token
 // rows are cleaned up at the end (users are left — FK dependents).
 //
-// Captions: a fixed bottom-third on-brand overlay, re-injected after
-// every navigation. Intro/outro are full-screen brand cards rendered
-// via page.setContent.
+// Captions: a fixed bottom-third on-brand overlay, mounted on
+// <html> (document.documentElement) so Next.js hydration / route
+// reconciliation can never wipe it. A MutationObserver + setInterval
+// re-assert text/position/visibility through any DOM rebuild.
+//
+// REVEAL MODEL (rewritten 2026-06): there is NO body-hide style, NO
+// full-screen cover, and NO skeleton-guard re-hide loop. We NEVER hide
+// the body. Instead, per segment we navigate, wait for networkidle, wait
+// for a CONCRETE content anchor to be visible AND for the loading
+// skeleton (.animate-pulse) to be gone, settle, set the caption, and
+// dwell over the live populated UI. Any brief opening flash is removed
+// deterministically in post-process by trimming the first ~1s of each
+// FEATURE segment (cards are not trimmed). This guarantees the recorded
+// dwell is the real, populated UI — the caption simply sits over it.
 //
 // Output: raw .webm per segment → scripts/demo-video/segments/NN-slug.webm.
 // ffmpeg post-process (separate step) normalizes + concatenates.
@@ -22,7 +33,8 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs"
 import path from "node:path";
 import { eq } from "drizzle-orm";
 import { demoDb } from "./db";
-import { sessions as authSessions, users } from "../../src/db/schema";
+import { programs, sessions as authSessions, users } from "../../src/db/schema";
+import { formatPfaDate } from "../../src/lib/timezone";
 
 const BASE_URL = process.env.DEMO_BASE_URL ?? "http://localhost:3001";
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -58,198 +70,13 @@ const DEMO_ADMIN_EMAIL = "demo-admin@pfa.invalid";
 const DEMO_COACH_EMAIL = "demo-coach@pfa.invalid";
 
 // ---------------------------------------------------------------------------
-// Caption overlay — injected into the page, persistent across the segment.
+// Caption overlay — mounted on <html>, persistent across the segment.
 // ---------------------------------------------------------------------------
 
-// Prime the overlay on the CURRENT page (typically about:blank, before the
-// first goto). The init script only runs on a real navigation, so about:blank
-// has neither cover nor caption — it would record as a white flash. This
-// paints a full-screen black cover AND the caption bar (caption on top) right
-// now, so the recording starts as "black screen + caption" instead of white.
-async function primeOverlay(page: Page, text: string, leadIn?: string) {
-  await page
-    .evaluate(
-      ({ text, leadIn, yellow, black }) => {
-        const root = document.documentElement || document.body;
-        if (!root) return;
-        // Stash caption text in window.name — it SURVIVES the upcoming
-        // same-tab navigation, so the next document's init script can restore
-        // the caption text instantly (no empty-bar flash between documents).
-        try {
-          window.name = JSON.stringify({ __demoCap: { text, lead: leadIn ?? "" } });
-        } catch {
-          /* noop */
-        }
-        // Cover.
-        if (!document.getElementById("__demo_cover__")) {
-          const cover = document.createElement("div");
-          cover.id = "__demo_cover__";
-          cover.style.cssText =
-            "position:fixed;inset:0;background:#0a0a0a;z-index:2147483646;" +
-            "pointer-events:none;transition:opacity 350ms ease;opacity:1;";
-          root.appendChild(cover);
-        }
-        // Caption (on top of cover).
-        const ID = "__demo_caption__";
-        let bar = document.getElementById(ID);
-        if (!bar) {
-          bar = document.createElement("div");
-          bar.id = ID;
-          bar.style.cssText = [
-            "position:fixed",
-            "left:0",
-            "right:0",
-            "bottom:0",
-            "height:22vh",
-            "background:" + black,
-            "border-top:3px solid " + yellow,
-            "z-index:2147483647",
-            "pointer-events:none",
-            "display:flex",
-            "flex-direction:column",
-            "align-items:center",
-            "justify-content:center",
-            "gap:10px",
-            "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",
-            "box-shadow:0 -8px 40px rgba(0,0,0,0.55)",
-          ].join(";");
-          const lead = document.createElement("div");
-          lead.id = ID + "_lead";
-          lead.style.cssText =
-            "color:rgba(255,255,255,0.55);font-size:20px;font-weight:600;" +
-            "letter-spacing:0.18em;text-transform:uppercase;";
-          const main = document.createElement("div");
-          main.id = ID + "_main";
-          main.style.cssText =
-            "color:" +
-            yellow +
-            ";font-size:40px;font-weight:700;text-align:center;" +
-            "max-width:80vw;line-height:1.2;";
-          bar.appendChild(lead);
-          bar.appendChild(main);
-          root.appendChild(bar);
-        }
-        const lead = document.getElementById(ID + "_lead");
-        const main = document.getElementById(ID + "_main");
-        if (lead) {
-          lead.textContent = leadIn ?? "";
-          lead.style.display = leadIn ? "block" : "none";
-        }
-        if (main) main.textContent = text;
-        bar.style.display = "flex";
-      },
-      { text, leadIn: leadIn ?? "", yellow: BRAND_YELLOW, black: BRAND_BLACK },
-    )
-    .catch(() => {});
-  // Give the frame a moment to paint the primed overlay before we navigate.
-  await sleep(150);
-}
-
-// Re-assert the FULL overlay (opaque cover + populated caption) on the
-// just-parsed document, regardless of init-script timing. Resets the
-// coverRemoved latch to false (this is a fresh page that must be covered)
-// and re-applies caption text via the persisted-state setter when present.
-async function forceOverlay(page: Page, text: string, leadIn?: string) {
-  await page
-    .evaluate(
-      ({ text, leadIn, yellow, black }) => {
-        const root = document.documentElement || document.body;
-        if (!root) return;
-        // Reset the cover latch so the cover is allowed up on this new page,
-        // and (re)set the caption state via the init-script setter if it ran.
-        const st = (
-          window as unknown as {
-            __demoOverlay?: { coverRemoved: boolean };
-          }
-        ).__demoOverlay;
-        if (st) st.coverRemoved = false;
-        const setter = (
-          window as unknown as {
-            __demoSetCaption?: (t: string, l: string) => void;
-          }
-        ).__demoSetCaption;
-        // Body-hide style (kills any SSR skeleton paint; cover+caption on
-        // <html> stay visible via the allow-list).
-        let hide = document.getElementById("__demo_hide_style__");
-        if (!hide) {
-          hide = document.createElement("style");
-          hide.id = "__demo_hide_style__";
-          hide.textContent =
-            // opacity:0 (not visibility:hidden) so Playwright still treats
-            // in-body elements as "visible" for its waitFor checks, while the
-            // skeleton is visually gone. Cover+caption live on <html>, not
-            // body, so body opacity never affects them.
-            "body{opacity:0 !important}";
-          (document.head || root).appendChild(hide);
-        }
-        // Cover (opaque, full screen, just below the caption).
-        let cover = document.getElementById("__demo_cover__");
-        if (!cover) {
-          cover = document.createElement("div");
-          cover.id = "__demo_cover__";
-          root.appendChild(cover);
-        }
-        cover.style.cssText =
-          "position:fixed;inset:0;background:#0a0a0a;z-index:2147483646;" +
-          "pointer-events:none;transition:opacity 350ms ease;opacity:1;";
-        if (cover.parentElement !== root) root.appendChild(cover);
-        // Caption (on top of cover).
-        if (setter) {
-          setter(text, leadIn);
-        } else {
-          const ID = "__demo_caption__";
-          let bar = document.getElementById(ID);
-          if (!bar) {
-            bar = document.createElement("div");
-            bar.id = ID;
-            bar.style.cssText = [
-              "position:fixed;left:0;right:0;bottom:0;height:22vh",
-              "background:" + black,
-              "border-top:3px solid " + yellow,
-              "z-index:2147483647;pointer-events:none;display:flex",
-              "flex-direction:column;align-items:center;justify-content:center;gap:10px",
-              "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",
-            ].join(";");
-            const lead = document.createElement("div");
-            lead.id = ID + "_lead";
-            lead.style.cssText =
-              "color:rgba(255,255,255,0.55);font-size:20px;font-weight:600;" +
-              "letter-spacing:0.18em;text-transform:uppercase;";
-            const main = document.createElement("div");
-            main.id = ID + "_main";
-            main.style.cssText =
-              "color:" +
-              yellow +
-              ";font-size:40px;font-weight:700;text-align:center;max-width:80vw;line-height:1.2;";
-            bar.appendChild(lead);
-            bar.appendChild(main);
-            root.appendChild(bar);
-          }
-          const lead = document.getElementById(ID + "_lead");
-          const main = document.getElementById(ID + "_main");
-          if (lead) {
-            lead.textContent = leadIn ?? "";
-            lead.style.display = leadIn ? "block" : "none";
-          }
-          if (main) main.textContent = text;
-          bar.style.display = "flex";
-          if (bar.parentElement !== root) root.appendChild(bar);
-        }
-        // Caption must stay the LAST child (topmost) over the cover.
-        const bar2 = document.getElementById("__demo_caption__");
-        if (bar2 && bar2.parentElement === root) root.appendChild(bar2);
-      },
-      { text, leadIn: leadIn ?? "", yellow: BRAND_YELLOW, black: BRAND_BLACK },
-    )
-    .catch(() => {});
-}
-
+// Set the caption text + lead on the just-navigated document and confirm it
+// is present, visible, and carrying our text. Uses the init-script setter
+// (which persists state + materializes the bar) with an inline fallback.
 async function setCaption(page: Page, text: string, leadIn?: string) {
-  // Source of truth is window.__demoOverlay (set up by the context init
-  // script). __demoSetCaption persists text+lead+shown there and materializes
-  // the bar from state; the MutationObserver/interval then keep it that way
-  // through any hydration rebuild, so the caption never blanks. (Fallback
-  // rebuild inline in case the init script global isn't present yet.)
   await page.evaluate(
     ({ text, leadIn }) => {
       const setter = (
@@ -262,15 +89,17 @@ async function setCaption(page: Page, text: string, leadIn?: string) {
         return;
       }
       // Defensive fallback (should be unreachable once init script ran).
+      // Mount on <body> (post-hydration) — never on <html>, which corrupts
+      // React hydration.
       const ID = "__demo_caption__";
-      const root = document.documentElement || document.body;
+      const root = document.body || document.documentElement;
       let bar = document.getElementById(ID);
       if (!bar) {
         bar = document.createElement("div");
         bar.id = ID;
         bar.style.cssText =
           "position:fixed;left:0;right:0;bottom:0;height:22vh;" +
-          "background:#0a0a0a;border-top:3px solid #FFC400;z-index:2147483646;" +
+          "background:#0a0a0a;border-top:3px solid #FFC400;z-index:2147483647;" +
           "pointer-events:none;display:flex;flex-direction:column;" +
           "align-items:center;justify-content:center;gap:10px;" +
           "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;";
@@ -288,8 +117,7 @@ async function setCaption(page: Page, text: string, leadIn?: string) {
     },
     { text, leadIn: leadIn ?? "" },
   );
-  // Confirm the caption node is present + visible + carrying our text BEFORE
-  // the caller lifts the cover, so the first revealed frame has the caption.
+  // Confirm the caption node is present + visible + carrying our text.
   await page
     .waitForFunction(
       (expected) => {
@@ -315,11 +143,10 @@ async function raiseCaption(page: Page) {
   await page
     .evaluate(() => {
       const bar = document.getElementById("__demo_caption__");
-      const root = document.documentElement || document.body;
-      if (bar && root) {
-        bar.style.zIndex = "2147483646";
-        // Re-pin to <html> (last child) so it stays topmost after a scroll.
-        root.appendChild(bar);
+      if (bar && document.body) {
+        bar.style.zIndex = "2147483647";
+        // Re-pin to <body> (last child) so it stays topmost after a scroll.
+        document.body.appendChild(bar);
       }
     })
     .catch(() => {});
@@ -329,141 +156,110 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// True when NO loading state remains: no Tailwind skeleton-pulse element
-// AND no route loading.tsx shell (LoadingShell renders role="status"
-// aria-live="polite"). Evaluated in-page.
-function noLoadingState(): boolean {
-  if (document.querySelectorAll(".animate-pulse").length > 0) return false;
-  // The route-segment skeleton shell. Match the LoadingShell signature
-  // (role=status + aria-live=polite) rather than ALL role=status (toasts
-  // etc. also use status) so we only key off the loading fallback.
-  const shells = document.querySelectorAll(
-    '[role="status"][aria-live="polite"]',
-  );
-  for (const s of Array.from(shells)) {
-    if ((s.textContent || "").toLowerCase().includes("loading")) return false;
-  }
-  return true;
-}
-
-// Wait for the page's real content to appear: a visible <h1> with
-// non-empty text, an optional page-specific heading/sentinel, AND no
-// remaining loading state (skeleton-pulse placeholders OR the route
-// loading.tsx shell). Tolerant — returns after the timeout either way so
-// a flaky page never aborts the recording. Generous timeouts: this runs
-// UNDER the black cover, so waiting longer never shows a bad frame.
-async function waitForContent(
-  page: Page,
-  headingText?: string,
-  readyText?: string,
-) {
-  // First, a visible heading with text.
-  await page
-    .locator("h1")
+// Wait for the app nav bar to be present — a sticky <header> containing the
+// "PFA Engine" logo image. A MISSING nav means the context is not
+// authenticated (or wrong role); we surface that loudly so the segment is
+// never recorded blank.
+async function waitForNav(page: Page, label: string) {
+  const ok = await page
+    .locator('header img[alt="PFA Engine"]')
     .first()
-    .waitFor({ state: "visible", timeout: 30_000 })
-    .catch(() => {});
-  if (headingText) {
-    await page
-      .getByRole("heading", { name: headingText, exact: false })
-      .first()
-      .waitFor({ state: "visible", timeout: 25_000 })
-      .catch(() => {});
+    .waitFor({ state: "visible", timeout: 15_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!ok) {
+    console.warn(
+      `[rec] WARNING: nav bar not visible on ${label} — context may be ` +
+        `unauthenticated or wrong role.`,
+    );
   }
-  // A page-specific "real content has loaded" sentinel (e.g. a table row
-  // or a known label) — only present once the route-segment loading.tsx
-  // skeleton has been replaced by the real page.
-  if (readyText) {
-    await page
-      .getByText(readyText, { exact: false })
-      .first()
-      .waitFor({ state: "visible", timeout: 25_000 })
-      .catch(() => {});
-  }
-  // Then wait for ALL loading state to clear — and STAY clear, so a page
-  // that renders a heading, then streams a second deferred chunk as its
-  // own skeleton (e.g. the work-log / reports / audit table) isn't revealed
-  // during the gap. Heavy admin pages render the route loading.tsx skeleton,
-  // briefly clear it, then re-skeleton the streamed table — so require the
-  // clear state to HOLD across MULTIPLE consecutive readings over ~1.5s, not
-  // just one transient clear moment. STRICTLY BOUNDED so it can never stall:
-  // two clear checks ~800ms apart, each capped at 12s. This all happens UNDER
-  // the body-hide + cover, so even if a streamed skeleton slips past these
-  // checks it is never visible; the checks just bias the reveal toward a
-  // loaded page. (No unbounded stability loop — that risked an infinite wait
-  // on a page that perpetually re-skeletons.)
-  const loadingGone = () =>
-    page
-      .waitForFunction(noLoadingState, undefined, {
-        timeout: 12_000,
-        polling: 150,
-      })
-      .catch(() => {});
-  await loadingGone();
-  await sleep(800);
-  await loadingGone();
+  return ok;
 }
 
-// Robust navigate: go to the route, wait for REAL content (heading +
-// no skeletons), THEN set the caption so the whole captioned dwell shows
-// loaded data. Never throws on a flaky selector.
+// Wait for the route's loading skeleton to be fully gone: no Tailwind
+// .animate-pulse element remains. Bounded so a flaky page never stalls.
+async function waitForNoSkeleton(page: Page) {
+  await page
+    .waitForFunction(
+      () => document.querySelectorAll(".animate-pulse").length === 0,
+      undefined,
+      { timeout: 15_000, polling: 150 },
+    )
+    .catch(() => {});
+}
+
+// Wait for a CONCRETE content anchor to be visible on the page. `anchors`
+// is a list of candidate locators; we RACE them and proceed the instant the
+// FIRST one becomes visible (a populated page satisfies one quickly). Only if
+// NONE appear within the timeout do we wait the full window and then warn.
+// Using a race (not Promise.all) is what keeps segment durations tight — an
+// all-settle wait would block on every non-matching anchor's full timeout.
+async function waitForAnchor(
+  page: Page,
+  anchors: Array<import("playwright").Locator>,
+  label: string,
+) {
+  if (anchors.length === 0) return;
+  const firstHit = new Promise<boolean>((resolve) => {
+    let pending = anchors.length;
+    for (const loc of anchors) {
+      loc
+        .first()
+        .waitFor({ state: "visible", timeout: 15_000 })
+        .then(() => resolve(true)) // first visible anchor wins immediately
+        .catch(() => {
+          // resolve(false) only once ALL anchors have failed
+          if (--pending === 0) resolve(false);
+        });
+    }
+  });
+  const ok = await firstHit;
+  if (!ok) {
+    console.warn(`[rec] WARNING: no content anchor visible on ${label}.`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Navigate + reveal: the simple, robust per-segment flow (no cover, no
+// body-hide). goto(domcontentloaded) → networkidle → nav visible → content
+// anchor visible → skeleton gone → settle → set caption → (caller dwells).
+// ---------------------------------------------------------------------------
 async function show(
   page: Page,
   route: string,
   opts: {
-    waitFor?: string;
-    readyText?: string;
+    anchors?: (page: Page) => Array<import("playwright").Locator>;
     caption: string;
     leadIn?: string;
     settleMs?: number;
-  } = {
-    caption: "",
   },
 ) {
-  // Paint the cover + set the caption on the CURRENT page (about:blank or the
-  // prior route) BEFORE navigating. This kills the white about:blank flash at
-  // the very start of the recording and means the caption is already showing
-  // (on top of the black cover) from the FIRST recorded frame — so a slow
-  // page load is just "black screen with the caption", never a blank/skeleton.
-  await primeOverlay(page, opts.caption, opts.leadIn);
-  const gotoStart = Date.now();
   try {
-    // waitUntil:"commit" returns the instant the navigation commits — BEFORE
-    // the SSR body (loading skeleton) parses and paints. We then forceOverlay
-    // immediately, so the cover + body-hide are applied ahead of the skeleton's
-    // first paint, closing the recording-start race where the encoder would
-    // otherwise capture a few bare-skeleton frames at t≈0.
     await page.goto(`${BASE_URL}${route}`, {
-      waitUntil: "commit",
+      waitUntil: "domcontentloaded",
       timeout: 45_000,
     });
   } catch (e) {
-    console.warn(`[rec] goto ${route} slow/failed: ${(e as Error).message.slice(0, 80)}`);
+    console.warn(
+      `[rec] goto ${route} slow/failed: ${(e as Error).message.slice(0, 80)}`,
+    );
   }
-  // Belt-and-braces: explicitly re-assert the cover + caption the instant the
-  // new document is parsed (domcontentloaded). The document-start init script
-  // SHOULD have painted the cover already, but on a fast warmed page the SSR
-  // loading skeleton can win the first-paint race — this guarantees the cover
-  // is back on top (and the caption set) right after parse, hiding it.
-  await forceOverlay(page, opts.caption, opts.leadIn);
-  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-  // Re-set the caption on the freshly-navigated document (on top of the cover).
+  // Short networkidle wait only: the Next dev server keeps an HMR websocket
+  // open, so the page rarely reaches a true "idle" — a long timeout here just
+  // burns ~20s of recorded wall-clock per segment (the duration-bloat bug).
+  // The nav + content-anchor + no-skeleton waits below are what actually
+  // gate on populated UI, so a brief idle attempt is enough.
+  await page.waitForLoadState("networkidle", { timeout: 3_000 }).catch(() => {});
+  // Nav bar must render (authenticated) before we trust the page.
+  await waitForNav(page, route);
+  // Wait for a concrete, content-specific anchor (real data, not a skeleton).
+  if (opts.anchors) await waitForAnchor(page, opts.anchors(page), route);
+  // And assert the route loading skeleton is fully gone.
+  await waitForNoSkeleton(page);
+  // Settle: let fonts/layout paint.
+  await sleep(opts.settleMs ?? 800);
+  // Set the caption over the now-live, populated UI.
   await setCaption(page, opts.caption, opts.leadIn);
-  // All of this runs UNDER the opaque black cover, so the loading skeleton is
-  // never visible — the viewer sees the black cover WITH the caption on it.
-  await waitForContent(page, opts.waitFor, opts.readyText);
-  await sleep(opts.settleMs ?? 400);
-  // Hold the cover up for a guaranteed MINIMUM wall-clock time from goto so
-  // the recording's early frames (≈0.5s, 1.0s in) are reliably the
-  // black-cover-WITH-caption phase on EVERY segment — fast or slow — not a
-  // content frame missing the caption. Invisible (still black), so harmless.
-  const MIN_COVER_MS = 2600;
-  const elapsed = Date.now() - gotoStart;
-  if (elapsed < MIN_COVER_MS) await sleep(MIN_COVER_MS - elapsed);
-  // Confirm the caption is set + visible, THEN lift the cover — so the frame
-  // where content appears already carries the caption (which never left).
-  await setCaption(page, opts.caption, opts.leadIn);
-  await revealPage(page);
 }
 
 async function gentleScroll(page: Page, dy: number) {
@@ -501,115 +297,36 @@ async function newSegmentContext(
       sameSite: "Lax",
     },
   ]);
-  // Paint a full-screen black cover AND the bottom-third caption bar at
-  // document-start on EVERY navigation, BEFORE any skeleton paints. Both are
-  // mounted as direct children of <html> (document.documentElement), NOT
-  // inside <body>/#__next — React only reconciles nodes inside its root
-  // container, so mounting outside it means Next.js client hydration / route
-  // transition reconciliation can NEVER remove or wipe these nodes. (Earlier
-  // the caption lived in <body> and hydration deleted it right after the
-  // cover lifted, so it reappeared ~1.5–2s late — that's the bug this fixes.)
-  //
-  // z-order: cover (MAX 2147483647) sits one ABOVE the caption
-  // (2147483646), so while it's up it hides EVERYTHING — caption area,
-  // hydration flashes, route loading skeleton. show() sets the caption text
-  // under the cover, then fades the cover out, so the first visible frame is
-  // fully-loaded content WITH the caption already on screen.
-  //
-  // A MutationObserver re-appends either node to <html> if it's ever detached
-  // and re-asserts z-index/topmost ordering; a setInterval is a belt-and-
-  // braces fallback in case observer callbacks are starved during heavy work.
+  // Define the caption helpers at document-start, but DO NOT touch the DOM
+  // until the recorder ARMS the caption (via __demoSetCaption) — which only
+  // happens AFTER the page has loaded + hydrated. CRITICAL: injecting a node
+  // before hydration corrupts React 19 hydration (an unexpected extra node
+  // makes React bail out and discard the body subtree → blank reveal). So
+  // the caption is appended to document.body ONLY post-hydration. The
+  // MutationObserver + setInterval re-append/repopulate it if React ever
+  // detaches or blanks it, but they too stay inert until armed.
   await ctx.addInitScript(
     ({ yellow, black }) => {
-      const root = () => document.documentElement || document.body || document;
-      // The caption sits ABOVE the full-screen cover (CAP_Z > COVER_Z). The
-      // cover (opaque black, full screen) hides the loading skeleton; the
-      // caption is a bottom-third black bar painted on top of it, so the
-      // caption is visible from the VERY FIRST frame — even while the page
-      // loads behind the cover — and simply stays put when the cover lifts to
-      // reveal the loaded content. Both are black, so cover+caption read as
-      // one black screen during load, then content fades in above the bar.
       const CAP_Z = "2147483647";
-      const COVER_Z = "2147483646";
 
-      // Persisted overlay state lives on window — survives DOM rebuilds. The
-      // observer rebuilds nodes FROM this state, so even if React hydration
-      // nukes a node, it comes back fully populated (caption text + visible),
-      // never blank. `coverRemoved` is a one-way latch: once the recorder
-      // fades the cover out, the observer/interval must NOT recreate it.
       interface OverlayState {
         capText: string;
         capLead: string;
-        capShown: boolean;
-        coverRemoved: boolean;
+        // armed: the recorder has set a caption at least once → safe to
+        // mount/observe (hydration is done by then).
+        armed: boolean;
       }
       const w = window as unknown as { __demoOverlay?: OverlayState };
       if (!w.__demoOverlay) {
-        // Restore caption text carried across the navigation via window.name
-        // (set by primeOverlay before goto) so the caption is populated from
-        // the very first paint of the new document — no empty-bar flash.
-        let carried = { text: "", lead: "" };
-        try {
-          const parsed = JSON.parse(window.name || "{}");
-          if (parsed && parsed.__demoCap) carried = parsed.__demoCap;
-        } catch {
-          /* noop */
-        }
-        w.__demoOverlay = {
-          capText: carried.text,
-          capLead: carried.lead,
-          capShown: !!carried.text,
-          coverRemoved: false,
-        };
+        w.__demoOverlay = { capText: "", capLead: "", armed: false };
       }
       const state = w.__demoOverlay;
 
-      // BULLETPROOF SSR-RACE GUARD: inject a <style> at document-start that
-      // makes <body> fully transparent (opacity:0) until reveal. The cover +
-      // caption are children of <html>, NOT body, so they stay fully opaque.
-      // This means the SSR loading skeleton (which lives in body) can NEVER
-      // paint a VISIBLE frame even if the cover div loses the first-paint race
-      // — body is transparent until __demoRemoveCover removes this style. We
-      // use opacity:0 (not visibility:hidden) so Playwright still treats
-      // in-body elements as "visible" for its waitFor() checks. Belt to the
-      // cover's braces; together they guarantee no skeleton is ever shown.
-      const ensureHide = () => {
-        if (state.coverRemoved) return;
-        let st = document.getElementById("__demo_hide_style__");
-        if (!st) {
-          st = document.createElement("style");
-          st.id = "__demo_hide_style__";
-          st.textContent =
-            // opacity:0 (not visibility:hidden) so Playwright still treats
-            // in-body elements as "visible" for its waitFor checks, while the
-            // skeleton is visually gone. Cover+caption live on <html>, not
-            // body, so body opacity never affects them.
-            "body{opacity:0 !important}";
-          (document.head || document.documentElement || document).appendChild(st);
-        }
-      };
-
-      const ensureCover = () => {
-        // Never resurrect the cover once it's been intentionally lifted.
-        if (state.coverRemoved) return null;
-        let cover = document.getElementById("__demo_cover__");
-        if (!cover) {
-          cover = document.createElement("div");
-          cover.id = "__demo_cover__";
-          cover.style.cssText =
-            "position:fixed;inset:0;background:#0a0a0a;z-index:" +
-            COVER_Z +
-            ";pointer-events:none;transition:opacity 350ms ease;opacity:1;";
-        }
-        cover.style.zIndex = COVER_Z;
-        if (cover.parentElement !== root()) root().appendChild(cover);
-        return cover;
-      };
-
-      // (Re)build the caption bar mounted on <html>. ALWAYS re-applies the
-      // persisted text/lead/visibility from `state`, so a hydration rebuild
-      // can't leave it blank or hidden — it reappears exactly as last set.
+      // (Re)build the caption bar mounted on <body>. ALWAYS re-applies the
+      // persisted text/lead from `state`, so if React detaches the node it
+      // comes back fully populated. Only ever called once armed.
       const ensureCaption = () => {
+        if (!state.armed || !document.body) return;
         const ID = "__demo_caption__";
         let bar = document.getElementById(ID);
         if (!bar) {
@@ -625,6 +342,7 @@ async function newSegmentContext(
             "border-top:3px solid " + yellow,
             "z-index:" + CAP_Z,
             "pointer-events:none",
+            "display:flex",
             "flex-direction:column",
             "align-items:center",
             "justify-content:center",
@@ -647,7 +365,6 @@ async function newSegmentContext(
           bar.appendChild(lead);
           bar.appendChild(main);
         }
-        // Re-apply persisted content + visibility every time.
         const lead = document.getElementById(ID + "_lead");
         const main = document.getElementById(ID + "_main");
         if (lead) {
@@ -655,16 +372,16 @@ async function newSegmentContext(
           lead.style.display = state.capLead ? "block" : "none";
         }
         if (main) main.textContent = state.capText;
-        bar.style.display = state.capShown ? "flex" : "none";
+        bar.style.display = "flex";
         bar.style.zIndex = CAP_Z;
-        // Keep the caption the LAST child of <html> so the cover (appended
-        // after) stays painted above it while up; setCaption re-asserts this.
-        if (bar.parentElement !== root()) root().appendChild(bar);
+        // Keep the caption the LAST child of <body> so it stays topmost.
+        if (bar.parentElement !== document.body) document.body.appendChild(bar);
         return bar;
       };
 
-      // Exposed to the recorder: set caption text + lead, mark shown, and
-      // immediately materialize it from state.
+      // Exposed to the recorder: arm + set caption text/lead, then mount it.
+      // The recorder calls this AFTER networkidle + content waits, so the
+      // page is already hydrated and appending to body is safe.
       (
         window as unknown as {
           __demoSetCaption?: (text: string, lead: string) => void;
@@ -672,199 +389,39 @@ async function newSegmentContext(
       ).__demoSetCaption = (text: string, lead: string) => {
         state.capText = text;
         state.capLead = lead;
-        state.capShown = true;
+        state.armed = true;
         ensureCaption();
       };
 
-      // Exposed to the recorder: latch the cover removed + fade/remove it AND
-      // drop the body-hide style so the real content becomes visible.
-      (window as unknown as { __demoRemoveCover?: () => void }).__demoRemoveCover =
-        () => {
-          state.coverRemoved = true;
-          const hide = document.getElementById("__demo_hide_style__");
-          if (hide) hide.remove();
-          const c = document.getElementById("__demo_cover__");
-          if (c) {
-            c.style.opacity = "0";
-            setTimeout(() => c.remove(), 400);
-          }
-        };
-
-      const ensureAll = () => {
-        // Body-hide first (kills any skeleton paint), then cover, then caption
-        // last (so it's the topmost <html> child painted over the cover).
-        ensureHide();
-        ensureCover();
-        ensureCaption();
-      };
-
-      ensureAll();
-      document.addEventListener("DOMContentLoaded", ensureAll);
-
-      // Re-append/rebuild on ANY subtree mutation (hydration, route swap) —
-      // <html>-level nodes stay put AND re-populate from state. Cheap: only
-      // touches the DOM when a node has actually been detached/blanked.
+      // Re-append/repopulate if React ever detaches or blanks the node —
+      // only while armed (so it never fires during hydration).
       const needsFix = () => {
-        const r = root();
+        if (!state.armed || !document.body) return false;
         const cap = document.getElementById("__demo_caption__");
         const main = document.getElementById("__demo_caption___main");
-        const cov = document.getElementById("__demo_cover__");
-        if (!cap || cap.parentElement !== r) return true;
-        if (state.capShown && (cap.style.display === "none" || !main)) return true;
-        if (state.capShown && main && main.textContent !== state.capText) return true;
-        if (!state.coverRemoved && (!cov || cov.parentElement !== r)) return true;
+        if (!cap || cap.parentElement !== document.body) return true;
+        if (cap.style.display === "none" || !main) return true;
+        if (main && main.textContent !== state.capText) return true;
         return false;
       };
       const obs = new MutationObserver(() => {
-        if (needsFix()) ensureAll();
+        if (needsFix()) ensureCaption();
       });
-      const startObs = () =>
-        obs.observe(root(), { childList: true, subtree: true });
-      if (document.documentElement) startObs();
+      const startObs = () => {
+        if (document.body) obs.observe(document.body, { childList: true, subtree: true });
+      };
+      if (document.body) startObs();
       else document.addEventListener("DOMContentLoaded", startObs);
 
-      // Fallback: if observer callbacks are ever starved during heavy work,
-      // this still keeps the overlays attached, populated, and topmost.
-      setInterval(ensureAll, 200);
+      // Fallback: if observer callbacks are starved during heavy work, this
+      // still keeps the caption attached + populated — but only once armed.
+      setInterval(() => {
+        if (state.armed && needsFix()) ensureCaption();
+      }, 200);
     },
     { yellow: BRAND_YELLOW, black: BRAND_BLACK },
   );
   return ctx;
-}
-
-/** Fade out + remove the black load-cover — but ONLY once NO loading
- * state (skeleton pulse OR route loading.tsx shell) remains, so we never
- * reveal a half-loaded page. A last-line defense behind waitForContent;
- * waits up to ~12s more for a late-streaming chunk, reveals anyway after
- * that (better a brief streamed chunk than a frozen recording). */
-async function revealPage(page: Page) {
-  await page
-    .waitForFunction(noLoadingState, undefined, { timeout: 12_000, polling: 150 })
-    .catch(() => {});
-  // Let any final React hydration / route-transition DOM churn finish while
-  // STILL under the (invisible) black cover — so when we lift it the DOM is
-  // settled and the caption won't be transiently detached on the reveal frame.
-  await sleep(450);
-  // Re-assert the caption on the settled DOM, then CONFIRM it's present,
-  // visible, carrying our text, AND the last child of <html> (topmost), with
-  // a short stability poll — only THEN lift the cover. This guarantees the
-  // very frame the content appears already carries the caption.
-  await page
-    .evaluate(() => {
-      const setter = (
-        window as unknown as { __demoSetCaption?: (t: string, l: string) => void }
-      ).__demoSetCaption;
-      const st = (
-        window as unknown as {
-          __demoOverlay?: { capText: string; capLead: string };
-        }
-      ).__demoOverlay;
-      if (setter && st) setter(st.capText, st.capLead);
-    })
-    .catch(() => {});
-  await page
-    .waitForFunction(
-      () => {
-        const root = document.documentElement;
-        const bar = document.getElementById("__demo_caption__");
-        const main = document.getElementById("__demo_caption___main");
-        return (
-          !!bar &&
-          bar.parentElement === root &&
-          bar.style.display !== "none" &&
-          !!main &&
-          !!main.textContent
-        );
-      },
-      undefined,
-      { timeout: 4_000, polling: 50 },
-    )
-    .catch(() => {});
-  await page
-    .evaluate(() => {
-      // Latch coverRemoved + fade/remove via the init-script helper so the
-      // observer/interval never resurrects the cover over loaded content.
-      const remover = (window as unknown as { __demoRemoveCover?: () => void })
-        .__demoRemoveCover;
-      if (remover) {
-        remover();
-        return;
-      }
-      const c = document.getElementById("__demo_cover__");
-      if (c) {
-        c.style.opacity = "0";
-        setTimeout(() => c.remove(), 400);
-      }
-    })
-    .catch(() => {});
-  await sleep(400);
-  // POST-REVEAL SKELETON GUARD (bounded LOOP, max 4 passes ≈ ≤28s — cannot
-  // infinite-loop): a heavy page (notably Work Log) can re-enter the route
-  // skeleton one or more times just after the cover lifts (client refetch /
-  // Suspense retry). Each pass: if the route skeleton (>3 pulse rows) is up,
-  // re-hide body + re-cover (caption stays on top), wait UP TO 6s for it to
-  // clear, then lift again and re-check. After 4 passes we proceed regardless
-  // (a perpetually-skeletoning page can't stall the run).
-  for (let pass = 0; pass < 4; pass++) {
-    const skeletonNow = await page
-      .evaluate(() => document.querySelectorAll(".animate-pulse").length > 3)
-      .catch(() => false);
-    if (!skeletonNow) break;
-    await page
-      .evaluate(() => {
-        const st = (
-          window as unknown as { __demoOverlay?: { coverRemoved: boolean } }
-        ).__demoOverlay;
-        if (st) st.coverRemoved = false;
-        const root = document.documentElement || document.body;
-        let hide = document.getElementById("__demo_hide_style__");
-        if (!hide) {
-          hide = document.createElement("style");
-          hide.id = "__demo_hide_style__";
-          hide.textContent = "body{opacity:0 !important}";
-          (document.head || root).appendChild(hide);
-        }
-        let c = document.getElementById("__demo_cover__");
-        if (!c) {
-          c = document.createElement("div");
-          c.id = "__demo_cover__";
-          root.appendChild(c);
-        }
-        c.style.cssText =
-          "position:fixed;inset:0;background:#0a0a0a;z-index:2147483646;" +
-          "pointer-events:none;opacity:1;";
-        if (c.parentElement !== root) root.appendChild(c);
-        const bar = document.getElementById("__demo_caption__");
-        if (bar && bar.parentElement === root) root.appendChild(bar);
-      })
-      .catch(() => {});
-    await page
-      .waitForFunction(
-        () => document.querySelectorAll(".animate-pulse").length <= 3,
-        undefined,
-        { timeout: 6_000, polling: 150 },
-      )
-      .catch(() => {});
-    // Hold the clear state a beat under cover so a quick re-skeleton is caught
-    // on the next pass rather than slipping through right after the lift.
-    await sleep(700);
-    await page
-      .evaluate(() => {
-        const remover = (
-          window as unknown as { __demoRemoveCover?: () => void }
-        ).__demoRemoveCover;
-        if (remover) remover();
-        else {
-          const c = document.getElementById("__demo_cover__");
-          if (c) {
-            c.style.opacity = "0";
-            setTimeout(() => c.remove(), 400);
-          }
-        }
-      })
-      .catch(() => {});
-    await sleep(400);
-  }
 }
 
 // Close the context, then move its single produced .webm to the named file.
@@ -939,39 +496,12 @@ async function recordCard(
     .first()
     .waitFor({ state: "visible", timeout: 5_000 })
     .catch(() => {});
-  // Cards are instant + have no skeleton/caption — directly drop the body-hide
-  // style + the cover so the card is fully visible, latching coverRemoved so
-  // the observer can't re-add them. (Don't use the app-page revealPage() —
-  // its skeleton guard + caption-confirm waits would inflate/garble the card.)
-  // Retry the reveal a few times: setContent + the document-start init script
-  // can race, and the card must end up visible (not a blank/transparent body).
-  for (let i = 0; i < 3; i++) {
-    await page
-      .evaluate(() => {
-        const st = (
-          window as unknown as { __demoOverlay?: { coverRemoved: boolean } }
-        ).__demoOverlay;
-        if (st) st.coverRemoved = true;
-        const hide = document.getElementById("__demo_hide_style__");
-        if (hide) hide.remove();
-        const c = document.getElementById("__demo_cover__");
-        if (c) c.remove();
-        const cap = document.getElementById("__demo_caption__");
-        if (cap) cap.remove();
-        // Defensively force body fully opaque/visible in case any stray rule
-        // left it transparent (the card supplies its own black background).
-        if (document.body) {
-          document.body.style.setProperty("opacity", "1", "important");
-          document.body.style.setProperty("visibility", "visible", "important");
-        }
-      })
-      .catch(() => {});
-    await sleep(150);
-  }
-  // Keep the recording "active" across the hold with periodic micro-repaints —
-  // Playwright's recordVideo under-captures a fully-static page (which can
-  // yield a ~1s clip even though we hold for holdMs). A 1px transform nudge
-  // every ~300ms forces frames without any visible change.
+  // Cards supply their own full-screen black background; there is no caption,
+  // cover, or body-hide to remove. Keep the recording "active" across the
+  // hold with periodic micro-repaints — Playwright's recordVideo
+  // under-captures a fully-static page (which can yield a ~1s clip even
+  // though we hold for holdMs). A transform nudge every ~300ms forces frames
+  // without any visible change.
   const ticks = Math.max(1, Math.round(holdMs / 300));
   for (let t = 0; t < ticks; t++) {
     await page
@@ -1042,6 +572,30 @@ async function main() {
   const ADMIN_LEAD = "The owner's side —";
   const COACH_LEAD = "And what your coaches see —";
 
+  // /coach/attendance only renders the athlete-checkbox roster when given a
+  // ?programId=&date= for a program with enrolled athletes (DEC-29). Resolve
+  // a populated program ("HS Summer Program" — seeded + enrolled by
+  // seed-demo-data) so the coach attendance segment shows a real roster.
+  const attnProgram =
+    (
+      await db
+        .select({ id: programs.id })
+        .from(programs)
+        .where(eq(programs.name, "HS Summer Program"))
+        .limit(1)
+    )[0] ??
+    (await db.select({ id: programs.id }).from(programs).limit(1))[0];
+  const attnDate = formatPfaDate(new Date());
+  const coachAttendanceRoute = attnProgram
+    ? `/coach/attendance?programId=${attnProgram.id}&date=${attnDate}`
+    : "/coach/attendance";
+  // /admin/attendance/by-program also needs a ?programId= to render the
+  // per-program athlete grid (otherwise it shows "Pick work to view
+  // attendance"). Reuse the same populated program.
+  const adminByProgramRoute = attnProgram
+    ? `/admin/attendance/by-program?programId=${attnProgram.id}`
+    : "/admin/attendance/by-program";
+
   const browser = await chromium.launch({ slowMo: SLOW_MO });
 
   // Warm up every route (compile Next dev routes) in a throwaway,
@@ -1066,13 +620,24 @@ async function main() {
     const routes = WARMUP_ROUTES.filter((r) =>
       isAdmin ? r.startsWith("/admin") : r.startsWith("/coach"),
     );
+    // Also warm the PARAM'd attendance routes the tour actually records, so
+    // the first real recording hits a fully-compiled param render (the bare
+    // route compiles a different code path than the program-selected one).
+    if (isAdmin) routes.push(adminByProgramRoute);
+    else routes.push(coachAttendanceRoute);
     for (const route of routes) {
       try {
         await warmPage.goto(`${BASE_URL}${route}`, {
           waitUntil: "networkidle",
           timeout: 60_000,
         });
-        await waitForContent(warmPage);
+        await warmPage
+          .waitForFunction(
+            () => document.querySelectorAll(".animate-pulse").length === 0,
+            undefined,
+            { timeout: 20_000, polling: 200 },
+          )
+          .catch(() => {});
       } catch (e) {
         console.warn(`[rec] warmup ${route}: ${(e as Error).message.slice(0, 80)}`);
       }
@@ -1091,196 +656,231 @@ async function main() {
         logo: true,
         title: "One platform for everything a facility runs on.",
       }),
-      3300,
+      3000,
     );
 
-    // 01 — Master Schedule at top of Home
+    // 01 — Master Schedule at top of Home. Anchor: nav + a resource row
+    // label ("Cage 1") and at least one schedule block bar in the grid.
     await recordSegment(browser, admin, "01-home-schedule.webm", async (page) => {
       await show(page, "/admin", {
-        waitFor: "Home",
+        anchors: (p) => [
+          p.getByText("Cage 1", { exact: false }),
+          p.getByRole("heading", { name: "Home", exact: false }),
+        ],
         caption:
           "Your whole facility's day on one schedule — drag to book, click to edit.",
         leadIn: ADMIN_LEAD,
-        settleMs: 300,
       });
-      await sleep(2000);
+      await sleep(2800);
     });
 
-    // 02 — Home: scroll to Needs review + Recent activity
+    // 02 — Home: scroll to Needs review + Recent activity.
     await recordSegment(browser, admin, "02-home-needs-review.webm", async (page) => {
       await show(page, "/admin", {
-        waitFor: "Home",
+        anchors: (p) => [
+          p.getByText("Needs review", { exact: false }),
+          p.getByText("Recent activity", { exact: false }),
+          p.getByRole("heading", { name: "Home", exact: false }),
+        ],
         caption:
           "It flags what needs attention — no-shows, unlogged hours, cancellations.",
         leadIn: ADMIN_LEAD,
-        settleMs: 300,
       });
       await gentleScroll(page, 900);
       await gentleScroll(page, 700);
-      await sleep(1800);
+      await sleep(2000);
     });
 
-    // 03 — Rentals booking calendar (+ brief hub + sessions)
+    // 03 — Rentals booking calendar.
     await recordSegment(browser, admin, "03-rentals-schedule.webm", async (page) => {
       await show(page, "/admin/schedule", {
+        anchors: (p) => [
+          p.getByText("Cage 1", { exact: false }),
+          p.getByText(/\d{1,2}:\d{2}\s*(AM|PM)/i),
+        ],
         caption: "Every cage and bullpen rental on a live booking calendar.",
         leadIn: ADMIN_LEAD,
-        settleMs: 400,
       });
-      await sleep(2000);
+      await sleep(2200);
       await gentleScroll(page, 500);
-      await sleep(1100);
+      await sleep(1300);
     });
 
-    // 04 — Work Log
+    // 04 — Work Log: heading + at least one table row.
     await recordSegment(browser, admin, "04-work-log.webm", async (page) => {
       await show(page, "/admin/hour-log", {
-        waitFor: "Work Log",
+        anchors: (p) => [
+          p.getByText("Marcus Bell", { exact: false }),
+          p.getByText("HS Summer Program", { exact: false }),
+          p.getByRole("heading", { name: "Work Log", exact: false }),
+        ],
         caption: "Every coach's logged hours, with unscheduled ones flagged.",
         leadIn: ADMIN_LEAD,
-        settleMs: 300,
       });
-      await sleep(2000);
+      await sleep(2200);
       await gentleScroll(page, 500);
-      await sleep(1100);
+      await sleep(1300);
     });
 
-    // 05 — Attendance by-program then by-player
+    // 05 — Attendance by-program. Stays on the POPULATED per-program grid for
+    // the FULL dwell. We deliberately do NOT sub-navigate to the by-player tab:
+    // that view lands on an EMPTY "Pick a player to view attendance." picker,
+    // which would put an empty, caption-dropped frame at the segment midpoint.
+    // The caption "by program or by player…" still reads fine over the grid.
     await recordSegment(browser, admin, "05-attendance.webm", async (page) => {
-      await show(page, "/admin/attendance/by-program", {
-        waitFor: "Attendance",
+      await show(page, adminByProgramRoute, {
+        anchors: (p) => [
+          p.locator("table tbody tr").first(),
+          p.getByText("HS Summer Program", { exact: false }),
+          p.getByRole("heading", { name: "Attendance", exact: false }),
+        ],
         caption:
           "Attendance by program or by player — with per-athlete session caps.",
         leadIn: ADMIN_LEAD,
-        settleMs: 300,
       });
-      await sleep(2000);
-      await show(page, "/admin/attendance/by-player", {
-        waitFor: "Attendance",
-        caption:
-          "Attendance by program or by player — with per-athlete session caps.",
-        leadIn: ADMIN_LEAD,
-        settleMs: 300,
-      });
-      await sleep(1800);
+      await sleep(4200);
+      await gentleScroll(page, 400);
+      await sleep(1300);
     });
 
-    // 06 — Roster
+    // 06 — Roster: at least one athlete name row.
     await recordSegment(browser, admin, "06-roster.webm", async (page) => {
       await show(page, "/admin/attendance/roster", {
+        anchors: (p) => [
+          p.locator("table tbody tr").first(),
+          p.getByRole("heading", { name: "Roster", exact: false }),
+        ],
         caption:
           "Your full roster — athletes, programs, enrollments — in one place.",
         leadIn: ADMIN_LEAD,
-        settleMs: 300,
       });
-      await sleep(2000);
+      await sleep(2200);
       await gentleScroll(page, 500);
-      await sleep(1100);
+      await sleep(1300);
     });
 
-    // 07 — Reports
+    // 07 — Reports: summary money figures + per-coach row.
     await recordSegment(browser, admin, "07-reports.webm", async (page) => {
       await show(page, "/admin/reports", {
-        waitFor: "Reports",
+        anchors: (p) => [
+          p.getByText(/RENTAL OWED/i),
+          p.getByText("Marcus Bell", { exact: false }),
+          p.getByText(/\$\d/),
+        ],
         caption:
           "What's owed for rentals vs. what each coach is paid — kept separate.",
         leadIn: ADMIN_LEAD,
-        settleMs: 300,
       });
-      await sleep(2000);
+      await sleep(2200);
       await gentleScroll(page, 500);
-      await sleep(1100);
+      await sleep(1300);
     });
 
-    // 08 — Payments
+    // 08 — Payments: at least one payment/coach row with a $ amount.
     await recordSegment(browser, admin, "08-payments.webm", async (page) => {
       await show(page, "/admin/payments", {
-        waitFor: "Payments",
+        anchors: (p) => [
+          p.getByText("Marcus Bell", { exact: false }),
+          p.getByText(/\$\d/),
+          p.getByRole("heading", { name: "Payments", exact: false }),
+        ],
         caption: "Track every payment in and out — no spreadsheets.",
         leadIn: ADMIN_LEAD,
-        settleMs: 300,
       });
-      await sleep(2000);
+      await sleep(2200);
       await gentleScroll(page, 500);
-      await sleep(1100);
+      await sleep(1300);
     });
 
-    // 09 — Records hub: Coaches / Accountability / Reports / Payments /
-    // Audit log / Historical import / Settings cards, each with a live count.
-    // This is the "Billing & Records" home and surfaces the audit log entry
-    // point directly. We end the admin tour here on the hub (which renders
-    // fast + clean) rather than navigating into the audit *table*, whose
-    // date-filtered query streams slowly on the demo DB and would show a
-    // loading skeleton mid-shot — the hub already conveys the caption.
+    // 09 — Records hub.
     await recordSegment(browser, admin, "09-records-audit.webm", async (page) => {
       await show(page, "/admin/records", {
-        waitFor: "Billing & Records",
+        anchors: (p) => [
+          p.getByText("Coaches", { exact: false }),
+          p.getByText("Audit", { exact: false }),
+          p.getByRole("heading", { name: "Billing & Records", exact: false }),
+        ],
         caption:
           "Manage coaches, import data, and a full audit log of every action.",
         leadIn: ADMIN_LEAD,
-        settleMs: 400,
       });
-      await sleep(2600);
+      await sleep(2800);
       await gentleScroll(page, 200);
-      await sleep(1800);
+      await sleep(2000);
     });
 
-    // 10 — coach: book a cage
+    // 10 — coach: book a cage. Anchor: calendar resource rows + time slots.
     await recordSegment(browser, coach, "10-coach-book.webm", async (page) => {
       await show(page, "/coach/sessions/new", {
+        anchors: (p) => [
+          p.getByText("Cage 1", { exact: false }),
+          p.getByText(/\d{1,2}:\d{2}\s*(AM|PM)/i),
+        ],
         caption: "A coach grabs an open cage and books it in two taps.",
         leadIn: COACH_LEAD,
-        settleMs: 400,
       });
-      await sleep(2000);
+      await sleep(2200);
       await gentleScroll(page, 400);
-      await sleep(1100);
+      await sleep(1300);
     });
 
-    // 11 — coach: work log
+    // 11 — coach: work log.
     await recordSegment(browser, coach, "11-coach-work-log.webm", async (page) => {
       await show(page, "/coach/hour-log", {
+        anchors: (p) => [
+          p.getByText("HS Summer Program", { exact: false }),
+          p.getByRole("heading", { name: "Work Log", exact: false }),
+          p.locator("form").first(),
+        ],
         caption:
           "They log their own hours — or confirm scheduled work in one tap.",
         leadIn: COACH_LEAD,
-        settleMs: 300,
       });
-      await sleep(2000);
+      await sleep(2200);
       await gentleScroll(page, 400);
-      await sleep(1100);
+      await sleep(1300);
     });
 
-    // 12 — coach: attendance
+    // 12 — coach: attendance (a session with a roster of athlete checkboxes).
     await recordSegment(browser, coach, "12-coach-attendance.webm", async (page) => {
-      await show(page, "/coach/attendance", {
-        waitFor: "Attendance",
+      await show(page, coachAttendanceRoute, {
+        anchors: (p) => [
+          p.locator('input[type="checkbox"]').first(),
+          p.getByText("HS Summer Program", { exact: false }),
+          p.getByRole("heading", { name: "Attendance", exact: false }),
+        ],
         caption: "Take attendance for a session in a few checkboxes.",
         leadIn: COACH_LEAD,
-        settleMs: 300,
       });
-      await sleep(2000);
+      await sleep(2800);
     });
 
-    // 13 — coach: schedule week
+    // 13 — coach: schedule week.
     await recordSegment(browser, coach, "13-coach-schedule.webm", async (page) => {
       await show(page, "/coach/schedule", {
+        anchors: (p) => [
+          p.getByText("HS Summer Program", { exact: false }),
+          p.getByText(/\d{1,2}:\d{2}\s*(AM|PM)/i),
+          p.getByRole("heading", { name: "Schedule", exact: false }),
+        ],
         caption: "Their whole week — programs and rentals — in one view.",
         leadIn: COACH_LEAD,
-        settleMs: 400,
       });
-      await sleep(1800);
+      await sleep(2600);
     });
 
-    // 14 — coach: what you owe
+    // 14 — coach: what you owe (scroll to the card).
     await recordSegment(browser, coach, "14-coach-owe.webm", async (page) => {
       await show(page, "/coach", {
-        caption:
-          "And exactly what they owe the facility, always current.",
+        anchors: (p) => [
+          p.getByText(/owe/i),
+          p.getByText(/\$\d/),
+        ],
+        caption: "And exactly what they owe the facility, always current.",
         leadIn: COACH_LEAD,
-        settleMs: 300,
       });
       await gentleScroll(page, 600);
-      await sleep(2000);
+      await sleep(2400);
     });
 
     // 99 — outro card
@@ -1293,7 +893,7 @@ async function main() {
         title: "Built to fit exactly how your facility runs.",
         footer: "Magna Software · magnathread.com",
       }),
-      3300,
+      3000,
     );
   } finally {
     await browser.close();

@@ -5,7 +5,14 @@
 #   1. Guard the DB host — resolve INTEGRATION_DATABASE_URL, assert it
 #      contains "dawn-forest", ABORT otherwise. We NEVER touch
 #      DATABASE_URL (prod, ep-purple-credit).
-#   2. db:migrate + db:seed against the integration branch.
+#   2. db:migrate, then db:clear + db:seed against the integration branch.
+#      The clear is what makes the pipeline SELF-CLEANING: db:seed is
+#      additive, so without a wipe first, leftover integration-test cruft
+#      rows (e.g. athletes named "Last17810…", "lt_…", programs named
+#      "Attendance Test Program") would survive and pollute the recorded
+#      roster / attendance / by-program screens. db:clear wipes athletes /
+#      programs / enrollments / attendance / etc. so every render starts
+#      from a clean, real-data-only DB.
 #   3. seed-demo-data (current-week believable data).
 #   4. Boot `next dev -p 3001` against integration + wait for ready.
 #   5. record-demo (Playwright, one context/segment).
@@ -47,9 +54,27 @@ export INTEGRATION_DATABASE_URL="${IURL}"
 export AUTH_SECRET="${AUTH_SECRET_VAL:-demo-secret-not-used}"
 export DEMO_BASE_URL="${BASE_URL}"
 
-# --- 2. migrate + seed ------------------------------------------------------
+# --- 2. migrate + clear + seed ----------------------------------------------
 echo "[run] db:migrate (integration)…"
 npm run db:migrate
+
+# SELF-CLEANING wipe BEFORE seeding. db:seed is additive and never removes
+# integration-test cruft, so we clear first. db:clear is DESTRUCTIVE and its
+# npm script reads the DEFAULT DATABASE_URL — so we re-assert the resolved
+# host contains "dawn-forest" (ABORT otherwise) and run it with DATABASE_URL
+# pinned explicitly to the integration URL. This can NEVER hit prod
+# (ep-purple-credit): the guard refuses any other host.
+echo "[run] re-asserting integration host before destructive clear…"
+case "${HOST}" in
+  *dawn-forest*) : ;;  # ok
+  *)
+    echo "[run] REFUSING TO CLEAR: host '${HOST}' is not the integration (dawn-forest) branch. ABORT." >&2
+    exit 1
+    ;;
+esac
+echo "[run] db:clear (integration) — wiping cruft + dynamic data…"
+CLEAR_CONFIRM=DELETE DATABASE_URL="${IURL}" npm run db:clear
+
 echo "[run] db:seed (integration)…"
 npm run db:seed
 
@@ -58,7 +83,11 @@ echo "[run] seed-demo-data…"
 npx tsx scripts/demo-video/seed-demo-data.ts
 
 # --- 4. boot dev server -----------------------------------------------------
+# Give the dev server generous heap: the recorder drives many heavy admin/
+# coach renders back-to-back, and the dev server has crashed under that load
+# with a default heap. 4 GB keeps it alive for the whole tour.
 echo "[run] booting next dev -p ${PORT}…"
+NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=4096" \
 AUTH_URL="${BASE_URL}" \
 AUTH_GOOGLE_ID="${AUTH_GOOGLE_ID:-demo-placeholder.apps.googleusercontent.com}" \
 AUTH_GOOGLE_SECRET="${AUTH_GOOGLE_SECRET:-demo-placeholder-secret}" \

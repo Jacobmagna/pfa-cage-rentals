@@ -217,7 +217,40 @@ async function main() {
   // 4. Enrollments — spread athletes across several programs, some capped.
   // -------------------------------------------------------------------------
   console.log("[demo] enrollments…");
-  const enrollPrograms = allPrograms.slice(0, Math.min(6, allPrograms.length));
+  // Enroll into the EXACT named programs the demo surfaces use (schedule
+  // blocks, hour logs, attendance, coach attendance), not an arbitrary
+  // slice(0,6) of all active programs. The integration DB can contain
+  // leftover "Attendance Test Program …" rows that sort first; enrolling
+  // into those would leave the real, on-screen programs (e.g. "HS Summer
+  // Program", which /coach/attendance + /admin/attendance/by-program show)
+  // with zero athletes. Resolve canonical names, de-dupe by id, and fall
+  // back to filling from the active catalog if any are missing.
+  const ENROLL_PROGRAM_NAMES = [
+    "HS Summer Program",
+    "Youth Summer Camp",
+    "HS Summer Program-Hitting",
+    "HS Summer Travel Team",
+    "HS Summer Program-Throwing",
+    "HS Summer Program-Catching",
+  ];
+  const enrollProgramsRaw = ENROLL_PROGRAM_NAMES.map((n) => programByName(n));
+  const seenProgId = new Set<string>();
+  const enrollPrograms = enrollProgramsRaw.filter((p) => {
+    if (!p || seenProgId.has(p.id)) return false;
+    seenProgId.add(p.id);
+    return true;
+  });
+  // Top up to 6 with any other active programs if names didn't resolve.
+  for (const p of allPrograms) {
+    if (enrollPrograms.length >= 6) break;
+    if (!seenProgId.has(p.id)) {
+      enrollPrograms.push(p);
+      seenProgId.add(p.id);
+    }
+  }
+  console.log(
+    `[demo] enrolling into programs: ${enrollPrograms.map((p) => p.name).join(", ")}`,
+  );
   const enrollRows: (typeof athletePrograms.$inferInsert)[] = [];
   allAthletes.slice(0, 60).forEach((a, i) => {
     // each athlete in 1–2 programs

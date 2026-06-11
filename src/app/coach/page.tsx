@@ -270,7 +270,7 @@ function BalanceCard({
       <div className="flex items-center gap-2 text-fg-muted">
         <Wallet className="h-4 w-4" />
         <p className="text-[11px] uppercase tracking-[0.14em] text-fg-muted">
-          What you owe PFA — cage rentals
+          You owe PFA for cage rentals
         </p>
       </div>
       <p className="tnum mt-4 text-4xl font-semibold tracking-tight text-fg">

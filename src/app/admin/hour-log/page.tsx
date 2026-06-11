@@ -199,7 +199,7 @@ export default async function AdminHourLogPage({
 
       {reviewItems.length > 0 ? (
         <NeedsReviewCard
-          items={reviewItems.slice(0, 5)}
+          items={reviewItems}
           totalCount={reviewItems.length}
         />
       ) : null}

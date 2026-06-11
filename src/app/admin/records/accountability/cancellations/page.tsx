@@ -69,11 +69,14 @@ export default async function CancellationsPage() {
         <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
           Rentals
         </p>
-        <h1 className="text-3xl font-semibold tracking-tight">Cancellations</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">
+          Cage-rental cancellations
+        </h1>
         <p className="text-sm text-fg-muted">
           When coaches remove their cage rentals, relative to the rental&apos;s
           start. Last-minute and mid-session removals are the concerning ones;
-          a coach with a repeated pattern is flagged.
+          a coach with a repeated pattern is flagged. (This is rentals only —
+          cancelled work blocks appear in the Needs-review queue.)
         </p>
       </div>
 

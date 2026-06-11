@@ -13,11 +13,14 @@ import {
 // QA10 W3-polish15b-ii: unified Home-dashboard triage card for the admin
 // "needs review" queue. Three tagged alert types are merged + sorted by the
 // page, then rendered here:
-//   • unscheduled   — coach logged program hours with no matching block
+//   • unscheduled   — "Off-schedule log": coach logged program hours with no
+//                     matching block
 //   • wrong_time    — log overlaps a block but mismatches it (reconciliation)
 //   • double_logged — two overlapping logs for the same coach (dup/double-pay)
-//   • cancelled     — coach cancelled their assignment to a scheduled block
-//   • no_show       — coach was scheduled but logged no matching hours
+//   • cancelled     — "Cancelled work block": coach cancelled their assignment
+//                     to a scheduled block (NOT a cage-rental cancellation)
+//   • no_show       — "Not logged": a scheduled block has no matching log (this
+//                     is NOT an accusation the player didn't show up)
 // Each row's Resolve button dispatches to the matching shared action (all of
 // which revalidate /admin), so resolving here refreshes the card.
 export type NeedsReviewItem =
@@ -81,7 +84,7 @@ const TAG: Record<
   { label: string; className: string }
 > = {
   unscheduled: {
-    label: "Unscheduled",
+    label: "Off-schedule log",
     className: "border-gold/30 bg-gold/10 text-gold-strong",
   },
   wrong_time: {
@@ -93,11 +96,11 @@ const TAG: Record<
     className: "border-danger/30 bg-danger/10 text-danger",
   },
   cancelled: {
-    label: "Cancelled",
+    label: "Cancelled work block",
     className: "border-line-strong bg-surface-2 text-fg-muted",
   },
   no_show: {
-    label: "No-show",
+    label: "Not logged",
     className: "border-danger/30 bg-danger/10 text-danger",
   },
 };
@@ -110,6 +113,7 @@ export function NeedsReviewCard({
   totalCount: number;
 }) {
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const [, startResolveTransition] = useTransition();
 
   const handleResolve = (item: NeedsReviewItem) => {
@@ -134,7 +138,9 @@ export function NeedsReviewCard({
     });
   };
 
-  const moreCount = totalCount - items.length;
+  const COLLAPSED_LIMIT = 5;
+  const visibleItems = expanded ? items : items.slice(0, COLLAPSED_LIMIT);
+  const moreCount = items.length - COLLAPSED_LIMIT;
 
   return (
     <section aria-labelledby="needs-review-heading" className="mb-10">
@@ -158,7 +164,7 @@ export function NeedsReviewCard({
         </p>
 
         <ul className="mt-3 divide-y divide-danger/15">
-          {items.map((item) => {
+          {visibleItems.map((item) => {
             const key = keyOf(item);
             const isPendingResolve = pendingKey === key;
             const tag = TAG[item.type];
@@ -219,15 +225,24 @@ export function NeedsReviewCard({
         </ul>
 
         {moreCount > 0 ? (
-          <p className="mt-3 text-xs text-fg-muted">+{moreCount} more</p>
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            className="mt-3 inline-flex items-center text-xs font-medium text-fg-muted hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 rounded transition-colors"
+          >
+            {expanded ? "Show less" : `Show all (${totalCount})`}
+          </button>
         ) : null}
 
-        <Link
-          href="/admin/hour-log"
-          className="mt-4 inline-flex items-center text-xs font-medium text-fg-muted hover:text-fg transition-colors"
-        >
-          Review all in Work Log →
-        </Link>
+        <div>
+          <Link
+            href="/admin/hour-log"
+            className="mt-4 inline-flex items-center text-xs font-medium text-fg-muted hover:text-fg transition-colors"
+          >
+            Review all in Work Log →
+          </Link>
+        </div>
       </div>
     </section>
   );

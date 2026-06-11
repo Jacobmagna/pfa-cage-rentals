@@ -24,15 +24,15 @@ const EVENT_BADGE: Record<
   { label: string; className: string }
 > = {
   no_show: {
-    label: "No-show",
+    label: "Not logged",
     className: "border-danger/30 bg-danger/10 text-danger",
   },
   late_cancel: {
-    label: "Late cancel",
+    label: "Late rental cancel",
     className: "border-danger/30 bg-danger/10 text-danger",
   },
   late_log: {
-    label: "Late log",
+    label: "Late work log",
     className: "border-warning/30 bg-warning/10 text-warning",
   },
   over_logged: {
@@ -142,9 +142,10 @@ export default async function AccountabilityPage() {
           Coach accountability
         </h1>
         <p className="text-sm text-fg-muted">
-          Per-coach patterns over the last {window.sinceDays} days — no-shows,
-          late cancellations, late logging, and over-logged hours — plus
-          coaches with an overdue cage-rental balance.
+          Per-coach patterns over the last {window.sinceDays} days — scheduled
+          blocks with no matching log, late cage-rental cancellations, late work
+          logs, and over-logged hours — plus coaches with an overdue cage-rental
+          balance.
         </p>
       </div>
 
@@ -181,16 +182,16 @@ export default async function AccountabilityPage() {
                 <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
                   <tr>
                     <th className="px-4 py-3 text-left">Coach</th>
-                    <th className="px-4 py-3 text-right">No-shows</th>
+                    <th className="px-4 py-3 text-right">Not logged</th>
                     <th className="px-4 py-3 text-right">
                       <Link
                         href="/admin/records/accountability/cancellations"
                         className="inline-flex items-center hover:text-fg transition-colors underline decoration-dotted underline-offset-2"
                       >
-                        Late cancels
+                        Late rental cancels
                       </Link>
                     </th>
-                    <th className="px-4 py-3 text-right">Late logs</th>
+                    <th className="px-4 py-3 text-right">Late work logs</th>
                     <th className="px-4 py-3 text-right">Over-logged</th>
                     <th className="px-4 py-3 text-right">Total</th>
                   </tr>

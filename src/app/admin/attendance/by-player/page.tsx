@@ -1,5 +1,5 @@
 import { CalendarCheck } from "lucide-react";
-import { asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
   athletePrograms,
@@ -16,7 +16,9 @@ import {
   type PlayerRecordInput,
 } from "@/lib/server/athlete-attendance";
 import { formatGridDateWithWeekday } from "@/lib/server/attendance-grid";
+import { resolveAttendanceMonth } from "@/lib/attendance/month";
 import { AthletePicker, type AthleteOption } from "./_components/athlete-picker";
+import { MonthNav } from "../_components/month-nav";
 
 // Admin Attendance "By player" view (QA10 W2.3). Read-only,
 // searchParams-driven (?athleteId=). The picker is a GET <form>;
@@ -32,6 +34,7 @@ import { AthletePicker, type AthleteOption } from "./_components/athlete-picker"
 
 type RawSearchParams = Promise<{
   athleteId?: string | string[];
+  month?: string | string[];
 }>;
 
 function firstParam(v: string | string[] | undefined): string {
@@ -45,6 +48,11 @@ export default async function AttendanceByPlayerPage({
 }) {
   await requireRole("admin");
   const params = await searchParams;
+
+  // Selected month (?month=YYYY-MM), defaulting to the current PFA month.
+  // Bounds the session query so only this month's date rows render
+  // (QA2 #12).
+  const monthSel = resolveAttendanceMonth(firstParam(params.month) || undefined);
 
   // Picker options = non-archived athletes, ordered Last, First. A
   // selected athleteId that isn't in this set is treated as no selection
@@ -84,7 +92,11 @@ export default async function AttendanceByPlayerPage({
   if (!selectedAthleteId) {
     return (
       <div className="space-y-6">
-        <AthletePicker athletes={athleteOptions} selectedAthleteId="" />
+        <AthletePicker
+          athletes={athleteOptions}
+          selectedAthleteId=""
+          month={monthSel.month}
+        />
         <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-line bg-surface py-16 text-center shadow-[var(--shadow-sm)]">
           <CalendarCheck className="h-8 w-8 text-gold" aria-hidden="true" />
           <p className="text-fg-muted">Pick a player to view attendance.</p>
@@ -131,7 +143,9 @@ export default async function AttendanceByPlayerPage({
   const playerPrograms = Array.from(programById.values());
   const programIds = playerPrograms.map((p) => p.id);
 
-  // (d) All attendance sessions for those programs (id, programId, date).
+  // (d) Attendance sessions for those programs WITHIN the selected month
+  // only (id, programId, date). sessionDate is a "YYYY-MM-DD" string, so
+  // the month bound is a string range [firstDay, nextMonthFirstDay).
   let sessionRows: PlayerSession[] = [];
   if (programIds.length > 0) {
     sessionRows = await db
@@ -141,7 +155,13 @@ export default async function AttendanceByPlayerPage({
         sessionDate: attendanceSessions.sessionDate,
       })
       .from(attendanceSessions)
-      .where(inArray(attendanceSessions.programId, programIds))
+      .where(
+        and(
+          inArray(attendanceSessions.programId, programIds),
+          gte(attendanceSessions.sessionDate, monthSel.firstDay),
+          lt(attendanceSessions.sessionDate, monthSel.nextMonthFirstDay),
+        ),
+      )
       .orderBy(asc(attendanceSessions.sessionDate));
   }
 
@@ -163,6 +183,15 @@ export default async function AttendanceByPlayerPage({
       <AthletePicker
         athletes={athleteOptions}
         selectedAthleteId={selectedAthleteId}
+        month={monthSel.month}
+      />
+
+      <MonthNav
+        basePath="/admin/attendance/by-player"
+        label={monthSel.label}
+        prevMonth={monthSel.prevMonth}
+        nextMonth={monthSel.nextMonth}
+        extraParams={{ athleteId: selectedAthleteId }}
       />
 
       {selectedAthlete ? (
@@ -175,7 +204,7 @@ export default async function AttendanceByPlayerPage({
         <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-line bg-surface py-16 text-center shadow-[var(--shadow-sm)]">
           <CalendarCheck className="h-8 w-8 text-gold" aria-hidden="true" />
           <p className="text-fg-muted">
-            No attendance recorded for this player yet.
+            No attendance recorded for this player this month.
           </p>
         </div>
       ) : (

@@ -773,7 +773,7 @@ export default async function AdminHome({
 
       {mergedReview.length > 0 ? (
         <NeedsReviewCard
-          items={mergedReview.slice(0, 5)}
+          items={mergedReview}
           totalCount={mergedReview.length}
         />
       ) : null}

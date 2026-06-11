@@ -361,7 +361,20 @@ export function SessionFormDialog({
                 variant="start"
                 required
                 value={live.startTime}
-                onChange={(v) => setLive((p) => ({ ...p, startTime: v }))}
+                onChange={(v) =>
+                  setLive((p) => ({
+                    ...p,
+                    startTime: v,
+                    // Auto-shift End to keep the currently-selected span
+                    // (end = start + duration). End stays user-editable
+                    // afterward — this only fires on a Start change.
+                    endTime: shiftEndToPreserveSpan(
+                      p.startTime,
+                      p.endTime,
+                      v,
+                    ),
+                  }))
+                }
                 className={selectStyles}
               />
             </Field>
@@ -493,3 +506,47 @@ const selectStyles = `${inputStyles} appearance-none pr-8`;
 // Inputs render PFA wall-clock — same value regardless of viewer's browser TZ.
 const toDateInput = formatPfaDate;
 const toTimeInput = formatPfaTime;
+
+// TimeSelect emits "HH:MM" (24h). The facility window is 08:00–22:00, so
+// the latest valid end is 22:00 (= 1320 minutes-of-day).
+const END_MAX_MINUTES = 22 * 60;
+
+function parseHHMM(v: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(v);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(min)) return null;
+  return h * 60 + min;
+}
+
+function formatHHMM(totalMinutes: number): string {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/**
+ * Given the previous start/end and a freshly-picked new start (all "HH:MM"
+ * wall-clock strings), returns a new end that preserves the prior span
+ * (end = newStart + (prevEnd - prevStart)). Both times are same calendar
+ * day, so plain minutes-of-day math is DST-safe here.
+ *
+ * Falls back to leaving the end untouched when inputs are missing/invalid
+ * or the prior span was non-positive. Clamps to the 22:00 facility close
+ * so we never auto-set an out-of-range end.
+ */
+function shiftEndToPreserveSpan(
+  prevStart: string,
+  prevEnd: string,
+  newStart: string,
+): string {
+  const ps = parseHHMM(prevStart);
+  const pe = parseHHMM(prevEnd);
+  const ns = parseHHMM(newStart);
+  if (ps === null || pe === null || ns === null) return prevEnd;
+  const span = pe - ps;
+  if (span <= 0) return prevEnd;
+  const newEnd = Math.min(ns + span, END_MAX_MINUTES);
+  return formatHHMM(newEnd);
+}

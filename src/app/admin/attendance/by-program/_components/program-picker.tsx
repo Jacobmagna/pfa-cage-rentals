@@ -22,9 +22,13 @@ export type ProgramOption = {
 export function ProgramPicker({
   programs,
   selectedProgramId,
+  month,
 }: {
   programs: ProgramOption[];
   selectedProgramId: string;
+  /** Selected "YYYY-MM" — carried through on submit so the picker
+   *  doesn't reset the month back to the current month. */
+  month?: string;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -39,6 +43,7 @@ export function ProgramPicker({
       action="/admin/attendance/by-program"
       className="rounded-xl border border-line bg-surface p-5 shadow-[var(--shadow-sm)]"
     >
+      {month ? <input type="hidden" name="month" value={month} /> : null}
       <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
         <div className="block">
           <span className="text-xs uppercase tracking-wider text-fg-muted block mb-1.5">

@@ -1,5 +1,6 @@
-import { CalendarCheck } from "lucide-react";
-import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
+import Link from "next/link";
+import { CalendarCheck, Download } from "lucide-react";
+import { and, asc, eq, gte, inArray, isNotNull, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
   athletePrograms,
@@ -14,8 +15,10 @@ import {
   type GridAthlete,
 } from "@/lib/server/attendance-grid";
 import { computeOverCapFlags } from "@/lib/server/attendance-flags";
+import { resolveAttendanceMonth } from "@/lib/attendance/month";
 import { ProgramPicker, type ProgramOption } from "./_components/program-picker";
 import { AttendanceGrid } from "./_components/attendance-grid";
+import { MonthNav } from "../_components/month-nav";
 
 // Admin Attendance-by-Program grid (FEAT-10, DEC-25). Read-only,
 // searchParams-driven (?programId=). The picker is a GET <form>;
@@ -33,6 +36,7 @@ import { AttendanceGrid } from "./_components/attendance-grid";
 
 type RawSearchParams = Promise<{
   programId?: string | string[];
+  month?: string | string[];
 }>;
 
 function firstParam(v: string | string[] | undefined): string {
@@ -46,6 +50,11 @@ export default async function AttendanceByProgramPage({
 }) {
   await requireRole("admin");
   const params = await searchParams;
+
+  // Selected month (?month=YYYY-MM), defaulting to the current PFA month.
+  // Bounds the session query so only this month's day-columns render
+  // (QA2 #12/#13 — fixes the unbounded horizontal overflow).
+  const monthSel = resolveAttendanceMonth(firstParam(params.month) || undefined);
 
   // Picker options = active programs only. A selected programId that
   // isn't in this set is treated as no selection (DEC-25).
@@ -76,7 +85,11 @@ export default async function AttendanceByProgramPage({
   if (!selectedProgramId) {
     return (
       <div className="space-y-6">
-        <ProgramPicker programs={programOptions} selectedProgramId="" />
+        <ProgramPicker
+          programs={programOptions}
+          selectedProgramId=""
+          month={monthSel.month}
+        />
         <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-line bg-surface py-16 text-center shadow-[var(--shadow-sm)]">
           <CalendarCheck className="h-8 w-8 text-gold" aria-hidden="true" />
           <p className="text-fg-muted">Pick work to view attendance.</p>
@@ -124,14 +137,22 @@ export default async function AttendanceByProgramPage({
     .innerJoin(athletes, eq(athletePrograms.athleteId, athletes.id))
     .where(eq(athletePrograms.programId, selectedProgramId));
 
-  // (c) the program's attendance sessions (all of them, ascending).
+  // (c) the program's attendance sessions WITHIN the selected month
+  // only, ascending. sessionDate is a "YYYY-MM-DD" string, so the month
+  // bound is a string range [firstDay, nextMonthFirstDay).
   const sessionRows = await db
     .select({
       id: attendanceSessions.id,
       sessionDate: attendanceSessions.sessionDate,
     })
     .from(attendanceSessions)
-    .where(eq(attendanceSessions.programId, selectedProgramId))
+    .where(
+      and(
+        eq(attendanceSessions.programId, selectedProgramId),
+        gte(attendanceSessions.sessionDate, monthSel.firstDay),
+        lt(attendanceSessions.sessionDate, monthSel.nextMonthFirstDay),
+      ),
+    )
     .orderBy(asc(attendanceSessions.sessionDate));
 
   const sessionIds = sessionRows.map((s) => s.id);
@@ -183,18 +204,43 @@ export default async function AttendanceByProgramPage({
 
   const empty = grid.sessions.length === 0 || grid.athletes.length === 0;
 
+  const downloadHref = `/admin/attendance/download?${new URLSearchParams({
+    programId: selectedProgramId,
+    month: monthSel.month,
+  }).toString()}`;
+
   return (
     <div className="space-y-6">
       <ProgramPicker
         programs={programOptions}
         selectedProgramId={selectedProgramId}
+        month={monthSel.month}
       />
+
+      <MonthNav
+        basePath="/admin/attendance/by-program"
+        label={monthSel.label}
+        prevMonth={monthSel.prevMonth}
+        nextMonth={monthSel.nextMonth}
+        extraParams={{ programId: selectedProgramId }}
+      />
+
+      <div className="flex items-center justify-end">
+        <Link
+          href={downloadHref}
+          prefetch={false}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-4 h-9 text-sm font-medium text-fg-muted shadow-[var(--shadow-sm)] hover:text-fg hover:-translate-y-px hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition"
+        >
+          <Download className="h-4 w-4" />
+          Download Excel
+        </Link>
+      </div>
 
       {empty ? (
         <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-line bg-surface py-16 text-center shadow-[var(--shadow-sm)]">
           <CalendarCheck className="h-8 w-8 text-gold" aria-hidden="true" />
           <p className="text-fg-muted">
-            No attendance recorded for this work yet.
+            No attendance recorded for this work this month.
           </p>
         </div>
       ) : (

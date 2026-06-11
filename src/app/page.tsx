@@ -1,6 +1,7 @@
+import type { Session } from "next-auth";
 import Image from "next/image";
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { auth } from "@/auth";
 import { DiamondMark } from "./_components/diamond-mark";
 import { GoogleSignInButton } from "./_components/google-signin-button";
@@ -43,7 +44,19 @@ export default async function Home({
 }: {
   searchParams: SearchParams;
 }) {
-  const session = await auth();
+  // The landing/sign-in page is the critical entry point, so a transient
+  // session-lookup failure (e.g. a Neon DB blip) must not 500 the page.
+  // Wrap ONLY the auth() call: on error we log and treat the user as
+  // signed-out so the normal sign-in form still renders. The redirect()
+  // below stays OUTSIDE the try/catch — it works by throwing NEXT_REDIRECT
+  // internally, which the catch must never swallow.
+  let session: Session | null = null;
+  try {
+    session = await auth();
+  } catch (err) {
+    unstable_rethrow(err);
+    console.error("[signin] auth() lookup failed; rendering signed-out view", err);
+  }
   if (session?.user) {
     redirect(session.user.role === "admin" ? "/admin" : "/coach");
   }

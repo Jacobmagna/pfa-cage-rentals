@@ -16,7 +16,11 @@ import {
 import type { CoachOption } from "./payments-client";
 import { formatPfaDate } from "@/lib/timezone";
 import { DateInput } from "@/app/_components/date-input";
-import { PAYMENT_METHODS, type PaymentMethod } from "@/lib/schemas/payment";
+import {
+  PAYMENT_METHODS,
+  type PaymentDirection,
+  type PaymentMethod,
+} from "@/lib/schemas/payment";
 
 // Methods shown in the dropdown for NEW payments. Venmo dropped 2026-05-25
 // (business Venmo charges incoming-payment fees) but kept in the enum so
@@ -38,6 +42,7 @@ export type PaymentInitialValues = {
   coachId: string;
   amountCents: number;
   method: PaymentMethod;
+  direction: PaymentDirection;
   paidAt: Date;
   reference: string | null;
   note: string | null;
@@ -102,6 +107,7 @@ export function PaymentDialog({
         coachId: initial.coachId,
         amountDollars: centsToDollarsInput(initial.amountCents),
         method: initial.method,
+        direction: initial.direction as string,
         paidAtDate: formatPfaDate(initial.paidAt),
         reference: initial.reference ?? "",
         note: initial.note ?? "",
@@ -111,6 +117,7 @@ export function PaymentDialog({
       coachId: prefillCoachId ?? "",
       amountDollars: "",
       method: "zelle" as string,
+      direction: "coach_to_pfa" as string,
       paidAtDate: formatPfaDate(new Date()),
       reference: "",
       note: "",
@@ -121,11 +128,13 @@ export function PaymentDialog({
   // and so prefillCoachId from a row's "Record" button is honored.
   const [coachId, setCoachId] = useState(defaults.coachId);
   const [method, setMethod] = useState(defaults.method);
+  const [direction, setDirection] = useState(defaults.direction);
   const [prevDefaults, setPrevDefaults] = useState(defaults);
   if (defaults !== prevDefaults) {
     setPrevDefaults(defaults);
     setCoachId(defaults.coachId);
     setMethod(defaults.method);
+    setDirection(defaults.direction);
   }
 
   return (
@@ -192,6 +201,27 @@ export function PaymentDialog({
                 </option>
               ))}
             </select>
+          </Field>
+
+          <Field
+            label="Direction"
+            hint="Which way did the money move?"
+          >
+            <input type="hidden" name="direction" value={direction} />
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <DirectionOption
+                checked={direction === "coach_to_pfa"}
+                onSelect={() => setDirection("coach_to_pfa")}
+                title="Coach paid PFA"
+                subtitle="Cage rental"
+              />
+              <DirectionOption
+                checked={direction === "pfa_to_coach"}
+                onSelect={() => setDirection("pfa_to_coach")}
+                title="PFA paid coach"
+                subtitle="Work hours"
+              />
+            </div>
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
@@ -317,6 +347,43 @@ function Field({
           {hint}
         </span>
       ) : null}
+    </label>
+  );
+}
+
+// A single direction radio rendered as a tappable card. Plain, explicit
+// labels (part of QA2 #5 directional-wording): the title states who paid
+// whom and the subtitle names which ledger it nets against.
+function DirectionOption({
+  checked,
+  onSelect,
+  title,
+  subtitle,
+}: {
+  checked: boolean;
+  onSelect: () => void;
+  title: string;
+  subtitle: string;
+}) {
+  return (
+    <label
+      className={`flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2.5 text-sm transition-colors ${
+        checked
+          ? "border-gold/60 bg-gold/10 ring-1 ring-inset ring-gold/40"
+          : "border-line bg-page hover:border-line-strong"
+      }`}
+    >
+      <input
+        type="radio"
+        name="directionRadio"
+        checked={checked}
+        onChange={onSelect}
+        className="mt-0.5 h-4 w-4 accent-gold"
+      />
+      <span className="flex flex-col leading-tight">
+        <span className="font-medium text-fg">{title}</span>
+        <span className="text-[11px] text-fg-subtle">{subtitle}</span>
+      </span>
     </label>
   );
 }

@@ -108,7 +108,8 @@ export async function createProgramScheduleSeriesInternal(
 
   const programName = await assertProgramActive(parsed.programId);
   // QA10 W3.2: full coach set; primary = [0]. Validate each, dedupe.
-  const primaryCoachId = parsed.scheduledCoachIds[0];
+  // QA-R2 #10: coach is OPTIONAL — empty array = no coach (primary = null).
+  const primaryCoachId = parsed.scheduledCoachIds[0] ?? null;
   for (const coachId of parsed.scheduledCoachIds) {
     await assertScheduledCoach(coachId);
   }
@@ -153,9 +154,12 @@ export async function createProgramScheduleSeriesInternal(
     })
     .returning();
 
-  await db
-    .insert(programScheduleSeriesCoaches)
-    .values(coachIds.map((coachId) => ({ seriesId: series.id, coachId })));
+  // QA-R2 #10: only write coach join rows when a coach is assigned.
+  if (coachIds.length > 0) {
+    await db
+      .insert(programScheduleSeriesCoaches)
+      .values(coachIds.map((coachId) => ({ seriesId: series.id, coachId })));
+  }
 
   let count = 0;
   if (occurrences.length > 0) {
@@ -180,11 +184,14 @@ export async function createProgramScheduleSeriesInternal(
     count = inserted.length;
 
     // QA10 W3.2: copy the full coach set onto every materialized block.
-    await db.insert(programScheduleBlockCoaches).values(
-      inserted.flatMap((b) =>
-        coachIds.map((coachId) => ({ blockId: b.id, coachId })),
-      ),
-    );
+    // QA-R2 #10: skip when the series has no coach.
+    if (coachIds.length > 0) {
+      await db.insert(programScheduleBlockCoaches).values(
+        inserted.flatMap((b) =>
+          coachIds.map((coachId) => ({ blockId: b.id, coachId })),
+        ),
+      );
+    }
 
     // QA10 W3.3: one linked blocked_time per (occurrence block × resource),
     // bulk-inserted in a single statement. The series' resource set is
@@ -236,7 +243,8 @@ export async function editProgramScheduleSeriesInternal(
 
   const programName = await assertProgramActive(parsed.programId);
   // QA10 W3.2: full coach set; primary = [0]. Validate each, dedupe.
-  const primaryCoachId = parsed.scheduledCoachIds[0];
+  // QA-R2 #10: coach is OPTIONAL — empty array = no coach (primary = null).
+  const primaryCoachId = parsed.scheduledCoachIds[0] ?? null;
   for (const coachId of parsed.scheduledCoachIds) {
     await assertScheduledCoach(coachId);
   }
@@ -303,12 +311,15 @@ export async function editProgramScheduleSeriesInternal(
     .returning();
 
   // QA10 W3.2: replace the series' full coach set.
+  // QA-R2 #10: empty set clears membership (delete, no insert).
   await db
     .delete(programScheduleSeriesCoaches)
     .where(eq(programScheduleSeriesCoaches.seriesId, seriesId));
-  await db
-    .insert(programScheduleSeriesCoaches)
-    .values(coachIds.map((coachId) => ({ seriesId, coachId })));
+  if (coachIds.length > 0) {
+    await db
+      .insert(programScheduleSeriesCoaches)
+      .values(coachIds.map((coachId) => ({ seriesId, coachId })));
+  }
 
   // Delete this series' FUTURE blocks (startAt >= start of PFA today),
   // then re-insert from the new definition. Past blocks untouched. The
@@ -347,11 +358,14 @@ export async function editProgramScheduleSeriesInternal(
     count = inserted.length;
 
     // QA10 W3.2: re-insert the full coach set for each new future block.
-    await db.insert(programScheduleBlockCoaches).values(
-      inserted.flatMap((b) =>
-        coachIds.map((coachId) => ({ blockId: b.id, coachId })),
-      ),
-    );
+    // QA-R2 #10: skip when the series has no coach.
+    if (coachIds.length > 0) {
+      await db.insert(programScheduleBlockCoaches).values(
+        inserted.flatMap((b) =>
+          coachIds.map((coachId) => ({ blockId: b.id, coachId })),
+        ),
+      );
+    }
 
     // QA10 W3.3: re-insert the linked occupancy blocked_times for the new
     // future blocks at the new times. Past blocks' occupancy is untouched.

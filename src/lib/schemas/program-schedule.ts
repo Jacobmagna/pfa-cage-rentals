@@ -11,11 +11,12 @@ import { z } from "zod";
 
 const programScheduleBlockShape = {
   programId: z.string().min(1, "programId is required"),
-  // QA10 W3.2: the FULL set of scheduled coaches (primary = [0]). At least
-  // one is required; the action dedupes + validates each id.
-  scheduledCoachIds: z
-    .array(z.string().min(1))
-    .min(1, "Pick at least one coach"),
+  // QA10 W3.2: the FULL set of scheduled coaches (primary = [0]). The
+  // action dedupes + validates each id.
+  // QA-R2 #10: coach assignment is OPTIONAL — an empty array means
+  // "no coach assigned" (the block renders as Unassigned). Inner
+  // z.string().min(1) still rejects any blank id that IS provided.
+  scheduledCoachIds: z.array(z.string().min(1)),
   startAt: z.coerce.date(),
   endAt: z.coerce.date(),
   // QA10 W3.3: the cage resources this program block OCCUPIES. CREATE
@@ -77,10 +78,9 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const programScheduleSeriesShape = {
   programId: z.string().min(1, "programId is required"),
-  // QA10 W3.2: full scheduled-coach set (primary = [0]); required on save.
-  scheduledCoachIds: z
-    .array(z.string().min(1))
-    .min(1, "Pick at least one coach"),
+  // QA10 W3.2: full scheduled-coach set (primary = [0]).
+  // QA-R2 #10: OPTIONAL — an empty array = no coach assigned.
+  scheduledCoachIds: z.array(z.string().min(1)),
   daysOfWeek: z
     .array(z.number().int().min(0).max(6))
     .min(1, "Pick at least one weekday"),

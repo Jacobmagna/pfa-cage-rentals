@@ -181,3 +181,28 @@ export function programPayFromSnapshot(
     ((ratePer30MinCents ?? 0) * programMinutes(startAt, endAt)) / 30,
   );
 }
+
+/**
+ * QA2 #6 — read-path work pay for a single hour_log, branching on the
+ * per-session snapshot. When `perSessionRateCents` is non-null the log was
+ * stamped at write time as a "per_session" coach → pay the FLAT per-session
+ * amount (duration is irrelevant to pay). Otherwise (every hourly log + every
+ * pre-existing row) fall back to the per-30-min hourly snapshot via
+ * `programPayFromSnapshot`.
+ *
+ * This is the single read-side entry point every work-pay display/report
+ * should call so the per-session vs hourly branch can never drift. Like the
+ * other snapshot helpers, it reads stamped values and never recomputes from
+ * the coach's CURRENT pay mode — preserving the immutable-snapshot rule.
+ */
+export function workPayForLog(log: {
+  perSessionRateCents: number | null;
+  startAt: Date;
+  endAt: Date;
+  ratePer30MinCents: number | null;
+}): number {
+  if (log.perSessionRateCents != null) {
+    return log.perSessionRateCents;
+  }
+  return programPayFromSnapshot(log.startAt, log.endAt, log.ratePer30MinCents);
+}

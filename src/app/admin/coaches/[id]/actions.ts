@@ -28,6 +28,8 @@ import {
   deleteCoachInternal,
 } from "@/lib/server/user-actions";
 import { updateUserHandlesInternal } from "@/lib/server/handles-actions";
+import { updateCoachNotesInternal } from "@/lib/server/coach-notes-actions";
+import { updateCoachPaySettingsInternal } from "@/lib/server/coach-pay-settings-actions";
 
 function revalidateOverrideSurfaces(coachId: string) {
   revalidatePath(`/admin/coaches/${coachId}`);
@@ -88,6 +90,27 @@ export async function updateCoachHandles(input: unknown) {
   const result = await updateUserHandlesInternal(session.user, input);
   revalidatePath(`/admin/coaches/${result.id}`);
   revalidatePath("/admin/payments");
+  return result;
+}
+
+// QA2 #8 — update the admin-only free-text notes on a coach. Revalidates
+// the coach detail page so the Notes card re-renders with the saved text.
+// Notes are never shown on coach-facing surfaces, so no other revalidate.
+export async function updateCoachNotes(input: unknown) {
+  const session = await requireRole("admin");
+  const result = await updateCoachNotesInternal(session.user, input);
+  revalidatePath(`/admin/coaches/${result.id}`);
+  return result;
+}
+
+// QA2 #6 — set how FUTURE logged work is paid for this coach (hourly vs
+// a flat per-session amount). Does NOT retroactively change already-logged
+// work — the billing layer snapshots the basis at log time. Revalidates
+// the coach detail page so the Work-pay-mode card re-renders.
+export async function updateCoachPaySettings(input: unknown) {
+  const session = await requireRole("admin");
+  const result = await updateCoachPaySettingsInternal(session.user, input);
+  revalidatePath(`/admin/coaches/${result.coachId}`);
   return result;
 }
 

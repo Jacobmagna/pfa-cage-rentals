@@ -13,7 +13,7 @@
 //     exempt.
 //
 // Money + cancellation logic is REUSED, never re-derived:
-//   @/lib/billing      → totalFromSnapshot, programPayFromSnapshot, slotsBetween
+//   @/lib/billing      → totalFromSnapshot, workPayForLog, slotsBetween
 //   @/lib/cancellation → categorizeCancellation
 //
 // `computeAggregates` takes the db client as a param so the Orchestrator
@@ -23,9 +23,9 @@
 import { and, eq, gte, isNull, lt, sql } from "drizzle-orm";
 
 import {
-  programPayFromSnapshot,
   slotsBetween,
   totalFromSnapshot,
+  workPayForLog,
 } from "@/lib/billing";
 import { categorizeCancellation } from "@/lib/cancellation";
 import { db as defaultDb } from "@/db";
@@ -353,6 +353,7 @@ export async function computeAggregates(
       startAt: hourLogs.startAt,
       endAt: hourLogs.endAt,
       ratePer30MinCents: hourLogs.ratePer30MinCents,
+      perSessionRateCents: hourLogs.perSessionRateCents,
     })
     .from(hourLogs)
     .where(
@@ -371,11 +372,12 @@ export async function computeAggregates(
     agg.logs += 1;
     agg.minutes += (log.endAt.getTime() - log.startAt.getTime()) / 60000;
     byCoach.set(log.coachId, agg);
-    programPayCents += programPayFromSnapshot(
-      log.startAt,
-      log.endAt,
-      log.ratePer30MinCents,
-    );
+    programPayCents += workPayForLog({
+      perSessionRateCents: log.perSessionRateCents,
+      startAt: log.startAt,
+      endAt: log.endAt,
+      ratePer30MinCents: log.ratePer30MinCents,
+    });
   }
 
   // Per coach → anon id. Suppress any coach with < k logs.

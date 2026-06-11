@@ -9,32 +9,35 @@ import {
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
-import { programPayFromSnapshot, totalFromSnapshot } from "@/lib/billing";
+import { totalFromSnapshot, workPayForLog } from "@/lib/billing";
+import { netCoachLedgers, type LedgerPayment } from "@/lib/payment-ledger";
 import { PaymentsClient, type CoachOption, type RecentPaymentRow } from "./_components/payments-client";
 
-// /admin/payments — coach-to-PFA ledger. Three stacked sections:
-//   1. Balances by coach: lifetime cage-rental owed minus lifetime
-//      confirmed payments. Pending payments don't reduce the balance.
-//      Program hours (a payout PFA owes the coach) are shown in their
-//      own neutral column and never netted into this balance.
+// /admin/payments — TWO-direction coach ledger. Three stacked sections:
+//   1. Balances by coach: two side-by-side ledgers per coach —
+//      a) Cage rentals (coach OWES PFA): lifetime cage owed minus
+//         confirmed coach_to_pfa payments.
+//      b) Work hours (PFA OWES coach): lifetime work pay minus confirmed
+//         pfa_to_coach payments.
+//      Pending payments (either direction) don't reduce either balance.
 //   2. Pending inbox: coach-self-reported payments awaiting admin
 //      confirmation. Phase P4 will populate this; for launch it
 //      typically renders an empty state.
-//   3. Recent payments: last 100 confirmed + pending entries with
-//      inline edit / delete / confirm actions.
+//   3. Recent payments: last 100 confirmed + pending entries (each
+//      tagged with its direction) with inline edit / delete / confirm.
 //
-// Money direction: cage rentals are money the coach OWES PFA (a
-// receivable); program hours are money PFA PAYS the coach (a payout).
-// They flow OPPOSITE ways and are kept SEPARATE — program pay is NOT
-// netted into the cage balance. Balance = cage owed − confirmed
-// payments. Program pay shows in its own neutral column.
+// Money direction (QA2 #9): cage rentals are money the coach OWES PFA (a
+// receivable, paid down by coach_to_pfa payments); work hours are money
+// PFA PAYS the coach (a payout, paid down by pfa_to_coach payments). They
+// flow OPPOSITE ways and are kept in SEPARATE ledgers — a payment in one
+// direction NEVER nets against the other. The netting itself lives in the
+// pure helper src/lib/payment-ledger.ts.
 //
-// Snapshot rule: each source is summed straight off its own snapshot —
+// Snapshot rule: each owed source is summed straight off its own snapshot —
 // sessionsBilling.ratePer30MinCents (cage rentals) and
-// hourLogs.ratePer30MinCents (program hours) — × its slot count. The
-// program-hour rate is likewise snapshotted at log time. Renegotiating
-// an override only affects future bookings / logs — past balances
-// never drift.
+// workPayForLog(hour_logs row) (work hours; per-session rate if stamped,
+// else the per-30-min snapshot). Renegotiating an override only affects
+// future bookings / logs — past balances never drift.
 //
 // All-time scope: imported historical data means lifetime-owed can be
 // large at launch. Dad's workflow for backfilling historical
@@ -80,14 +83,16 @@ export default async function AdminPaymentsPage() {
         startAt: hourLogs.startAt,
         endAt: hourLogs.endAt,
         ratePer30MinCents: hourLogs.ratePer30MinCents,
+        perSessionRateCents: hourLogs.perSessionRateCents,
       })
-      // 1b security B: held logs are not part of the lifetime program-pay total.
+      // 1b security B: held logs are not part of the lifetime work-pay total.
       .from(hourLogs)
       .where(eq(hourLogs.status, "posted")),
     db
       .select({
         coachId: coachPayments.coachId,
         amountCents: coachPayments.amountCents,
+        direction: coachPayments.direction,
       })
       .from(coachPayments)
       .where(
@@ -104,6 +109,7 @@ export default async function AdminPaymentsPage() {
         coachEmail: users.email,
         amountCents: coachPayments.amountCents,
         method: coachPayments.method,
+        direction: coachPayments.direction,
         paidAt: coachPayments.paidAt,
         reference: coachPayments.reference,
         note: coachPayments.note,
@@ -126,6 +132,7 @@ export default async function AdminPaymentsPage() {
         coachEmail: users.email,
         amountCents: coachPayments.amountCents,
         method: coachPayments.method,
+        direction: coachPayments.direction,
         paidAt: coachPayments.paidAt,
         reference: coachPayments.reference,
         note: coachPayments.note,
@@ -139,12 +146,11 @@ export default async function AdminPaymentsPage() {
       .limit(RECENT_LIMIT),
   ]);
 
-  // Cage owed (what the coach owes PFA) and program pay (what PFA owes
-  // the coach) are summed from their own snapshots and kept separate.
-  // Reading ratePer30MinCents directly off each row preserves the
+  // Cage owed (what the coach owes PFA) and work pay (what PFA owes the
+  // coach) are summed from their own snapshots and kept in separate
+  // ledgers. Reading the snapshot directly off each row preserves the
   // historical rate at booking / log time — renegotiating an override
-  // never rewrites past balances. The hour_logs snapshot is nullable
-  // (pre-rate logs) → treat null as $0.
+  // never rewrites past balances.
   const owedCageByCoach = new Map<string, number>();
   for (const s of sessionRows) {
     const total = totalFromSnapshot(s.startAt, s.endAt, s.ratePer30MinCents);
@@ -153,58 +159,70 @@ export default async function AdminPaymentsPage() {
       (owedCageByCoach.get(s.coachId) ?? 0) + total,
     );
   }
-  const owedProgramByCoach = new Map<string, number>();
+  const owedWorkByCoach = new Map<string, number>();
   for (const h of hourLogRows) {
-    // Program pay = per-hour × EXACT duration (not the 30-min cage slot
-    // model). The cage loop above keeps totalFromSnapshot.
-    const total = programPayFromSnapshot(
-      h.startAt,
-      h.endAt,
-      h.ratePer30MinCents ?? 0,
-    );
-    owedProgramByCoach.set(
+    // Work pay via the single read-side entry point: per-session flat rate
+    // when stamped, else per-hour × exact duration off the per-30-min
+    // snapshot. (workPayForLog tolerates null rate → $0.)
+    const total = workPayForLog(h);
+    owedWorkByCoach.set(
       h.coachId,
-      (owedProgramByCoach.get(h.coachId) ?? 0) + total,
+      (owedWorkByCoach.get(h.coachId) ?? 0) + total,
     );
   }
-  const paidByCoach = new Map<string, number>();
+  // Confirmed payments grouped per coach, keeping direction so the netting
+  // helper can route each into the correct ledger.
+  const confirmedByCoach = new Map<string, LedgerPayment[]>();
   for (const p of confirmedPaymentRows) {
-    paidByCoach.set(
-      p.coachId,
-      (paidByCoach.get(p.coachId) ?? 0) + p.amountCents,
-    );
+    const list = confirmedByCoach.get(p.coachId) ?? [];
+    list.push({ amountCents: p.amountCents, direction: p.direction });
+    confirmedByCoach.set(p.coachId, list);
   }
 
-  // Roster rows + sort by balance descending (biggest debtors first).
+  // Roster rows. Each coach gets BOTH ledgers netted by direction; sorted
+  // by cage balance descending (biggest cage debtors first — that's the
+  // receivable Dad chases). Work pay shows alongside as PFA's payout.
   const balanceRows = activeCoaches
     .map((c) => {
-      const owedCage = owedCageByCoach.get(c.id) ?? 0;
-      const owedProgram = owedProgramByCoach.get(c.id) ?? 0;
-      const paid = paidByCoach.get(c.id) ?? 0;
-      // Balance is cage-only: program pay is a payout, never reduces it.
+      const ledgers = netCoachLedgers(
+        owedCageByCoach.get(c.id) ?? 0,
+        owedWorkByCoach.get(c.id) ?? 0,
+        confirmedByCoach.get(c.id) ?? [],
+      );
       return {
         coachId: c.id,
         coachName: c.name ?? c.email,
         coachEmail: c.email,
         zelleContact: c.zelleContact,
-        owedCageCents: owedCage,
-        owedProgramCents: owedProgram,
-        paidCents: paid,
-        balanceCents: owedCage - paid,
+        owedCageCents: ledgers.owedCageCents,
+        paidCageCents: ledgers.paidCageCents,
+        cageBalanceCents: ledgers.cageBalanceCents,
+        owedWorkCents: ledgers.owedWorkCents,
+        paidWorkCents: ledgers.paidWorkCents,
+        workBalanceCents: ledgers.workBalanceCents,
       };
     })
-    .sort((a, b) => b.balanceCents - a.balanceCents);
+    .sort((a, b) => b.cageBalanceCents - a.cageBalanceCents);
 
   // Grand totals across the active roster.
   const totals = balanceRows.reduce(
     (acc, r) => {
       acc.owedCage += r.owedCageCents;
-      acc.owedProgram += r.owedProgramCents;
-      acc.paid += r.paidCents;
-      acc.balance += r.balanceCents;
+      acc.paidCage += r.paidCageCents;
+      acc.cageBalance += r.cageBalanceCents;
+      acc.owedWork += r.owedWorkCents;
+      acc.paidWork += r.paidWorkCents;
+      acc.workBalance += r.workBalanceCents;
       return acc;
     },
-    { owedCage: 0, owedProgram: 0, paid: 0, balance: 0 },
+    {
+      owedCage: 0,
+      paidCage: 0,
+      cageBalance: 0,
+      owedWork: 0,
+      paidWork: 0,
+      workBalance: 0,
+    },
   );
 
   const coachOptions: CoachOption[] = activeCoaches.map((c) => ({
@@ -219,6 +237,7 @@ export default async function AdminPaymentsPage() {
     coachName: p.coachName ?? p.coachEmail,
     amountCents: p.amountCents,
     method: p.method,
+    direction: p.direction,
     paidAt: p.paidAt,
     reference: p.reference,
     note: p.note,
@@ -231,6 +250,7 @@ export default async function AdminPaymentsPage() {
     coachName: p.coachName ?? p.coachEmail,
     amountCents: p.amountCents,
     method: p.method,
+    direction: p.direction,
     paidAt: p.paidAt,
     reference: p.reference,
     note: p.note,
@@ -254,11 +274,13 @@ export default async function AdminPaymentsPage() {
         </p>
         <h1 className="text-3xl font-semibold tracking-tight">Payments</h1>
         <p className="text-sm text-fg-muted">
-          Cage-rental balances (what each coach owes PFA) and the program hours
-          PFA owes them. <span className="font-medium text-fg">Balance = cage
-          owed − confirmed payments</span>; program pay is a separate payout and
-          does not reduce the cage balance. Only confirmed payments reduce the
-          balance — pending entries wait in the inbox.
+          Two separate ledgers per coach.{" "}
+          <span className="font-medium text-fg">Owes PFA (rentals)</span> = cage
+          owed − confirmed <em>coach&nbsp;paid&nbsp;PFA</em> payments;{" "}
+          <span className="font-medium text-fg">PFA owes (work)</span> = work pay
+          − confirmed <em>PFA&nbsp;paid&nbsp;coach</em> payments. The two never
+          net against each other. Only confirmed payments move a balance —
+          pending entries wait in the inbox.
         </p>
         <p className="text-xs italic text-fg-subtle md:hidden">
           This page is designed for desktop. Rotate your device or use a

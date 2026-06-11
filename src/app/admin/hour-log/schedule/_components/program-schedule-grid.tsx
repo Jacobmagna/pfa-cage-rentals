@@ -61,10 +61,12 @@ const SLOTS = PROGRAM_GRID_SLOTS; // 56
 export type ProgramScheduleBlockView = {
   id: string;
   programId: string;
-  scheduledCoachId: string;
+  // QA-R2 #10: null + "Unassigned" name when the block has no coach.
+  scheduledCoachId: string | null;
   coachName: string;
   // QA10 W3.2: the FULL scheduled-coach set (first = primary). The bar
   // shows the primary name + "+N" when length > 1.
+  // QA-R2 #10: EMPTY when the block has no coach.
   coaches: { id: string; name: string }[];
   startAt: Date;
   endAt: Date;

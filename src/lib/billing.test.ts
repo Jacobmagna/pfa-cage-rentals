@@ -8,6 +8,7 @@ import {
   rateForSlot,
   slotsBetween,
   totalFromSnapshot,
+  workPayForLog,
   type ProgramRateOverride,
   type RateOverride,
   type ResourceType,
@@ -371,6 +372,86 @@ describe("programPayFromSnapshot", () => {
         2200,
       ),
     ).toThrow(/after/);
+  });
+});
+
+describe("workPayForLog", () => {
+  // Per-session branch: a non-null perSessionRateCents pays a FLAT amount,
+  // independent of duration and the hourly rate.
+  it("returns the flat per-session amount when perSessionRateCents is set", () => {
+    expect(
+      workPayForLog({
+        perSessionRateCents: 5000,
+        startAt: d("2026-05-24T09:00:00Z"),
+        endAt: d("2026-05-24T10:30:00Z"), // 90 min — irrelevant to pay
+        ratePer30MinCents: 2200, // hourly basis — ignored when per-session
+      }),
+    ).toBe(5000);
+  });
+
+  it("ignores duration entirely in the per-session branch", () => {
+    const short = workPayForLog({
+      perSessionRateCents: 5000,
+      startAt: d("2026-05-24T09:00:00Z"),
+      endAt: d("2026-05-24T09:15:00Z"), // 15 min
+      ratePer30MinCents: 2200,
+    });
+    const long = workPayForLog({
+      perSessionRateCents: 5000,
+      startAt: d("2026-05-24T09:00:00Z"),
+      endAt: d("2026-05-24T12:00:00Z"), // 3 hr
+      ratePer30MinCents: 2200,
+    });
+    expect(short).toBe(5000);
+    expect(long).toBe(5000);
+  });
+
+  it("pays a per-session log of 0 cents as 0 (flat zero is honored)", () => {
+    expect(
+      workPayForLog({
+        perSessionRateCents: 0,
+        startAt: d("2026-05-24T09:00:00Z"),
+        endAt: d("2026-05-24T10:00:00Z"),
+        ratePer30MinCents: 2200,
+      }),
+    ).toBe(0);
+  });
+
+  // Hourly branch: null perSessionRateCents falls back to the per-30-min
+  // snapshot via programPayFromSnapshot.
+  it("falls back to the hourly snapshot when perSessionRateCents is null", () => {
+    const start = d("2026-05-24T09:00:00Z");
+    const end = d("2026-05-24T10:00:00Z"); // 60 min
+    expect(
+      workPayForLog({
+        perSessionRateCents: null,
+        startAt: start,
+        endAt: end,
+        ratePer30MinCents: 2200,
+      }),
+    ).toBe(programPayFromSnapshot(start, end, 2200));
+  });
+
+  it("bills a 45-min hourly log at 0.75× the hourly rate", () => {
+    expect(
+      workPayForLog({
+        perSessionRateCents: null,
+        startAt: d("2026-05-24T09:00:00Z"),
+        endAt: d("2026-05-24T09:45:00Z"),
+        ratePer30MinCents: 2200,
+      }),
+    ).toBe(3300);
+  });
+
+  it("treats a null hourly snapshot as $0 in the hourly branch", () => {
+    expect(
+      workPayForLog({
+        perSessionRateCents: null,
+        startAt: d("2026-05-24T09:00:00Z"),
+        endAt: d("2026-05-24T10:00:00Z"),
+        ratePer30MinCents: null,
+      }),
+    ).toBe(0);
   });
 });
 

@@ -97,10 +97,12 @@ export type ResourceOption = {
 
 export type ProgramBlockEditInitial = {
   id: string;
+  // QA-R2 #10: null when the block is Unassigned (no coach).
   programId: string;
-  scheduledCoachId: string;
+  scheduledCoachId: string | null;
   // QA10 W3.2: the FULL scheduled-coach set (first = primary). The form
   // seeds its multi-coach control from this and submits scheduledCoachIds.
+  // QA-R2 #10: EMPTY when the block has no coach.
   scheduledCoachIds: string[];
   startAt: Date;
   endAt: Date;
@@ -118,8 +120,10 @@ export type ProgramBlockEditInitial = {
 export type SeriesView = {
   id: string;
   programId: string;
-  scheduledCoachId: string;
+  // QA-R2 #10: null when the series has no coach.
+  scheduledCoachId: string | null;
   // QA10 W3.2: full scheduled-coach set for the series (first = primary).
+  // QA-R2 #10: EMPTY when the series has no coach.
   scheduledCoachIds: string[];
   daysOfWeek: number[];
   startTime: string;

@@ -167,7 +167,8 @@ export async function loadAccountabilityScorecard(opts?: {
       endAt: programScheduleBlocks.endAt,
     })
     .from(programScheduleBlocks)
-    .innerJoin(users, eq(programScheduleBlocks.scheduledCoachId, users.id))
+    // QA-R2 #10: LEFT join so coachless (Unassigned) blocks still appear.
+    .leftJoin(users, eq(programScheduleBlocks.scheduledCoachId, users.id))
     .where(
       and(
         lt(programScheduleBlocks.startAt, now),
@@ -197,20 +198,26 @@ export async function loadAccountabilityScorecard(opts?: {
   }
 
   const blocks: ReconBlock[] = blockRows.map((b) => {
-    const primary = {
-      coachId: b.scheduledCoachId,
-      coachName: b.coachName ?? b.coachEmail,
-    };
+    // QA-R2 #10: a coachless (Unassigned) block has no primary + empty set.
+    const primary =
+      b.scheduledCoachId !== null
+        ? {
+            coachId: b.scheduledCoachId,
+            coachName: b.coachName ?? b.coachEmail ?? b.scheduledCoachId,
+          }
+        : null;
     const list = coachesByBlock.get(b.id);
     const coaches =
-      !list || list.length === 0
-        ? [primary]
-        : [primary, ...list.filter((c) => c.coachId !== b.scheduledCoachId)];
+      primary === null
+        ? (list ?? [])
+        : !list || list.length === 0
+          ? [primary]
+          : [primary, ...list.filter((c) => c.coachId !== b.scheduledCoachId)];
     return {
       id: b.id,
       programId: b.programId,
       scheduledCoachId: b.scheduledCoachId,
-      scheduledCoachName: b.coachName ?? b.coachEmail,
+      scheduledCoachName: primary?.coachName ?? null,
       coaches,
       startAt: b.startAt,
       endAt: b.endAt,

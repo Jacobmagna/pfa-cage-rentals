@@ -13,8 +13,8 @@
 
 import {
   programMinutes,
-  programPayFromSnapshot,
   slotsBetween,
+  workPayForLog,
   type ResourceType,
 } from "@/lib/billing";
 import {
@@ -55,6 +55,13 @@ export type AggregateHourLogInput = {
    * logs stay null and contribute $0; callers pass `?? 0`.
    */
   ratePer30MinCents: number;
+  /**
+   * QA2 #6 — flat per-session pay (cents) snapshotted at log time when the
+   * coach was on the "per_session" pay mode. NULL = hourly (use the per-30-min
+   * rate above). When set, the log pays this flat amount regardless of
+   * duration; the program HOURS column still reflects the real duration.
+   */
+  perSessionRateCents: number | null;
 };
 
 export type DetailRow = {
@@ -215,11 +222,12 @@ export function aggregateReport(
       log.coachName ?? log.coachEmail,
       log.coachEmail,
     );
-    const totalCents = programPayFromSnapshot(
-      log.startAt,
-      log.endAt,
-      log.ratePer30MinCents,
-    );
+    const totalCents = workPayForLog({
+      perSessionRateCents: log.perSessionRateCents,
+      startAt: log.startAt,
+      endAt: log.endAt,
+      ratePer30MinCents: log.ratePer30MinCents,
+    });
     entry.programHours += programMinutes(log.startAt, log.endAt) / 60;
     entry.programTotalCents += totalCents;
     // Program pay is a payout (PFA owes the coach) — the OPPOSITE money

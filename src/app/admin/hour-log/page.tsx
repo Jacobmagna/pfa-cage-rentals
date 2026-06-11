@@ -19,7 +19,7 @@ import {
 } from "@/lib/reports/hour-log-filters";
 import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
 import { countHeldHourLogs } from "@/lib/server/hour-log-actions";
-import { programMinutes, programPayFromSnapshot } from "@/lib/billing";
+import { programMinutes, workPayForLog } from "@/lib/billing";
 import { formatDollars } from "@/lib/format-money";
 import { pfaDayEnd, pfaDayStart, pfaMonthEnd, pfaMonthStart } from "@/lib/timezone";
 import { fetchNeedsReviewItems } from "@/lib/server/needs-review";
@@ -93,6 +93,7 @@ export default async function AdminHourLogPage({
         startAt: hourLogs.startAt,
         endAt: hourLogs.endAt,
         ratePer30MinCents: hourLogs.ratePer30MinCents,
+        perSessionRateCents: hourLogs.perSessionRateCents,
       })
       .from(hourLogs)
       .where(
@@ -133,11 +134,15 @@ export default async function AdminHourLogPage({
   let owedProgramCents = 0;
   for (const r of monthHourLogRows) {
     monthMinutes += programMinutes(r.startAt, r.endAt);
-    owedProgramCents += programPayFromSnapshot(
-      r.startAt,
-      r.endAt,
-      r.ratePer30MinCents ?? 0,
-    );
+    // QA2 #6: per-session coaches pay a flat snapshot; hourly coaches pay
+    // per-hour × exact duration (null stamped rate → $0). The HOURS stat above
+    // still reflects real duration regardless of pay mode.
+    owedProgramCents += workPayForLog({
+      perSessionRateCents: r.perSessionRateCents,
+      startAt: r.startAt,
+      endAt: r.endAt,
+      ratePer30MinCents: r.ratePer30MinCents ?? 0,
+    });
   }
   const monthHours = monthMinutes / 60;
   // Up to 2 decimals, trailing zeros stripped: 42.75 → "42.75", 42.5 → "42.5", 40 → "40".

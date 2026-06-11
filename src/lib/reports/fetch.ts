@@ -91,6 +91,7 @@ export async function fetchReportData(
           startAt: hourLogs.startAt,
           endAt: hourLogs.endAt,
           ratePer30MinCents: hourLogs.ratePer30MinCents,
+          perSessionRateCents: hourLogs.perSessionRateCents,
         })
         .from(hourLogs)
         .innerJoin(users, eq(hourLogs.coachId, users.id))
@@ -105,6 +106,7 @@ export async function fetchReportData(
     startAt: r.startAt,
     endAt: r.endAt,
     ratePer30MinCents: r.ratePer30MinCents ?? 0,
+    perSessionRateCents: r.perSessionRateCents,
   }));
 
   const aggregateInputs: AggregateSessionInput[] = sessionRows.map((r) => ({

@@ -1,15 +1,18 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, like, or } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import {
+  auditLog,
   coachPayments,
+  coachPaySettings,
   coachRateOverrides,
   programRateOverrides,
   programs,
   sessionsBilling,
   users,
+  type CoachPayMode,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import {
@@ -18,6 +21,12 @@ import {
   type ResourceType,
 } from "@/lib/billing";
 import { formatPfaDateMedium } from "@/lib/timezone";
+import { CoachNotesCard } from "./_components/notes-card";
+import { CoachPayModeCard } from "./_components/pay-mode-card";
+import {
+  RateHistoryCard,
+  type RateHistoryRow,
+} from "./_components/rate-history-card";
 import {
   RateOverridesCard,
   type RateOverrideRow,
@@ -36,6 +45,14 @@ import { CoachHandlesCard } from "./_components/handles-card";
 
 const ALL_RESOURCE_TYPES: ResourceType[] = ["cage", "bullpen", "weight_room"];
 
+// Display labels for resource types in the rate-history timeline. Matches
+// the RESOURCE_LABEL map in rate-overrides-card.tsx.
+const RESOURCE_LABEL: Record<string, string> = {
+  cage: "Cages",
+  bullpen: "Bullpens",
+  weight_room: "Weight Room",
+};
+
 type Params = Promise<{ id: string }>;
 
 export default async function AdminCoachDetailPage({
@@ -53,6 +70,9 @@ export default async function AdminCoachDetailPage({
     paymentRows,
     programRows,
     programOverrideRows,
+    paySettingsResult,
+    rateAuditRows,
+    allProgramRows,
   ] = await Promise.all([
       db
         .select({
@@ -63,6 +83,7 @@ export default async function AdminCoachDetailPage({
           createdAt: users.createdAt,
           phone: users.phone,
           zelleContact: users.zelleContact,
+          notes: users.notes,
           smsOptIn: users.smsOptIn,
           smsConsentAt: users.smsConsentAt,
           smsOptOut: users.smsOptOut,
@@ -121,6 +142,51 @@ export default async function AdminCoachDetailPage({
         .select()
         .from(programRateOverrides)
         .where(eq(programRateOverrides.coachId, id)),
+      // QA2 #6 — this coach's work-pay-mode settings (one row, or none →
+      // implicit "hourly").
+      db
+        .select()
+        .from(coachPaySettings)
+        .where(eq(coachPaySettings.coachId, id))
+        .limit(1),
+      // QA2 #7 — rate-override change history, derived from the existing
+      // audit_log (no new table). Resource-type overrides log with
+      // entityType="rate_override" + entityId="${coachId}:${resourceType}";
+      // program-rate overrides log with entityType="program_rate_override" +
+      // entityId="${coachId}:${programId}". Filter to this coach's entries
+      // (entityId starts with "${coachId}:"), newest first. Join users to
+      // resolve the actor's display name.
+      db
+        .select({
+          id: auditLog.id,
+          entityType: auditLog.entityType,
+          entityId: auditLog.entityId,
+          action: auditLog.action,
+          diff: auditLog.diff,
+          ts: auditLog.ts,
+          actorName: users.name,
+          actorEmail: users.email,
+        })
+        .from(auditLog)
+        .leftJoin(users, eq(users.id, auditLog.actorUserId))
+        .where(
+          and(
+            inArray(auditLog.entityType, [
+              "rate_override",
+              "program_rate_override",
+            ]),
+            or(
+              like(auditLog.entityId, `${id}:%`),
+              eq(auditLog.entityId, id),
+            ),
+          ),
+        )
+        .orderBy(desc(auditLog.ts)),
+      // All programs (active + retired) so the rate-history timeline can
+      // resolve a program name even for an override on a now-inactive program.
+      db
+        .select({ id: programs.id, name: programs.name })
+        .from(programs),
     ]);
 
   const coach = coachResult[0];
@@ -178,6 +244,59 @@ export default async function AdminCoachDetailPage({
     };
   });
 
+  // QA2 #6 — current pay-mode setting (default "hourly" when no row).
+  const paySettings = paySettingsResult[0];
+  const payMode: CoachPayMode = paySettings?.payMode ?? "hourly";
+  const perSessionRateCents = paySettings?.perSessionRateCents ?? null;
+
+  // QA2 #7 — build the rate-history timeline from the audit rows.
+  // The override tables store ratePer30MinCents. Resource (rental) rates
+  // are DISPLAYED per 30 min; program (work) rates are DISPLAYED per hour
+  // (cents × 2). The diff JSONB shape (see src/lib/audit.ts):
+  //   create → { after: <full row> }
+  //   update → { before: <changed keys>, after: <changed keys> }  (rate only)
+  //   delete → { before: <full row> }
+  const programNameById = new Map(allProgramRows.map((p) => [p.id, p.name]));
+
+  const rateHistoryRows: RateHistoryRow[] = rateAuditRows.map((r) => {
+    const isProgram = r.entityType === "program_rate_override";
+    // entityId is "${coachId}:${suffix}" — the suffix is the resourceType
+    // (rate_override) or the programId (program_rate_override).
+    const suffix = r.entityId.startsWith(`${id}:`)
+      ? r.entityId.slice(id.length + 1)
+      : "";
+    const target = isProgram
+      ? (programNameById.get(suffix) ?? "Unknown program")
+      : (RESOURCE_LABEL[suffix] ?? suffix);
+    const kind = isProgram ? "Work rate" : "Rental rate";
+
+    // Pull the per-30-min cents out of the diff's before/after snapshots.
+    const diff = (r.diff ?? {}) as {
+      before?: { ratePer30MinCents?: number } | null;
+      after?: { ratePer30MinCents?: number } | null;
+    };
+    const beforeCents = diff.before?.ratePer30MinCents ?? null;
+    const afterCents = diff.after?.ratePer30MinCents ?? null;
+
+    const fmt = (cents: number | null): string | null =>
+      cents == null
+        ? null
+        : isProgram
+          ? `$${((cents * 2) / 100).toFixed(2)} / hr`
+          : `$${(cents / 100).toFixed(2)} / 30 min`;
+
+    return {
+      id: r.id,
+      action: r.action,
+      target,
+      kind,
+      beforeLabel: fmt(beforeCents),
+      afterLabel: fmt(afterCents),
+      ts: r.ts,
+      actor: r.actorName ?? r.actorEmail ?? "—",
+    };
+  });
+
   return (
     <>
       <Link
@@ -210,6 +329,16 @@ export default async function AdminCoachDetailPage({
         coachId={coach.id}
         rows={programRateRows}
       />
+
+      <CoachPayModeCard
+        coachId={coach.id}
+        initialPayMode={payMode}
+        initialPerSessionRateCents={perSessionRateCents}
+      />
+
+      <RateHistoryCard rows={rateHistoryRows} />
+
+      <CoachNotesCard coachId={coach.id} initialNotes={coach.notes} />
 
       <CoachHandlesCard
         coachId={coach.id}

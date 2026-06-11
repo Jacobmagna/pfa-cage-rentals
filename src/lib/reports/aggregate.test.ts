@@ -144,6 +144,7 @@ function hourLog(
     startAt: new Date("2026-05-01T16:00:00Z"),
     endAt: new Date("2026-05-01T17:00:00Z"), // 1 hour → 1.0 program hours
     ratePer30MinCents: 1500,
+    perSessionRateCents: null,
     ...overrides,
   };
 }
@@ -233,5 +234,24 @@ describe("aggregateReport — program hours", () => {
     );
     expect(summary[0].programHours).toBe(1.5);
     expect(summary[0].programTotalCents).toBe(6600);
+  });
+
+  it("pays a per-session log a FLAT amount, ignoring the hourly rate + duration", () => {
+    // QA2 #6: perSessionRateCents set → flat pay; the per-30-min hourly rate is
+    // irrelevant, but the HOURS column still reflects the real duration.
+    const { summary, programGrandTotalCents } = aggregateReport(
+      [],
+      [
+        hourLog({
+          startAt: new Date("2026-05-01T16:00:00Z"),
+          endAt: new Date("2026-05-01T17:30:00Z"), // 1.5 hr
+          ratePer30MinCents: 2200, // would be 6600 hourly
+          perSessionRateCents: 5000, // flat $50 per session
+        }),
+      ],
+    );
+    expect(summary[0].programHours).toBe(1.5);
+    expect(summary[0].programTotalCents).toBe(5000);
+    expect(programGrandTotalCents).toBe(5000);
   });
 });

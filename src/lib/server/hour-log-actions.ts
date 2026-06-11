@@ -23,6 +23,7 @@
 import { and, desc, eq, gte, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  coachPaySettings,
   hourLogs,
   programRateOverrides,
   programScheduleBlockCoaches,
@@ -85,6 +86,31 @@ export async function resolveRateCentsForProgram(args: {
   );
 }
 
+// QA2 #6 — resolves the per-session pay snapshot (cents) to stamp on a new
+// hour_logs row. Returns the coach's coachPaySettings.perSessionRateCents ONLY
+// when the coach is on the "per_session" pay mode AND has a positive rate set;
+// otherwise null (every hourly coach, every coach with no settings row, and any
+// per_session coach with a missing/non-positive rate → hourly snapshot applies).
+// Preserves the immutable-snapshot rule: changing a coach's mode never re-bills.
+export async function resolvePerSessionRateCents(
+  coachId: string,
+): Promise<number | null> {
+  const [settings] = await db
+    .select()
+    .from(coachPaySettings)
+    .where(eq(coachPaySettings.coachId, coachId))
+    .limit(1);
+  if (
+    settings?.payMode === "per_session" &&
+    typeof settings.perSessionRateCents === "number" &&
+    Number.isInteger(settings.perSessionRateCents) &&
+    settings.perSessionRateCents > 0
+  ) {
+    return settings.perSessionRateCents;
+  }
+  return null;
+}
+
 export async function logHourInternal(
   actor: AuthedSession["user"],
   input: unknown,
@@ -109,6 +135,13 @@ export async function logHourInternal(
     programId: parsed.programId,
     programDefaultCents: program.defaultRatePer30MinCents,
   });
+
+  // QA2 #6 — per-session pay snapshot. Non-null only when the coach is on the
+  // "per_session" pay mode with a positive rate; otherwise null = hourly basis
+  // (the ratePer30MinCents snapshot above applies). Snapshotted alongside the
+  // hourly rate so a later mode change never re-bills this log. Applies to ALL
+  // insert paths (coach self-log, schedule-confirm auto-confirm, held).
+  const perSessionRateCents = await resolvePerSessionRateCents(actor.id);
 
   // 1b security B — held-then-approve gate. Only MANUAL entries (the
   // default source) are anomaly-checked; the trusted auto-confirm hotlink
@@ -189,6 +222,7 @@ export async function logHourInternal(
       endAt: parsed.endAt,
       note: parsed.note ?? null,
       ratePer30MinCents,
+      perSessionRateCents,
       createdBy: actor.id,
       // A clean/auto-confirm log omits status → relies on the "posted"
       // default. Only the held branch stamps status + heldReason.

@@ -34,7 +34,7 @@ import {
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
-import { programPayFromSnapshot, totalFromSnapshot } from "@/lib/billing";
+import { totalFromSnapshot, workPayForLog } from "@/lib/billing";
 import { listActiveCoaches } from "@/lib/server/coaches";
 import { formatDollars } from "@/lib/format-money";
 import { formatRelative } from "@/lib/format-relative";
@@ -175,6 +175,7 @@ export default async function AdminHome({
         startAt: hourLogs.startAt,
         endAt: hourLogs.endAt,
         ratePer30MinCents: hourLogs.ratePer30MinCents,
+        perSessionRateCents: hourLogs.perSessionRateCents,
       })
       .from(hourLogs)
       .where(
@@ -345,13 +346,15 @@ export default async function AdminHome({
   }
   let programPayMonthCents = 0;
   for (const l of programMonthRows) {
-    // Program pay is per-hour × EXACT duration (not the 30-min cage slot
-    // model). Cage above keeps totalFromSnapshot.
-    programPayMonthCents += programPayFromSnapshot(
-      l.startAt,
-      l.endAt,
-      l.ratePer30MinCents ?? 0,
-    );
+    // QA2 #6: per-session coaches pay a flat snapshot; hourly coaches pay
+    // per-hour × EXACT duration (not the 30-min cage slot model). Cage above
+    // keeps totalFromSnapshot.
+    programPayMonthCents += workPayForLog({
+      perSessionRateCents: l.perSessionRateCents,
+      startAt: l.startAt,
+      endAt: l.endAt,
+      ratePer30MinCents: l.ratePer30MinCents ?? 0,
+    });
   }
 
   // Shape the Master Schedule rows for the read-only grid.

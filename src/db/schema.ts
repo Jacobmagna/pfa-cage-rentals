@@ -116,6 +116,10 @@ export const users = pgTable("users", {
   smsConsentAt: timestamp("sms_consent_at", { mode: "date" }),
   smsOptOut: boolean("sms_opt_out").notNull().default(false),
   smsPromptAnsweredAt: timestamp("sms_prompt_answered_at", { mode: "date" }),
+  // QA2 #8 — free-text admin notes about a coach. Admin-only; never shown on
+  // coach-facing surfaces. NULL = no notes. Additive + nullable, so it never
+  // affects any existing read.
+  notes: text("notes"),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { mode: "date" }),
 });
@@ -537,6 +541,15 @@ export const paymentMethod = pgEnum("payment_method", [
 
 export const paymentStatus = pgEnum("payment_status", ["pending", "confirmed"]);
 
+// QA2 #9 — direction of a recorded payment. "coach_to_pfa" = a coach paying
+// down what they owe PFA (cage rentals); "pfa_to_coach" = PFA paying a coach
+// out (program/work pay). Every pre-existing row is a cage-rental payment, so
+// the column defaults to "coach_to_pfa" and the backfill is correct.
+export const paymentDirection = pgEnum("payment_direction", [
+  "coach_to_pfa",
+  "pfa_to_coach",
+]);
+
 // Ledger of payments from a coach to PFA. One direction only — Dad's
 // own payouts to coaches (the pfaReferred flag flow) happen outside
 // the app. Admin-recorded payments auto-confirm (recordedBy === confirmedBy);
@@ -560,6 +573,9 @@ export const coachPayments = pgTable(
       .references(() => users.id),
     amountCents: integer("amount_cents").notNull(),
     method: paymentMethod("method").notNull(),
+    // QA2 #9 — payment direction. Defaults to "coach_to_pfa" so every
+    // pre-existing (cage-rental) payment backfills to the correct direction.
+    direction: paymentDirection("direction").notNull().default("coach_to_pfa"),
     paidAt: timestamp("paid_at", { mode: "date" }).notNull(),
     // Free-text: Venmo txn id, check number, etc. Optional — cash
     // payments don't have one and that's fine.
@@ -579,6 +595,29 @@ export const coachPayments = pgTable(
     index("coach_payments_status_paid_idx").on(table.status, table.paidAt),
   ],
 );
+
+// QA2 #6 — how a coach is paid for logged work. "hourly" (the default for
+// every coach) = the existing per-30-min rate snapshot on hour_logs; per
+// "per_session" = a flat per-session amount (coachPaySettings.perSessionRateCents)
+// snapshotted onto each log at write time.
+export const coachPayMode = pgEnum("coach_pay_mode", ["hourly", "per_session"]);
+
+// QA2 #6 — per-coach pay-mode settings. One row per coach (coachId is the PK
+// + FK, cascade-deleted with the user). payMode defaults to "hourly" so a
+// coach with no row (or an unset row) keeps today's per-30-min behavior.
+// perSessionRateCents is nullable — required only when payMode = "per_session"
+// (enforced in the app layer, not at the DB).
+export const coachPaySettings = pgTable("coach_pay_settings", {
+  coachId: text("coach_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  payMode: coachPayMode("pay_mode").notNull().default("hourly"),
+  perSessionRateCents: integer("per_session_rate_cents"),
+  updatedAt: timestamp("updated_at", { mode: "date" })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
 
 export const auditAction = pgEnum("audit_action", ["create", "update", "delete"]);
 
@@ -792,6 +831,12 @@ export const hourLogs = pgTable(
     // and a new row stamps null when the program has no rate set → $0
     // pay. Reads use this snapshot, never recompute from current rates.
     ratePer30MinCents: integer("rate_per_30_min_cents"),
+    // QA2 #6 — per-session pay snapshot (cents) stamped at write time when the
+    // coach is on the "per_session" pay mode. When set, the log is paid this
+    // flat per-session amount; when NULL (every pre-existing row + any hourly
+    // coach), the per-30-min hourly snapshot above applies. Preserves the
+    // existing immutable-snapshot billing rule — reads use this, never recompute.
+    perSessionRateCents: integer("per_session_rate_cents"),
     // Admin "Resolve" marker for unscheduled logs (mark reviewed/acknowledged).
     // The log STAYS (real worked time/pay); a non-null reviewedAt drops it off
     // the needs-review queue. Additive + nullable, no backfill — existing rows
@@ -1125,6 +1170,11 @@ export const smsReminderLog = pgTable(
 
 export type CoachPayment = typeof coachPayments.$inferSelect;
 export type NewCoachPayment = typeof coachPayments.$inferInsert;
+export type PaymentDirection = (typeof paymentDirection.enumValues)[number];
+
+export type CoachPaySettings = typeof coachPaySettings.$inferSelect;
+export type NewCoachPaySettings = typeof coachPaySettings.$inferInsert;
+export type CoachPayMode = (typeof coachPayMode.enumValues)[number];
 
 export type OrgSettings = typeof orgSettings.$inferSelect;
 export type NewOrgSettings = typeof orgSettings.$inferInsert;

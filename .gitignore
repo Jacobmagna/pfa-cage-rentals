@@ -70,3 +70,10 @@ source_data.xlsx
 
 # worklog rotation backups
 worklog/*.bak.*
+
+# Demo-video generated artifacts (scripts live on feat/demo-video; outputs are throwaway)
+scripts/demo-video/segments/
+scripts/demo-video/audio/
+scripts/demo-video/samples/
+scripts/demo-video/assets/
+*.webm

@@ -29,7 +29,11 @@ function block(over: Partial<ReconBlock> = {}): ReconBlock {
   };
   return {
     ...base,
-    coaches: over.coaches ?? [{ coachId: base.scheduledCoachId, coachName: "" }],
+    coaches:
+      over.coaches ??
+      (base.scheduledCoachId === null
+        ? []
+        : [{ coachId: base.scheduledCoachId, coachName: "" }]),
   };
 }
 

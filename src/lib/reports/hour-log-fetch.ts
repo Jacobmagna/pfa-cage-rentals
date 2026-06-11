@@ -94,7 +94,9 @@ export async function fetchHourLogRowsWithScheduleNotes(
       endAt: programScheduleBlocks.endAt,
     })
     .from(programScheduleBlocks)
-    .innerJoin(users, eq(programScheduleBlocks.scheduledCoachId, users.id))
+    // QA-R2 #10: LEFT join so coachless (Unassigned) blocks still appear;
+    // coachName/coachEmail are null for them.
+    .leftJoin(users, eq(programScheduleBlocks.scheduledCoachId, users.id))
     .where(
       and(
         lt(programScheduleBlocks.startAt, filters.toDateExclusive),
@@ -127,20 +129,27 @@ export async function fetchHourLogRowsWithScheduleNotes(
   }
 
   const blocks: ReconBlock[] = blockRows.map((b) => {
-    const primary = {
-      coachId: b.scheduledCoachId,
-      coachName: b.coachName ?? b.coachEmail,
-    };
+    // QA-R2 #10: a coachless (Unassigned) block has no primary and an
+    // empty coach set, so reconciliation yields no per-coach rows for it.
+    const primary =
+      b.scheduledCoachId !== null
+        ? {
+            coachId: b.scheduledCoachId,
+            coachName: b.coachName ?? b.coachEmail ?? b.scheduledCoachId,
+          }
+        : null;
     const list = coachesByBlock.get(b.id);
     const coaches =
-      !list || list.length === 0
-        ? [primary]
-        : [primary, ...list.filter((c) => c.coachId !== b.scheduledCoachId)];
+      primary === null
+        ? (list ?? [])
+        : !list || list.length === 0
+          ? [primary]
+          : [primary, ...list.filter((c) => c.coachId !== b.scheduledCoachId)];
     return {
       id: b.id,
       programId: b.programId,
       scheduledCoachId: b.scheduledCoachId,
-      scheduledCoachName: b.coachName ?? b.coachEmail,
+      scheduledCoachName: primary?.coachName ?? null,
       coaches,
       startAt: b.startAt,
       endAt: b.endAt,

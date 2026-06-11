@@ -33,9 +33,10 @@ export type ReconCoach = { coachId: string; coachName: string };
 export type ReconBlock = {
   id: string;
   programId: string;
-  scheduledCoachId: string; // primary (first) — keep for back-compat
-  scheduledCoachName: string; // primary — keep
-  coaches: ReconCoach[]; // FULL set, includes the primary, length >= 1
+  // QA-R2 #10: coach is OPTIONAL — null when the block is Unassigned.
+  scheduledCoachId: string | null; // primary (first) — keep for back-compat
+  scheduledCoachName: string | null; // primary — keep
+  coaches: ReconCoach[]; // FULL set; EMPTY when the block has no coach
   startAt: Date;
   endAt: Date;
 };
@@ -304,11 +305,14 @@ export function annotateLogs(
       result[l.id] = null;
     } else if (!inSet(chosen)) {
       // The coach who logged isn't scheduled on the chosen block — name
-      // the scheduled coach(es).
+      // the scheduled coach(es). QA-R2 #10: a coachless block has no
+      // scheduled coach to name.
       result[l.id] =
-        chosen.coaches.length === 1
-          ? `${chosen.scheduledCoachName} was scheduled.`
-          : `${chosen.coaches.map((bc) => bc.coachName).join(", ")} were scheduled.`;
+        chosen.coaches.length === 0
+          ? "No coach was scheduled."
+          : chosen.coaches.length === 1
+            ? `${chosen.scheduledCoachName} was scheduled.`
+            : `${chosen.coaches.map((bc) => bc.coachName).join(", ")} were scheduled.`;
     } else {
       // In set, off-time.
       result[l.id] = `Scheduled ${formatTime(chosen.startAt)}–${formatTime(chosen.endAt)}.`;

@@ -77,7 +77,8 @@ export type MasterProgramRow = {
 export type MasterProgramBlock = {
   id: string;
   programId: string;
-  coachName: string;
+  // QA-R2 #10: null when the block is Unassigned (no scheduled coach).
+  coachName: string | null;
   startAt: Date;
   endAt: Date;
   status?: "logged" | "wrong_coach" | "wrong_time" | "no_show" | "pending";

@@ -24,22 +24,30 @@ export type CoachOption = {
   email: string;
 };
 
+type PaymentDirection = "coach_to_pfa" | "pfa_to_coach";
+
 export type BalanceRow = {
   coachId: string;
   coachName: string;
   coachEmail: string;
   zelleContact: string | null;
+  // Cage ledger: coach owes PFA.
   owedCageCents: number;
-  owedProgramCents: number;
-  paidCents: number;
-  balanceCents: number;
+  paidCageCents: number;
+  cageBalanceCents: number;
+  // Work ledger: PFA owes coach.
+  owedWorkCents: number;
+  paidWorkCents: number;
+  workBalanceCents: number;
 };
 
 type BalanceTotals = {
   owedCage: number;
-  owedProgram: number;
-  paid: number;
-  balance: number;
+  paidCage: number;
+  cageBalance: number;
+  owedWork: number;
+  paidWork: number;
+  workBalance: number;
 };
 
 export type PendingPaymentRow = {
@@ -48,6 +56,7 @@ export type PendingPaymentRow = {
   coachName: string;
   amountCents: number;
   method: "venmo" | "zelle" | "check" | "cash" | "other";
+  direction: PaymentDirection;
   paidAt: Date;
   reference: string | null;
   note: string | null;
@@ -60,6 +69,7 @@ export type RecentPaymentRow = {
   coachName: string;
   amountCents: number;
   method: "venmo" | "zelle" | "check" | "cash" | "other";
+  direction: PaymentDirection;
   paidAt: Date;
   reference: string | null;
   note: string | null;
@@ -143,6 +153,7 @@ export function PaymentsClient({
           coachId: dialog.row.coachId,
           amountCents: dialog.row.amountCents,
           method: dialog.row.method,
+          direction: dialog.row.direction,
           paidAt: dialog.row.paidAt,
           reference: dialog.row.reference,
           note: dialog.row.note,
@@ -269,32 +280,48 @@ function BalancesTable({
         </div>
       ) : (
       <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
-        <table className="w-full min-w-[680px]">
+        <table className="w-full min-w-[860px]">
           <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
             <tr>
-              <th scope="col" className="px-4 py-3 text-left font-semibold">
+              <th scope="col" className="px-4 py-3 text-left font-semibold" rowSpan={2}>
                 Coach
               </th>
-              <th scope="col" className="px-4 py-3 text-right font-semibold">
-                Owed (rentals)
-              </th>
-              <th scope="col" className="px-4 py-3 text-right font-semibold">
-                Paid
-              </th>
-              <th scope="col" className="px-4 py-3 text-right font-semibold">
-                Balance
+              <th
+                scope="colgroup"
+                colSpan={3}
+                className="px-4 pt-3 pb-1 text-right font-semibold border-l border-line"
+              >
+                Rentals — coach owes PFA
               </th>
               <th
-                scope="col"
-                className="px-4 py-3 text-right font-semibold border-l border-line"
+                scope="colgroup"
+                colSpan={3}
+                className="px-4 pt-3 pb-1 text-right font-semibold border-l border-line"
               >
-                Work pay
-                <span className="block text-[10px] font-normal normal-case tracking-normal text-fg-subtle">
-                  PFA owes coach
-                </span>
+                Work — PFA owes coach
               </th>
-              <th scope="col" className="px-4 py-3 text-right font-semibold sr-only">
+              <th scope="col" className="px-4 py-3 text-right font-semibold sr-only" rowSpan={2}>
                 Actions
+              </th>
+            </tr>
+            <tr>
+              <th scope="col" className="px-4 pb-3 text-right font-semibold border-l border-line">
+                Owed
+              </th>
+              <th scope="col" className="px-4 pb-3 text-right font-semibold">
+                Coach paid
+              </th>
+              <th scope="col" className="px-4 pb-3 text-right font-semibold">
+                Owes PFA
+              </th>
+              <th scope="col" className="px-4 pb-3 text-right font-semibold border-l border-line">
+                Owed
+              </th>
+              <th scope="col" className="px-4 pb-3 text-right font-semibold">
+                PFA paid
+              </th>
+              <th scope="col" className="px-4 pb-3 text-right font-semibold">
+                PFA owes
               </th>
             </tr>
           </thead>
@@ -319,19 +346,27 @@ function BalancesTable({
                     ) : null}
                   </div>
                 </td>
-                <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right text-fg-muted whitespace-nowrap align-top">
+                <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right text-fg-muted whitespace-nowrap align-top border-l border-line">
                   {formatDollars(row.owedCageCents)}
                 </td>
                 <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right text-fg-muted whitespace-nowrap align-top">
-                  {formatDollars(row.paidCents)}
+                  {formatDollars(row.paidCageCents)}
                 </td>
                 <td
-                  className={`px-4 py-3 text-sm font-mono tnum tabular-nums text-right whitespace-nowrap align-top ${balanceColor(row.balanceCents)}`}
+                  className={`px-4 py-3 text-sm font-mono tnum tabular-nums text-right whitespace-nowrap align-top ${balanceColor(row.cageBalanceCents)}`}
                 >
-                  {formatDollars(row.balanceCents)}
+                  {formatDollars(row.cageBalanceCents)}
                 </td>
                 <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right text-fg-muted whitespace-nowrap align-top border-l border-line">
-                  {formatDollars(row.owedProgramCents)}
+                  {formatDollars(row.owedWorkCents)}
+                </td>
+                <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right text-fg-muted whitespace-nowrap align-top">
+                  {formatDollars(row.paidWorkCents)}
+                </td>
+                <td
+                  className={`px-4 py-3 text-sm font-mono tnum tabular-nums text-right whitespace-nowrap align-top ${balanceColor(row.workBalanceCents)}`}
+                >
+                  {formatDollars(row.workBalanceCents)}
                 </td>
                 <td className="px-4 py-3 text-right whitespace-nowrap align-top">
                   <button
@@ -356,19 +391,27 @@ function BalancesTable({
                   </span>
                 ) : null}
               </td>
-              <td className="px-4 py-3 font-mono tnum tabular-nums text-right text-fg align-top">
+              <td className="px-4 py-3 font-mono tnum tabular-nums text-right text-fg align-top border-l border-line">
                 {formatDollars(totals.owedCage)}
               </td>
               <td className="px-4 py-3 font-mono tnum tabular-nums text-right text-fg align-top">
-                {formatDollars(totals.paid)}
+                {formatDollars(totals.paidCage)}
               </td>
               <td
-                className={`px-4 py-3 font-mono tnum tabular-nums text-right align-top ${balanceColor(totals.balance)}`}
+                className={`px-4 py-3 font-mono tnum tabular-nums text-right align-top ${balanceColor(totals.cageBalance)}`}
               >
-                {formatDollars(totals.balance)}
+                {formatDollars(totals.cageBalance)}
               </td>
-              <td className="px-4 py-3 font-mono tnum tabular-nums text-right text-fg-muted align-top border-l border-line">
-                {formatDollars(totals.owedProgram)}
+              <td className="px-4 py-3 font-mono tnum tabular-nums text-right text-fg align-top border-l border-line">
+                {formatDollars(totals.owedWork)}
+              </td>
+              <td className="px-4 py-3 font-mono tnum tabular-nums text-right text-fg align-top">
+                {formatDollars(totals.paidWork)}
+              </td>
+              <td
+                className={`px-4 py-3 font-mono tnum tabular-nums text-right align-top ${balanceColor(totals.workBalance)}`}
+              >
+                {formatDollars(totals.workBalance)}
               </td>
               <td />
             </tr>
@@ -406,11 +449,12 @@ function PendingInbox({
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
-          <table className="w-full min-w-[640px]">
+          <table className="w-full min-w-[760px]">
             <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">Date</th>
                 <th className="px-4 py-3 text-left font-semibold">Coach</th>
+                <th className="px-4 py-3 text-left font-semibold">Direction</th>
                 <th className="px-4 py-3 text-left font-semibold">Method</th>
                 <th className="px-4 py-3 text-right font-semibold">Amount</th>
                 <th className="px-4 py-3 text-left font-semibold">Reference</th>
@@ -434,6 +478,9 @@ function PendingInbox({
                       <span className="block truncate" title={row.coachName}>
                         {row.coachName}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <DirectionBadge direction={row.direction} />
                     </td>
                     <td className="px-4 py-3 text-sm text-fg-muted">
                       <MethodBadge method={row.method} />
@@ -504,6 +551,7 @@ function RecentTable({
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">Date</th>
                 <th className="px-4 py-3 text-left font-semibold">Coach</th>
+                <th className="px-4 py-3 text-left font-semibold">Direction</th>
                 <th className="px-4 py-3 text-left font-semibold">Method</th>
                 <th className="px-4 py-3 text-right font-semibold">Amount</th>
                 <th className="px-4 py-3 text-left font-semibold">Reference</th>
@@ -528,6 +576,9 @@ function RecentTable({
                       <span className="block truncate" title={row.coachName}>
                         {row.coachName}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <DirectionBadge direction={row.direction} />
                     </td>
                     <td className="px-4 py-3 text-sm">
                       <MethodBadge method={row.method} />
@@ -612,6 +663,24 @@ function HandleChip({ label, value }: { label: string; value: string }) {
         <ClipboardCopy className="h-2.5 w-2.5" strokeWidth={2.5} />
       )}
     </button>
+  );
+}
+
+// Which way the money flowed. coach_to_pfa pays down the cage-rentals
+// ledger (coach owes PFA); pfa_to_coach pays down the work ledger (PFA
+// owes the coach). Spelled out so the direction is never ambiguous.
+function DirectionBadge({ direction }: { direction: PaymentDirection }) {
+  if (direction === "pfa_to_coach") {
+    return (
+      <span className="inline-block whitespace-nowrap rounded-full bg-blue/10 text-blue-strong ring-1 ring-inset ring-blue/30 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider">
+        PFA → coach
+      </span>
+    );
+  }
+  return (
+    <span className="inline-block whitespace-nowrap rounded-full bg-gold/15 text-gold-strong ring-1 ring-inset ring-gold/40 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider">
+      Coach → PFA
+    </span>
   );
 }
 

@@ -268,7 +268,8 @@ export default async function AdminHome({
         seriesId: programScheduleBlocks.seriesId,
       })
       .from(programScheduleBlocks)
-      .innerJoin(users, eq(programScheduleBlocks.scheduledCoachId, users.id))
+      // QA-R2 #10: LEFT join so coachless (Unassigned) blocks still appear.
+      .leftJoin(users, eq(programScheduleBlocks.scheduledCoachId, users.id))
       .where(
         and(
           gte(programScheduleBlocks.startAt, schedDayStart),
@@ -461,11 +462,16 @@ export default async function AdminHome({
   const coachesForBlock = (
     b: (typeof programBlockRows)[number],
   ): ReconCoach[] => {
+    const list = programCoachesByBlock.get(b.id);
+    // QA-R2 #10: a coachless block (null primary + no join rows) has no
+    // scheduled coaches → empty set (no recon/no-show rows derive from it).
+    if (b.scheduledCoachId === null) {
+      return list ? [...list] : [];
+    }
     const primary = {
       coachId: b.scheduledCoachId,
-      coachName: b.coachName ?? b.coachEmail,
+      coachName: b.coachName ?? b.coachEmail ?? "Unassigned",
     };
-    const list = programCoachesByBlock.get(b.id);
     if (!list || list.length === 0) return [primary];
     return [primary, ...list.filter((c) => c.coachId !== b.scheduledCoachId)];
   };
@@ -572,7 +578,11 @@ export default async function AdminHome({
         s.id,
         {
           ...s,
-          scheduledCoachIds: [s.scheduledCoachId, ...extra],
+          // QA-R2 #10: a coachless series has an EMPTY coach set.
+          scheduledCoachIds:
+            s.scheduledCoachId === null
+              ? extra
+              : [s.scheduledCoachId, ...extra],
           resourceIds: resourceIdsBySeries.get(s.id) ?? [],
         },
       ];
@@ -627,7 +637,8 @@ export default async function AdminHome({
     (b) => ({
       id: b.id,
       programId: b.programId,
-      coachName: b.coachName ?? b.coachEmail,
+      // QA-R2 #10: coachless block → "Unassigned".
+      coachName: b.coachName ?? b.coachEmail ?? "Unassigned",
       startAt: b.startAt,
       endAt: b.endAt,
       status: reconciliation[b.id]?.status,

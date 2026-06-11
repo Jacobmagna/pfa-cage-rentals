@@ -376,13 +376,14 @@ describe("createProgramScheduleBlockSchema", () => {
     expect(r.success).toBe(false);
   });
 
-  // QA10 W3.2: at least one scheduled coach is required.
-  it("rejects an empty scheduledCoachIds set", () => {
+  // QA-R2 #10: coach assignment is OPTIONAL — an empty set is now accepted
+  // and means "no coach assigned" (the block renders as Unassigned).
+  it("accepts an empty scheduledCoachIds set (Unassigned block)", () => {
     const r = createProgramScheduleBlockSchema.safeParse({
       ...base,
       scheduledCoachIds: [],
     });
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
   });
 
   it("accepts multiple scheduled coaches", () => {

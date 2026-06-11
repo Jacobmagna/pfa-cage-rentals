@@ -17,12 +17,18 @@ import {
   PaymentNotFoundError,
 } from "@/lib/errors";
 import { parsePfaInput } from "@/lib/timezone";
-import { PAYMENT_METHODS, type PaymentMethod } from "@/lib/schemas/payment";
+import {
+  PAYMENT_DIRECTIONS,
+  PAYMENT_METHODS,
+  type PaymentDirection,
+  type PaymentMethod,
+} from "@/lib/schemas/payment";
 
 export type SubmittedPaymentValues = {
   coachId: string;
   amountDollars: string;
   method: string;
+  direction: string;
   paidAtDate: string;
   reference: string;
   note: string;
@@ -41,6 +47,7 @@ function snapshot(formData: FormData): SubmittedPaymentValues {
     coachId: formData.get("coachId")?.toString() ?? "",
     amountDollars: formData.get("amountDollars")?.toString() ?? "",
     method: formData.get("method")?.toString() ?? "",
+    direction: formData.get("direction")?.toString() ?? "",
     paidAtDate: formData.get("paidAtDate")?.toString() ?? "",
     reference: formData.get("reference")?.toString() ?? "",
     note: formData.get("note")?.toString() ?? "",
@@ -73,6 +80,13 @@ function buildInput(formData: FormData) {
   if (!PAYMENT_METHODS.includes(methodRaw as PaymentMethod)) {
     throw new Error("Choose a payment method");
   }
+  // Direction defaults to coach_to_pfa (cage rental) when the form omits it,
+  // matching the schema default + the historical implicit direction.
+  const directionRaw =
+    formData.get("direction")?.toString().trim() || "coach_to_pfa";
+  if (!PAYMENT_DIRECTIONS.includes(directionRaw as PaymentDirection)) {
+    throw new Error("Choose a payment direction");
+  }
   const amountStr = formData.get("amountDollars")?.toString() ?? "";
   const amountCents = dollarsToCents(amountStr);
 
@@ -88,6 +102,7 @@ function buildInput(formData: FormData) {
     coachId: formData.get("coachId")?.toString() ?? "",
     amountCents,
     method: methodRaw as PaymentMethod,
+    direction: directionRaw as PaymentDirection,
     paidAt,
     reference: formData.get("reference")?.toString().trim() || null,
     note: formData.get("note")?.toString().trim() || null,

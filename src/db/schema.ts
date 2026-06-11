@@ -948,9 +948,9 @@ export const programScheduleSeries = pgTable("program_schedule_series", {
   programId: text("program_id")
     .notNull()
     .references(() => programs.id, { onDelete: "cascade" }),
-  scheduledCoachId: text("scheduled_coach_id")
-    .notNull()
-    .references(() => users.id),
+  // QA-R2 #10: coach assignment is OPTIONAL (mirrors program_schedule_blocks).
+  // NULL = no coach; materialized occurrences are likewise coachless.
+  scheduledCoachId: text("scheduled_coach_id").references(() => users.id),
   daysOfWeek: integer("days_of_week").array().notNull(),
   // RECUR-a frequency + interval. "weekly" with interval N = every N
   // weeks; "monthly" with interval N = the same weekday/ordinal every N
@@ -987,9 +987,11 @@ export const programScheduleBlocks = pgTable(
     programId: text("program_id")
       .notNull()
       .references(() => programs.id),
-    scheduledCoachId: text("scheduled_coach_id")
-      .notNull()
-      .references(() => users.id),
+    // QA-R2 #10: coach assignment is OPTIONAL. NULL = no coach assigned
+    // yet ("Unassigned"). A coachless block has no programScheduleBlockCoaches
+    // members, so the per-coach reconciliation / no-show derivation naturally
+    // yields no rows for it. Existing rows keep their value (ALTER DROP NOT NULL).
+    scheduledCoachId: text("scheduled_coach_id").references(() => users.id),
     startAt: timestamp("start_at", { mode: "date" }).notNull(),
     endAt: timestamp("end_at", { mode: "date" }).notNull(),
     note: text("note"),

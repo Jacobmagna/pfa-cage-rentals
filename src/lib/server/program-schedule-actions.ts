@@ -95,7 +95,9 @@ export async function createProgramScheduleBlockInternal(
   const programName = await assertProgramActive(parsed.programId);
   // QA10 W3.2: full coach set; primary = [0]. Validate EACH coach, then
   // dedupe (preserving order) for the join rows.
-  const primaryCoachId = parsed.scheduledCoachIds[0];
+  // QA-R2 #10: coach is OPTIONAL — an empty array means no coach assigned
+  // (primary = null, no join rows). Validate any ids that ARE provided.
+  const primaryCoachId = parsed.scheduledCoachIds[0] ?? null;
   for (const coachId of parsed.scheduledCoachIds) {
     await assertScheduledCoach(coachId);
   }
@@ -121,9 +123,12 @@ export async function createProgramScheduleBlockInternal(
     })
     .returning();
 
-  await db
-    .insert(programScheduleBlockCoaches)
-    .values(coachIds.map((coachId) => ({ blockId: inserted.id, coachId })));
+  // QA-R2 #10: only write join rows when at least one coach is assigned.
+  if (coachIds.length > 0) {
+    await db
+      .insert(programScheduleBlockCoaches)
+      .values(coachIds.map((coachId) => ({ blockId: inserted.id, coachId })));
+  }
 
   // QA10 W3.3: write one linked blocked_time per occupied resource.
   if (resourceIds.length > 0) {
@@ -174,9 +179,12 @@ export async function updateProgramScheduleBlockInternal(
   // QA10 W3.2: when scheduledCoachIds is provided, primary = [0] and the
   // full join set is REPLACED; when omitted, coaches (and the primary
   // scheduledCoachId) are left untouched.
+  // QA-R2 #10: an explicitly-provided EMPTY array clears the assignment
+  // (primary = null, join rows removed). Omitted (undefined) still = leave
+  // untouched.
   const coachIdsProvided = parsed.scheduledCoachIds !== undefined;
   const primaryCoachId = coachIdsProvided
-    ? parsed.scheduledCoachIds![0]
+    ? (parsed.scheduledCoachIds![0] ?? null)
     : existing.scheduledCoachId;
 
   const programName = await assertProgramActive(finalProgramId);
@@ -184,8 +192,9 @@ export async function updateProgramScheduleBlockInternal(
     for (const coachId of parsed.scheduledCoachIds!) {
       await assertScheduledCoach(coachId);
     }
-  } else {
+  } else if (primaryCoachId !== null) {
     // Re-validate the unchanged primary, mirroring the program re-check.
+    // (Skipped when the existing block is already coachless.)
     await assertScheduledCoach(primaryCoachId);
   }
 
@@ -247,14 +256,17 @@ export async function updateProgramScheduleBlockInternal(
   }
 
   // Replace the join set only when a new coach list was provided.
+  // QA-R2 #10: an empty provided array clears membership (delete, no insert).
   if (coachIdsProvided) {
     const coachIds = [...new Set(parsed.scheduledCoachIds!)];
     await db
       .delete(programScheduleBlockCoaches)
       .where(eq(programScheduleBlockCoaches.blockId, id));
-    await db
-      .insert(programScheduleBlockCoaches)
-      .values(coachIds.map((coachId) => ({ blockId: id, coachId })));
+    if (coachIds.length > 0) {
+      await db
+        .insert(programScheduleBlockCoaches)
+        .values(coachIds.map((coachId) => ({ blockId: id, coachId })));
+    }
   }
 
   // QA10 W3.3: apply the occupancy change.

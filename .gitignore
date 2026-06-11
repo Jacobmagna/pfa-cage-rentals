@@ -72,6 +72,11 @@ source_data.xlsx
 scripts/demo-video/segments/
 scripts/demo-video/**/*.webm
 scripts/demo-video/**/*.mp4
+# demo-video AUDIO artifacts (synthesized VO cache, audition samples, music bed)
+scripts/demo-video/audio/
+scripts/demo-video/samples/
+scripts/demo-video/assets/
+scripts/demo-video/**/*.mp3
 
 # worklog rotation backups
 worklog/*.bak.*

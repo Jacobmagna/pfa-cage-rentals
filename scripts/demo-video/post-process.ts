@@ -40,6 +40,15 @@ import {
 import path from "node:path";
 import { chromium } from "playwright";
 
+import {
+  MUSIC_PATH,
+  VOICE_ID,
+  buildAudioMux,
+  ensureVoForSlug,
+  voPathForSlug,
+  type VoPlacement,
+} from "./audio";
+
 const FFMPEG = process.env.FFMPEG_BIN ?? "/opt/homebrew/bin/ffmpeg";
 const FFPROBE =
   process.env.FFPROBE_BIN ?? FFMPEG.replace(/ffmpeg$/, "ffprobe");
@@ -48,8 +57,14 @@ const CAPTIONS_JSON = path.join(RAW_DIR, "captions.json");
 const OUT_ROOT =
   process.env.DEMO_OUT_DIR ??
   "/Users/jacobmagna/Magna Software LLC/Sales/demo";
-const OUT_SEGMENTS = path.join(OUT_ROOT, "segments");
-const FULL_OUT = path.join(OUT_ROOT, "pfa-platform-demo-full.mp4");
+// A PROOF render (DEMO_ONLY_SLUGS set) writes to distinct files so it never
+// clobbers a real full tour or its standalone segments.
+const IS_PROOF = !!process.env.DEMO_ONLY_SLUGS;
+const OUT_SEGMENTS = path.join(OUT_ROOT, IS_PROOF ? "_proof_segments" : "segments");
+const FULL_OUT = path.join(
+  OUT_ROOT,
+  IS_PROOF ? "pfa-platform-demo-PROOF.mp4" : "pfa-platform-demo-full.mp4",
+);
 const PNG_DIR = path.join(RAW_DIR, "_overlays");
 
 const W = 1920;
@@ -59,6 +74,16 @@ const XFADE = 0.4; // crossfade duration between screens (seconds)
 const TRIM_LEAD_SECONDS = 1.0; // feature lead-in trim
 const TEXT_XFADE = 0.3; // caption text crossfade (alpha in/out) duration (s)
 const MIN_CAPTION_WINDOW = 5.0; // every feature caption must be on screen ≥ this
+// AUDIO: when on (default), synth+cache a VO clip per feature caption and mux
+// it (plus optional ducked music) onto the tour + standalone segments. Set
+// DEMO_AUDIO=0 to render silent (the old behavior). PROOF render restricts the
+// segments rendered via DEMO_ONLY_SLUGS (comma-separated slugs).
+const AUDIO_ON = process.env.DEMO_AUDIO !== "0";
+const VO_PAD = 0.4; // each caption window must be ≥ its VO length + this margin
+const ONLY_SLUGS = (process.env.DEMO_ONLY_SLUGS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 const BAR_H = Math.round(H * 0.22); // ~237px — same look as the old bar
 const BRAND_YELLOW = "#FFC400";
 const BRAND_BLACK = "#0a0a0a";
@@ -178,6 +203,66 @@ async function renderOverlays(
 }
 
 // ---------------------------------------------------------------------------
+// Audio mux: take a SILENT video and attach a VO track (+ optional ducked
+// music) built from the given VO placements. Each placement is a cached VO
+// mp3 placed at `startSec` on the timeline (the SAME offset the on-screen
+// caption uses). `-c:v copy` keeps the already-encoded video untouched; only
+// audio is (re-)encoded to AAC. If there are no VO clips, the silent file is
+// just moved to `finalOut`.
+// ---------------------------------------------------------------------------
+function muxAudioOnto(
+  silentVideo: string,
+  finalOut: string,
+  placements: { slug: string; startSec: number }[],
+  totalDuration: number,
+): boolean {
+  const clips = placements.filter((p) => existsSync(voPathForSlug(p.slug)));
+  if (clips.length === 0) {
+    if (silentVideo !== finalOut) execFileSync("/bin/mv", [silentVideo, finalOut]);
+    return false;
+  }
+
+  // input 0 = the silent video; VO mp3s start at input index 1; music last.
+  const voPaths = clips.map((c) => voPathForSlug(c.slug));
+  const voClips: VoPlacement[] = clips.map((c, i) => ({
+    inputIndex: 1 + i,
+    startSec: c.startSec,
+  }));
+  const musicArg = existsSync(MUSIC_PATH) ? MUSIC_PATH : undefined;
+  const plan = buildAudioMux(voClips, voPaths, totalDuration, musicArg);
+
+  run([
+    "-y",
+    "-i",
+    silentVideo,
+    ...plan.inputs,
+    "-filter_complex",
+    plan.filters.join(";"),
+    "-map",
+    "0:v",
+    "-map",
+    plan.outLabel,
+    "-c:v",
+    "copy",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "192k",
+    "-shortest",
+    "-movflags",
+    "+faststart",
+    finalOut,
+  ]);
+  if (silentVideo !== finalOut) rmSync(silentVideo, { force: true });
+  console.log(
+    `[post]   muxed audio (${clips.length} VO clip(s)${
+      plan.hasMusic ? " + ducked music" : ", VO-only"
+    }) → ${path.basename(finalOut)}`,
+  );
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 async function main() {
@@ -197,9 +282,16 @@ async function main() {
   rmSync(OUT_SEGMENTS, { recursive: true, force: true });
   mkdirSync(OUT_SEGMENTS, { recursive: true });
 
-  const webms = readdirSync(RAW_DIR)
+  let webms = readdirSync(RAW_DIR)
     .filter((f) => f.endsWith(".webm"))
     .sort(); // NN- prefix → lexical sort is segment order
+  if (ONLY_SLUGS.length > 0) {
+    // PROOF render: restrict to the requested slugs (in segment order).
+    webms = webms.filter((w) => ONLY_SLUGS.includes(w.replace(/\.webm$/, "")));
+    console.log(
+      `[post] PROOF render — restricted to ${webms.length} segment(s): ${ONLY_SLUGS.join(", ")}`,
+    );
+  }
   if (webms.length === 0) {
     throw new Error(`No .webm segments found in ${RAW_DIR}. Run record-demo first.`);
   }
@@ -244,35 +336,68 @@ async function main() {
     mp4s.push(dest);
   }
 
-  // --- 1b. 5s caption SAFETY NET --------------------------------------------
+  // --- 1a. AUDIO: synth + cache a VO clip per feature caption ---------------
+  // For each FEATURE segment, synthesize (or reuse from cache) a voiceover of
+  // the caption's MAIN text only (the lead-in label is a visual tag, not
+  // narration). Cached by text+voice so reruns don't re-bill. voLen[slug] is
+  // the VO clip's duration — used by the pacing safeguard below.
+  const voLen: Record<string, number> = {};
+  if (AUDIO_ON) {
+    console.log(
+      `[post] AUDIO on — voice ${VOICE_ID}; synth/cache VO per feature caption…`,
+    );
+    for (const slug of featureSlugs) {
+      const entry = captions[slug];
+      if (!entry) continue;
+      const { path: voPath, cached } = await ensureVoForSlug(slug, entry.text);
+      voLen[slug] = probeDuration(voPath);
+      console.log(
+        `[post]   vo-${slug}.mp3 ${cached ? "(cached)" : "(synth)"} ${voLen[
+          slug
+        ].toFixed(2)}s`,
+      );
+    }
+  }
+
+  // --- 1b. caption SAFETY NET + AUDIO PACING SAFEGUARD ----------------------
   // Each FEATURE caption's base on-screen window equals that segment's
   // contribution to the xfaded timeline: interior features = dur − XFADE
   // (the next screen's xfade eats XFADE off the tail), the LAST feature = its
   // full dur (its caption runs to barEnd). The text crossfade only ADDS ~0.3s
   // of edge-to-edge visibility on top, so guarding the base window ≥ 5.0s is
-  // conservative. If recording jitter left any feature short, pad it by
-  // cloning its last frame (tpad) up to the duration that yields a ≥5.0s
-  // window. Re-probe afterwards so all downstream timing uses the padded
-  // durations. Cards (intro/outro) are never padded.
+  // conservative. PACING SAFEGUARD: the window must ALSO be ≥ the VO clip
+  // length + VO_PAD so the voice is never cut off — if a VO is longer than the
+  // 5s floor, that becomes the requirement and the segment is extended via the
+  // SAME tpad/dwell mechanism. If recording jitter (or a long VO) left any
+  // feature short, pad it by cloning its last frame (tpad) up to the duration
+  // that yields the required window. Re-probe afterwards so all downstream
+  // timing uses the padded durations. Cards (intro/outro) are never padded.
   const featureIdxForPad = slugs
     .map((s, i) => (isCard(s) ? -1 : i))
     .filter((i) => i >= 0);
   const lastFeaturePadIdx = featureIdxForPad[featureIdxForPad.length - 1];
   for (const i of featureIdxForPad) {
     const dur = probeDuration(mp4s[i]);
-    // window = dur − XFADE for interior features, dur for the last feature.
+    const slug = slugs[i];
+    // Window floor = max(5s, VO length + margin). The window is dur for the
+    // last feature and dur − XFADE for interior features, so the REQUIRED clip
+    // duration adds XFADE back for interior features.
+    const windowFloor = Math.max(
+      MIN_CAPTION_WINDOW,
+      AUDIO_ON && voLen[slug] ? voLen[slug] + VO_PAD : 0,
+    );
     const required =
-      i === lastFeaturePadIdx
-        ? MIN_CAPTION_WINDOW
-        : MIN_CAPTION_WINDOW + XFADE;
+      i === lastFeaturePadIdx ? windowFloor : windowFloor + XFADE;
     if (dur + 1e-3 >= required) continue;
     const pad = required - dur;
     console.log(
-      `[post] 5s SAFETY NET: ${slugs[i]} window ${(
+      `[post] PACING SAFEGUARD: ${slugs[i]} window ${(
         dur - (i === lastFeaturePadIdx ? 0 : XFADE)
-      ).toFixed(2)}s < ${MIN_CAPTION_WINDOW}s — padding +${pad.toFixed(
-        2,
-      )}s (clone last frame).`,
+      ).toFixed(2)}s < required ${windowFloor.toFixed(2)}s` +
+        (AUDIO_ON && voLen[slug]
+          ? ` (VO ${voLen[slug].toFixed(2)}s + ${VO_PAD}s)`
+          : "") +
+        ` — padding +${pad.toFixed(2)}s (clone last frame).`,
     );
     const padded = path.join(OUT_SEGMENTS, `_pad_${slugs[i]}.mp4`);
     run([
@@ -424,6 +549,7 @@ async function main() {
     chain = outLabel;
   });
 
+  const tourSilent = AUDIO_ON ? path.join(OUT_ROOT, "_tour_silent.mp4") : FULL_OUT;
   run([
     "-y",
     ...inputs,
@@ -444,8 +570,20 @@ async function main() {
     "-an",
     "-movflags",
     "+faststart",
-    FULL_OUT,
+    tourSilent,
   ]);
+
+  // --- 4b. AUDIO: place each feature's VO at its caption START offset --------
+  // (the SAME `starts[i]` the on-screen caption uses) and mux + duck onto the
+  // tour. VO-only if assets/music.mp3 is absent.
+  if (AUDIO_ON) {
+    console.log(`[post] muxing tour audio (VO @ caption starts)…`);
+    const placements = featureSlugs.map((slug) => ({
+      slug,
+      startSec: starts[slugs.indexOf(slug)],
+    }));
+    muxAudioOnto(tourSilent, FULL_OUT, placements, totalDuration);
+  }
 
   // --- 5. standalone segment files: clean content + constant bar + text -----
   // (cards stay exactly as normalized; features get bar + their own text at
@@ -492,7 +630,13 @@ async function main() {
       tmp,
     ]);
     rmSync(file, { force: true });
-    execFileSync("/bin/mv", [tmp, file]);
+    if (AUDIO_ON) {
+      // Standalone: VO starts at 0 (caption is on screen for the whole clip).
+      const clipDur = probeDuration(tmp);
+      muxAudioOnto(tmp, file, [{ slug, startSec: 0 }], clipDur);
+    } else {
+      execFileSync("/bin/mv", [tmp, file]);
+    }
   }
 
   rmSync(PNG_DIR, { recursive: true, force: true });

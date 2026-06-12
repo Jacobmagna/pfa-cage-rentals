@@ -15,10 +15,24 @@
 // assertions to the created program/row ids. audit_log IS truncated
 // between tests.
 
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { and, eq } from "drizzle-orm";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { auditLog, hourLogs, programs } from "@/db/schema";
+import {
+  auditLog,
+  hourLogs,
+  programScheduleBlockCoaches,
+  programScheduleBlocks,
+  programs,
+} from "@/db/schema";
 import { ZodError } from "zod";
 import {
   deleteHourInternal,
@@ -42,12 +56,26 @@ vi.mock("@/auth", () => ({
 
 let fixtures: FixtureUsers;
 
+// Track scheduled blocks we create so we can clean them up. programs and
+// program_schedule_blocks are NOT truncated by truncateMutables().
+const createdBlockIds: string[] = [];
+
 beforeAll(async () => {
   fixtures = await ensureFixtureUsers();
 });
 
 beforeEach(async () => {
   await truncateMutables();
+});
+
+afterEach(async () => {
+  if (createdBlockIds.length > 0) {
+    // CASCADE removes the program_schedule_block_coaches join rows.
+    await db
+      .delete(programScheduleBlocks)
+      .where(inArray(programScheduleBlocks.id, createdBlockIds));
+    createdBlockIds.length = 0;
+  }
 });
 
 function tomorrowAt(hour: number, minute = 0): Date {
@@ -70,6 +98,33 @@ async function createProgram(): Promise<{ id: string; name: string }> {
   return row;
 }
 
+// Inserts a scheduled program block with the given coach as a member
+// (both the primary scheduledCoachId and a join row). The 1b held-then-
+// approve gate only posts a log when it cleanly matches such a block, so
+// seedHour() creates one matching its log window. Returns the block id.
+async function createScheduledBlock(args: {
+  programId: string;
+  coachId: string;
+  startAt: Date;
+  endAt: Date;
+}): Promise<string> {
+  const [block] = await db
+    .insert(programScheduleBlocks)
+    .values({
+      programId: args.programId,
+      scheduledCoachId: args.coachId,
+      startAt: args.startAt,
+      endAt: args.endAt,
+      createdBy: fixtures.admin.id,
+    })
+    .returning({ id: programScheduleBlocks.id });
+  createdBlockIds.push(block.id);
+  await db
+    .insert(programScheduleBlockCoaches)
+    .values({ blockId: block.id, coachId: args.coachId });
+  return block.id;
+}
+
 // Logs one hour as admin against a fresh program, returning the row.
 async function seedHour(): Promise<{
   id: string;
@@ -78,10 +133,21 @@ async function seedHour(): Promise<{
   endAt: Date;
 }> {
   const program = await createProgram();
+  const startAt = tomorrowAt(10);
+  const endAt = tomorrowAt(11);
+  // The schedule-confirm log below only POSTs when it cleanly matches a
+  // scheduled block the actor (admin) is a member of (1b held-then-approve
+  // gate). Create that matching block first.
+  await createScheduledBlock({
+    programId: program.id,
+    coachId: fixtures.admin.id,
+    startAt,
+    endAt,
+  });
   const created = await logHourInternal(fixtures.admin, {
     programId: program.id,
-    startAt: tomorrowAt(10),
-    endAt: tomorrowAt(11),
+    startAt,
+    endAt,
     note: "before",
     source: "schedule-confirm",
   });

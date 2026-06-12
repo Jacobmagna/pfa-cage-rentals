@@ -131,17 +131,43 @@ export async function createProgramScheduleBlockInternal(
   }
 
   // QA10 W3.3: write one linked blocked_time per occupied resource.
+  //
+  // assertResourcesFree pre-checked these slots, but it's read-then-write and
+  // neon-http has no transactions, so a concurrent booking can collide in the
+  // race window → the blocked_times EXCLUDE constraint (23P01) rejects this
+  // insert. insertProgramResourceBlocks translates that into a friendly
+  // BlockOverlapError, but the program block + coach rows were already
+  // inserted in the statements above. With no transaction to roll back, we run
+  // a COMPENSATING DELETE of the just-inserted block (its coach rows + any
+  // partial occupancy cascade away via FK ON DELETE CASCADE) so NO orphan
+  // remains, then rethrow the friendly error for the UI. Happy path unchanged.
   if (resourceIds.length > 0) {
-    await insertProgramResourceBlocks(
-      resourceIds.map((resourceId) => ({
-        programScheduleBlockId: inserted.id,
-        resourceId,
-        startAt: parsed.startAt,
-        endAt: parsed.endAt,
-        reason: programOccupancyReason(programName),
-        createdBy: actor.id,
-      })),
-    );
+    try {
+      await insertProgramResourceBlocks(
+        resourceIds.map((resourceId) => ({
+          programScheduleBlockId: inserted.id,
+          resourceId,
+          startAt: parsed.startAt,
+          endAt: parsed.endAt,
+          reason: programOccupancyReason(programName),
+          createdBy: actor.id,
+        })),
+      );
+    } catch (err) {
+      // Best-effort compensating delete; ON DELETE CASCADE removes the coach
+      // join rows and any linked blocked_times. Swallow a cleanup failure so
+      // the user still sees the real (overlap) error, not a cleanup error.
+      try {
+        await db
+          .delete(programScheduleBlocks)
+          .where(eq(programScheduleBlocks.id, inserted.id));
+      } catch {
+        // Leave the original error to propagate; the orphan, if any, is
+        // visible to the admin to delete manually — far better than swapping
+        // the meaningful overlap error for a cleanup error.
+      }
+      throw err;
+    }
   }
 
   await safeLogAudit(db, {
@@ -211,11 +237,11 @@ export async function updateProgramScheduleBlockInternal(
     finalEndAt.getTime() !== existing.endAt.getTime();
 
   // The block's CURRENT linked blocked_times (for the move/replace paths).
+  // Select the FULL rows (not just id/resourceId) so the occupancy-replace
+  // branch below can faithfully RESTORE them if the new-occupancy insert trips
+  // a concurrent 23P01 after the old rows were deleted (no transactions).
   const existingLinked = await db
-    .select({
-      id: blockedTimes.id,
-      resourceId: blockedTimes.resourceId,
-    })
+    .select()
     .from(blockedTimes)
     .where(eq(blockedTimes.programScheduleBlockId, id));
 
@@ -277,16 +303,44 @@ export async function updateProgramScheduleBlockInternal(
       .delete(blockedTimes)
       .where(eq(blockedTimes.programScheduleBlockId, id));
     if (newResourceIds.length > 0) {
-      await insertProgramResourceBlocks(
-        newResourceIds.map((resourceId) => ({
-          programScheduleBlockId: id,
-          resourceId,
-          startAt: finalStartAt,
-          endAt: finalEndAt,
-          reason: programOccupancyReason(programName),
-          createdBy: actor.id,
-        })),
-      );
+      try {
+        await insertProgramResourceBlocks(
+          newResourceIds.map((resourceId) => ({
+            programScheduleBlockId: id,
+            resourceId,
+            startAt: finalStartAt,
+            endAt: finalEndAt,
+            reason: programOccupancyReason(programName),
+            createdBy: actor.id,
+          })),
+        );
+      } catch (err) {
+        // Concurrent 23P01 (translated to BlockOverlapError) AFTER we deleted
+        // the block's old occupancy. With no transaction, the block would be
+        // left NOT occupying any cage = silent double-book. Best-effort RESTORE
+        // the original linked blocked_times (snapshotted above) so the block
+        // keeps occupying its prior slots, then rethrow the friendly error so
+        // the admin's edit fails cleanly with "that cage is busy".
+        if (existingLinked.length > 0) {
+          try {
+            await db.insert(blockedTimes).values(
+              existingLinked.map((r) => ({
+                id: r.id,
+                resourceId: r.resourceId,
+                startAt: r.startAt,
+                endAt: r.endAt,
+                reason: r.reason,
+                programScheduleBlockId: r.programScheduleBlockId,
+                createdBy: r.createdBy,
+                createdAt: r.createdAt,
+              })),
+            );
+          } catch {
+            // Restore best-effort; surface the original overlap error.
+          }
+        }
+        throw err;
+      }
     }
   } else if (timeChanged && existingLinked.length > 0) {
     // Keep the same resource set, just move the linked blocks to the new

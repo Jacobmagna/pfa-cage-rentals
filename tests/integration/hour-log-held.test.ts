@@ -268,11 +268,22 @@ describe("logHourInternal held-then-approve gate", () => {
     });
     expect(held.status).toBe("held");
 
-    // One posted row via the trusted auto-confirm path (never held).
+    // One posted row via the trusted auto-confirm path. Posts because it
+    // cleanly matches a scheduled block the coach is a member of (the held
+    // gate runs for every source) — create that matching block first. The
+    // held row above (10–11) has NO block, so it stays held.
+    const postStart = tomorrowAt(12);
+    const postEnd = tomorrowAt(13);
+    await createScheduledBlock({
+      programId: program.id,
+      coachId: fixtures.coach.id,
+      startAt: postStart,
+      endAt: postEnd,
+    });
     const posted = await logHourInternal(fixtures.coach, {
       programId: program.id,
-      startAt: tomorrowAt(12),
-      endAt: tomorrowAt(13),
+      startAt: postStart,
+      endAt: postEnd,
       note: "posted one",
       source: "schedule-confirm",
     });

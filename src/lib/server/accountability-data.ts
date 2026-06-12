@@ -509,6 +509,7 @@ export async function loadOverdueBalances(opts?: {
         and(
           isNull(coachPayments.deletedAt),
           eq(coachPayments.status, "confirmed"),
+          eq(coachPayments.direction, "coach_to_pfa"),
         ),
       ),
   ]);

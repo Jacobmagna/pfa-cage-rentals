@@ -143,17 +143,19 @@ export async function logHourInternal(
   // insert paths (coach self-log, schedule-confirm auto-confirm, held).
   const perSessionRateCents = await resolvePerSessionRateCents(actor.id);
 
-  // 1b security B — held-then-approve gate. Only MANUAL entries (the
-  // default source) are anomaly-checked; the trusted auto-confirm hotlink
-  // passes source:"schedule-confirm" with the block's exact times and is
-  // always posted. For a manual log we fetch the actor's scheduled MEMBER
-  // blocks overlapping the log window (same join as the coach history page)
-  // and classify it. A clean log posts as today; an anomalous one is either
-  // held (coach acknowledged) or refused with a thrown error the form turns
-  // into a "send for approval / go back and edit" warning.
-  const source = parsed.source ?? "manual";
+  // 1b security B — held-then-approve gate. Runs for EVERY source. The
+  // `source` flag (client-supplied) must NOT be able to bypass this check:
+  // a forged source:"schedule-confirm" with no matching block would
+  // otherwise post immediately as payable (P0 payroll-fraud). Instead we
+  // ALWAYS fetch the actor's scheduled MEMBER blocks overlapping the log
+  // window (same join as the coach history page) and classify the log.
+  // A clean log posts as today — this is exactly what the trusted
+  // auto-confirm hotlink sends (the block's EXACT start/end/program), so it
+  // still posts instantly. An anomalous log is either held (coach
+  // acknowledged) or refused with a thrown error the form turns into a
+  // "send for approval / go back and edit" warning.
   let heldReason: "unscheduled" | "wrong_time" | "over_logged" | null = null;
-  if (source === "manual") {
+  {
     const blockRows = await db
       .select({
         id: programScheduleBlocks.id,

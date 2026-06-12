@@ -28,6 +28,24 @@ import {
   ResourceNotFoundError,
 } from "@/lib/errors";
 
+// Postgres SQLSTATE 23P01 — exclusion-constraint violation, thrown by the
+// `blocked_times_no_overlap` EXCLUDE constraint when a linked occupancy row
+// races onto a slot that became busy AFTER assertResourcesFree pre-checked
+// it. Mirrors the private helper in session-actions.ts (kept separate per the
+// "do not export session-actions' private finders" rule); Neon's HTTP driver
+// wraps DB errors, so we walk the cause chain. Exported so the program-block /
+// series action files can translate this collision into a friendly
+// BlockOverlapError instead of a raw 500 (and run their compensating writes).
+export function isExclusionViolation(err: unknown): boolean {
+  if (err && typeof err === "object" && "code" in err && err.code === "23P01") {
+    return true;
+  }
+  if (err instanceof Error && err.cause) {
+    return isExclusionViolation(err.cause);
+  }
+  return false;
+}
+
 // Overlap query: two ranges [a, b) and [c, d) overlap iff a < d and b > c.
 // Mirrors the EXCLUDE constraint's tsrange semantics — back-to-back
 // (end == next start) does NOT overlap.
@@ -174,20 +192,66 @@ export type ProgramResourceBlockRow = {
 };
 
 // Bulk-insert linked blocked_times in a single statement. No-op when empty.
+//
+// assertResourcesFree pre-checks every slot, but it is read-then-write and
+// neon-http has no transactions, so a concurrent booking can grab a slot in
+// the race window and this INSERT trips the `blocked_times_no_overlap` EXCLUDE
+// constraint (SQLSTATE 23P01). When that happens we re-query the colliding
+// block to name it and throw a friendly BlockOverlapError — the SAME error the
+// pre-check throws — so callers' catch sites and the UI handle it uniformly
+// instead of a raw 500. Any non-23P01 error rethrows untranslated.
+//
+// IMPORTANT (no transactions): a 23P01 here means the bulk INSERT was rejected
+// in full by Postgres (single statement = all-or-nothing), so no occupancy row
+// was written. The caller is still responsible for compensating any rows it
+// wrote in EARLIER statements (e.g. the program block + coach rows).
 export async function insertProgramResourceBlocks(
   rows: ProgramResourceBlockRow[],
 ): Promise<void> {
   if (rows.length === 0) return;
-  await db.insert(blockedTimes).values(
-    rows.map((r) => ({
-      resourceId: r.resourceId,
-      startAt: r.startAt,
-      endAt: r.endAt,
-      reason: r.reason,
-      programScheduleBlockId: r.programScheduleBlockId,
-      createdBy: r.createdBy,
-    })),
-  );
+  try {
+    await db.insert(blockedTimes).values(
+      rows.map((r) => ({
+        resourceId: r.resourceId,
+        startAt: r.startAt,
+        endAt: r.endAt,
+        reason: r.reason,
+        programScheduleBlockId: r.programScheduleBlockId,
+        createdBy: r.createdBy,
+      })),
+    );
+  } catch (err) {
+    if (!isExclusionViolation(err)) throw err;
+    // Find which row collided so the message names the real cage + reason.
+    // Exclude this block's own (just-attempted) rows is unnecessary — none
+    // were committed — so a plain overlap query identifies the foreign block.
+    const names = await resolveResourceNames(rows.map((r) => r.resourceId));
+    for (const r of rows) {
+      const conflict = await findOverlappingBlock(
+        r.resourceId,
+        r.startAt,
+        r.endAt,
+      );
+      if (conflict) {
+        throw new BlockOverlapError(
+          names.get(r.resourceId) ?? r.resourceId,
+          conflict.reason,
+          conflict.startAt,
+          conflict.endAt,
+        );
+      }
+    }
+    // 23P01 but no overlap found on re-query (e.g. the racing row was already
+    // removed). Surface a generic-but-friendly overlap on the first row rather
+    // than a raw 500.
+    const first = rows[0];
+    throw new BlockOverlapError(
+      names.get(first.resourceId) ?? first.resourceId,
+      first.reason,
+      first.startAt,
+      first.endAt,
+    );
+  }
 }
 
 // The reason text stamped on a program-occupancy blocked_time.

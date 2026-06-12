@@ -100,6 +100,7 @@ export default async function BillingRecordsHome() {
         and(
           isNull(coachPayments.deletedAt),
           eq(coachPayments.status, "confirmed"),
+          eq(coachPayments.direction, "coach_to_pfa"),
         ),
       ),
     db

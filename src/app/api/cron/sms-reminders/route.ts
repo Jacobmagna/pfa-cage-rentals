@@ -17,6 +17,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 
+import { pingHeartbeat } from "@/lib/heartbeat";
 import { isPacific8am, runSmsReminders } from "@/lib/server/sms-reminders";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +51,7 @@ export async function GET(req: Request) {
 
   try {
     const summary = await runSmsReminders({ dryRun: false });
+    await pingHeartbeat(process.env.HEARTBEAT_URL_SMS_REMINDERS);
     return NextResponse.json(summary);
   } catch (err) {
     // Sentry auto-captures unhandled errors in this route via the Next

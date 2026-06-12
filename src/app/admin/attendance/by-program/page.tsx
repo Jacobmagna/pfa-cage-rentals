@@ -101,8 +101,7 @@ export default async function AttendanceByProgramPage({
   // Per-athlete enrollment caps for this program (FEAT-11 redesign).
   // cap + capPeriod are co-required (both NULL = that enrollment is
   // uncapped — filtered out here). Build a capsByAthlete lookup for the
-  // pure flag logic. All caps are NULL until the assign-form UI lands, so
-  // this currently yields no flags (correct).
+  // pure flag logic.
   const capRows = await db
     .select({
       athleteId: athletePrograms.athleteId,
@@ -192,13 +191,57 @@ export default async function AttendanceByProgramPage({
     records,
   });
 
-  // Over-cap red flags (FEAT-11). Pure logic on the already-built grid;
-  // athletes without an enrollment cap → no flags → grid renders exactly
-  // as FEAT-10.
+  // Over-cap red flags (FEAT-11). The flag math must reflect each
+  // athlete's TRUE period totals regardless of which month is being
+  // viewed — for "total" caps the count must NOT restart each month, and
+  // for "week" caps a week straddling the month boundary must include its
+  // out-of-month sessions. So the flag computation is fed a SEPARATE,
+  // program-scoped (un-month-bounded) set of present sessions, while the
+  // rendered columns/grid above stay month-bounded. computeOverCapFlags is
+  // pure and buckets independently by week/month/total, so a superset of
+  // sessions is correct (it just buckets more). The result is keyed by
+  // sessionId; the grid component only displays flags whose session is in
+  // the rendered month, so out-of-month flag entries are inert. The
+  // "month" case is unchanged: the full set buckets the displayed month
+  // identically. Only present (true) records are counted, matching the
+  // month-scoped semantics.
+  const flagSessionRows = await db
+    .select({
+      id: attendanceSessions.id,
+      sessionDate: attendanceSessions.sessionDate,
+    })
+    .from(attendanceSessions)
+    .where(eq(attendanceSessions.programId, selectedProgramId))
+    .orderBy(asc(attendanceSessions.sessionDate));
+
+  const flagSessionIds = flagSessionRows.map((s) => s.id);
+
+  let flagRecords: {
+    sessionId: string;
+    athleteId: string;
+    present: boolean;
+  }[] = [];
+  if (flagSessionIds.length > 0) {
+    flagRecords = await db
+      .select({
+        sessionId: attendanceRecords.sessionId,
+        athleteId: attendanceRecords.athleteId,
+        present: attendanceRecords.present,
+      })
+      .from(attendanceRecords)
+      .where(inArray(attendanceRecords.sessionId, flagSessionIds));
+  }
+
+  const flagGrid = buildAttendanceGrid({
+    athletes: grid.athletes,
+    sessions: flagSessionRows,
+    records: flagRecords,
+  });
+
   const flags = computeOverCapFlags({
     athletes: grid.athletes,
-    sessions: grid.sessions,
-    present: grid.present,
+    sessions: flagGrid.sessions,
+    present: flagGrid.present,
     capsByAthlete,
   });
 

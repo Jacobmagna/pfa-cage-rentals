@@ -327,9 +327,17 @@ describe("editProgramScheduleSeriesInternal", () => {
       endsOn: iso(future),
     });
 
+    // Approved boundary: occurrences that have ALREADY STARTED (startAt <
+    // now, including ones earlier today) are kept as history; only genuinely
+    // future ones (startAt >= now) regenerate. Classify by the instant the
+    // edit will run against, NOT by PFA calendar date, so today's earlier
+    // occurrence counts as past.
+    const now = new Date();
     const before = await blocksForSeries(series.id);
-    const pastBlocks = before.filter((b) => formatPfaDate(b.startAt) < today);
-    const futureBlocks = before.filter((b) => formatPfaDate(b.startAt) >= today);
+    const pastBlocks = before.filter((b) => b.startAt.getTime() < now.getTime());
+    const futureBlocks = before.filter(
+      (b) => b.startAt.getTime() >= now.getTime(),
+    );
     expect(pastBlocks.length).toBeGreaterThan(0);
     expect(futureBlocks.length).toBeGreaterThan(0);
     const pastIds = new Set(pastBlocks.map((b) => b.id));
@@ -337,7 +345,7 @@ describe("editProgramScheduleSeriesInternal", () => {
     // Cancel a FUTURE occurrence first so we can assert it stays skipped
     // through the edit/regenerate.
     const toCancel = futureBlocks.sort((a, b) =>
-      formatPfaDate(a.startAt) < formatPfaDate(b.startAt) ? -1 : 1,
+      a.startAt.getTime() - b.startAt.getTime(),
     )[1]; // second future occurrence
     const cancelledDate = formatPfaDate(toCancel.startAt);
     await cancelSeriesOccurrenceInternal(fixtures.admin, toCancel.id);
@@ -370,8 +378,11 @@ describe("editProgramScheduleSeriesInternal", () => {
       );
     }
 
-    // Future blocks regenerated: new coach2, NOT the old ids.
-    const afterFuture = after.filter((b) => formatPfaDate(b.startAt) >= today);
+    // Future blocks regenerated: new coach2, NOT the old ids. Classify by
+    // the same `now` instant used to split before the edit.
+    const afterFuture = after.filter(
+      (b) => b.startAt.getTime() >= now.getTime(),
+    );
     expect(afterFuture.length).toBeGreaterThan(0);
     for (const b of afterFuture) {
       expect(b.scheduledCoachId).toBe(coach2.id);
@@ -438,8 +449,14 @@ describe("editProgramScheduleSeriesInternal", () => {
       endsOn: iso(future),
     });
 
+    // Approved boundary: split past/future by the current instant (startAt
+    // < now = history), not by PFA date, so today's earlier occurrence is
+    // kept as history rather than regenerated.
+    const now = new Date();
     const before = await blocksForSeries(series.id);
-    const pastBlock = before.find((b) => formatPfaDate(b.startAt) < today)!;
+    const pastBlock = before.find(
+      (b) => b.startAt.getTime() < now.getTime(),
+    )!;
     expect(pastBlock).toBeDefined();
     const pastCoachesBefore = (await blockCoachIds(pastBlock.id)).sort();
 
@@ -468,7 +485,7 @@ describe("editProgramScheduleSeriesInternal", () => {
 
     // Future blocks carry the NEW set.
     const futureBlocks = after.filter(
-      (b) => formatPfaDate(b.startAt) >= today,
+      (b) => b.startAt.getTime() >= now.getTime(),
     );
     expect(futureBlocks.length).toBeGreaterThan(0);
     for (const b of futureBlocks) {
@@ -554,8 +571,15 @@ describe("series occupies cage resources (W3.3)", () => {
       endsOn: iso(future),
     });
 
+    // Approved boundary: linked rows whose occupancy has already started
+    // (startAt < now) are history and untouched; only future ones (>= now)
+    // regenerate. Split by instant, not PFA date, so today's earlier
+    // occupancy counts as past.
+    const now = new Date();
     const before = await linkedForSeries(series.id);
-    const pastLinked = before.filter((l) => formatPfaDate(l.startAt) < today);
+    const pastLinked = before.filter(
+      (l) => l.startAt.getTime() < now.getTime(),
+    );
     expect(pastLinked.length).toBeGreaterThan(0);
     const pastLinkedIds = new Set(pastLinked.map((l) => l.id));
 
@@ -580,7 +604,7 @@ describe("series occupies cage resources (W3.3)", () => {
     }
     // Future linked rows now point at cage2.
     const afterFuture = after.filter(
-      (l) => formatPfaDate(l.startAt) >= today,
+      (l) => l.startAt.getTime() >= now.getTime(),
     );
     expect(afterFuture.length).toBeGreaterThan(0);
     for (const l of afterFuture) {

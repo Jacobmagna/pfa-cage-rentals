@@ -45,8 +45,10 @@ import { safeLogAudit } from "./audit-helpers";
 import {
   assertResourcesFree,
   insertProgramResourceBlocks,
+  isExclusionViolation,
   programOccupancyReason,
 } from "./program-resource-blocks";
+import { BlockOverlapError } from "@/lib/errors";
 
 const AUDIT_ENTITY = "program_schedule_block";
 
@@ -345,14 +347,40 @@ export async function updateProgramScheduleBlockInternal(
   } else if (timeChanged && existingLinked.length > 0) {
     // Keep the same resource set, just move the linked blocks to the new
     // time. Reason carries the program name (re-stamp in case it changed).
-    await db
-      .update(blockedTimes)
-      .set({
-        startAt: finalStartAt,
-        endAt: finalEndAt,
-        reason: programOccupancyReason(programName),
-      })
-      .where(eq(blockedTimes.programScheduleBlockId, id));
+    // A concurrent booking can grab the destination slot in the race window
+    // between the pre-check above and this in-place UPDATE, throwing a raw
+    // 23P01. Translate it to the friendly BlockOverlapError (re-querying to
+    // name the colliding block), matching the replace-branch / create path.
+    // This is an in-place move (no prior delete) so NO compensating restore
+    // is needed — just translate. Non-23P01 errors rethrow untranslated.
+    try {
+      await db
+        .update(blockedTimes)
+        .set({
+          startAt: finalStartAt,
+          endAt: finalEndAt,
+          reason: programOccupancyReason(programName),
+        })
+        .where(eq(blockedTimes.programScheduleBlockId, id));
+    } catch (err) {
+      if (!isExclusionViolation(err)) throw err;
+      const ownResourceIds = [
+        ...new Set(existingLinked.map((r) => r.resourceId)),
+      ];
+      // Re-query to name the colliding block (excluding this block's own
+      // linked rows). On a collision this throws a named BlockOverlapError.
+      await assertResourcesFree(ownResourceIds, finalStartAt, finalEndAt, {
+        excludeProgramBlockId: id,
+      });
+      // 23P01 but the racing row is already gone — surface a generic-but-
+      // friendly overlap rather than a raw 500.
+      throw new BlockOverlapError(
+        ownResourceIds[0],
+        programOccupancyReason(programName),
+        finalStartAt,
+        finalEndAt,
+      );
+    }
   }
 
   await safeLogAudit(db, {

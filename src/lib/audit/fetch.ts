@@ -22,7 +22,7 @@ export type AuditRow = {
   diff: unknown;
   actorId: string;
   actorName: string | null;
-  actorEmail: string;
+  actorEmail: string | null;
 };
 
 export type AuditFetchResult = {
@@ -66,7 +66,13 @@ export async function fetchAuditPage(
         actorEmail: users.email,
       })
       .from(auditLog)
-      .innerJoin(users, eq(auditLog.actorUserId, users.id))
+      // leftJoin (not innerJoin): if an actor user row is ever hard-deleted,
+      // an innerJoin would silently drop its audit rows from the page while
+      // the `total` count below (which has no join) still counts them →
+      // phantom pages / vanished entries. leftJoin keeps the rows; the actor
+      // renders as actorName ?? actorEmail ?? "—". Both queries apply the
+      // SAME `where`, so pagination stays exact.
+      .leftJoin(users, eq(auditLog.actorUserId, users.id))
       .where(where)
       .orderBy(desc(auditLog.ts))
       .limit(AUDIT_PAGE_SIZE)

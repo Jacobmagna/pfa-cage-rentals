@@ -50,7 +50,7 @@ import {
   editProgramScheduleSeriesSchema,
 } from "@/lib/schemas/program-schedule";
 import { generateOccurrences } from "@/lib/schedule-recurrence";
-import { formatPfaDate, pfaWallClockToUtc } from "@/lib/timezone";
+import { formatPfaDate } from "@/lib/timezone";
 import { safeLogAudit } from "./audit-helpers";
 import {
   assertResourcesFree,
@@ -92,13 +92,6 @@ async function assertScheduledCoach(coachId: string) {
     )
     .limit(1);
   if (!coach) throw new CoachNotFoundError(coachId);
-}
-
-// "YYYY-MM-DD" PFA calendar date for the current instant. Server code,
-// so `new Date()` (the real now) is fine here — this is NOT a workflow
-// script. Used to split past vs. future occurrences on edit/regenerate.
-function todayPfaDate(): string {
-  return formatPfaDate(new Date());
 }
 
 export async function createProgramScheduleSeriesInternal(
@@ -254,20 +247,24 @@ export async function editProgramScheduleSeriesInternal(
   const resourceIds = [...new Set(parsed.resourceIds)];
 
   // Edit-WHOLE-series: update the definition, then regenerate FUTURE
-  // occurrences only. Past blocks (startAt before today's PFA midnight)
-  // stay as a historical record. Previously-cancelled dates stay
-  // cancelled — we carry forward the series' existing skipDates so a
-  // re-generate won't resurrect a cancelled occurrence.
-  const today = todayPfaDate();
-  // UTC instant of PFA-local midnight at the start of today's PFA date —
-  // the boundary between "past" blocks (kept) and "future" blocks
-  // (regenerated). Built via the same DST-correct helper the generator
-  // uses, so it lines up exactly with materialized startAt values.
-  const cutoff = pfaWallClockToUtc(today, "00:00");
+  // occurrences only. Occurrences that have ALREADY STARTED — including
+  // ones completed earlier TODAY — stay as a historical record (rewriting
+  // a finished session could orphan an hour-log reconciled against it).
+  // Previously-cancelled dates stay cancelled — we carry forward the
+  // series' existing skipDates so a re-generate won't resurrect a
+  // cancelled occurrence.
+  //
+  // The past/future boundary is `now` (the current instant), NOT PFA
+  // midnight today: an occurrence with startAt >= now is future
+  // (regenerated); startAt < now is past/in-progress and untouched. This
+  // single `now` is reused for the occurrence split, the snapshot SELECT,
+  // the delete, the regenerate, and the catch-block cleanup so the
+  // snapshot/restore saga covers the IDENTICAL set of rows.
+  const now = new Date();
 
   // Regenerate occurrences for the new definition, then keep only those
-  // on or after today. We intersect on the generator output rather than
-  // a DB time filter so the wall-clock/DST math matches create exactly.
+  // whose start is in the future. We split on the generator output's UTC
+  // startAt (matching materialized block startAt exactly) against `now`.
   const allOccurrences = generateOccurrences({
     daysOfWeek: parsed.daysOfWeek,
     startTime: parsed.startTime,
@@ -278,7 +275,7 @@ export async function editProgramScheduleSeriesInternal(
     interval: parsed.interval,
     skipDates: existing.skipDates,
   });
-  const futureOccurrences = allOccurrences.filter((o) => o.date >= today);
+  const futureOccurrences = allOccurrences.filter((o) => o.startAt >= now);
 
   // QA10 W3.3: PRE-VALIDATE every future occurrence × resource BEFORE any
   // mutation (neon-http has no transactions). A conflict here aborts the
@@ -322,8 +319,8 @@ export async function editProgramScheduleSeriesInternal(
       .values(coachIds.map((coachId) => ({ seriesId, coachId })));
   }
 
-  // Delete this series' FUTURE blocks (startAt >= start of PFA today),
-  // then re-insert from the new definition. Past blocks untouched. The
+  // Delete this series' FUTURE blocks (startAt >= now), then re-insert
+  // from the new definition. Past/in-progress blocks untouched. The
   // deleted blocks' program_schedule_block_coaches rows cascade away — as
   // do their linked occupancy blocked_times (FK ON DELETE CASCADE), so the
   // future resource slots are freed before we re-validate + re-insert.
@@ -342,7 +339,7 @@ export async function editProgramScheduleSeriesInternal(
     .where(
       and(
         eq(programScheduleBlocks.seriesId, seriesId),
-        gte(programScheduleBlocks.startAt, cutoff),
+        gte(programScheduleBlocks.startAt, now),
       ),
     );
   const futureBlockIds = futureBlocks.map((b) => b.id);
@@ -402,7 +399,7 @@ export async function editProgramScheduleSeriesInternal(
       .where(
         and(
           eq(programScheduleBlocks.seriesId, seriesId),
-          gte(programScheduleBlocks.startAt, cutoff),
+          gte(programScheduleBlocks.startAt, now),
         ),
       );
 
@@ -466,7 +463,7 @@ export async function editProgramScheduleSeriesInternal(
         .where(
           and(
             eq(programScheduleBlocks.seriesId, seriesId),
-            gte(programScheduleBlocks.startAt, cutoff),
+            gte(programScheduleBlocks.startAt, now),
           ),
         );
     } catch {

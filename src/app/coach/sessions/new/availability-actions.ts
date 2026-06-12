@@ -14,7 +14,7 @@
 // Soft-deleted coaches show as "Former coach" via the same join the
 // admin grid uses — see src/db/schema.ts deletedAt notes.
 
-import { and, asc, eq, gte, lt } from "drizzle-orm";
+import { and, asc, eq, gt, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
   blockedTimes,
@@ -89,9 +89,12 @@ export async function getDayAvailability(
       .from(sessionsBilling)
       .innerJoin(users, eq(sessionsBilling.coachId, users.id))
       .where(
+        // True half-open overlap (matches the codebase's overlap semantics,
+        // e.g. program-resource-blocks): catches a row straddling midnight
+        // from the prior PFA day. start < dayEnd AND end > dayStart.
         and(
-          gte(sessionsBilling.startAt, dayStart),
           lt(sessionsBilling.startAt, dayEnd),
+          gt(sessionsBilling.endAt, dayStart),
         ),
       )
       .orderBy(asc(sessionsBilling.startAt)),
@@ -108,9 +111,12 @@ export async function getDayAvailability(
       // notNull at the schema level. We do need to scope by date.
       .innerJoin(resources, eq(blockedTimes.resourceId, resources.id))
       .where(
+        // True half-open overlap (see the sessions query above): catches a
+        // blocked_times / program-occupancy row that starts the prior PFA day
+        // and ends after midnight. start < dayEnd AND end > dayStart.
         and(
-          gte(blockedTimes.startAt, dayStart),
           lt(blockedTimes.startAt, dayEnd),
+          gt(blockedTimes.endAt, dayStart),
         ),
       )
       .orderBy(asc(blockedTimes.startAt)),

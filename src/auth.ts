@@ -105,7 +105,18 @@ export const { handlers, auth: uncachedAuth, signIn, signOut } = NextAuth({
     async session({ session, user }) {
       if (session.user) {
         session.user.id = user.id;
-        session.user.role = (user as { role?: "coach" | "admin" }).role ?? "coach";
+        // The hardcoded admin allowlist is AUTHORITATIVE for the session
+        // role, evaluated every request. The createUser event only promotes
+        // a row on FIRST sign-in, so an allowlisted email whose user row
+        // already exists (e.g. pre-added via "Add coach" with role="coach")
+        // would otherwise read role="coach" and be stuck in the coach UI.
+        // Coercing here self-heals both that pre-add case and the case where
+        // an email is added to the allowlist after the coach row exists,
+        // without a DB write on every request. A non-allowlisted coach is
+        // unaffected — they fall through to the stored role.
+        session.user.role = isAdminEmail(session.user.email)
+          ? "admin"
+          : (user as { role?: "coach" | "admin" }).role ?? "coach";
       }
       return session;
     },

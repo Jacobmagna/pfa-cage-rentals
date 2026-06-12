@@ -1,11 +1,20 @@
 // E2E happy path for the coach flow: sign in (via injected cookie),
-// log a session at /coach/sessions/new, see it on /coach/sessions,
+// log a cage rental at /coach/sessions/new, see it on /coach/sessions,
 // delete it, see the empty state again.
 //
 // This is the highest-value automated test in the suite — it
 // exercises auth → middleware → server component → client hydration
 // → useActionState → server action → DB → revalidatePath → re-render.
 // Any of those seams breaking shows up here.
+//
+// The booking surface was reflowed: the Calendly-style calendar is now
+// the DEFAULT view, with the legacy form behind a "Prefer the form?"
+// toggle. The form defaults to a 1-hour range at 30-min slots (a 2-slot
+// BATCH); selecting the "1 hr" slot length collapses that to a single
+// 1-hour rental (one history row + a visible Note field). The coach
+// history surface deliberately renders NO dollar amounts (money is
+// admin-only), so the $44 rate is asserted against the persisted
+// billing snapshot rather than a UI string.
 //
 // Resist adding error-path tests in this file — those live in the
 // Vitest integration suite (tests/integration/) which doesn't need a
@@ -18,6 +27,7 @@ import { db } from "../../src/db";
 import {
   resources,
   sessions as authSessions,
+  sessionsBilling,
   users,
 } from "../../src/db/schema";
 
@@ -85,7 +95,7 @@ test.beforeEach(async ({ context }) => {
   ]);
 });
 
-test("coach logs a session, sees it in history, then deletes it", async ({
+test("coach logs a rental, sees it in history, then deletes it", async ({
   page,
 }) => {
   // Sanity check: Cage 5 must be seeded. If this fails the test
@@ -102,38 +112,89 @@ test("coach logs a session, sees it in history, then deletes it", async ({
     );
   }
 
-  // 1. Log the session.
+  // 1. Open the booking page — the calendar is the default surface.
   await page.goto("/coach/sessions/new");
-  await expect(page.getByRole("heading", { name: "New session" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "New rental" }),
+  ).toBeVisible();
 
-  await page.locator("select[name=resourceId]").selectOption({ label: "Cage 5" });
+  // 2. Reveal the form (calendar → form toggle).
+  await page.getByRole("button", { name: "Prefer the form?" }).click();
+
+  // 3. The form defaults to a 1-hr range at 30-min slots = a 2-slot
+  // batch (Note hidden, submit reads "Log 2 rentals"). Click the
+  // "1 hr" slot length so it collapses to a SINGLE 1-hour rental:
+  // one history row + the Note field appears + submit reads exactly
+  // "Log rental".
+  await page.getByRole("radio", { name: "1 hr" }).click();
+
+  // 4. Push the rental into the FUTURE so its history row is deletable.
+  // A coach can only request removal of a PAST rental (startAt <= now),
+  // and the form defaults to the current half-hour (which reads as past).
+  // The DateInput's visible field is a masked MM/DD/YYYY text input; the
+  // hidden input[name=date] carries the resolved ISO. Type tomorrow.
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const mm = String(tomorrow.getMonth() + 1).padStart(2, "0");
+  const dd = String(tomorrow.getDate()).padStart(2, "0");
+  const yyyy = String(tomorrow.getFullYear());
+  await page
+    .getByRole("textbox", { name: "Date" })
+    .or(page.locator('input[placeholder="MM/DD/YYYY"]'))
+    .first()
+    .fill(`${mm}/${dd}/${yyyy}`);
+
+  // 5. Pick the cage, 6. fill the note, 7. submit.
+  await page
+    .locator("select[name=resourceId]")
+    .selectOption({ label: "Cage 5" });
   await page.locator("input[name=note]").fill("E2E happy path");
+  await page.getByRole("button", { name: "Log rental", exact: true }).click();
 
-  await page.getByRole("button", { name: "Log session" }).click();
+  // 8. Success: the form collapses into a CompletionPanel (role=status).
+  await expect(page.getByRole("status")).toContainText("Rental logged");
 
-  // 2. Success banner appears (and form clears, but we only assert
-  // the banner — clearing is covered by D1 manual verification).
-  await expect(page.getByRole("status")).toContainText("Session logged");
-
-  // 3. Navigate to history.
+  // 9. Navigate to history.
   await page.goto("/coach/sessions");
-  await expect(page.getByRole("heading", { name: "My sessions" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "My rentals" }),
+  ).toBeVisible();
 
-  // 4. See the row. Filter by resource + note to disambiguate.
+  // 10. See the row. Filter by resource + note to disambiguate.
   const row = page
     .locator("ul > li")
     .filter({ hasText: "Cage 5" })
     .filter({ hasText: "E2E happy path" });
   await expect(row).toBeVisible();
-  // Rate math sanity: 1-hour cage session = 2 × $22.00 = $44.00.
-  await expect(row).toContainText("$44.00");
+  // The UI row proves it's a SINGLE 1-hour rental (the "1 hr" duration
+  // chip) — the coach surface shows no money.
+  await expect(row).toContainText("1 hr");
+  // Rate math sanity, asserted at the data layer since the coach surface
+  // renders no dollars: a 1-hour cage rental snapshots a $22.00/30-min
+  // rate, so the persisted billing row totals 2 × 2200 = 4400¢ = $44.00.
+  const [billed] = await db
+    .select({ rate: sessionsBilling.ratePer30MinCents })
+    .from(sessionsBilling)
+    .where(eq(sessionsBilling.coachId, coachId))
+    .limit(1);
+  if (!billed) throw new Error("Logged rental not found in sessions_billing");
+  expect(billed.rate * 2).toBe(4400);
 
-  // 5. Delete it. The client uses native confirm(); Playwright's
-  // dialog handler auto-accepts the next prompt.
+  // 11. Delete it. The destructive confirm is a custom <ConfirmDialog>
+  // (no native window.confirm), so we click the row's "Delete rental"
+  // (aria-label) button, then the dialog's "Delete rental" confirm
+  // button. The dialog handler below is a harmless backstop in case any
+  // surface still routes through the native prompt.
   page.once("dialog", (dialog) => dialog.accept());
-  await row.getByRole("button", { name: "Delete session" }).click();
+  await row.getByRole("button", { name: "Delete rental" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Delete rental" })
+    .click();
 
-  // 6. Row gone, empty state appears.
+  // 12. Row gone, empty state appears (the "No rentals yet" <h2> only
+  // renders once this coach has zero lifetime rentals).
   await expect(row).toHaveCount(0);
-  await expect(page.getByText("No sessions yet")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "No rentals yet" }),
+  ).toBeVisible();
 });

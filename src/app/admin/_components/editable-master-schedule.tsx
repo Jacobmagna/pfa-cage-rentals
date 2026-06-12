@@ -65,14 +65,13 @@ import {
 } from "@/app/admin/hour-log/schedule/_components/program-block-dialog";
 import type { BlockReconciliation } from "@/lib/server/reconciliation";
 import {
-  PROGRAM_GRID_SLOTS,
   SCHEDULE_GRID_SLOTS,
   placeOnGrid,
   placeOnGrid15,
   slotStartAt,
   slotStartAt15,
 } from "@/lib/schedule-grid-utils";
-import { formatPfaTime, pfaHour, pfaMinute, pfaWallClockAt } from "@/lib/timezone";
+import { formatPfaTime } from "@/lib/timezone";
 
 // Drag id prefix (e.g. "session-…" / "program-block-…") → bare entity id, so
 // the grid's draggingId prop (which excludes the dragged item's own footprint
@@ -245,11 +244,19 @@ export function EditableMasterSchedule({
       }
       return false;
     }
+    // #8: the program paint layer is 30-min (slotIndex 0..27). A 30-min slot is
+    // occupied if EITHER of its two 15-min sub-slots is covered by a block.
     for (const b of programBlocksRef.current) {
       const p = placeOnGrid15(b.startAt, b.endAt);
+      if (!p) continue;
       // placeOnGrid15.col is 1-based with NO leading label column (slot 0 →
-      // col 1). Recover the 0-based slot index.
-      if (p && slotIndex >= p.col - 1 && slotIndex < p.col - 1 + p.span) {
+      // col 1). Recover the 0-based 15-min slot range, then test both sub-slots
+      // of the 30-min cell.
+      const start15 = p.col - 1;
+      const end15 = start15 + p.span; // exclusive
+      const lo = slotIndex * 2;
+      const hi = slotIndex * 2 + 1;
+      if ((lo >= start15 && lo < end15) || (hi >= start15 && hi < end15)) {
         return true;
       }
     }
@@ -257,17 +264,19 @@ export function EditableMasterSchedule({
   };
 
   // Map a pointer clientX to a slot index within `section`'s own grid. Both
-  // sub-grids template "120px repeat(SLOTS, …)" — the first column is the label,
-  // then SLOTS equal fractions fill the rest. SLOTS differs per section (28 vs
-  // 56), so we read the section's bounding rect + its own slot count.
+  // sub-grids template "120px repeat(N, …)" — the first column is the label,
+  // then N equal fractions fill the rest. #8: BOTH sections' paint layer is now
+  // 30-min, so both resolve to 28 logical slots (0..27). The program grid node
+  // still has 56 underlying template columns, but the 28 30-min cells span the
+  // same total width as the cage section's 28, so we measure against 28 slots
+  // and decode to the 15-min template via *2 elsewhere.
   const slotIndexFromClientX = (
     section: "resource" | "program",
     clientX: number,
   ): number | null => {
     const grid = gridNodes.current[section];
     if (!grid) return null;
-    const slots =
-      section === "resource" ? SCHEDULE_GRID_SLOTS : PROGRAM_GRID_SLOTS;
+    const slots = SCHEDULE_GRID_SLOTS;
     const rect = grid.getBoundingClientRect();
     const cellsLeft = rect.left + 120;
     const cellsWidth = rect.right - cellsLeft;
@@ -320,8 +329,11 @@ export function EditableMasterSchedule({
         prefill: { resourceId: rowId, startAt, endAt },
       });
     } else {
-      const startAt = slotStartAt15(date, minSlot);
-      const endAt = slotStartAt15(date, maxSlot + 1);
+      // #8: program paint slots are 30-min indices (0..27); maxSlot is
+      // inclusive → the block runs through the END of slot maxSlot. Decode to
+      // the 15-min template via *2 so the painted range snaps to 30-min.
+      const startAt = slotStartAt15(date, minSlot * 2);
+      const endAt = slotStartAt15(date, (maxSlot + 1) * 2);
       setDialog({
         kind: "program",
         prefill: {
@@ -469,12 +481,14 @@ export function EditableMasterSchedule({
       return;
     }
 
-    // PROGRAM block: drop target must be a program cell (15-min). New start =
-    // start of that 15-min slot. Only the times are sent → the action leaves
+    // PROGRAM block: drop target must be a program cell. #8: the program drop
+    // layer is now 30-min (dropData.slotIndex is a 0..27 30-min index), so
+    // moves snap to 30-min — decode to the 15-min template via *2. New start =
+    // start of that 30-min slot. Only the times are sent → the action leaves
     // program / coaches / occupied resources / note untouched (and auto-moves
     // any linked cage blocked_times to the new time).
     if (dragData.type === "program-block" && dropData.section === "program") {
-      const newStart = slotStartAt15(selectedDate, dropData.slotIndex);
+      const newStart = slotStartAt15(selectedDate, dropData.slotIndex * 2);
       const newEnd = new Date(newStart.getTime() + durationMs);
       if (newStart.getTime() === oldStart.getTime()) return; // no-op
       startTransition(async () => {
@@ -515,31 +529,28 @@ export function EditableMasterSchedule({
     rowId,
     slotIndex,
   }) => {
-    // #8: the cage (resource) section reports 30-min slot indices; the Work
-    // (program) section reports 15-min slot indices. Decode with the matching
-    // helper so the clicked cell maps to the right start time.
-    const start =
-      section === "resource"
-        ? slotStartAt(selectedDate, slotIndex)
-        : slotStartAt15(selectedDate, slotIndex);
-    // Default span = 60 min, mirroring the standalone grids' openCreateAt.
-    const end = pfaWallClockAt(
-      selectedDate,
-      pfaHour(start) + 1,
-      pfaMinute(start),
-    );
+    // #8: BOTH the cage (resource) section AND the Work (program) section now
+    // report 30-min slot indices for the clickable empty-cell layer. A single
+    // empty-cell click defaults to a 30-min block (= one slot) in both
+    // sections. The program section's bars still render at 15-min precision,
+    // but its click/drop layer is 30-min (slotIndex 0..27, decoded to the
+    // 15-min template via *2).
     if (section === "resource") {
+      const startAt = slotStartAt(selectedDate, slotIndex);
+      const endAt = slotStartAt(selectedDate, slotIndex + 1); // +30 min
       setDialog({
         kind: "cage",
-        prefill: { resourceId: rowId, startAt: start, endAt: end },
+        prefill: { resourceId: rowId, startAt, endAt },
       });
     } else {
+      const startAt = slotStartAt15(selectedDate, slotIndex * 2);
+      const endAt = slotStartAt15(selectedDate, slotIndex * 2 + 2); // +30 min
       setDialog({
         kind: "program",
         prefill: {
           programId: rowId,
-          startTime: formatPfaTime(start),
-          endTime: formatPfaTime(end),
+          startTime: formatPfaTime(startAt),
+          endTime: formatPfaTime(endAt),
         },
       });
     }

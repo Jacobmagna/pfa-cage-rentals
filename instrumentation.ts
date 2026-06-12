@@ -8,6 +8,7 @@
  */
 import * as Sentry from "@sentry/nextjs";
 import { validateRequiredEnv } from "@/lib/env";
+import { scrubPii } from "@/lib/sentry-scrub";
 
 export async function register() {
   // Boot-time env guard — logs loudly but never throws. An instrumentation-
@@ -34,6 +35,9 @@ export async function register() {
       // Send default PII (request data) only — no body capture (could include
       // billing data, coach emails). Tune later if we need more context.
       sendDefaultPii: false,
+      // Defense-in-depth: redact likely PII (emails/phones/birthdays) from the
+      // event before send. Never throws / never drops events. See sentry-scrub.
+      beforeSend: scrubPii,
       enabled: !!process.env.NEXT_PUBLIC_SENTRY_DSN,
     });
   }
@@ -45,6 +49,8 @@ export async function register() {
       environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV,
       tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 0,
       sendDefaultPii: false,
+      // See node init above — same PII scrubber for the edge runtime.
+      beforeSend: scrubPii,
       enabled: !!process.env.NEXT_PUBLIC_SENTRY_DSN,
     });
   }

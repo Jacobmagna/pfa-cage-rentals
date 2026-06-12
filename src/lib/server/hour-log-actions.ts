@@ -243,8 +243,9 @@ export async function logHourInternal(
     .returning();
 
   if (!inserted) {
-    // Conflict: an identical log already exists. Return it unchanged
-    // without writing a duplicate audit row.
+    // Conflict: an identical log already exists. The unique index does NOT
+    // include `status`, so a held row + a later CLEAN confirm of the exact
+    // same window both collide here.
     const [existing] = await db
       .select()
       .from(hourLogs)
@@ -257,6 +258,42 @@ export async function logHourInternal(
         ),
       )
       .limit(1);
+
+    // Held → posted auto-upgrade: if the existing row is stuck "held"
+    // (awaiting admin approval, unpaid, excluded from counts) AND the
+    // current attempt is itself CLEAN (heldReason === null → it matched a
+    // scheduled block cleanly), treat this confirm as the approval. We
+    // mirror approveHeldHourLogInternal exactly: flip status → "posted" and
+    // stamp reviewedAt/reviewedBy so the row also leaves the needs-review
+    // queue, plus clear the stale heldReason. We do NOT downgrade an
+    // already-"posted" row, and we never auto-approve when the current
+    // attempt is itself anomalous (heldReason !== null) — that stays held.
+    if (existing && existing.status === "held" && heldReason === null) {
+      const [upgraded] = await db
+        .update(hourLogs)
+        .set({
+          status: "posted",
+          heldReason: null,
+          reviewedAt: new Date(),
+          reviewedBy: actor.id,
+        })
+        .where(eq(hourLogs.id, existing.id))
+        .returning();
+
+      await safeLogAudit(db, {
+        actorUserId: actor.id,
+        entityType: "hour_log",
+        entityId: existing.id,
+        action: "update",
+        before: existing as unknown as Record<string, unknown>,
+        after: upgraded as unknown as Record<string, unknown>,
+      });
+      return upgraded;
+    }
+
+    // Otherwise an identical log already exists in its current state
+    // (already posted, or still legitimately held by an anomalous attempt).
+    // Return it unchanged without writing a duplicate audit row.
     return existing;
   }
 

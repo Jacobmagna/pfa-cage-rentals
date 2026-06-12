@@ -5,25 +5,22 @@
 // before touching the DB, so the validation contract lives in one
 // place and the action stays terse.
 //
-// Roles live in src/db/schema.ts (`roleEnum`). The literal union
-// here mirrors that enum — Drizzle's `roleEnum.enumValues` is a
-// readonly tuple of strings, not a Zod-compatible type, so we
-// duplicate the literals rather than pull a value-level dependency
-// from db/schema into the schemas layer.
+// Role is strictly server-derived: every user write hardcodes
+// `role: "coach"` and admin elevation happens only via the
+// isAdminEmail-gated createUser auth event. These schemas therefore
+// do NOT accept a client-supplied `role` — exposing one would be a
+// privilege-escalation footgun if a future action ever did
+// `.set(updateUserSchema.parse(input))`.
 
 import { z } from "zod";
-
-export const userRoleSchema = z.enum(["coach", "admin"]);
 
 export const createUserSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1).max(120).optional(),
-  role: userRoleSchema.default("coach"),
 });
 
 export const updateUserSchema = z.object({
   name: z.string().min(1).max(120).optional(),
-  role: userRoleSchema.optional(),
 });
 
 // J9 account-deletion input. Just the coachId — the internal looks

@@ -24,11 +24,24 @@ import { checkMagicLinkRateLimit } from "@/lib/ratelimit";
 
 async function getClientIp(): Promise<string> {
   const h = await headers();
+  // Prefer the platform-trusted client IP. On Vercel, `x-vercel-forwarded-for`
+  // is set by the platform to the real client IP and CANNOT be forged by the
+  // client, so the per-IP magic-link rate limit can't be evaded by spoofing
+  // `x-forwarded-for`. Fall back to `x-real-ip`, then the (spoofable)
+  // `x-forwarded-for` first entry only as a last resort.
+  const vercel = h.get("x-vercel-forwarded-for");
+  if (vercel) {
+    return vercel.split(",")[0]!.trim();
+  }
+  const real = h.get("x-real-ip");
+  if (real) {
+    return real.trim();
+  }
   const forwarded = h.get("x-forwarded-for");
   if (forwarded) {
     return forwarded.split(",")[0]!.trim();
   }
-  return h.get("x-real-ip") ?? "unknown";
+  return "unknown";
 }
 
 export async function requestMagicLink(formData: FormData): Promise<void> {

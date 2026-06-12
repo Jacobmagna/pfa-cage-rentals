@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import {
   ChevronLeft,
@@ -59,24 +60,33 @@ export function SessionsHistoryClient({
   totalCount: number;
   filters: HistoryFilterSet;
 }) {
+  const router = useRouter();
   const [editingRow, setEditingRow] = useState<HistoryRow | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [confirmRow, setConfirmRow] = useState<HistoryRow | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, startTransition] = useTransition();
   const [removalRow, setRemovalRow] = useState<HistoryRow | null>(null);
 
   const onDelete = (row: HistoryRow) => {
+    setDeleteError(null);
     setConfirmRow(row);
   };
 
   const handleConfirmDelete = () => {
     const row = confirmRow;
     if (!row) return;
+    setDeleteError(null);
     setPendingDeleteId(row.id);
     startTransition(async () => {
       try {
         await deleteOwnSessionAction(row.id);
         setConfirmRow(null);
+      } catch {
+        // Benign "already gone" (admin removed it, or a transient blip).
+        // Don't throw to the route boundary — re-sync and tell the user.
+        setDeleteError("That rental was already removed — refreshing.");
+        router.refresh();
       } finally {
         setPendingDeleteId(null);
       }
@@ -260,13 +270,23 @@ export function SessionsHistoryClient({
       <ConfirmDialog
         open={confirmRow !== null}
         onOpenChange={(next) => {
-          if (!next) setConfirmRow(null);
+          if (!next) {
+            setConfirmRow(null);
+            setDeleteError(null);
+          }
         }}
         title="Delete this rental?"
         description={
-          confirmRow
-            ? `${confirmRow.resourceName} · ${formatWhen(confirmRow.startAt, confirmRow.endAt)}. This can't be undone.`
-            : undefined
+          <>
+            {confirmRow
+              ? `${confirmRow.resourceName} · ${formatWhen(confirmRow.startAt, confirmRow.endAt)}. This can't be undone.`
+              : null}
+            {deleteError ? (
+              <span role="alert" className="mt-2 block text-danger">
+                {deleteError}
+              </span>
+            ) : null}
+          </>
         }
         confirmLabel={isDeleting ? "Deleting…" : "Delete rental"}
         onConfirm={handleConfirmDelete}

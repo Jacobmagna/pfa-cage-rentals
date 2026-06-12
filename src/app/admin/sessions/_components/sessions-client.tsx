@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { SessionFormDialog, type SessionFormInitialValues } from "./session-form-dialog";
 import { deleteSessionAction } from "../form-actions";
@@ -60,8 +61,10 @@ export function SessionsClient({
   const [dialogState, setDialogState] = useState<
     { mode: "closed" } | { mode: "create" } | { mode: "edit"; row: SessionRow }
   >({ mode: "closed" });
+  const router = useRouter();
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [confirmRow, setConfirmRow] = useState<SessionRow | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, startTransition] = useTransition();
 
   const openCreate = () => setDialogState({ mode: "create" });
@@ -69,17 +72,25 @@ export function SessionsClient({
   const close = () => setDialogState({ mode: "closed" });
 
   const onDelete = (row: SessionRow) => {
+    setDeleteError(null);
     setConfirmRow(row);
   };
 
   const handleConfirmDelete = () => {
     const row = confirmRow;
     if (!row) return;
+    setDeleteError(null);
     setPendingDeleteId(row.id);
     startTransition(async () => {
       try {
         await deleteSessionAction(row.id);
         setConfirmRow(null);
+      } catch {
+        // Benign "already gone" (another admin removed it, or a transient
+        // blip). Don't throw to the route boundary — re-sync and tell the
+        // user the stale row is on its way out.
+        setDeleteError("That rental was already removed — refreshing.");
+        router.refresh();
       } finally {
         setPendingDeleteId(null);
       }
@@ -216,13 +227,23 @@ export function SessionsClient({
       <ConfirmDialog
         open={confirmRow !== null}
         onOpenChange={(next) => {
-          if (!next) setConfirmRow(null);
+          if (!next) {
+            setConfirmRow(null);
+            setDeleteError(null);
+          }
         }}
         title="Delete this rental?"
         description={
-          confirmRow
-            ? `${confirmRow.coachName ?? confirmRow.coachEmail} · ${confirmRow.resourceName} · ${formatWhen(confirmRow.startAt, confirmRow.endAt)}. This can't be undone.`
-            : undefined
+          <>
+            {confirmRow
+              ? `${confirmRow.coachName ?? confirmRow.coachEmail} · ${confirmRow.resourceName} · ${formatWhen(confirmRow.startAt, confirmRow.endAt)}. This can't be undone.`
+              : null}
+            {deleteError ? (
+              <span role="alert" className="mt-2 block text-danger">
+                {deleteError}
+              </span>
+            ) : null}
+          </>
         }
         confirmLabel={isDeleting ? "Deleting…" : "Delete rental"}
         onConfirm={handleConfirmDelete}

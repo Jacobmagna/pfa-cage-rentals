@@ -448,7 +448,7 @@ async function buildNoShowEvents(
       coachId: c.coachId,
       coachName: c.coachName ?? c.coachEmail,
       when: c.endAt,
-      detail: `No-show for scheduled ${c.programName}.`,
+      detail: `No work logged for scheduled ${c.programName}.`,
     });
   }
   return events;

@@ -4,8 +4,13 @@
 //
 //   - per-email:  5 requests per hour. Stops an attacker (or a
 //     confused coach) from triggering 50 emails to one address.
-//   - per-ip:    10 requests per hour. Stops the "loop a script
-//     against random emails" scenario before it floods Resend.
+//     This is the real per-target abuse protection.
+//   - per-ip:   100 requests per hour. Generous on purpose: whole
+//     coaching staffs onboard at once from a single office Wi-Fi,
+//     sharing ONE public IP, so a tight per-IP cap would lock out
+//     everyone past the limit. The per-email window above still
+//     stops scripted spraying against any single address, so the
+//     IP window only needs to be a coarse flood backstop on Resend.
 //
 // Both limits use Upstash's sliding-window algorithm — more
 // accurate than fixed buckets at the boundary between windows.
@@ -19,6 +24,7 @@
 
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
+import * as Sentry from "@sentry/nextjs";
 
 let cachedRedis: Redis | undefined;
 let cachedEmailLimit: Ratelimit | undefined;
@@ -42,7 +48,7 @@ function getIpLimit(): Ratelimit {
     cachedRedis ??= Redis.fromEnv();
     cachedIpLimit = new Ratelimit({
       redis: cachedRedis,
-      limiter: Ratelimit.slidingWindow(10, "1 h"),
+      limiter: Ratelimit.slidingWindow(100, "1 h"),
       prefix: "rl:magic-link:ip",
       analytics: false,
     });
@@ -69,16 +75,30 @@ export async function checkMagicLinkRateLimit(
   ip: string,
 ): Promise<RateLimitDecision> {
   const emailKey = email.trim().toLowerCase();
-  const [emailResult, ipResult] = await Promise.all([
-    getEmailLimit().limit(emailKey),
-    getIpLimit().limit(ip),
-  ]);
 
-  if (!emailResult.success) {
-    return { allowed: false, reason: "email-limit", resetAt: emailResult.reset };
+  // FAIL OPEN: if Upstash is unreachable / over-quota, `.limit()` throws.
+  // A rate limiter that bricks login when its backing store hiccups is
+  // strictly worse than no limiter — especially during a synchronized
+  // sign-in surge, where an Upstash blip would otherwise block EVERY
+  // coach. So on ANY error we treat the request as not-rate-limited
+  // (return allowed) and report to Sentry for visibility. Degrading the
+  // per-email guard to open during an outage is the correct tradeoff on
+  // a login surface; the normal (Upstash-up) path is unchanged.
+  try {
+    const [emailResult, ipResult] = await Promise.all([
+      getEmailLimit().limit(emailKey),
+      getIpLimit().limit(ip),
+    ]);
+
+    if (!emailResult.success) {
+      return { allowed: false, reason: "email-limit", resetAt: emailResult.reset };
+    }
+    if (!ipResult.success) {
+      return { allowed: false, reason: "ip-limit", resetAt: ipResult.reset };
+    }
+    return { allowed: true };
+  } catch (err) {
+    Sentry.captureException(err);
+    return { allowed: true };
   }
-  if (!ipResult.success) {
-    return { allowed: false, reason: "ip-limit", resetAt: ipResult.reset };
-  }
-  return { allowed: true };
 }

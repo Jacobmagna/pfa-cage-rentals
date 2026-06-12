@@ -25,9 +25,10 @@
 //   5. Insert / regenerate / cancel
 //   6. Audit
 
-import { and, eq, gte, isNull } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  blockedTimes,
   programs,
   programScheduleBlockCoaches,
   programScheduleBlocks,
@@ -326,63 +327,158 @@ export async function editProgramScheduleSeriesInternal(
   // deleted blocks' program_schedule_block_coaches rows cascade away — as
   // do their linked occupancy blocked_times (FK ON DELETE CASCADE), so the
   // future resource slots are freed before we re-validate + re-insert.
-  await db
-    .delete(programScheduleBlocks)
+  //
+  // DATA-LOSS GUARD (neon-http has no transactions): the delete commits
+  // immediately, so if ANY re-insert below fails (transient Neon error, a
+  // concurrent 23P01, etc.) the future schedule would be GONE with nothing
+  // replacing it. Before deleting, we SNAPSHOT the exact rows about to be
+  // destroyed — the future blocks, their coach links, and their linked
+  // blocked_times — so we can re-create them verbatim (same IDs/links) on any
+  // failure. This is a compensating-restore saga, NOT a real transaction; the
+  // restore is best-effort but recreates the prior state faithfully.
+  const futureBlocks = await db
+    .select()
+    .from(programScheduleBlocks)
     .where(
       and(
         eq(programScheduleBlocks.seriesId, seriesId),
         gte(programScheduleBlocks.startAt, cutoff),
       ),
     );
+  const futureBlockIds = futureBlocks.map((b) => b.id);
+  const futureCoachLinks =
+    futureBlockIds.length > 0
+      ? await db
+          .select()
+          .from(programScheduleBlockCoaches)
+          .where(inArray(programScheduleBlockCoaches.blockId, futureBlockIds))
+      : [];
+  const futureOccupancy =
+    futureBlockIds.length > 0
+      ? await db
+          .select()
+          .from(blockedTimes)
+          .where(
+            inArray(blockedTimes.programScheduleBlockId, futureBlockIds),
+          )
+      : [];
+
+  // Re-create the snapshotted prior state verbatim (same primary keys, so the
+  // coach-link + occupancy FKs line back up). Best-effort: each insert is
+  // guarded so a partial restore still recovers as much as possible. Called
+  // from the catch below when delete/regenerate fails midway.
+  async function restoreSnapshot(): Promise<void> {
+    if (futureBlocks.length > 0) {
+      try {
+        await db.insert(programScheduleBlocks).values(futureBlocks);
+      } catch {
+        // Block restore failed — coach/occupancy restores below would dangle,
+        // so stop here; surface the original error to the admin.
+        return;
+      }
+    }
+    if (futureCoachLinks.length > 0) {
+      try {
+        await db
+          .insert(programScheduleBlockCoaches)
+          .values(futureCoachLinks);
+      } catch {
+        // best-effort
+      }
+    }
+    if (futureOccupancy.length > 0) {
+      try {
+        await db.insert(blockedTimes).values(futureOccupancy);
+      } catch {
+        // best-effort
+      }
+    }
+  }
 
   let count = 0;
-  if (futureOccurrences.length > 0) {
-    const inserted = await db
-      .insert(programScheduleBlocks)
-      .values(
-        futureOccurrences.map((o) => ({
-          programId: parsed.programId,
-          scheduledCoachId: primaryCoachId,
-          startAt: o.startAt,
-          endAt: o.endAt,
-          note: parsed.note ?? null,
-          seriesId,
-          createdBy: actor.id,
-        })),
-      )
-      .returning({
-        id: programScheduleBlocks.id,
-        startAt: programScheduleBlocks.startAt,
-        endAt: programScheduleBlocks.endAt,
-      });
-    count = inserted.length;
-
-    // QA10 W3.2: re-insert the full coach set for each new future block.
-    // QA-R2 #10: skip when the series has no coach.
-    if (coachIds.length > 0) {
-      await db.insert(programScheduleBlockCoaches).values(
-        inserted.flatMap((b) =>
-          coachIds.map((coachId) => ({ blockId: b.id, coachId })),
+  try {
+    await db
+      .delete(programScheduleBlocks)
+      .where(
+        and(
+          eq(programScheduleBlocks.seriesId, seriesId),
+          gte(programScheduleBlocks.startAt, cutoff),
         ),
       );
-    }
 
-    // QA10 W3.3: re-insert the linked occupancy blocked_times for the new
-    // future blocks at the new times. Past blocks' occupancy is untouched.
-    if (resourceIds.length > 0) {
-      const reason = programOccupancyReason(programName);
-      const rows: ProgramResourceBlockRow[] = inserted.flatMap((b) =>
-        resourceIds.map((resourceId) => ({
-          programScheduleBlockId: b.id,
-          resourceId,
-          startAt: b.startAt,
-          endAt: b.endAt,
-          reason,
-          createdBy: actor.id,
-        })),
-      );
-      await insertProgramResourceBlocks(rows);
+    if (futureOccurrences.length > 0) {
+      const inserted = await db
+        .insert(programScheduleBlocks)
+        .values(
+          futureOccurrences.map((o) => ({
+            programId: parsed.programId,
+            scheduledCoachId: primaryCoachId,
+            startAt: o.startAt,
+            endAt: o.endAt,
+            note: parsed.note ?? null,
+            seriesId,
+            createdBy: actor.id,
+          })),
+        )
+        .returning({
+          id: programScheduleBlocks.id,
+          startAt: programScheduleBlocks.startAt,
+          endAt: programScheduleBlocks.endAt,
+        });
+      count = inserted.length;
+
+      // QA10 W3.2: re-insert the full coach set for each new future block.
+      // QA-R2 #10: skip when the series has no coach.
+      if (coachIds.length > 0) {
+        await db.insert(programScheduleBlockCoaches).values(
+          inserted.flatMap((b) =>
+            coachIds.map((coachId) => ({ blockId: b.id, coachId })),
+          ),
+        );
+      }
+
+      // QA10 W3.3: re-insert the linked occupancy blocked_times for the new
+      // future blocks at the new times. Past blocks' occupancy is untouched.
+      if (resourceIds.length > 0) {
+        const reason = programOccupancyReason(programName);
+        const rows: ProgramResourceBlockRow[] = inserted.flatMap((b) =>
+          resourceIds.map((resourceId) => ({
+            programScheduleBlockId: b.id,
+            resourceId,
+            startAt: b.startAt,
+            endAt: b.endAt,
+            reason,
+            createdBy: actor.id,
+          })),
+        );
+        await insertProgramResourceBlocks(rows);
+      }
     }
+  } catch (regenErr) {
+    // Regenerate failed after the destructive delete (or the delete itself
+    // failed). First clear any PARTIAL regenerate output for this series'
+    // future window (new blocks + their cascaded coach/occupancy rows), so the
+    // restore doesn't collide on the EXCLUDE constraint, then restore the
+    // snapshot. Both best-effort; rethrow a clear error either way.
+    try {
+      await db
+        .delete(programScheduleBlocks)
+        .where(
+          and(
+            eq(programScheduleBlocks.seriesId, seriesId),
+            gte(programScheduleBlocks.startAt, cutoff),
+          ),
+        );
+    } catch {
+      // If even the cleanup fails, the restore below may partially collide;
+      // still attempt it.
+    }
+    await restoreSnapshot();
+    throw new Error(
+      "Failed to update the recurring series; the original schedule was " +
+        "restored. Please try again.",
+      { cause: regenErr },
+    );
   }
 
   await safeLogAudit(db, {

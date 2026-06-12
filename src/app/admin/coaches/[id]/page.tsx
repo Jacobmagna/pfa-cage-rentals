@@ -117,6 +117,7 @@ export default async function AdminCoachDetailPage({
           reference: coachPayments.reference,
           note: coachPayments.note,
           status: coachPayments.status,
+          direction: coachPayments.direction,
         })
         .from(coachPayments)
         .where(
@@ -211,7 +212,7 @@ export default async function AdminCoachDetailPage({
     owedCents += totalFromSnapshot(s.startAt, s.endAt, s.ratePer30MinCents);
   }
   const confirmedPaidCents = paymentRows
-    .filter((p) => p.status === "confirmed")
+    .filter((p) => p.status === "confirmed" && p.direction === "coach_to_pfa")
     .reduce((sum, p) => sum + p.amountCents, 0);
   const pendingCents = paymentRows
     .filter((p) => p.status === "pending")

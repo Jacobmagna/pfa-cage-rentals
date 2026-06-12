@@ -91,6 +91,7 @@ export default async function CoachHome() {
         and(
           eq(coachPayments.coachId, coachId),
           eq(coachPayments.status, "confirmed"),
+          eq(coachPayments.direction, "coach_to_pfa"),
           isNull(coachPayments.deletedAt),
         ),
       ),

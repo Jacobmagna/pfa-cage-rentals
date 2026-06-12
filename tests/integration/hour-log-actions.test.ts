@@ -13,10 +13,24 @@
 // its own program(s) with a unique name suffix and scopes assertions to
 // the created program/coach ids. audit_log IS truncated between tests.
 
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { and, eq } from "drizzle-orm";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { auditLog, hourLogs, programs } from "@/db/schema";
+import {
+  auditLog,
+  hourLogs,
+  programScheduleBlockCoaches,
+  programScheduleBlocks,
+  programs,
+} from "@/db/schema";
 import { ZodError } from "zod";
 import { logHourInternal } from "@/lib/server/hour-log-actions";
 import { ProgramInactiveError } from "@/lib/errors";
@@ -36,12 +50,26 @@ vi.mock("@/auth", () => ({
 
 let fixtures: FixtureUsers;
 
+// Track scheduled blocks we create so we can clean them up. programs and
+// program_schedule_blocks are NOT truncated by truncateMutables().
+const createdBlockIds: string[] = [];
+
 beforeAll(async () => {
   fixtures = await ensureFixtureUsers();
 });
 
 beforeEach(async () => {
   await truncateMutables();
+});
+
+afterEach(async () => {
+  if (createdBlockIds.length > 0) {
+    // CASCADE removes the program_schedule_block_coaches join rows.
+    await db
+      .delete(programScheduleBlocks)
+      .where(inArray(programScheduleBlocks.id, createdBlockIds));
+    createdBlockIds.length = 0;
+  }
 });
 
 // Tomorrow at the given UTC hour. Far enough out that overlapping with
@@ -72,11 +100,50 @@ async function createProgram(active: boolean): Promise<{
   return row;
 }
 
+// Inserts a scheduled program block with the given coach as a member
+// (both the primary scheduledCoachId and a join row). The 1b held-then-
+// approve gate (logHourInternal) only posts a log as "posted" when it
+// CLEANLY matches such a block within ±15min on both ends, same program;
+// otherwise it holds/throws. So any test that expects a log to POST must
+// first create the matching block here. Returns the block id.
+async function createScheduledBlock(args: {
+  programId: string;
+  coachId: string;
+  startAt: Date;
+  endAt: Date;
+}): Promise<string> {
+  const [block] = await db
+    .insert(programScheduleBlocks)
+    .values({
+      programId: args.programId,
+      scheduledCoachId: args.coachId,
+      startAt: args.startAt,
+      endAt: args.endAt,
+      createdBy: fixtures.admin.id,
+    })
+    .returning({ id: programScheduleBlocks.id });
+  createdBlockIds.push(block.id);
+  await db
+    .insert(programScheduleBlockCoaches)
+    .values({ blockId: block.id, coachId: args.coachId });
+  return block.id;
+}
+
 describe("logHourInternal", () => {
   it("admin logs an hour against an active program → row + audit row exist", async () => {
     const program = await createProgram(true);
     const startAt = tomorrowAt(10);
     const endAt = tomorrowAt(11);
+
+    // 1b held-then-approve gate: a schedule-confirm log only posts when it
+    // cleanly matches a scheduled block the coach is a member of. Create
+    // the matching block (admin is the actor here, so admin is the member).
+    await createScheduledBlock({
+      programId: program.id,
+      coachId: fixtures.admin.id,
+      startAt,
+      endAt,
+    });
 
     const created = await logHourInternal(fixtures.admin, {
       programId: program.id,
@@ -159,13 +226,24 @@ describe("logHourInternal", () => {
   it("allows a coach to log against any active program — no assignment needed (DEC-29)", async () => {
     // Active program; the coach has NO coach_programs assignment (the
     // feature was removed). DEC-29: any coach may log against any active
-    // program, so this writes a row + audit.
+    // program, so this writes a row + audit. The 1b held-then-approve gate
+    // additionally requires a matching scheduled block for the log to POST
+    // (vs. be held) — that's orthogonal to DEC-29's "no per-program
+    // assignment needed" point, so we create one for this program/coach.
     const program = await createProgram(true);
+    const startAt = tomorrowAt(13);
+    const endAt = tomorrowAt(14);
+    await createScheduledBlock({
+      programId: program.id,
+      coachId: fixtures.coach.id,
+      startAt,
+      endAt,
+    });
 
     const created = await logHourInternal(fixtures.coach, {
       programId: program.id,
-      startAt: tomorrowAt(13),
-      endAt: tomorrowAt(14),
+      startAt,
+      endAt,
       note: "any-program",
       source: "schedule-confirm",
     });

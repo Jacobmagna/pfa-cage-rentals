@@ -326,11 +326,7 @@ export function ScheduleGrid({
       FIRST_HOUR + Math.floor(slotIdx / 2),
       (slotIdx % 2) * 30,
     );
-    const endAt = pfaWallClockAt(
-      selectedDate,
-      pfaHour(startAt) + 1,
-      pfaMinute(startAt),
-    );
+    const endAt = new Date(startAt.getTime() + 30 * 60_000);
     setDialog({
       kind: "create",
       prefill: { resourceId: resource.id, startAt, endAt },

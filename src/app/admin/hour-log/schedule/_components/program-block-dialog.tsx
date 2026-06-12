@@ -933,6 +933,7 @@ export function ProgramBlockDialog({
                 name="startTime"
                 variant="start"
                 required
+                stepMinutes={15}
                 defaultValue={defaults.startTime}
                 className={selectStyles}
               />
@@ -942,6 +943,7 @@ export function ProgramBlockDialog({
                 name="endTime"
                 variant="end"
                 required
+                stepMinutes={15}
                 defaultValue={defaults.endTime}
                 className={selectStyles}
               />

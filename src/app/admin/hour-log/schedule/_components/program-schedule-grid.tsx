@@ -34,12 +34,7 @@ import {
   slotStartAt15,
 } from "@/lib/schedule-grid-utils";
 import { updateProgramScheduleBlock } from "../actions";
-import {
-  pfaHour,
-  pfaMinute,
-  pfaWallClockAt,
-  formatPfaTime,
-} from "@/lib/timezone";
+import { pfaHour, formatPfaTime } from "@/lib/timezone";
 import type {
   BlockReconciliation,
   BlockStatus,
@@ -54,9 +49,14 @@ import {
 
 const FIRST_HOUR = 8;
 const LAST_HOUR = 22;
-// #8: programs use 15-min resolution → 56 slots over the same 8 AM–10 PM
-// window (cage grids keep the 28 half-hour slots). 4 slots = 1 hour.
-const SLOTS = PROGRAM_GRID_SLOTS; // 56
+// #8: program BARS place on a 15-min track (56 columns) so master-schedule
+// alignment + true-precision bars are preserved. The clickable empty-cell
+// layer + visible gridlines are 30-min, though: 28 cells, each spanning 2 of
+// the underlying 15-min columns. A "slotIdx" in the cell/click/drag/paint
+// layer is therefore a 0..27 30-MIN index; multiply by 2 to get a 15-min
+// coordinate when a real timestamp is computed.
+const SLOTS = PROGRAM_GRID_SLOTS; // 56 (15-min columns; bars place here)
+const CELL_SLOTS = PROGRAM_GRID_SLOTS / 2; // 28 (30-min clickable cells)
 
 export type ProgramScheduleBlockView = {
   id: string;
@@ -226,18 +226,19 @@ export function ProgramScheduleGrid({
   const occupiedSlotsRef = useRef<Set<number>>(new Set());
   const selectedDateRef = useRef(selectedDate);
 
-  // Convert pointer.clientX → a 15-min slot index by measuring the grid's
-  // bounding rect. The program grid template is `repeat(56, minmax(18px,
-  // 1fr))` with NO leading label column, so the whole rect width maps
-  // linearly onto the 56 slots (unlike the cage grid's 120px label offset).
+  // Convert pointer.clientX → a 30-min CELL slot index (0..27) by measuring
+  // the grid's bounding rect. The program grid template is `repeat(56,
+  // minmax(18px, 1fr))` with NO leading label column, so the whole rect width
+  // maps linearly onto the 28 half-hour cells (unlike the cage grid's 120px
+  // label offset). Paint/drop endpoints decode to 15-min coords via *2.
   const slotIndexFromClientX = (clientX: number): number | null => {
     const grid = gridRef.current;
     if (!grid) return null;
     const rect = grid.getBoundingClientRect();
     if (clientX < rect.left) return 0;
-    if (clientX >= rect.right) return SLOTS - 1;
-    const idx = Math.floor(((clientX - rect.left) / rect.width) * SLOTS);
-    return Math.max(0, Math.min(SLOTS - 1, idx));
+    if (clientX >= rect.right) return CELL_SLOTS - 1;
+    const idx = Math.floor(((clientX - rect.left) / rect.width) * CELL_SLOTS);
+    return Math.max(0, Math.min(CELL_SLOTS - 1, idx));
   };
 
   const handleCellPointerDown = (
@@ -285,12 +286,15 @@ export function ProgramScheduleGrid({
         return;
       }
 
-      // Already painting — update endSlot to the pointer's slot, clamped at
-      // the first OCCUPIED slot between startSlot and the pointer so you
-      // can't paint across an existing block.
+      // Already painting — update endSlot to the pointer's 30-min cell,
+      // clamped at the first OCCUPIED cell between startSlot and the pointer
+      // so you can't paint across an existing block. `occupied` is keyed by
+      // 15-min slot, so a 30-min cell `i` is occupied if EITHER sub-slot is.
       const targetSlot = slotIndexFromClientX(e.clientX);
       if (targetSlot === null) return;
       const occupied = occupiedSlotsRef.current;
+      const cellOccupied = (cell: number) =>
+        occupied.has(cell * 2) || occupied.has(cell * 2 + 1);
       const dir = targetSlot >= current.startSlot ? 1 : -1;
       let clampedEnd = current.startSlot;
       for (
@@ -298,7 +302,7 @@ export function ProgramScheduleGrid({
         dir > 0 ? i <= targetSlot : i >= targetSlot;
         i += dir
       ) {
-        if (occupied.has(i)) break;
+        if (cellOccupied(i)) break;
         clampedEnd = i;
       }
       if (clampedEnd !== current.endSlot) {
@@ -315,10 +319,11 @@ export function ProgramScheduleGrid({
       if (current.kind === "active") {
         const min = Math.min(current.startSlot, current.endSlot);
         const max = Math.max(current.startSlot, current.endSlot);
-        // start = beginning of the first painted slot; end = end of the LAST
-        // painted slot (end-exclusive → slotStartAt15 of max + 1).
-        const startAt = slotStartAt15(selectedDateRef.current, min);
-        const endAt = slotStartAt15(selectedDateRef.current, max + 1);
+        // min/max are 30-MIN cell indices → decode to the 15-min track via *2.
+        // start = beginning of the first painted cell; end = end of the LAST
+        // painted cell (end-exclusive 30-min → slotStartAt15 of (max+1)*2).
+        const startAt = slotStartAt15(selectedDateRef.current, min * 2);
+        const endAt = slotStartAt15(selectedDateRef.current, (max + 1) * 2);
         setDialog({
           kind: "create",
           prefill: {
@@ -365,7 +370,9 @@ export function ProgramScheduleGrid({
     const oldEnd = new Date(blockData.endAt);
     const durationMs = oldEnd.getTime() - oldStart.getTime();
 
-    const newStart = slotStartAt15(selectedDate, dropData.slotIndex);
+    // dropData.slotIndex is a 0..27 30-min cell index → decode via *2 so the
+    // move snaps to a 30-min boundary. Duration is preserved.
+    const newStart = slotStartAt15(selectedDate, dropData.slotIndex * 2);
     const newEnd = new Date(newStart.getTime() + durationMs);
 
     // No-op if dropped on the same start slot.
@@ -390,16 +397,14 @@ export function ProgramScheduleGrid({
   };
 
   // QA10 W3.8a: empty-cell create no longer preselects a program — the admin
-  // picks it in the dialog. Prefill carries only the clicked time.
+  // picks it in the dialog. Prefill carries only the clicked time. The cell
+  // layer is 30-min, so a single click defaults to a 30-MIN block (the
+  // clicked cell); 15-min precision lives in the dialog's time dropdown.
   const openCreateAt = (slotIdx: number) => {
-    // 15-min slot start (slot 0 = 8:00, slot 1 = 8:15, …); default a 1-hour
-    // duration prefilled in the dialog (admin can edit to any time there).
-    const start = slotStartAt15(selectedDate, slotIdx);
-    const end = pfaWallClockAt(
-      selectedDate,
-      pfaHour(start) + 1,
-      pfaMinute(start),
-    );
+    // slotIdx is a 0..27 30-min cell index → decode to the 15-min track via
+    // *2. start = cell start (cell 0 = 8:00, cell 1 = 8:30, …); end = +30 min.
+    const start = slotStartAt15(selectedDate, slotIdx * 2);
+    const end = slotStartAt15(selectedDate, slotIdx * 2 + 2);
     setDialog({
       kind: "create",
       prefill: {
@@ -515,40 +520,47 @@ export function ProgramScheduleGrid({
             className="relative grid bg-surface min-w-fit"
             style={gridStyle}
           >
-            {/* Time-slot headers. */}
-            {Array.from({ length: SLOTS }).map((_, slotIdx) => {
-              const col = slotIdx + 1;
-              // 4 fifteen-min slots = 1 hour: label + strong divider on the
-              // hour boundary (slotIdx % 4 === 0), faint dividers in between.
-              const isHour = slotIdx % 4 === 0;
-              const hour24 = FIRST_HOUR + Math.floor(slotIdx / 4);
+            {/* Time-slot headers — one per 30-MIN cell (28), each spanning 2
+                of the underlying 15-min columns. Strong divider every 30 min;
+                hour-boundary cells carry the hour label, half-hour cells are
+                blank (no faint 15-min sub-lines). */}
+            {Array.from({ length: CELL_SLOTS }).map((_, slotIdx) => {
+              // 2 thirty-min cells = 1 hour: label + (already strong) divider
+              // on the hour boundary (slotIdx % 2 === 0).
+              const isHour = slotIdx % 2 === 0;
+              const hour24 = FIRST_HOUR + Math.floor(slotIdx / 2);
               return (
                 <div
                   key={`h-${slotIdx}`}
                   className={[
                     "border-b border-line text-[10px] uppercase tracking-wider text-fg-muted",
                     "flex items-end pb-1.5 pl-1",
-                    isHour
-                      ? "border-l border-line-strong"
-                      : "border-l border-line/40",
+                    "border-l border-line-strong",
                   ].join(" ")}
-                  style={{ gridRow: 1, gridColumn: col }}
+                  style={{
+                    gridRow: 1,
+                    gridColumn: `${slotIdx * 2 + 1} / span 2`,
+                  }}
                 >
                   {isHour ? formatHour(hour24) : ""}
                 </div>
               );
             })}
 
-            {/* Cells — one per (lane row × slot), clickable when the slot's
-                time is not covered by any block. Occupied cells skip the
-                click so the bar above wins it. */}
+            {/* Cells — one per (lane row × 30-MIN cell), clickable when the
+                cell's time is not covered by any block. A 30-min cell is
+                occupied if EITHER of its 15-min sub-slots is taken. Occupied
+                cells skip the click so the bar above wins it. */}
             {Array.from({ length: laneRows }).map((_, laneIdx) =>
-              Array.from({ length: SLOTS }).map((_, slotIdx) => (
+              Array.from({ length: CELL_SLOTS }).map((_, slotIdx) => (
                 <DroppableCell
                   key={`cell-${laneIdx}-${slotIdx}`}
                   laneIdx={laneIdx}
                   slotIdx={slotIdx}
-                  isOccupied={occupiedSlots.has(slotIdx)}
+                  isOccupied={
+                    occupiedSlots.has(slotIdx * 2) ||
+                    occupiedSlots.has(slotIdx * 2 + 1)
+                  }
                   isDragging={draggingBlockId !== null}
                   onCreate={() => openCreateAt(slotIdx)}
                   onPointerDown={handleCellPointerDown}
@@ -561,6 +573,8 @@ export function ProgramScheduleGrid({
                 the painted slot range in the pressed lane row, while active. */}
             {paint.kind === "active"
               ? (() => {
+                  // min/max are 30-min cell indices → map onto the underlying
+                  // 15-min columns via *2 (each cell = 2 columns wide).
                   const min = Math.min(paint.startSlot, paint.endSlot);
                   const max = Math.max(paint.startSlot, paint.endSlot);
                   return (
@@ -568,7 +582,9 @@ export function ProgramScheduleGrid({
                       aria-hidden
                       style={{
                         gridRow: paint.laneIdx + 2,
-                        gridColumn: `${min + 1} / span ${max - min + 1}`,
+                        gridColumn: `${min * 2 + 1} / span ${
+                          (max - min + 1) * 2
+                        }`,
                         pointerEvents: "none",
                         zIndex: 5,
                       }}
@@ -718,10 +734,8 @@ function DroppableCell({
     disabled: isOccupied,
   });
 
-  const baseBorders =
-    slotIdx % 4 === 0
-      ? "border-l border-line-strong"
-      : "border-l border-line/40";
+  // Strong vertical divider on every 30-min cell boundary.
+  const baseBorders = "border-l border-line-strong";
 
   return (
     <button
@@ -736,13 +750,7 @@ function DroppableCell({
       aria-label={
         isOccupied
           ? undefined
-          : `Schedule a program at ${formatHour(
-              FIRST_HOUR + Math.floor(slotIdx / 4),
-            )}${
-              slotIdx % 4 !== 0
-                ? `:${String((slotIdx % 4) * 15).padStart(2, "0")}`
-                : ""
-            }`
+          : `Schedule a program at ${formatCellTime(slotIdx)}`
       }
       className={[
         "border-b border-line text-left",
@@ -755,7 +763,10 @@ function DroppableCell({
               : "bg-page/40"
             : "bg-surface-2/40 transition-colors hover:bg-gold/5 focus-visible:outline-none focus-visible:bg-gold/10",
       ].join(" ")}
-      style={{ gridRow: laneIdx + 2, gridColumn: slotIdx + 1 }}
+      style={{
+        gridRow: laneIdx + 2,
+        gridColumn: `${slotIdx * 2 + 1} / span 2`,
+      }}
     />
   );
 }
@@ -855,4 +866,14 @@ function formatHour(hour24: number): string {
   if (hour24 === 12) return "12 PM";
   if (hour24 < 12) return `${hour24} AM`;
   return `${hour24 - 12} PM`;
+}
+
+// "4:00 PM" / "4:30 PM" for a 0..27 30-min cell index — used in cell
+// aria-labels so the 30-min cadence is announced (not :15/:45).
+function formatCellTime(cellIdx: number): string {
+  const hour24 = FIRST_HOUR + Math.floor(cellIdx / 2);
+  const minutes = cellIdx % 2 === 0 ? "00" : "30";
+  const hour12 = hour24 === 0 ? 12 : hour24 > 12 ? hour24 - 12 : hour24;
+  const meridiem = hour24 < 12 || hour24 === 24 ? "AM" : "PM";
+  return `${hour12}:${minutes} ${meridiem}`;
 }

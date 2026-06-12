@@ -66,10 +66,14 @@ function typeBorder(type: ResourceType): string {
 
 // Columns: 64px sticky time-label column + 7 equal day columns.
 const gridTemplateColumns = "64px repeat(7, minmax(120px, 1fr))";
-// Rows: 44px header row + 56 fifteen-min slot rows of 15px each (#8). Same
-// total height as the old 28 × 30px grid; a 30-min cage block now spans 2
-// rows = identical visual height, a 15-min work block spans 1 row.
+// Rows: 44px header row + 56 fifteen-min slot rows of 15px each (#8). The
+// 56-row track is KEPT so bars place at true 15-min precision via
+// placeVerticalOnGrid15; the visible time-label column + empty-cell backdrop
+// render as 28 thirty-min rows (each spanning 2 of these rows) so the
+// gridlines LOOK 30-min while bars stay precise.
 const gridTemplateRows = `44px repeat(${PROGRAM_GRID_SLOTS}, 15px)`;
+// 28 thirty-min cells over the same 8 AM–10 PM window (= 56 / 2).
+const CELL_SLOTS = PROGRAM_GRID_SLOTS / 2;
 
 export function CoachWeekGrid({
   days,
@@ -117,39 +121,40 @@ export function CoachWeekGrid({
             </div>
           ))}
 
-          {/* Time-label column (sticky left). One cell per slot row; hour
-              boundaries are labeled, half-hour rows blank. */}
-          {Array.from({ length: PROGRAM_GRID_SLOTS }).map((_, slotIdx) => {
-            // 4 fifteen-min rows = 1 hour: label + strong divider on the hour.
-            const isHour = slotIdx % 4 === 0;
-            const hour24 = SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIdx / 4);
+          {/* Time-label column (sticky left). One cell per 30-MIN row (28),
+              each spanning 2 of the underlying 15-min rows; hour boundaries
+              are labeled, half-hour rows blank. Strong border every 30 min. */}
+          {Array.from({ length: CELL_SLOTS }).map((_, slotIdx) => {
+            // 2 thirty-min rows = 1 hour: label on the hour boundary.
+            const isHour = slotIdx % 2 === 0;
+            const hour24 = SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIdx / 2);
             return (
               <div
                 key={`time-${slotIdx}`}
                 className={[
                   "sticky left-0 z-20 flex items-start justify-end pr-1.5 pt-0.5 bg-surface border-r border-line text-[10px] uppercase tracking-wider text-fg-muted",
-                  isHour ? "border-t border-line-strong" : "border-t border-line/40",
+                  "border-t border-line-strong",
                 ].join(" ")}
-                style={{ gridRow: slotIdx + 2, gridColumn: 1 }}
+                style={{ gridRow: `${slotIdx * 2 + 2} / span 2`, gridColumn: 1 }}
               >
                 {isHour ? formatGridHour(hour24) : ""}
               </div>
             );
           })}
 
-          {/* Empty cell backdrop (visual grid lines). */}
+          {/* Empty cell backdrop (visual grid lines) — 28 thirty-min rows per
+              day, each spanning 2 of the underlying 15-min rows, strong border
+              every 30 min (no faint 15-min sub-lines). */}
           {days.map((_, dayIdx) =>
-            Array.from({ length: PROGRAM_GRID_SLOTS }).map((__, slotIdx) => (
+            Array.from({ length: CELL_SLOTS }).map((__, slotIdx) => (
               <div
                 key={`cell-${dayIdx}-${slotIdx}`}
                 aria-hidden
-                className={[
-                  "border-l border-line bg-surface-2/40",
-                  slotIdx % 4 === 0
-                    ? "border-t border-line-strong"
-                    : "border-t border-line/40",
-                ].join(" ")}
-                style={{ gridRow: slotIdx + 2, gridColumn: dayIdx + 2 }}
+                className="border-l border-line border-t border-line-strong bg-surface-2/40"
+                style={{
+                  gridRow: `${slotIdx * 2 + 2} / span 2`,
+                  gridColumn: dayIdx + 2,
+                }}
               />
             )),
           )}

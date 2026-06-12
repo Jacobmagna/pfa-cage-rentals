@@ -808,12 +808,15 @@ function ProgramGrid({
   );
   const laneRows = Math.max(laneCount, 1);
 
-  // A slot column is "occupied" if ANY visible block covers it, so empty-cell
-  // clicks only land on free time. Keyed by 0-based slot index.
-  const occupiedSlots = new Set<number>();
+  // #8: bars still render at TRUE 15-min precision (placeOnGrid15 + the 56-col
+  // template), but the clickable empty-cell + drop layer is now 30-min — one
+  // logical cell per 30 minutes (slotIdx 0..27), each spanning 2 underlying
+  // 15-min template columns. So occupancy is tracked per 15-min slot, then a
+  // 30-min cell counts as occupied if EITHER of its two sub-slots is taken.
+  const occupied15 = new Set<number>();
   for (const b of blocks) {
     // #15B: exclude the actively-dragged block's own slots so a shift-in-place
-    // (e.g. nudging it 15 min) isn't rejected as "dropping onto itself".
+    // (e.g. nudging it) isn't rejected as "dropping onto itself".
     if (dragEnabled && b.id === draggingId) continue;
     const placement = placeOnGrid15(b.startAt, b.endAt);
     if (!placement) continue;
@@ -821,9 +824,12 @@ function ProgramGrid({
     // col 1). Recover the 0-based 15-min slot index.
     const startSlot = placement.col - 1;
     for (let i = 0; i < placement.span; i++) {
-      occupiedSlots.add(startSlot + i);
+      occupied15.add(startSlot + i);
     }
   }
+  // A 30-min cell (slotIdx 0..27) is occupied if either 15-min sub-slot is.
+  const isCellOccupied = (slotIdx: number): boolean =>
+    occupied15.has(slotIdx * 2) || occupied15.has(slotIdx * 2 + 1);
 
   return (
     <div
@@ -845,21 +851,31 @@ function ProgramGrid({
         />
       ))}
 
-      {/* Empty cell grid — one per (lane row × slot). Read-only `aria-hidden`
-          divs by default; with an onEmptyCellClick handler the FREE cells
-          become click-to-add program buttons. There are no per-program rows
-          now, so the click carries rowId "" — the admin picks the program in
-          the create dialog. Occupied cells skip the click so the bar wins. */}
+      {/* Empty cell grid — one per (lane row × 30-min slot). Read-only
+          `aria-hidden` divs by default; with an onEmptyCellClick handler the
+          FREE cells become click-to-add program buttons. There are no
+          per-program rows now, so the click carries rowId "" — the admin picks
+          the program in the create dialog. Occupied cells skip the click so the
+          bar wins.
+          #8: the clickable layer is 30-min (28 logical cells, slotIdx 0..27)
+          even though bars are placed at 15-min on the 56-col template — each
+          cell spans 2 underlying columns. `slotIdx*2 + 2` (the +2 clears the
+          120px label column) matches the cage section's `slotIdx + 2` over 28
+          slots, so the two sections' gridlines line up. The reported slotIndex
+          is the 0..27 30-min index; the wrapper decodes it via *2. */}
       {Array.from({ length: laneRows }).map((_, laneIdx) =>
-        Array.from({ length: PROGRAM_GRID_SLOTS }).map((_, slotIdx) => {
-          const isOccupied = occupiedSlots.has(slotIdx);
+        Array.from({ length: SCHEDULE_GRID_SLOTS }).map((_, slotIdx) => {
+          const isOccupied = isCellOccupied(slotIdx);
           const cellClass = [
             "border-b border-line bg-surface-2/40",
-            slotIdx % 4 === 0
+            slotIdx % 2 === 0
               ? "border-l border-line-strong"
               : "border-l border-line/40",
           ].join(" ");
-          const cellStyle = { gridRow: laneIdx + 1, gridColumn: slotIdx + 2 };
+          const cellStyle = {
+            gridRow: laneIdx + 1,
+            gridColumn: `${slotIdx * 2 + 2} / span 2`,
+          };
           // #15: paint handlers (free cells only). Programs have no per-row
           // dimension here, so paint anchors carry rowId "". Wrap the click so
           // a completed paint swallows its trailing click.
@@ -941,12 +957,8 @@ function ProgramGrid({
                   : undefined
               }
               aria-label={`Add work block at ${formatGridHour(
-                SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIdx / 4),
-              )}${
-                slotIdx % 4 !== 0
-                  ? `:${String((slotIdx % 4) * 15).padStart(2, "0")}`
-                  : ""
-              }`}
+                SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIdx / 2),
+              )}${slotIdx % 2 !== 0 ? ":30" : ""}`}
               className={`${cellClass} cursor-pointer transition-colors hover:bg-gold/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gold/40`}
               style={cellStyle}
             />
@@ -955,7 +967,10 @@ function ProgramGrid({
       )}
 
       {/* #15: program paint highlight — a blue dashed overlay across the painted
-          15-min range, spanning all lane rows (programs aren't per-resource). */}
+          30-min range, spanning all lane rows (programs aren't per-resource).
+          #8: minSlot/maxSlot are 30-min indices (0..27); each spans 2 underlying
+          template columns, so the overlay starts at `min*2 + 2` (the +2 clears
+          the 120px label column) and spans `(max - min + 1) * 2` columns. */}
       {programPaint
         ? (() => {
             const min = Math.min(programPaint.minSlot, programPaint.maxSlot);
@@ -965,7 +980,7 @@ function ProgramGrid({
                 aria-hidden
                 style={{
                   gridRow: `1 / span ${laneRows}`,
-                  gridColumn: `${min + 2} / span ${max - min + 1}`,
+                  gridColumn: `${min * 2 + 2} / span ${(max - min + 1) * 2}`,
                   pointerEvents: "none",
                   zIndex: 5,
                 }}
@@ -1111,12 +1126,8 @@ function ProgramDroppableCell({
           : undefined
       }
       aria-label={`Add work block at ${formatGridHour(
-        SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIdx / 4),
-      )}${
-        slotIdx % 4 !== 0
-          ? `:${String((slotIdx % 4) * 15).padStart(2, "0")}`
-          : ""
-      }`}
+        SCHEDULE_GRID_FIRST_HOUR + Math.floor(slotIdx / 2),
+      )}${slotIdx % 2 !== 0 ? ":30" : ""}`}
       className={`${cellClass} cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gold/40 ${
         isOver ? "bg-gold/20" : "hover:bg-gold/10"
       }`}

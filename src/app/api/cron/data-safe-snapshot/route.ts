@@ -14,6 +14,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { runSnapshot } from "@/lib/data-safe/snapshot";
+import { pingHeartbeat } from "@/lib/heartbeat";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -40,6 +41,7 @@ export async function GET(req: Request) {
 
   try {
     const summary = await runSnapshot({ dryRun: false });
+    await pingHeartbeat(process.env.HEARTBEAT_URL_DATA_SAFE);
     return NextResponse.json(summary);
   } catch (err) {
     // Sentry auto-captures unhandled errors in this route via the Next

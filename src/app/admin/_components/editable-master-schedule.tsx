@@ -458,6 +458,10 @@ export function EditableMasterSchedule({
             endAt: newEnd,
           });
           setDragError(null);
+          // The bars render purely from server props; without a refresh the
+          // dnd-kit transform clears and the moved bar snaps back to its old
+          // server-rendered spot until the 30s AutoRefresh poll. Re-pull now.
+          router.refresh();
         } catch (err) {
           surfaceDragError(err);
         }
@@ -480,6 +484,10 @@ export function EditableMasterSchedule({
             endAt: newEnd,
           });
           setDragError(null);
+          // Re-pull the server route so the moved bar re-renders in its new
+          // position immediately (the transform clears on dragEnd; without a
+          // refresh it snaps back until the 30s AutoRefresh poll).
+          router.refresh();
         } catch (err) {
           surfaceDragError(err);
         }

@@ -115,22 +115,44 @@ export function formatPfaMonthYear(d: Date): string {
  * for any wall-time in the operating window (8:00–22:00); the
  * unrepresentable 02:00–03:00 spring-forward gap can't appear in
  * imported data.
+ *
+ * Two-pass fixpoint for the DST-transition days: probing the offset
+ * at the naive (wall-clock-as-UTC) instant reads the WRONG side of
+ * the switch for early-morning targets near the 2 AM transition (it
+ * probes a clock-hour off by the offset). So we apply the first
+ * offset to get a candidate UTC instant, RE-PROBE at that candidate,
+ * and if the offset changed we re-apply the corrected one. This is a
+ * no-op on the ~363 non-transition days and for every wall-clock on a
+ * transition day whose naive-probe already lands on the correct side
+ * (midnight, noon, late evening); it only corrects the early-AM hours
+ * that straddle the switch (e.g. 8:00 AM on spring-forward/fall-back).
  */
 export function pfaWallClockToUtc(date: string, time: string): Date {
   const naive = new Date(`${date}T${time}:00Z`);
   if (Number.isNaN(naive.getTime())) {
     throw new Error(`pfaWallClockToUtc: invalid date/time "${date}T${time}"`);
   }
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: PFA_TIMEZONE,
-    timeZoneName: "shortOffset",
-  }).formatToParts(naive);
-  const offsetPart = parts.find((p) => p.type === "timeZoneName")?.value ?? "GMT+0";
-  const match = offsetPart.match(/GMT([+-])(\d+)(?::(\d+))?/);
-  if (!match) throw new Error(`pfaWallClockToUtc: could not parse offset "${offsetPart}"`);
-  const sign = match[1] === "+" ? 1 : -1;
-  const offsetMin = sign * (Number(match[2]) * 60 + Number(match[3] ?? 0));
-  return new Date(naive.getTime() - offsetMin * 60_000);
+  const probeOffsetMin = (instant: Date): number => {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: PFA_TIMEZONE,
+      timeZoneName: "shortOffset",
+    }).formatToParts(instant);
+    const offsetPart =
+      parts.find((p) => p.type === "timeZoneName")?.value ?? "GMT+0";
+    const match = offsetPart.match(/GMT([+-])(\d+)(?::(\d+))?/);
+    if (!match)
+      throw new Error(`pfaWallClockToUtc: could not parse offset "${offsetPart}"`);
+    const sign = match[1] === "+" ? 1 : -1;
+    return sign * (Number(match[2]) * 60 + Number(match[3] ?? 0));
+  };
+  const offsetMin = probeOffsetMin(naive);
+  const candidate = new Date(naive.getTime() - offsetMin * 60_000);
+  // Re-probe at the candidate instant; if the offset there differs, the
+  // naive probe was on the wrong side of a DST switch — re-apply with
+  // the corrected offset. Converges in one correction for US DST.
+  const correctedOffsetMin = probeOffsetMin(candidate);
+  if (correctedOffsetMin === offsetMin) return candidate;
+  return new Date(naive.getTime() - correctedOffsetMin * 60_000);
 }
 
 /**

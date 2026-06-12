@@ -1,3 +1,5 @@
+import { cache } from "react";
+import * as Sentry from "@sentry/nextjs";
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import Resend from "next-auth/providers/resend";
@@ -8,7 +10,7 @@ import { users, accounts, sessions, verificationTokens } from "@/db/schema";
 import { isAdminEmail } from "@/lib/admin-emails";
 import { decideSignIn } from "@/lib/auth-access";
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+export const { handlers, auth: uncachedAuth, signIn, signOut } = NextAuth({
   adapter: DrizzleAdapter(db, {
     usersTable: users,
     accountsTable: accounts,
@@ -71,13 +73,33 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         .trim();
       if (!email) return false;
       if (isAdminEmail(email)) return true;
-      const rows = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(
-          and(eq(sql`lower(${users.email})`, email), isNull(users.deletedAt)),
-        )
-        .limit(1);
+
+      // Resilience for the onboarding surge: a transient neon-http blip on
+      // this lookup would throw → NextAuth bounces the coach to ?error.
+      // Retry the (idempotent, read-only) lookup ONCE after a short pause.
+      // If BOTH attempts fail we fail CLOSED (deny — never grant access on
+      // a DB error) but capture to Sentry so the outage is visible.
+      const lookupUser = () =>
+        db
+          .select({ id: users.id })
+          .from(users)
+          .where(
+            and(eq(sql`lower(${users.email})`, email), isNull(users.deletedAt)),
+          )
+          .limit(1);
+
+      let rows: { id: string }[];
+      try {
+        rows = await lookupUser();
+      } catch {
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          rows = await lookupUser();
+        } catch (retryErr) {
+          Sentry.captureException(retryErr);
+          return false;
+        }
+      }
       return decideSignIn({ email, isAdmin: false, userExists: rows.length > 0 });
     },
     async session({ session, user }) {
@@ -99,3 +121,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
 });
+
+// Dedup the session read within a single request. NextAuth v5 (beta) does
+// NOT wrap auth() in React cache(), so every page issues 2+ identical
+// session DB lookups (layout AppShell + page guard). React cache() is
+// per-request and the session read is idempotent, so this collapses them
+// to one DB hit per request without changing behavior.
+//
+// SAFETY: this only wraps the RSC / server-action session GETTER. The
+// route handlers (src/app/api/auth/[...nextauth]/route.ts) use `handlers`,
+// NOT `auth` as a wrapper, so caching the getter cannot affect the auth
+// HTTP endpoints. Signature is preserved as the no-arg getter overload.
+export const auth: typeof uncachedAuth = cache(uncachedAuth);

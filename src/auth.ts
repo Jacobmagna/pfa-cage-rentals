@@ -30,7 +30,7 @@ export const { handlers, auth: uncachedAuth, signIn, signOut } = NextAuth({
       // (jacob+pfa@themagnas.com — separate from doc-insured). See
       // docs/operations/resend-setup.md for the account-creation + domain-verification
       // runbook. AUTH_RESEND_KEY must be the API key from THAT account.
-      from: "PFA Sports Academy <noreply@pfaengine.com>",
+      from: "PFA Engine <noreply@pfaengine.com>",
       // (no allowDangerousEmailAccountLinking — Email providers always
       // require the link-click to prove email ownership, so Auth.js handles
       // the linking flow safely without an opt-in.)

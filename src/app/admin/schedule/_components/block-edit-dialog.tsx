@@ -9,6 +9,7 @@
 // tab; this component is edit-only.
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Pencil, Trash2, X } from "lucide-react";
 import {
   deleteBlockAction,
@@ -47,6 +48,7 @@ export function BlockEditDialog({
   resources: ResourceOption[];
   initial?: BlockEditInitialValues;
 }) {
+  const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const editButtonRef = useRef<HTMLButtonElement>(null);
   const [state, formAction, pending] = useActionState(
@@ -55,6 +57,7 @@ export function BlockEditDialog({
   );
   const [deleting, setDeleting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // This dialog is edit-only; an existing block always opens to the
   // read-only summary first (QA2-5), with an Edit button to reveal the
@@ -133,16 +136,24 @@ export function BlockEditDialog({
 
   const handleDelete = () => {
     if (!initial) return;
+    setDeleteError(null);
     setConfirmOpen(true);
   };
 
   const handleConfirmDelete = async () => {
     if (!initial) return;
+    setDeleteError(null);
     setDeleting(true);
     try {
       await deleteBlockAction(initial.id);
       setConfirmOpen(false);
       onClose();
+    } catch {
+      // Benign "already gone" (another admin removed it, or a transient
+      // blip). Don't throw to the route boundary — re-sync and tell the
+      // user the stale block is on its way out.
+      setDeleteError("That block was already removed — refreshing.");
+      router.refresh();
     } finally {
       setDeleting(false);
     }
@@ -360,13 +371,23 @@ export function BlockEditDialog({
       <ConfirmDialog
         open={confirmOpen}
         onOpenChange={(next) => {
-          if (!deleting) setConfirmOpen(next);
+          if (!deleting) {
+            setConfirmOpen(next);
+            if (!next) setDeleteError(null);
+          }
         }}
         title="Delete this block?"
         description={
-          initial
-            ? `"${initial.reason}" · ${formatPfaDateMedium(initial.startAt)} · ${formatPfaTime(initial.startAt)} – ${formatPfaTime(initial.endAt)}. This can't be undone.`
-            : undefined
+          <>
+            {initial
+              ? `"${initial.reason}" · ${formatPfaDateMedium(initial.startAt)} · ${formatPfaTime(initial.startAt)} – ${formatPfaTime(initial.endAt)}. This can't be undone.`
+              : null}
+            {deleteError ? (
+              <span role="alert" className="mt-2 block text-danger">
+                {deleteError}
+              </span>
+            ) : null}
+          </>
         }
         confirmLabel={deleting ? "Deleting…" : "Delete block"}
         onConfirm={handleConfirmDelete}

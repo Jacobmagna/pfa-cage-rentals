@@ -61,10 +61,14 @@ const assignCapCoRequiredError = {
 // (when present) applies to EVERY selected (athlete × program) enrollment.
 export const assignAthletesToProgramSchema = z
   .object({
-    athleteIds: z.array(z.string().min(1)).min(1, "at least one athlete"),
+    athleteIds: z
+      .array(z.string().min(1))
+      .min(1, "at least one athlete")
+      .max(500, "too many athletes (max 500)"),
     programIds: z
       .array(z.string().min(1))
-      .min(1, "at least one program"),
+      .min(1, "at least one program")
+      .max(50, "too many programs (max 50)"),
     mode: z.enum(["add", "move"]).default("add"),
     // Coerce from the form string; a positive whole number of sessions.
     cap: z.coerce.number().int().positive().nullish(),

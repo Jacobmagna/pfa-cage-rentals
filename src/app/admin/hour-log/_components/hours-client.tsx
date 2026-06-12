@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Check, Pencil, Trash2 } from "lucide-react";
 import { HourEditDialog, type HourEditInitialValues } from "./hour-edit-dialog";
 import { deleteHourAction } from "../form-actions";
@@ -42,9 +43,11 @@ export function HoursClient({
   rows: HourRow[];
   programOptions: ProgramOption[];
 }) {
+  const router = useRouter();
   const [editRow, setEditRow] = useState<HourRow | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [confirmRow, setConfirmRow] = useState<HourRow | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, startTransition] = useTransition();
   const [unscheduledOnly, setUnscheduledOnly] = useState(false);
   const [pendingResolveId, setPendingResolveId] = useState<string | null>(null);
@@ -53,11 +56,18 @@ export function HoursClient({
   const handleConfirmDelete = () => {
     const row = confirmRow;
     if (!row) return;
+    setDeleteError(null);
     setPendingDeleteId(row.id);
     startTransition(async () => {
       try {
         await deleteHourAction(row.id);
         setConfirmRow(null);
+      } catch {
+        // Benign "already gone" (another admin removed it, or a transient
+        // blip). Don't throw to the route boundary — re-sync and tell the
+        // user the stale row is on its way out.
+        setDeleteError("That entry was already removed — refreshing.");
+        router.refresh();
       } finally {
         setPendingDeleteId(null);
       }
@@ -264,13 +274,23 @@ export function HoursClient({
       <ConfirmDialog
         open={confirmRow !== null}
         onOpenChange={(next) => {
-          if (!next) setConfirmRow(null);
+          if (!next) {
+            setConfirmRow(null);
+            setDeleteError(null);
+          }
         }}
         title="Delete this hour log?"
         description={
-          confirmRow
-            ? `${confirmRow.coachName ?? confirmRow.coachEmail} · ${confirmRow.programName} · ${formatDate(confirmRow.startAt)} ${formatTime(confirmRow.startAt)}–${formatTime(confirmRow.endAt)}. This can't be undone.`
-            : undefined
+          <>
+            {confirmRow
+              ? `${confirmRow.coachName ?? confirmRow.coachEmail} · ${confirmRow.programName} · ${formatDate(confirmRow.startAt)} ${formatTime(confirmRow.startAt)}–${formatTime(confirmRow.endAt)}. This can't be undone.`
+              : null}
+            {deleteError ? (
+              <span role="alert" className="mt-2 block text-danger">
+                {deleteError}
+              </span>
+            ) : null}
+          </>
         }
         confirmLabel={isDeleting ? "Deleting…" : "Delete entry"}
         onConfirm={handleConfirmDelete}

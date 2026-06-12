@@ -16,7 +16,8 @@ export const submitAttendanceSchema = z.object({
   sessionDate: isoDateString,
   records: z
     .array(attendanceRecordInputSchema)
-    .min(1, "at least one record is required"),
+    .min(1, "at least one record is required")
+    .max(500, "too many records (max 500)"),
 });
 
 export type AttendanceRecordInput = z.infer<typeof attendanceRecordInputSchema>;

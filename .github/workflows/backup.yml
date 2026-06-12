@@ -23,6 +23,9 @@ name: Nightly backup
 #   - R2_ACCESS_KEY_ID             (R2 access key with bucket write perm)
 #   - R2_SECRET_ACCESS_KEY         (R2 secret access key)
 #   - R2_BUCKET                    (bucket name, e.g. pfa-cage-rentals-backups)
+#   - HEARTBEAT_URL_BACKUP         (OPTIONAL — Better Stack heartbeat URL; the
+#                                   workflow runs fine without it, it just
+#                                   won't ping on success)
 
 on:
   schedule:
@@ -132,3 +135,19 @@ jobs:
           # rclone lsf returns the newest object name; we sanity-check
           # that today's dump shows up.
           rclone ls "r2:${R2_BUCKET}/nightly/" | tail -5
+
+      - name: Heartbeat (Better Stack)
+        env:
+          HEARTBEAT_URL_BACKUP: ${{ secrets.HEARTBEAT_URL_BACKUP }}
+        run: |
+          # Fire-and-forget liveness ping AFTER a successful dump+upload.
+          # Mirrors src/lib/heartbeat.ts: success-only (this is the last
+          # step, so it runs only if every prior step succeeded), no-op
+          # when the secret is unset, 3s-bounded, never fails the job.
+          if [ -z "$HEARTBEAT_URL_BACKUP" ]; then
+            echo "HEARTBEAT_URL_BACKUP not set — skipping heartbeat"
+            exit 0
+          fi
+          curl --max-time 3 -fsS "$HEARTBEAT_URL_BACKUP" \
+            && echo "heartbeat sent" \
+            || echo "heartbeat ping failed (non-fatal)"

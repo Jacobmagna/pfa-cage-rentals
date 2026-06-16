@@ -40,7 +40,14 @@ export default function SmsTermsPage() {
             </li>
             <li>
               <strong>Get help:</strong> Reply <strong>HELP</strong> to any
-              message, or contact PFA Sports Academy.
+              message, or contact PFA Sports Academy at{" "}
+              <a
+                className="text-gold-strong underline underline-offset-2 hover:text-fg-muted"
+                href="mailto:mdm@pfasports.com"
+              >
+                mdm@pfasports.com
+              </a>
+              .
             </li>
             <li>
               <strong>Opt out:</strong> Reply <strong>STOP</strong> to any

@@ -50,5 +50,19 @@ export const editHourLogSchema = z
   .refine(endAfterStart, endAfterStartError)
   .refine(underMaxDuration, underMaxDurationError);
 
+// Optional start/end correction supplied when an admin ACCEPTS a needs-review
+// log (e.g. a coach logged a 30-min-off time; the admin shifts it and accepts
+// in one step). Pay/hours recompute downstream from start/end × the snapshotted
+// rate, so correcting the times also corrects the money — no rate/snapshot edit.
+// Reuses the same endAt > startAt and ≤16h refines as the create/edit schemas.
+export const acceptTimeEditSchema = z
+  .object({
+    startAt: z.coerce.date(),
+    endAt: z.coerce.date(),
+  })
+  .refine(endAfterStart, endAfterStartError)
+  .refine(underMaxDuration, underMaxDurationError);
+
 export type CreateHourLogInput = z.infer<typeof createHourLogSchema>;
 export type EditHourLogInput = z.infer<typeof editHourLogSchema>;
+export type AcceptTimeEditInput = z.infer<typeof acceptTimeEditSchema>;

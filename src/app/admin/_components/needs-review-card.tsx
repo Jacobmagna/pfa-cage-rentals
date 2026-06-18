@@ -3,7 +3,14 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { Check, TriangleAlert, X } from "lucide-react";
 import Link from "next/link";
-import { formatPfaDateMedium, formatPfaTime12h } from "@/lib/timezone";
+import {
+  formatPfaDate,
+  formatPfaDateMedium,
+  formatPfaTime,
+  formatPfaTime12h,
+  parsePfaInput,
+} from "@/lib/timezone";
+import { TimeSelect } from "@/app/_components/time-select";
 import {
   acceptNeedsReviewLog,
   rejectNeedsReviewLog,
@@ -125,6 +132,20 @@ export function NeedsReviewCard({
     key: string;
     title: string;
   } | null>(null);
+  // Accept dialog targets one hour-backed item at a time. The admin may
+  // OPTIONALLY adjust the logged start/end times before accepting (e.g. a
+  // coach logged a time 30 min off). Confirming sends the corrected ISO
+  // times to acceptNeedsReviewLog(id, { startAt, endAt }).
+  const [acceptTarget, setAcceptTarget] = useState<{
+    id: string;
+    key: string;
+    title: string;
+    startAt: Date;
+    endAt: Date;
+  } | null>(null);
+  // Last accept error (e.g. duplicate-times collision), surfaced inline in
+  // the accept dialog. Keyed to the active accept target.
+  const [acceptError, setAcceptError] = useState<string | null>(null);
 
   // Single Resolve path — cancelled / no_show only (no coach-submitted hour).
   const handleResolve = (item: NeedsReviewItem) => {
@@ -144,12 +165,28 @@ export function NeedsReviewCard({
   };
 
   // Accept = keep the hour posted + counting, mark reviewed. Only valid for the
-  // three hour-backed types (item.id = the hour-log id).
-  const handleAccept = (id: string, key: string) => {
+  // three hour-backed types (item.id = the hour-log id). The admin confirms in
+  // the AcceptDialog, optionally correcting the logged start/end times first;
+  // when they did, `edit` carries the corrected ISO times and the server
+  // recomputes pay/hours from the new duration (and validates / rejects a
+  // duplicate-times collision).
+  const handleAcceptConfirm = (
+    id: string,
+    key: string,
+    edit: { startAt: string; endAt: string },
+  ) => {
     setPendingKey(key);
+    setAcceptError(null);
     startResolveTransition(async () => {
       try {
-        await acceptNeedsReviewLog(id);
+        await acceptNeedsReviewLog(id, edit);
+        setAcceptTarget(null);
+      } catch (err) {
+        setAcceptError(
+          err instanceof Error && err.message
+            ? err.message
+            : "Couldn't accept this hour. Please try again.",
+        );
       } finally {
         setPendingKey(null);
       }
@@ -245,7 +282,16 @@ export function NeedsReviewCard({
                   <div className="inline-flex shrink-0 self-end sm:self-auto items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={() => handleAccept(item.id, key)}
+                      onClick={() => {
+                        setAcceptError(null);
+                        setAcceptTarget({
+                          id: item.id,
+                          key,
+                          title: lineTitle,
+                          startAt: item.startAt,
+                          endAt: item.endAt,
+                        });
+                      }}
                       disabled={isPendingResolve}
                       className="inline-flex items-center gap-1 h-8 rounded-md border border-success/30 bg-success/10 px-2.5 text-xs font-medium text-success hover:bg-success/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success/40 transition-colors disabled:opacity-40"
                       title="Accept — keep this hour posted and counting"
@@ -312,6 +358,24 @@ export function NeedsReviewCard({
         onConfirm={(reason) => {
           if (rejectTarget) {
             handleRejectConfirm(rejectTarget.id, rejectTarget.key, reason);
+          }
+        }}
+      />
+
+      <AcceptDialog
+        open={acceptTarget !== null}
+        title={acceptTarget?.title ?? ""}
+        startAt={acceptTarget?.startAt ?? null}
+        endAt={acceptTarget?.endAt ?? null}
+        error={acceptError}
+        isPending={acceptTarget !== null && pendingKey === acceptTarget.key}
+        onClose={() => {
+          setAcceptTarget(null);
+          setAcceptError(null);
+        }}
+        onConfirm={(edit) => {
+          if (acceptTarget) {
+            handleAcceptConfirm(acceptTarget.id, acceptTarget.key, edit);
           }
         }}
       />
@@ -422,6 +486,170 @@ function RejectReasonDialog({
             className="inline-flex items-center justify-center rounded-lg border border-danger/30 bg-danger/10 text-danger hover:bg-danger/20 h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
           >
             {isPending ? "Rejecting…" : "Reject hour"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Small modal for accepting a coach-submitted hour, with an OPTIONAL
+// time correction. Start/End are pre-filled from the logged times (15-min
+// granularity — these are program/work hours). The date is shown read-only:
+// only the time-of-day is editable here; full date/program edits live in the
+// Work Log row's Edit dialog. On confirm we rebuild the corrected timestamps
+// on the SAME date as the original start and send ISO strings; the server
+// recomputes pay/hours and validates (end > start, ≤16h, no duplicate-times
+// collision). Mirrors RejectReasonDialog's chrome / focus / Esc / backdrop.
+function AcceptDialog({
+  open,
+  title,
+  startAt,
+  endAt,
+  error,
+  isPending,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  startAt: Date | null;
+  endAt: Date | null;
+  error: string | null;
+  isPending: boolean;
+  onClose: () => void;
+  onConfirm: (edit: { startAt: string; endAt: string }) => void;
+}) {
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open || !startAt || !endAt) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setStartTime(formatPfaTime(startAt));
+     
+    setEndTime(formatPfaTime(endAt));
+    const t = requestAnimationFrame(() => cancelRef.current?.focus());
+    return () => cancelAnimationFrame(t);
+  }, [open, startAt, endAt]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isPending) {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [open, isPending, onClose]);
+
+  if (!open || !startAt) return null;
+
+  // Client-side guard: end must be strictly after start (the server also
+  // validates this + the ≤16h span). Compare on "HH:MM" strings since both
+  // times share the same calendar date.
+  const timesValid = startTime !== "" && endTime !== "" && endTime > startTime;
+  const canSubmit = timesValid && !isPending;
+
+  const submit = () => {
+    if (!timesValid) return;
+    const dateStr = formatPfaDate(startAt);
+    const start = parsePfaInput(dateStr, startTime);
+    const end = parsePfaInput(dateStr, endTime);
+    onConfirm({
+      startAt: start.toISOString(),
+      endAt: end.toISOString(),
+    });
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Accept hour"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={() => {
+        if (!isPending) onClose();
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md rounded-2xl border border-line bg-surface shadow-[var(--shadow-lg)]"
+      >
+        <div className="px-5 py-4 border-b border-line">
+          <h4 className="text-base font-semibold text-fg">Accept this hour?</h4>
+          <p className="mt-1 text-xs text-fg-muted leading-relaxed">
+            Adjust the times if the coach logged them slightly off — this
+            updates the logged hours and pay, then accepts.
+          </p>
+        </div>
+
+        <div className="px-5 py-4 space-y-4">
+          <div className="text-xs text-fg-muted">
+            <span className="uppercase tracking-wider text-fg-subtle">Date</span>{" "}
+            <span className="text-fg">{formatPfaDateMedium(startAt)}</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-xs uppercase tracking-wider text-fg-muted mb-1.5 block">
+                Start
+              </span>
+              <TimeSelect
+                name="acceptStart"
+                variant="start"
+                stepMinutes={15}
+                value={startTime}
+                onChange={setStartTime}
+                aria-label="Corrected start time"
+                className="w-full rounded-lg bg-page border border-line text-fg px-3 py-2 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs uppercase tracking-wider text-fg-muted mb-1.5 block">
+                End
+              </span>
+              <TimeSelect
+                name="acceptEnd"
+                variant="end"
+                stepMinutes={15}
+                value={endTime}
+                onChange={setEndTime}
+                aria-label="Corrected end time"
+                className="w-full rounded-lg bg-page border border-line text-fg px-3 py-2 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+              />
+            </label>
+          </div>
+
+          {!timesValid && startTime !== "" && endTime !== "" ? (
+            <p className="text-xs text-danger">
+              End time must be after the start time.
+            </p>
+          ) : null}
+          {error ? <p className="text-xs text-danger">{error}</p> : null}
+        </div>
+
+        <div className="px-5 py-4 border-t border-line flex items-center justify-end gap-2">
+          <button
+            ref={cancelRef}
+            type="button"
+            onClick={onClose}
+            disabled={isPending}
+            className="inline-flex items-center justify-center rounded-lg border border-line-strong bg-surface text-fg-muted hover:text-fg hover:-translate-y-px h-9 px-3 text-sm font-medium shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSubmit}
+            className="inline-flex items-center justify-center gap-1 rounded-lg border border-success/30 bg-success/10 text-success hover:bg-success/20 h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success/40 transition-colors"
+          >
+            <Check className="h-3.5 w-3.5" />
+            {isPending ? "Accepting…" : "Accept"}
           </button>
         </div>
       </div>

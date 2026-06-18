@@ -127,6 +127,11 @@ export default function PrivacyPage() {
             which receives your mobile number and the message content.
           </p>
           <p>
+            Message frequency varies — about one message per day, only on days
+            you have unlogged scheduled work. <strong>Message and data rates
+            may apply.</strong>
+          </p>
+          <p>
             No mobile information will be shared with third parties or
             affiliates for marketing or promotional purposes. Information
             collected for SMS reminders is used solely to deliver those

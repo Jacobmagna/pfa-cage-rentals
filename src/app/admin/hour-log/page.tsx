@@ -263,6 +263,8 @@ export default async function AdminHourLogPage({
           unscheduled: r.unscheduled ?? false,
           reviewedAt: r.reviewedAt ?? null,
           reviewedBy: r.reviewedBy ?? null,
+          status: r.status,
+          decisionReason: r.decisionReason ?? null,
         }))}
         programOptions={programOptions}
       />

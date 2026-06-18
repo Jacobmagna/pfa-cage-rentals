@@ -18,9 +18,11 @@ import {
   resolveNoShowInternal,
 } from "@/lib/server/block-flag-actions";
 import {
+  acceptNeedsReviewLogInternal,
   approveHeldHourLogInternal,
   deleteHourInternal,
   rejectHeldHourLogInternal,
+  rejectNeedsReviewLogInternal,
   resolveHourLogInternal,
   updateHourInternal,
 } from "@/lib/server/hour-log-actions";
@@ -98,6 +100,32 @@ export async function rejectHeldHourLog(id: string, adminNote?: string) {
   revalidatePath("/admin/payments");
   revalidatePath("/admin");
   revalidatePath("/admin/records/accountability");
+  revalidatePath("/coach/hour-log");
+  return result;
+}
+
+// Admin ACCEPT of a needs-review hour log: stays posted (counts) + marked
+// reviewed. Idempotent. Revalidates the admin queues + the coach's history.
+export async function acceptNeedsReviewLog(id: string) {
+  const session = await requireRole("admin");
+  const result = await acceptNeedsReviewLogInternal(session.user, id);
+  revalidatePath("/admin/hour-log");
+  revalidatePath("/admin");
+  revalidatePath("/coach/hour-log");
+  return result;
+}
+
+// Admin REJECT of a needs-review hour log: flips to 'rejected' (excluded from
+// every pay/report/accountability read) but keeps the row + reason so the
+// coach sees why. Idempotent. Revalidates every surface that pins posted.
+export async function rejectNeedsReviewLog(id: string, reason: string) {
+  const session = await requireRole("admin");
+  const result = await rejectNeedsReviewLogInternal(session.user, id, reason);
+  revalidatePath("/admin/hour-log");
+  revalidatePath("/admin");
+  revalidatePath("/admin/payments");
+  revalidatePath("/admin/records/accountability");
+  revalidatePath("/admin/hour-log/schedule");
   revalidatePath("/coach/hour-log");
   return result;
 }

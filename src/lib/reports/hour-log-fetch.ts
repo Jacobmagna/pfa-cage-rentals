@@ -29,13 +29,27 @@ import { formatPfaTime12h } from "@/lib/timezone";
 import type { HourLogWorkbookRow } from "./hour-log-excel";
 import type { NormalizedHourLogFilters } from "./hour-log-filters";
 
+// The admin Work Log fetch carries the per-log review decision so the table
+// can badge rejected rows. These columns aren't part of the downloadable
+// workbook shape (HourLogWorkbookRow), so we widen the return type here
+// rather than in the Excel builder. `status` is always present; `decisionReason`
+// is the coach-visible reject note (null unless rejected).
+export type HourLogFetchRow = HourLogWorkbookRow & {
+  status: "posted" | "held" | "rejected";
+  decisionReason: string | null;
+};
+
 export async function fetchHourLogRows(
   filters: NormalizedHourLogFilters,
-): Promise<HourLogWorkbookRow[]> {
+): Promise<HourLogFetchRow[]> {
   const conditions = [
     // 1b security B: exclude held (awaiting-approval) logs from the admin
     // Work Log table + workbook — they're not real logs until approved.
-    eq(hourLogs.status, "posted"),
+    // Rejected logs ARE included so the admin table can SHOW them with a
+    // "Rejected" badge; they carry reviewedAt so they never re-surface as
+    // open needs-review items, and pay/aggregate reads pin status='posted'
+    // elsewhere so they're never billed.
+    inArray(hourLogs.status, ["posted", "rejected"]),
     gte(hourLogs.startAt, filters.fromDate),
     lt(hourLogs.startAt, filters.toDateExclusive),
   ];
@@ -59,6 +73,8 @@ export async function fetchHourLogRows(
       note: hourLogs.note,
       reviewedAt: hourLogs.reviewedAt,
       reviewedBy: hourLogs.reviewedBy,
+      status: hourLogs.status,
+      decisionReason: hourLogs.decisionReason,
     })
     .from(hourLogs)
     .innerJoin(users, eq(hourLogs.coachId, users.id))
@@ -78,7 +94,7 @@ export async function fetchHourLogRows(
  */
 export async function fetchHourLogRowsWithScheduleNotes(
   filters: NormalizedHourLogFilters,
-): Promise<HourLogWorkbookRow[]> {
+): Promise<HourLogFetchRow[]> {
   const rows = await fetchHourLogRows(filters);
 
   // Scheduled blocks overlapping the same window as the logs. Overlap =

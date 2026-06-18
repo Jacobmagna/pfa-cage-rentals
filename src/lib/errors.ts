@@ -251,6 +251,17 @@ export class HeldHourLogNotFoundError extends Error {
   }
 }
 
+// Admin tried to reject a needs-review hour log without supplying a
+// reason. The coach must be told WHY their hour was rejected, so a
+// non-empty reason is mandatory. Mirrors HeldHourLogNotFoundError's shape.
+export class RejectReasonRequiredError extends Error {
+  readonly code = "REJECT_REASON_REQUIRED" as const;
+  constructor() {
+    super("A reason is required to reject an hour.");
+    this.name = "RejectReasonRequiredError";
+  }
+}
+
 // Admin resolve referenced a program_block_coach_flags id that doesn't
 // exist (stale client row, or a direct RPC call with a bogus id).
 // Mirrors HourLogNotFoundError's shape.

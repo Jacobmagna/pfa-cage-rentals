@@ -34,6 +34,7 @@ import {
 import { type AuthedSession } from "@/lib/authz";
 import { rateForProgram } from "@/lib/billing";
 import {
+  DuplicateHourLogError,
   HeldHourLogNotFoundError,
   HeldLogReviewRequiredError,
   HourLogNotFoundError,
@@ -481,12 +482,45 @@ export async function rejectHeldHourLogInternal(
   });
 }
 
+// Postgres SQLSTATE 23505 — unique_violation, specifically the
+// hour_logs_coach_program_start_end_unique index. Neon's HTTP driver wraps
+// errors, so we walk the cause chain (same shape as program-actions'
+// isProgramNameViolation). We additionally match the constraint name so a
+// future second unique constraint on hour_logs wouldn't get mistranslated.
+function isHourLogDuplicateViolation(err: unknown): boolean {
+  if (err && typeof err === "object" && "code" in err) {
+    const e = err as { code?: unknown; constraint?: unknown };
+    if (e.code === "23505") {
+      if (
+        e.constraint === undefined ||
+        e.constraint === "hour_logs_coach_program_start_end_unique"
+      ) {
+        return true;
+      }
+    }
+  }
+  if (err instanceof Error && err.cause) {
+    return isHourLogDuplicateViolation(err.cause);
+  }
+  return false;
+}
+
 // Admin ACCEPTS a needs-review hour log: it stays posted (counts) and is
 // marked reviewed. Idempotent. Mirrors resolveHourLogInternal but is the
 // explicit "accepted" decision the coach is notified of.
+//
+// Optional `edit` lets the admin CORRECT the log's start/end times in the
+// same action (e.g. a coach logged a 30-min-off time). Pay/hours are computed
+// downstream from start/end × the snapshotted rate, so updating the times
+// auto-corrects the money — we never touch the rate/snapshot, no migration.
+// When `edit` is present we ALWAYS apply it (no idempotent short-circuit — the
+// admin may be correcting times on an already-reviewed log); the audit diff
+// captures the time change. Shifting onto an exact (coach, program, start, end)
+// duplicate is caught (23505) and re-thrown as a friendly DuplicateHourLogError.
 export async function acceptNeedsReviewLogInternal(
   actor: AuthedSession["user"],
   id: string,
+  edit?: { startAt: Date; endAt: Date },
 ) {
   const [existing] = await db
     .select()
@@ -496,14 +530,29 @@ export async function acceptNeedsReviewLogInternal(
   if (!existing) throw new HourLogNotFoundError(id);
 
   // Idempotent — already accepted (posted + reviewed), keep the original
-  // reviewer/timestamp and return unchanged.
-  if (existing.status === "posted" && existing.reviewedAt) return existing;
+  // reviewer/timestamp and return unchanged. Skipped when an edit is present:
+  // the admin may be correcting times even on an already-reviewed log.
+  if (!edit && existing.status === "posted" && existing.reviewedAt) {
+    return existing;
+  }
 
-  const [updated] = await db
-    .update(hourLogs)
-    .set({ reviewedAt: new Date(), reviewedBy: actor.id })
-    .where(eq(hourLogs.id, id))
-    .returning();
+  let updated;
+  try {
+    [updated] = await db
+      .update(hourLogs)
+      .set({
+        ...(edit ? { startAt: edit.startAt, endAt: edit.endAt } : {}),
+        reviewedAt: new Date(),
+        reviewedBy: actor.id,
+      })
+      .where(eq(hourLogs.id, id))
+      .returning();
+  } catch (err) {
+    if (edit && isHourLogDuplicateViolation(err)) {
+      throw new DuplicateHourLogError();
+    }
+    throw err;
+  }
 
   await safeLogAudit(db, {
     actorUserId: actor.id,

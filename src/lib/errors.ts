@@ -251,6 +251,20 @@ export class HeldHourLogNotFoundError extends Error {
   }
 }
 
+// Admin accept-with-time-edit shifted a needs-review log onto the exact
+// (coach, program, start, end) of an already-logged hour — caught via the
+// hour_logs_coach_program_start_end_unique index (SQLSTATE 23505) and
+// translated to a friendly message. Mirrors HourLogNotFoundError's shape.
+export class DuplicateHourLogError extends Error {
+  readonly code = "DUPLICATE_HOUR_LOG" as const;
+  constructor() {
+    super(
+      "Another logged hour already covers those exact times for this coach and program.",
+    );
+    this.name = "DuplicateHourLogError";
+  }
+}
+
 // Admin tried to reject a needs-review hour log without supplying a
 // reason. The coach must be told WHY their hour was rejected, so a
 // non-empty reason is mandatory. Mirrors HeldHourLogNotFoundError's shape.

@@ -13,6 +13,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/authz";
+import { acceptTimeEditSchema } from "@/lib/schemas/hour-log";
 import {
   resolveCancellationInternal,
   resolveNoShowInternal,
@@ -105,12 +106,23 @@ export async function rejectHeldHourLog(id: string, adminNote?: string) {
 }
 
 // Admin ACCEPT of a needs-review hour log: stays posted (counts) + marked
-// reviewed. Idempotent. Revalidates the admin queues + the coach's history.
-export async function acceptNeedsReviewLog(id: string) {
+// reviewed. Idempotent. Optionally CORRECTS the log's start/end times in the
+// same action — `edit` is parsed via acceptTimeEditSchema (end > start, ≤16h)
+// and pay recomputes downstream from the new duration × the snapshotted rate.
+// When an edit changes the times the pay/schedule overlays shift, so we widen
+// the revalidate set (payments / accountability / schedule) accordingly.
+export async function acceptNeedsReviewLog(
+  id: string,
+  edit?: { startAt: string; endAt: string },
+) {
   const session = await requireRole("admin");
-  const result = await acceptNeedsReviewLogInternal(session.user, id);
+  const parsed = edit ? acceptTimeEditSchema.parse(edit) : undefined;
+  const result = await acceptNeedsReviewLogInternal(session.user, id, parsed);
   revalidatePath("/admin/hour-log");
   revalidatePath("/admin");
+  revalidatePath("/admin/payments");
+  revalidatePath("/admin/records/accountability");
+  revalidatePath("/admin/hour-log/schedule");
   revalidatePath("/coach/hour-log");
   return result;
 }

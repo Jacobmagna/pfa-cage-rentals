@@ -33,6 +33,8 @@ export default async function CoachHourLogHistoryPage() {
       endAt: hourLogs.endAt,
       note: hourLogs.note,
       status: hourLogs.status,
+      reviewedAt: hourLogs.reviewedAt,
+      decisionReason: hourLogs.decisionReason,
     })
     .from(hourLogs)
     .innerJoin(programs, eq(hourLogs.programId, programs.id))
@@ -119,12 +121,22 @@ export default async function CoachHourLogHistoryPage() {
               <span className="text-sm text-fg-muted truncate">
                 {row.programName}
               </span>
-              {row.status === "held" ? (
+              {row.status === "rejected" ? (
+                <RejectedBadge />
+              ) : row.status === "held" ? (
                 <PendingApprovalBadge />
-              ) : !row.scheduled ? (
+              ) : row.status === "posted" && row.reviewedAt != null ? (
+                <AcceptedBadge />
+              ) : null}
+              {row.status !== "rejected" && !row.scheduled ? (
                 <UnscheduledBadge />
               ) : null}
             </div>
+            {row.status === "rejected" && row.decisionReason ? (
+              <p className="mt-0.5 text-xs text-danger leading-snug">
+                Rejected — {row.decisionReason}
+              </p>
+            ) : null}
             {row.note ? (
               <p
                 className="mt-0.5 text-xs text-fg-subtle leading-snug truncate"
@@ -135,9 +147,16 @@ export default async function CoachHourLogHistoryPage() {
             ) : null}
           </div>
 
-          <span className="text-xs font-mono tabular-nums text-fg-muted whitespace-nowrap">
-            {formatDuration(row.startAt, row.endAt)}
-          </span>
+          {row.status === "rejected" ? (
+            <span className="text-xs font-mono tabular-nums text-fg-subtle line-through whitespace-nowrap">
+              {formatDuration(row.startAt, row.endAt)}
+              <span className="ml-1 no-underline">(not counted)</span>
+            </span>
+          ) : (
+            <span className="text-xs font-mono tabular-nums text-fg-muted whitespace-nowrap">
+              {formatDuration(row.startAt, row.endAt)}
+            </span>
+          )}
         </li>
       ))}
     </ul>
@@ -151,6 +170,25 @@ function PendingApprovalBadge() {
   return (
     <span className="inline-flex items-center rounded-full border border-line-strong bg-surface-2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted whitespace-nowrap">
       Pending approval
+    </span>
+  );
+}
+
+// Danger pill: the admin reviewed this log and rejected it — it does NOT
+// count toward pay. The reason renders inline below the row.
+function RejectedBadge() {
+  return (
+    <span className="inline-flex items-center rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger whitespace-nowrap">
+      Rejected
+    </span>
+  );
+}
+
+// Positive pill: the admin reviewed this log and confirmed (accepted) it.
+function AcceptedBadge() {
+  return (
+    <span className="inline-flex items-center rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success whitespace-nowrap">
+      Accepted
     </span>
   );
 }

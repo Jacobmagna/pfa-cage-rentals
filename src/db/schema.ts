@@ -55,7 +55,11 @@ export const recurrenceFrequency = pgEnum("recurrence_frequency", [
 // are anomalous (unscheduled / wrong-time / over-logged) that the coach
 // flagged for admin approval; it is NOT payable and EXCLUDED from every
 // counting read until an admin approves it (flips it to "posted").
-export const hourLogStatus = pgEnum("hour_log_status", ["posted", "held"]);
+export const hourLogStatus = pgEnum("hour_log_status", [
+  "posted",
+  "held",
+  "rejected",
+]);
 
 // QA10 W3-polish15: a coach flag on a scheduled program block. "cancelled"
 // = the coach proactively says they will NOT run a block they're assigned
@@ -851,6 +855,9 @@ export const hourLogs = pgTable(
     // The anomaly kind for HELD rows: "unscheduled" | "wrong_time" |
     // "over_logged". NULL for posted rows.
     heldReason: text("held_reason"),
+    // admin rejection reason for a needs-review hour log; surfaced to the
+    // coach on their history; null for accepted/posted rows.
+    decisionReason: text("decision_reason"),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),

@@ -39,6 +39,7 @@ import {
   HourLogNotFoundError,
   ProgramInactiveError,
   ProgramNotFoundError,
+  RejectReasonRequiredError,
 } from "@/lib/errors";
 import {
   createHourLogSchema,
@@ -478,6 +479,88 @@ export async function rejectHeldHourLogInternal(
     before: existing as unknown as Record<string, unknown>,
     ...(adminNote ? { after: { adminNote } } : {}),
   });
+}
+
+// Admin ACCEPTS a needs-review hour log: it stays posted (counts) and is
+// marked reviewed. Idempotent. Mirrors resolveHourLogInternal but is the
+// explicit "accepted" decision the coach is notified of.
+export async function acceptNeedsReviewLogInternal(
+  actor: AuthedSession["user"],
+  id: string,
+) {
+  const [existing] = await db
+    .select()
+    .from(hourLogs)
+    .where(eq(hourLogs.id, id))
+    .limit(1);
+  if (!existing) throw new HourLogNotFoundError(id);
+
+  // Idempotent — already accepted (posted + reviewed), keep the original
+  // reviewer/timestamp and return unchanged.
+  if (existing.status === "posted" && existing.reviewedAt) return existing;
+
+  const [updated] = await db
+    .update(hourLogs)
+    .set({ reviewedAt: new Date(), reviewedBy: actor.id })
+    .where(eq(hourLogs.id, id))
+    .returning();
+
+  await safeLogAudit(db, {
+    actorUserId: actor.id,
+    entityType: "hour_log",
+    entityId: id,
+    action: "update",
+    before: existing as unknown as Record<string, unknown>,
+    after: updated as unknown as Record<string, unknown>,
+  });
+  return updated;
+}
+
+// Admin REJECTS a needs-review hour log: it is NOT deleted (the coach must
+// still see it + the reason) but flips to status 'rejected' so it is excluded
+// from every pay/report/needs-review/accountability read (all of which pin
+// status='posted'). Idempotent.
+export async function rejectNeedsReviewLogInternal(
+  actor: AuthedSession["user"],
+  id: string,
+  reason: string,
+) {
+  const trimmed = reason.trim();
+  if (!trimmed) throw new RejectReasonRequiredError();
+
+  const [existing] = await db
+    .select()
+    .from(hourLogs)
+    .where(eq(hourLogs.id, id))
+    .limit(1);
+  if (!existing) throw new HourLogNotFoundError(id);
+
+  // Idempotent — already rejected: keep the original reason/reviewer.
+  if (existing.status === "rejected") return existing;
+
+  const [updated] = await db
+    .update(hourLogs)
+    .set({
+      status: "rejected",
+      reviewedAt: new Date(),
+      reviewedBy: actor.id,
+      decisionReason: trimmed,
+    })
+    .where(eq(hourLogs.id, id))
+    .returning();
+
+  await safeLogAudit(db, {
+    actorUserId: actor.id,
+    entityType: "hour_log",
+    entityId: id,
+    action: "update",
+    before: existing as unknown as Record<string, unknown>,
+    after: {
+      ...(updated as unknown as Record<string, unknown>),
+      reason: trimmed,
+    },
+  });
+  return updated;
 }
 
 // 1b security B — the admin held-approval queue, newest-first by createdAt.

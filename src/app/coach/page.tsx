@@ -9,7 +9,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { db } from "@/db";
-import { coachPayments, sessionsBilling, users } from "@/db/schema";
+import { coachPayments, hourLogs, sessionsBilling, users } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
 import { totalFromSnapshot } from "@/lib/billing";
 import {
@@ -50,6 +50,7 @@ export default async function CoachHome() {
 
   const [
     monthSessionRows,
+    monthWorkLogRows,
     [{ count: totalEver }],
     allSessionRows,
     confirmedPaymentRows,
@@ -66,6 +67,23 @@ export default async function CoachHome() {
           eq(sessionsBilling.coachId, coachId),
           gte(sessionsBilling.startAt, monthStart),
           lt(sessionsBilling.startAt, monthEndExclusive),
+        ),
+      ),
+    // This coach's actual logged WORK (hour_logs) for the current PFA
+    // month — posted only (held/rejected don't count, matching every
+    // other counting read). Strictly separate from cage rentals above.
+    db
+      .select({
+        startAt: hourLogs.startAt,
+        endAt: hourLogs.endAt,
+      })
+      .from(hourLogs)
+      .where(
+        and(
+          eq(hourLogs.coachId, coachId),
+          eq(hourLogs.status, "posted"),
+          gte(hourLogs.startAt, monthStart),
+          lt(hourLogs.startAt, monthEndExclusive),
         ),
       ),
     db
@@ -111,8 +129,8 @@ export default async function CoachHome() {
   ]);
 
   const monthCount = monthSessionRows.length;
-  const monthMinutes = monthSessionRows.reduce(
-    (sum, s) => sum + (s.endAt.getTime() - s.startAt.getTime()) / 60_000,
+  const monthWorkMinutes = monthWorkLogRows.reduce(
+    (sum, l) => sum + (l.endAt.getTime() - l.startAt.getTime()) / 60_000,
     0,
   );
 
@@ -163,11 +181,11 @@ export default async function CoachHome() {
         <Stat
           icon={<Clock className="h-4 w-4" />}
           label={`Work hours in ${formatPfaMonthYear(now)}`}
-          value={formatHours(monthMinutes)}
+          value={formatHours(monthWorkMinutes)}
           sub={
-            monthMinutes === 0
+            monthWorkMinutes === 0
               ? "—"
-              : "Sum of your logged rental durations"
+              : "Sum of your logged work hours"
           }
           accent
         />

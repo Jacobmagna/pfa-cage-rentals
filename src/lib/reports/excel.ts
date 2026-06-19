@@ -186,11 +186,17 @@ function addDetailSheet(workbook: ExcelJS.Workbook, report: ReportData) {
     { header: "Coach", key: "coach", width: 24 },
     { header: "Slots", key: "slots", width: 8 },
     { header: "Rate", key: "rate", width: 10 },
+    { header: "Rate basis", key: "rateBasis", width: 12 },
     { header: "$", key: "total", width: 12 },
     { header: "Note", key: "note", width: 40 },
   ];
 
   for (const row of report.detail) {
+    // The stored snapshot is per-30-min cents. Weight-room rates display
+    // per HOUR (×2); cage/bullpen stay per 30 min. The adjacent "Rate basis"
+    // column makes the numeric Rate cell's unit unambiguous per row. This is
+    // display-only — totals and the stored snapshot are untouched.
+    const perHour = row.resourceType === "weight_room";
     sheet.addRow({
       date: row.date,
       day: row.dayOfWeek,
@@ -200,7 +206,10 @@ function addDetailSheet(workbook: ExcelJS.Workbook, report: ReportData) {
       resource: row.resourceName,
       coach: row.coachName,
       slots: row.slots,
-      rate: row.ratePerSlotCents / 100,
+      rate: perHour
+        ? (row.ratePerSlotCents * 2) / 100
+        : row.ratePerSlotCents / 100,
+      rateBasis: perHour ? "per hr" : "per 30 min",
       total: row.totalCents / 100,
       note: row.note ?? "",
     });

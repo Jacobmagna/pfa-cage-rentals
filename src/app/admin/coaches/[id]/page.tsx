@@ -268,10 +268,13 @@ export default async function AdminCoachDetailPage({
     const beforeCents = diff.before?.ratePer30MinCents ?? null;
     const afterCents = diff.after?.ratePer30MinCents ?? null;
 
+    // Weight room resource overrides are DISPLAYED per HOUR (cents × 2),
+    // like program rates; cages & bullpens stay per 30 min.
+    const isHourly = isProgram || suffix === "weight_room";
     const fmt = (cents: number | null): string | null =>
       cents == null
         ? null
-        : isProgram
+        : isHourly
           ? `$${((cents * 2) / 100).toFixed(2)} / hr`
           : `$${(cents / 100).toFixed(2)} / 30 min`;
 

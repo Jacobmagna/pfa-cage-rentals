@@ -6,13 +6,11 @@ import { db } from "@/db";
 import {
   auditLog,
   coachPayments,
-  coachPaySettings,
   coachRateOverrides,
   programRateOverrides,
   programs,
   sessionsBilling,
   users,
-  type CoachPayMode,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import {
@@ -22,7 +20,6 @@ import {
 } from "@/lib/billing";
 import { formatPfaDateMedium } from "@/lib/timezone";
 import { CoachNotesCard } from "./_components/notes-card";
-import { CoachPayModeCard } from "./_components/pay-mode-card";
 import {
   RateHistoryCard,
   type RateHistoryRow,
@@ -70,7 +67,6 @@ export default async function AdminCoachDetailPage({
     paymentRows,
     programRows,
     programOverrideRows,
-    paySettingsResult,
     rateAuditRows,
     allProgramRows,
   ] = await Promise.all([
@@ -143,13 +139,6 @@ export default async function AdminCoachDetailPage({
         .select()
         .from(programRateOverrides)
         .where(eq(programRateOverrides.coachId, id)),
-      // QA2 #6 — this coach's work-pay-mode settings (one row, or none →
-      // implicit "hourly").
-      db
-        .select()
-        .from(coachPaySettings)
-        .where(eq(coachPaySettings.coachId, id))
-        .limit(1),
       // QA2 #7 — rate-override change history, derived from the existing
       // audit_log (no new table). Resource-type overrides log with
       // entityType="rate_override" + entityId="${coachId}:${resourceType}";
@@ -240,15 +229,15 @@ export default async function AdminCoachDetailPage({
       programName: p.name,
       defaultCents: p.defaultRatePer30MinCents,
       override: o
-        ? { ratePer30MinCents: o.ratePer30MinCents, updatedAt: o.updatedAt }
+        ? {
+            payMode: o.payMode,
+            ratePer30MinCents: o.ratePer30MinCents,
+            perSessionRateCents: o.perSessionRateCents,
+            updatedAt: o.updatedAt,
+          }
         : null,
     };
   });
-
-  // QA2 #6 — current pay-mode setting (default "hourly" when no row).
-  const paySettings = paySettingsResult[0];
-  const payMode: CoachPayMode = paySettings?.payMode ?? "hourly";
-  const perSessionRateCents = paySettings?.perSessionRateCents ?? null;
 
   // QA2 #7 — build the rate-history timeline from the audit rows.
   // The override tables store ratePer30MinCents. Resource (rental) rates
@@ -329,12 +318,6 @@ export default async function AdminCoachDetailPage({
       <ProgramRateOverridesCard
         coachId={coach.id}
         rows={programRateRows}
-      />
-
-      <CoachPayModeCard
-        coachId={coach.id}
-        initialPayMode={payMode}
-        initialPerSessionRateCents={perSessionRateCents}
       />
 
       <RateHistoryCard rows={rateHistoryRows} />

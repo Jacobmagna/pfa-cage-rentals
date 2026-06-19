@@ -172,6 +172,23 @@ describe("rateForProgram", () => {
     ];
     expect(rateForProgram(programId, coachId, overrides, 900)).toBe(1800);
   });
+
+  it("falls back to the program default when the matching override carries a null hourly rate (per_session shape)", () => {
+    // DESIGN-1: a per_session override row stores ratePer30MinCents: null.
+    // rateForProgram must treat that null as "no hourly rate" and fall back
+    // to the program default rather than returning null.
+    const overrides: ProgramRateOverride[] = [
+      { coachId, programId, ratePer30MinCents: null },
+    ];
+    expect(rateForProgram(programId, coachId, overrides, 1800)).toBe(1800);
+  });
+
+  it("returns null when a null-rate override matches and there is no program default", () => {
+    const overrides: ProgramRateOverride[] = [
+      { coachId, programId, ratePer30MinCents: null },
+    ];
+    expect(rateForProgram(programId, coachId, overrides, null)).toBeNull();
+  });
 });
 
 describe("computeRate", () => {

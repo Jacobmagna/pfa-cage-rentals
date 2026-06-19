@@ -115,8 +115,12 @@ export async function upsertRateOverrideFormAction(
 export type ProgramRateOverrideFormValues = {
   coachId: string;
   programId: string;
-  /** As the user typed it (dollars, "22.00"). Echoed back on error. */
+  /** How this program pays the coach: hourly rate vs flat per-session. */
+  payMode: "hourly" | "per_session";
+  /** Hourly rate as the user typed it (dollars/HR). Echoed back on error. */
   rateDollars: string;
+  /** Flat per-session amount as typed (dollars). Echoed back on error. */
+  perSessionDollars: string;
 };
 
 export type ProgramRateOverrideActionResult =
@@ -154,10 +158,15 @@ function hourlyDollarsToCentsPer30Min(input: string): number {
 function snapshotProgram(
   formData: FormData,
 ): ProgramRateOverrideFormValues {
+  const rawMode = formData.get("payMode")?.toString();
+  const payMode: "hourly" | "per_session" =
+    rawMode === "per_session" ? "per_session" : "hourly";
   return {
     coachId: formData.get("coachId")?.toString() ?? "",
     programId: formData.get("programId")?.toString() ?? "",
+    payMode,
     rateDollars: formData.get("rateDollars")?.toString() ?? "",
+    perSessionDollars: formData.get("perSessionDollars")?.toString() ?? "",
   };
 }
 
@@ -194,12 +203,22 @@ export async function upsertProgramRateOverrideFormAction(
 ): Promise<ProgramRateOverrideActionResult> {
   const values = snapshotProgram(formData);
   try {
-    // Entered per HOUR → stored per 30 min.
-    const cents = hourlyDollarsToCentsPer30Min(values.rateDollars);
+    // Branch on pay mode. Hourly: entered per HOUR → stored per 30 min,
+    // per-session cents null. Per session: a FLAT dollar amount (no ×2),
+    // hourly cents null. The inactive amount field is ignored.
+    let ratePer30MinCents: number | null = null;
+    let perSessionRateCents: number | null = null;
+    if (values.payMode === "per_session") {
+      perSessionRateCents = dollarsToCents(values.perSessionDollars);
+    } else {
+      ratePer30MinCents = hourlyDollarsToCentsPer30Min(values.rateDollars);
+    }
     await upsertProgramRateOverride({
       coachId: values.coachId,
       programId: values.programId,
-      ratePer30MinCents: cents,
+      payMode: values.payMode,
+      ratePer30MinCents,
+      perSessionRateCents,
     });
     return { ok: true };
   } catch (err) {

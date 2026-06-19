@@ -46,7 +46,10 @@ export type RateOverride = {
 export type ProgramRateOverride = {
   coachId: string;
   programId: string;
-  ratePer30MinCents: number;
+  // DESIGN-1: per_session override rows carry a null hourly rate. The
+  // `?? programDefaultCents` fallback in rateForProgram already handles
+  // null, so a null here just resolves to the program default.
+  ratePer30MinCents: number | null;
 };
 
 /**

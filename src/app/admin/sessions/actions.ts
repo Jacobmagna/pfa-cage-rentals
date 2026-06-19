@@ -14,7 +14,7 @@
 // 30s AutoRefresh tick.
 
 import { revalidatePath } from "next/cache";
-import { requireRole } from "@/lib/authz";
+import { requireRole, requireScheduleAccess } from "@/lib/authz";
 import {
   createSessionInternal,
   createSessionsBatchInternal,
@@ -35,29 +35,33 @@ function revalidateSessionSurfaces() {
   revalidatePath("/admin/records/accountability/cancellations");
 }
 
+// The four rental-scheduling actions below (create/createBatch/update/delete)
+// are schedule-manager-accessible: a Schedule Manager runs the cage-rental
+// schedule. Rate/owed is stamped server-side in the internal fns and is never
+// set here. The approve/deny removal workflow further down stays admin-only.
 export async function createSession(input: unknown) {
-  const session = await requireRole("admin");
+  const session = await requireScheduleAccess();
   const result = await createSessionInternal(session.user, input);
   revalidateSessionSurfaces();
   return result;
 }
 
 export async function createSessionsBatch(input: unknown) {
-  const session = await requireRole("admin");
+  const session = await requireScheduleAccess();
   const result = await createSessionsBatchInternal(session.user, input);
   revalidateSessionSurfaces();
   return result;
 }
 
 export async function updateSession(id: string, input: unknown) {
-  const session = await requireRole("admin");
+  const session = await requireScheduleAccess();
   const result = await updateSessionInternal(session.user, id, input);
   revalidateSessionSurfaces();
   return result;
 }
 
 export async function deleteSession(id: string) {
-  const session = await requireRole("admin");
+  const session = await requireScheduleAccess();
   const result = await deleteSessionInternal(session.user, id);
   revalidateSessionSurfaces();
   return result;

@@ -48,7 +48,7 @@ export async function AppShell({
             </Link>
 
             <div className="hidden md:block border-l border-line pl-3 min-w-0">
-              <TabNav role={role} />
+              <TabNav role={role} scheduleAdmin={session?.user?.scheduleAdmin ?? false} />
             </div>
           </div>
 
@@ -83,7 +83,7 @@ export async function AppShell({
         </div>
 
         <div className="md:hidden border-t border-white/10 px-3 py-1.5">
-          <TabNav role={role} />
+          <TabNav role={role} scheduleAdmin={session?.user?.scheduleAdmin ?? false} />
         </div>
       </header>
 

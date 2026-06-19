@@ -117,6 +117,11 @@ export const { handlers, auth: uncachedAuth, signIn, signOut } = NextAuth({
         session.user.role = isAdminEmail(session.user.email)
           ? "admin"
           : (user as { role?: "coach" | "admin" }).role ?? "coach";
+        // Master Schedule Manager flag (Add-On Part 1). Read straight from the
+        // adapter user row (database session strategy). Admins implicitly have
+        // schedule access via requireScheduleAccess, so no coercion needed here.
+        session.user.scheduleAdmin =
+          (user as { scheduleAdmin?: boolean }).scheduleAdmin ?? false;
       }
       return session;
     },

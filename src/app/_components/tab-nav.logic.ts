@@ -4,7 +4,8 @@ export type TabKey =
   | "hour-log"
   | "attendance"
   | "schedule"
-  | "records";
+  | "records"
+  | "master";
 
 // Admin sections that belong to the new top-level "Billing & Records" tab
 // (QA5). These surfaces aren't cage-rental-specific, so they were lifted off
@@ -47,10 +48,17 @@ const RECORDS_SECTIONS = new Set([
  *
  * Cage Rentals is the fallback and must not light up for hour-log /
  * attendance routes.
+ *
+ * The Master schedule (Add-On) is a TOP-LEVEL route (`/master/...`), matched
+ * on `segments[0] === "master"` before any role-base rule, so it never falls
+ * through to the coach "schedule" rule. It is role-independent.
  */
 export function activeTab(pathname: string, role?: "admin" | "coach"): TabKey {
   const segments = pathname.split("/").filter(Boolean);
   const section = segments[1];
+  // The Master schedule (Add-On) is a TOP-LEVEL route (/master/...), not
+  // under /admin or /coach, so it's matched on segments[0].
+  if (segments[0] === "master") return "master";
   if (section === "hour-log") return "hour-log";
   if (section === "attendance") return "attendance";
   if (section === "schedule" && role === "coach") return "schedule";

@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "schedule_admin" boolean DEFAULT false NOT NULL;

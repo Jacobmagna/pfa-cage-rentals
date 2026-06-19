@@ -50,6 +50,20 @@ export async function requireRole(
 }
 
 /**
+ * Authorizes the Master schedule surface (Add-On Part 1): admins always
+ * pass; a coach passes only when their `scheduleAdmin` flag is set. Anyone
+ * else redirects to /coach. Used ONLY by the Master routes + the widened
+ * schedule mutation actions — never by money/roster/report/admin surfaces.
+ */
+export async function requireScheduleAccess(): Promise<AuthedSession> {
+  const session = await requireSession();
+  if (session.user.role === "admin" || session.user.scheduleAdmin === true) {
+    return session;
+  }
+  redirect("/coach");
+}
+
+/**
  * Authorizes access to a row that belongs to one coach. Admins
  * always pass. Coaches pass only when they own the row (coachId
  * matches their user id). Anything else redirects to /coach —

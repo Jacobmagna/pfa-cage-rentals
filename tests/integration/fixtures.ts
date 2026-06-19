@@ -15,10 +15,15 @@ import { eq } from "drizzle-orm";
 
 export const INTEGRATION_ADMIN_EMAIL = "integration-admin@pfa.invalid";
 export const INTEGRATION_COACH_EMAIL = "integration-coach@pfa.invalid";
+// A coach with the schedule_admin flag set — a "Schedule Manager". Used
+// by the master-schedule authz/audit suites to prove the widened schedule
+// actions accept this user while money/roster admin actions still reject.
+export const INTEGRATION_FLAGGED_COACH_EMAIL = "flagged-coach@pfa.invalid";
 
 export type FixtureUsers = {
   admin: User;
   coach: User;
+  flaggedCoach: User;
 };
 
 // Upserts the two test users and returns them. Idempotent across runs.
@@ -37,16 +42,39 @@ export async function ensureFixtureUsers(): Promise<FixtureUsers> {
       set: { role: "admin", name: "Integration Admin" },
     });
 
+  // Plain coach: role coach, scheduleAdmin explicitly false. Forcing the
+  // flag off on every run guards against a previous suite leaving it on.
   await db
     .insert(users)
     .values({
       email: INTEGRATION_COACH_EMAIL,
       name: "Integration Coach",
       role: "coach",
+      scheduleAdmin: false,
     })
     .onConflictDoUpdate({
       target: users.email,
-      set: { role: "coach", name: "Integration Coach" },
+      set: { role: "coach", name: "Integration Coach", scheduleAdmin: false },
+    });
+
+  // Flagged coach ("Schedule Manager"): role coach, scheduleAdmin true.
+  // Must be a real users row (schedule_admin=true) so the widened actions'
+  // internal logic runs and the audit_log FK on actor_user_id resolves.
+  await db
+    .insert(users)
+    .values({
+      email: INTEGRATION_FLAGGED_COACH_EMAIL,
+      name: "Integration Flagged Coach",
+      role: "coach",
+      scheduleAdmin: true,
+    })
+    .onConflictDoUpdate({
+      target: users.email,
+      set: {
+        role: "coach",
+        name: "Integration Flagged Coach",
+        scheduleAdmin: true,
+      },
     });
 
   const [admin] = await db
@@ -59,11 +87,16 @@ export async function ensureFixtureUsers(): Promise<FixtureUsers> {
     .from(users)
     .where(eq(users.email, INTEGRATION_COACH_EMAIL))
     .limit(1);
+  const [flaggedCoach] = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, INTEGRATION_FLAGGED_COACH_EMAIL))
+    .limit(1);
 
-  if (!admin || !coach) {
+  if (!admin || !coach || !flaggedCoach) {
     throw new Error("ensureFixtureUsers: upsert failed to round-trip");
   }
-  return { admin, coach };
+  return { admin, coach, flaggedCoach };
 }
 
 // Returns the two cages and one bullpen the session tests need.

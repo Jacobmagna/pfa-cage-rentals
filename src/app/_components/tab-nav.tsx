@@ -33,9 +33,9 @@ function hrefFor(key: TabKey, base: string): string {
     case "home":
       return base;
     case "cage":
-      // Admin's Cage Rentals now lives at its own route; coach's cage tab
-      // stays at /coach.
-      return base === "/admin" ? "/admin/cage-rentals" : base;
+      // Admin's Rentals tab lands on the Schedule (the main view, which
+      // renders the Rentals sub-nav); coach's cage tab stays at /coach.
+      return base === "/admin" ? "/admin/schedule" : base;
     case "hour-log":
       return `${base}/hour-log`;
     case "attendance":

@@ -1,9 +1,8 @@
-import Link from "next/link";
 import { and, asc, desc, eq, gte, inArray, lt } from "drizzle-orm";
-import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import { resources, sessionsBilling, users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
+import { RentalsSubnav } from "@/app/admin/_components/rentals-subnav";
 import { listActiveCoaches } from "@/lib/server/coaches";
 import { parsePfaInput, pfaDayEnd } from "@/lib/timezone";
 import { FiltersForm } from "./_components/filters-form";
@@ -97,14 +96,8 @@ export default async function AdminSessionsPage({
   const visibleRows = truncated ? rows.slice(0, MAX_ROWS) : rows;
 
   return (
-    <>
-      <Link
-        href="/admin/cage-rentals"
-        className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
-      >
-        <ArrowLeft className="h-3.5 w-3.5" />
-        Back to Rentals
-      </Link>
+    <div className="space-y-6">
+      <RentalsSubnav />
 
       <div className="mb-8 space-y-2">
         <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
@@ -140,7 +133,7 @@ export default async function AdminSessionsPage({
         truncated={truncated}
         maxRows={MAX_ROWS}
       />
-    </>
+    </div>
   );
 }
 

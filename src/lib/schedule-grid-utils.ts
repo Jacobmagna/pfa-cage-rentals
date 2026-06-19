@@ -149,6 +149,60 @@ export function slotStartAt15(selectedDate: Date, slotIndex: number): Date {
 }
 
 /**
+ * Expands a set of selected grid-cell keys (`${resourceId}|${slotIndex}`)
+ * into structured slot descriptors. Shared by the multi-resource batch
+ * UIs (both the cage grid and the read-only master grid will import this)
+ * so the key format + slot→time math live in exactly one place.
+ *
+ * Keys are `${resourceId}|${slotIndex}`. ResourceIds never contain "|",
+ * but we split on the FIRST "|" to be safe (everything before it is the
+ * resourceId; everything after is the slotIndex). slotIndex maps to a
+ * 30-min half-hour offset from `firstHour`: hour = firstHour +
+ * floor(idx/2), minute = (idx%2)*30 — the same slot math as slotStartAt.
+ *
+ * Output is sorted deterministically by (resourceId, slotIndex) so two
+ * equal selections always expand to byte-identical arrays. Empty input
+ * yields []. Pure + unit-testable.
+ */
+export function expandSlotKeys(
+  keys: Iterable<string>,
+  firstHour: number,
+): Array<{
+  resourceId: string;
+  slotIndex: number;
+  hour: number;
+  minute: number;
+}> {
+  const out: Array<{
+    resourceId: string;
+    slotIndex: number;
+    hour: number;
+    minute: number;
+  }> = [];
+  for (const key of keys) {
+    const sep = key.indexOf("|");
+    if (sep < 0) continue; // malformed — no separator
+    const resourceId = key.slice(0, sep);
+    const slotIndex = Number(key.slice(sep + 1));
+    if (resourceId.length === 0 || !Number.isInteger(slotIndex)) continue;
+    out.push({
+      resourceId,
+      slotIndex,
+      hour: firstHour + Math.floor(slotIndex / 2),
+      minute: (slotIndex % 2) * 30,
+    });
+  }
+  out.sort((a, b) =>
+    a.resourceId === b.resourceId
+      ? a.slotIndex - b.slotIndex
+      : a.resourceId < b.resourceId
+        ? -1
+        : 1,
+  );
+  return out;
+}
+
+/**
  * 24-hour hour number → "8 AM" / "12 PM" / "10 PM". Copied from
  * schedule-grid.tsx formatHour.
  */

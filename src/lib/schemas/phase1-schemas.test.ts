@@ -11,6 +11,10 @@ import {
   createProgramScheduleBlockSchema,
   updateProgramScheduleBlockSchema,
 } from "./program-schedule";
+import {
+  createSessionBatchSchema,
+  effectiveResourceId,
+} from "./session";
 
 describe("createProgramSchema", () => {
   it("accepts a name-only program", () => {
@@ -473,5 +477,79 @@ describe("updateProgramScheduleBlockSchema", () => {
       endAt: "2026-06-01T14:00:00.000Z",
     });
     expect(r.success).toBe(false);
+  });
+});
+
+describe("createSessionBatchSchema (multi-resource)", () => {
+  const slot = (extra: Record<string, unknown> = {}) => ({
+    startAt: "2026-06-01T14:00:00.000Z",
+    endAt: "2026-06-01T14:30:00.000Z",
+    ...extra,
+  });
+
+  it("rejects when NEITHER slot nor top-level resourceId is set (path slots.0.resourceId)", () => {
+    const r = createSessionBatchSchema.safeParse({
+      coachId: "coach1",
+      slots: [slot()],
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const issue = r.error.issues.find(
+        (i) => i.path.join(".") === "slots.0.resourceId",
+      );
+      expect(issue).toBeDefined();
+      expect(issue?.message).toBe("resourceId is required (slot or top-level)");
+    }
+  });
+
+  it("accepts top-level resourceId only (back-compat)", () => {
+    const r = createSessionBatchSchema.safeParse({
+      coachId: "coach1",
+      resourceId: "cage1",
+      slots: [slot(), slot()],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts slot-only resourceIds (no top-level)", () => {
+    const r = createSessionBatchSchema.safeParse({
+      coachId: "coach1",
+      slots: [slot({ resourceId: "cage1" }), slot({ resourceId: "cage2" })],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("accepts a mix of top-level default + per-slot override", () => {
+    const r = createSessionBatchSchema.safeParse({
+      coachId: "coach1",
+      resourceId: "cage1",
+      slots: [slot(), slot({ resourceId: "bullpen1" })],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("flags only the slot that resolves to nothing", () => {
+    const r = createSessionBatchSchema.safeParse({
+      coachId: "coach1",
+      slots: [slot({ resourceId: "cage1" }), slot()],
+    });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const paths = r.error.issues.map((i) => i.path.join("."));
+      expect(paths).toContain("slots.1.resourceId");
+      expect(paths).not.toContain("slots.0.resourceId");
+    }
+  });
+});
+
+describe("effectiveResourceId", () => {
+  it("prefers the slot's own resourceId", () => {
+    expect(effectiveResourceId({ resourceId: "cage2" }, "cage1")).toBe("cage2");
+  });
+  it("falls back to the top-level resourceId", () => {
+    expect(effectiveResourceId({}, "cage1")).toBe("cage1");
+  });
+  it("returns undefined when neither is set", () => {
+    expect(effectiveResourceId({}, undefined)).toBeUndefined();
   });
 });

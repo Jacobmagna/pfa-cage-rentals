@@ -53,6 +53,7 @@ import {
 import {
   createSessionBatchSchema,
   createSessionSchema,
+  effectiveResourceId,
   updateSessionSchema,
 } from "@/lib/schemas/session";
 
@@ -410,19 +411,28 @@ async function safeRecordCancellation(
 }
 
 /**
- * Batch-create: insert N sessions sharing the same coach + resource,
- * each with its own time range / note. Used by the multi-slot UI
- * ("create 8 back-to-back 30-min lessons in Cage 3 from 10 AM to 2 PM").
+ * Batch-create: insert N sessions sharing the same coach, each with its
+ * own time range / note AND its own (optional) resource. Used by the
+ * multi-slot UI ("create 8 back-to-back 30-min lessons in Cage 3 from
+ * 10 AM to 2 PM" — or a mix across Cage 1, Cage 2, and a bullpen).
+ *
+ * MULTI-RESOURCE money rule: each slot resolves to an effective
+ * resourceId (its own, else the top-level default). Every row is billed
+ * at ITS resource type's rate — so a cage slot and a bullpen slot in the
+ * same batch get the cage rate and the bullpen rate respectively. The
+ * rate is resolved ONCE per distinct resource and cached.
  *
  * Pipeline:
  *   1. Zod-parse
- *   2. Resource lookup (shared — checked once)
- *   3. For each slot: cross-check blocked_times AND the rest of
- *      sessions_billing AND every PRIOR slot in this same batch
- *      (so a self-overlap inside the batch is caught here, not
- *      at the DB insert).
- *   4. Bulk insert. Audit log a single "batch_create" entry with
- *      the array of created IDs.
+ *   2. Resolve each distinct effective resource: existence check +
+ *      its own rate, cached in a Map.
+ *   3. For each slot: cross-check blocked_times AND sessions_billing on
+ *      ITS OWN resource, AND every PRIOR slot in this same batch that
+ *      shares the same effective resource (so an intra-batch self-overlap
+ *      is caught here, not at the DB insert). Slots on DIFFERENT cages at
+ *      the same time do NOT collide.
+ *   4. Bulk insert (single multi-row INSERT). Audit log a single batch
+ *      entry with the created ids + their resourceIds.
  *
  * Atomicity caveat: neon-http has no transactions. We pre-validate
  * every slot before inserting any, which shuts the door on the
@@ -431,31 +441,55 @@ async function safeRecordCancellation(
  * bulk insert — is caught by the DB's EXCLUDE constraint and
  * surfaces as a SessionOverlapError. The bulk insert is a single
  * statement, so it's either fully applied or fully rejected by
- * Postgres — no partial-insert surprises.
+ * Postgres — no partial-insert surprises, across all cages.
  */
 export async function createSessionsBatchInternal(
   actor: AuthedSession["user"],
   input: unknown,
 ) {
   const parsed = createSessionBatchSchema.parse(input);
-  const resource = await getResourceOrThrow(parsed.resourceId);
 
-  // Pre-validate each slot:
-  //   (a) against any existing block on the same resource
-  //   (b) against any existing session on the same resource
-  //   (c) against every PRIOR slot in this batch (intra-batch overlap)
+  // Resolve effective resource per slot once, up front. The schema's
+  // superRefine already guarantees each resolves to a non-empty string,
+  // so the assertion below never fires for parsed input.
+  const slotResourceIds = parsed.slots.map((s) => {
+    const rid = effectiveResourceId(s, parsed.resourceId);
+    if (!rid) throw new Error("unreachable: slot has no effective resourceId");
+    return rid;
+  });
+
+  // For every DISTINCT effective resource: look it up (throws
+  // ResourceNotFoundError per missing resource) and resolve ITS rate.
+  // Cache both so each row bills at its own resource type's rate. THIS
+  // IS THE CORE MONEY FIX.
+  const resourceMap = new Map<
+    string,
+    { resource: typeof resources.$inferSelect; rate: number }
+  >();
+  for (const rid of new Set(slotResourceIds)) {
+    const resource = await getResourceOrThrow(rid);
+    const rate = await resolveRateCents({
+      coachId: parsed.coachId,
+      resourceType: resource.type,
+    });
+    resourceMap.set(rid, { resource, rate });
+  }
+
+  // Pre-validate each slot against ITS OWN effective resource:
+  //   (a) against any existing block on that resource
+  //   (b) against any existing session on that resource
+  //   (c) against every PRIOR slot in this batch ON THE SAME resource
+  //       (cross-cage same-time slots must NOT collide)
   for (let i = 0; i < parsed.slots.length; i++) {
     const slot = parsed.slots[i];
+    const rid = slotResourceIds[i];
+    const { resource } = resourceMap.get(rid)!;
 
-    const block = await findOverlappingBlock(
-      parsed.resourceId,
-      slot.startAt,
-      slot.endAt,
-    );
+    const block = await findOverlappingBlock(rid, slot.startAt, slot.endAt);
     if (block) throw new BlockedTimeError(resource.name, block.reason);
 
     const conflict = await findOverlappingSession(
-      parsed.resourceId,
+      rid,
       slot.startAt,
       slot.endAt,
     );
@@ -468,10 +502,13 @@ export async function createSessionsBatchInternal(
       );
     }
 
-    // Intra-batch self-overlap: scan earlier slots in the same array.
-    // O(N^2) but N ≤ 50, so worst case 1,225 comparisons — fine.
+    // Intra-batch self-overlap: scan earlier slots in the same array,
+    // but ONLY those that share this slot's effective resource. Two
+    // slots on different cages at the same time are fine. O(N^2) but
+    // N ≤ 50, so worst case 1,225 comparisons — fine.
     for (let j = 0; j < i; j++) {
       const prior = parsed.slots[j];
+      if (slotResourceIds[j] !== rid) continue;
       if (prior.startAt < slot.endAt && prior.endAt > slot.startAt) {
         throw new SessionOverlapError(
           resource.name,
@@ -483,28 +520,23 @@ export async function createSessionsBatchInternal(
     }
   }
 
-  // Resolve the rate once — coach + resource type are shared across
-  // the batch.
-  const ratePer30MinCents = await resolveRateCents({
-    coachId: parsed.coachId,
-    resourceType: resource.type,
-  });
-
   // Bulk insert in a single statement. drizzle accepts an array on
   // .values() and emits one multi-row INSERT, which Postgres treats
-  // atomically — either all rows commit or the statement fails.
+  // atomically — either all rows commit or the statement fails, across
+  // every cage in the batch. Each row carries its own resourceId + the
+  // rate resolved for that resource's type.
   let inserted;
   try {
     inserted = await db
       .insert(sessionsBilling)
       .values(
-        parsed.slots.map((s) => ({
+        parsed.slots.map((s, i) => ({
           coachId: parsed.coachId,
-          resourceId: parsed.resourceId,
+          resourceId: slotResourceIds[i],
           startAt: s.startAt,
           endAt: s.endAt,
           note: s.note ?? null,
-          ratePer30MinCents,
+          ratePer30MinCents: resourceMap.get(slotResourceIds[i])!.rate,
           createdBy: actor.id,
         })),
       )
@@ -513,10 +545,11 @@ export async function createSessionsBatchInternal(
     if (isExclusionViolation(err)) {
       // Race with a concurrent booking — one of our slots collided.
       // We don't know which one without rescanning, so surface a
-      // generic overlap message scoped to the resource. The coach
-      // can re-check the schedule grid.
+      // generic overlap message scoped to the first slot's resource.
+      // The coach can re-check the schedule grid.
+      const firstResource = resourceMap.get(slotResourceIds[0])!.resource;
       throw new SessionOverlapError(
-        resource.name,
+        firstResource.name,
         "another booking",
         parsed.slots[0].startAt,
         parsed.slots[parsed.slots.length - 1].endAt,
@@ -531,7 +564,8 @@ export async function createSessionsBatchInternal(
     // Audit log entity-per-row convention: log a single batch entry
     // keyed to the first inserted id with the full set in metadata.
     // Per-row entries would clutter the audit page; this surface is
-    // a batch action.
+    // a batch action. Multi-resource: record each row's resourceId
+    // (not a single shared one) plus the distinct set spanned.
     entityId: inserted[0].id,
     action: "create",
     after: {
@@ -539,7 +573,11 @@ export async function createSessionsBatchInternal(
       count: inserted.length,
       sessionIds: inserted.map((r) => r.id),
       coachId: parsed.coachId,
-      resourceId: parsed.resourceId,
+      resourceIds: [...new Set(slotResourceIds)],
+      rows: inserted.map((r) => ({
+        sessionId: r.id,
+        resourceId: r.resourceId,
+      })),
     },
   });
 

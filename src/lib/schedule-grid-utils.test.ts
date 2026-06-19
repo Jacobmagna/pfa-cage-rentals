@@ -4,6 +4,7 @@ import {
   SCHEDULE_GRID_FIRST_HOUR,
   SCHEDULE_GRID_LAST_HOUR,
   SCHEDULE_GRID_SLOTS,
+  expandSlotKeys,
   formatGridHour,
   placeOnGrid,
   placeOnGrid15,
@@ -225,6 +226,57 @@ describe("placeVerticalOnGrid15", () => {
     const start = pfaWallClockAt(refDate, 21, 45); // slot 55
     const end = pfaWallClockAt(refDate, 22, 30); // slot 58 → clipped to 56
     expect(placeVerticalOnGrid15(start, end)).toEqual({ row: 56, rowSpan: 1 });
+  });
+});
+
+describe("expandSlotKeys", () => {
+  it("returns [] for empty input", () => {
+    expect(expandSlotKeys([], SCHEDULE_GRID_FIRST_HOUR)).toEqual([]);
+    expect(expandSlotKeys(new Set<string>(), SCHEDULE_GRID_FIRST_HOUR)).toEqual(
+      [],
+    );
+  });
+
+  it("expands keys across 3 resources sorted by (resourceId, slotIndex)", () => {
+    // Intentionally unsorted input; expect deterministic (resourceId,
+    // slotIndex) ordering out.
+    const keys = ["cage2|0", "cage1|3", "cage1|0", "bullpen1|2"];
+    const out = expandSlotKeys(keys, SCHEDULE_GRID_FIRST_HOUR);
+    expect(out.map((s) => `${s.resourceId}|${s.slotIndex}`)).toEqual([
+      "bullpen1|2",
+      "cage1|0",
+      "cage1|3",
+      "cage2|0",
+    ]);
+  });
+
+  it("maps slotIndex to the correct hour/minute (firstHour=8)", () => {
+    const out = expandSlotKeys(["r|0", "r|1", "r|2", "r|3"], 8);
+    expect(out).toEqual([
+      { resourceId: "r", slotIndex: 0, hour: 8, minute: 0 },
+      { resourceId: "r", slotIndex: 1, hour: 8, minute: 30 },
+      { resourceId: "r", slotIndex: 2, hour: 9, minute: 0 },
+      { resourceId: "r", slotIndex: 3, hour: 9, minute: 30 },
+    ]);
+  });
+
+  it("honors a non-default firstHour", () => {
+    const [slot] = expandSlotKeys(["r|2"], 10);
+    // 10 + floor(2/2)=1 → 11:00
+    expect(slot).toEqual({
+      resourceId: "r",
+      slotIndex: 2,
+      hour: 11,
+      minute: 0,
+    });
+  });
+
+  it("splits on the FIRST | only and skips malformed keys", () => {
+    // No resourceId in this repo ever contains "|", but be defensive.
+    const out = expandSlotKeys(["nope", "|3", "r|x", "good|4"], 8);
+    expect(out).toEqual([
+      { resourceId: "good", slotIndex: 4, hour: 10, minute: 0 },
+    ]);
   });
 });
 

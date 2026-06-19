@@ -608,7 +608,8 @@ export function ProgramScheduleGrid({
               )}`;
               const programLabel =
                 programNameById.get(b.programId) ?? b.programId;
-              // Coach names move OFF the bar into the tooltip (W3.2 set).
+              // Coach name now shows ON the bar per the admin's request
+              // (the tooltip keeps it too).
               const allCoachNames =
                 b.coaches.length > 1
                   ? b.coaches.map((c) => c.name).join(", ")
@@ -632,6 +633,7 @@ export function ProgramScheduleGrid({
                   accentClass={statusAccent(status)}
                   title={`${tooltip} (click to edit or drag to move)`}
                   programLabel={programLabel}
+                  coachLabel={allCoachNames}
                   timeLabel={timeLabel}
                   status={status}
                   onEdit={() => openEdit(b)}
@@ -781,6 +783,7 @@ function DraggableBlock({
   accentClass,
   title,
   programLabel,
+  coachLabel,
   timeLabel,
   status,
   onEdit,
@@ -791,6 +794,7 @@ function DraggableBlock({
   accentClass: string;
   title: string;
   programLabel: string;
+  coachLabel: string;
   timeLabel: string;
   status: BlockStatus | undefined;
   onEdit: () => void;
@@ -833,6 +837,7 @@ function DraggableBlock({
       title={title}
     >
       <span className="truncate font-medium">{programLabel}</span>
+      <span className="truncate text-[10px] text-fg-muted">{coachLabel}</span>
       <span className="truncate text-[9px] uppercase tracking-wider text-fg-subtle">
         {timeLabel}
       </span>

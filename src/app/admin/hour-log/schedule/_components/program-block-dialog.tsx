@@ -347,6 +347,11 @@ export function ProgramBlockDialog({
     isEdit ? (editInitial?.resourceIds ?? []) : [],
   );
 
+  // The block's date is editable inline (was a fixed hidden field). Seeded
+  // from the block's own date in edit, else the grid's selected date.
+  const dateInput = formatPfaDate(date);
+  const [formDate, setFormDate] = useState(dateInput);
+
   if (open !== prevOpen) {
     setPrevOpen(open);
     if (open) {
@@ -380,6 +385,9 @@ export function ProgramBlockDialog({
           : [""],
       );
       setBlockResourceIds(isEdit ? (editInitial?.resourceIds ?? []) : []);
+      setFormDate(
+        isEdit && editInitial ? formatPfaDate(editInitial.startAt) : dateInput,
+      );
       setCancelError(null);
     }
   }
@@ -398,6 +406,8 @@ export function ProgramBlockDialog({
     if (!state.ok) {
       setBlockResourceIds(state.values.resourceIds);
     }
+    // Re-seed the chosen date so a failed submit keeps the chosen day.
+    if (!state.ok) setFormDate(state.values.date);
   }
   // #10: an errored apply-to-all (series) submit re-seeds the SAME block
   // coach/resource controls the edit form renders, so the admin's selection
@@ -509,8 +519,8 @@ export function ProgramBlockDialog({
   }, [open, onClose]);
 
   // Defaults priority: errored submission → initial/prefill values →
-  // empty skeleton. The date is always the grid's selected date.
-  const dateInput = formatPfaDate(date);
+  // empty skeleton. The date defaults to the grid's selected date but is
+  // editable via the Date field (dateInput defined above).
   const defaults = useMemo(() => {
     // #10: when "apply to all" is on, an errored series submit echoes its
     // submitted values back into the shared fields. Takes priority so the
@@ -836,7 +846,6 @@ export function ProgramBlockDialog({
             defaultValue={editInitial.seriesId}
           />
         ) : null}
-        <input type="hidden" name="date" defaultValue={dateInput} />
 
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -923,6 +932,36 @@ export function ProgramBlockDialog({
             selected={blockResourceIds}
             onToggle={(id) => toggleResource(setBlockResourceIds, id)}
           />
+
+          {!applyToSeries ? (
+            isSeries ? (
+              // A recurring-series occurrence keeps its date fixed: moving one
+              // occurrence to another day would desync it from the series (no
+              // skipDates bookkeeping), so a later "Apply to all" edit would
+              // delete/orphan it. Submit the date as a hidden field so the update
+              // still composes startAt/endAt; to move it, use "Apply to all" or
+              // cancel + recreate.
+              <input type="hidden" name="date" defaultValue={formDate} />
+            ) : (
+              <Field label="Date">
+                <DateInput
+                  name="date"
+                  value={formDate}
+                  onChange={(iso) => {
+                    setFormDate(iso);
+                    if (!isEdit) {
+                      setSelectedDays(
+                        new Set([pfaWeekdayIndex(parsePfaInput(iso, "12:00"))]),
+                      );
+                      setRecurError(null);
+                    }
+                  }}
+                  required
+                  aria-label="Date"
+                />
+              </Field>
+            )
+          ) : null}
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Start">
@@ -1245,8 +1284,9 @@ export function ProgramBlockDialog({
                   </Field>
 
                   <p className="text-[11px] text-fg-subtle leading-snug">
-                    Creates a block from {formatPfaDateMedium(date)} through
-                    the end date.
+                    Creates a block from{" "}
+                    {formatPfaDateMedium(parsePfaInput(formDate, "12:00"))}{" "}
+                    through the end date.
                   </p>
 
                   {recurError ? (

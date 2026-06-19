@@ -95,7 +95,12 @@ export async function upsertRateOverrideFormAction(
 ): Promise<RateOverrideActionResult> {
   const values = snapshot(formData);
   try {
-    const cents = dollarsToCents(values.rateDollars);
+    // Weight room is ENTERED per HOUR but STORED per 30 min (reuses the
+    // program-override hourly parser). Cages & bullpens stay per 30 min.
+    const cents =
+      values.resourceType === "weight_room"
+        ? hourlyDollarsToCentsPer30Min(values.rateDollars)
+        : dollarsToCents(values.rateDollars);
     await upsertRateOverride({
       coachId: values.coachId,
       resourceType: values.resourceType,

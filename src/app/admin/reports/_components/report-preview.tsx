@@ -6,6 +6,7 @@
 // Server component, no client state. Filter changes happen via the
 // form's GET submit; this just re-renders against the new data.
 
+import type { ResourceType } from "@/lib/billing";
 import type { DetailRow, SummaryRow } from "@/lib/reports/aggregate";
 
 export function ReportPreview({
@@ -158,7 +159,10 @@ export function ReportPreview({
                     </span>
                   </td>
                   <NumCell value={row.slots} />
-                  <CashCell cents={row.ratePerSlotCents} />
+                  <RateCell
+                    cents={row.ratePerSlotCents}
+                    resourceType={row.resourceType}
+                  />
                   <td className="px-3 py-3 text-right font-mono tnum tabular-nums font-semibold text-fg">
                     {formatCents(row.totalCents)}
                   </td>
@@ -309,14 +313,31 @@ function formatHours(hours: number): string {
   return hours.toFixed(2).replace(/\.?0+$/, "");
 }
 
-function CashCell({ cents }: { cents: number }) {
-  return (
-    <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-muted">
-      {cents === 0 ? (
+// Per-row rate cell with an EXPLICIT unit suffix, so the mixed-resource
+// column is never ambiguous. The stored snapshot is per-30-min cents; we
+// display weight-room rates per HOUR (×2) and cage/bullpen per 30 min.
+// Display-only — the snapshot and all totals/sums are untouched.
+function RateCell({
+  cents,
+  resourceType,
+}: {
+  cents: number;
+  resourceType: ResourceType;
+}) {
+  if (cents === 0) {
+    return (
+      <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-muted">
         <span className="text-fg-subtle">—</span>
-      ) : (
-        formatCents(cents)
-      )}
+      </td>
+    );
+  }
+  const perHour = resourceType === "weight_room";
+  const displayCents = perHour ? cents * 2 : cents;
+  const unit = perHour ? "/hr" : "/30 min";
+  return (
+    <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-muted whitespace-nowrap">
+      {formatCents(displayCents)}{" "}
+      <span className="text-fg-subtle">{unit}</span>
     </td>
   );
 }

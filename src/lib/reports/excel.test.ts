@@ -274,9 +274,9 @@ describe("buildReportWorkbook", () => {
       expect(sheet.rowCount).toBe(4); // header + 3 sessions
     });
 
-    // Detail column layout (1-based) after the cage-flag removal:
+    // Detail column layout (1-based) after adding the "Rate basis" column:
     //   1 Date · 2 Day · 3 Start · 4 End · 5 Duration · 6 Resource
-    //   7 Coach · 8 Slots · 9 Rate · 10 $ · 11 Note
+    //   7 Coach · 8 Slots · 9 Rate · 10 Rate basis · 11 $ · 12 Note
     it("writes dollar amounts per session", async () => {
       const buf = await build(makeReport());
       const wb = await loadWorkbook(buf);
@@ -287,13 +287,49 @@ describe("buildReportWorkbook", () => {
       expect(row2.getCell(6).value).toBe("Cage 1");
       expect(row2.getCell(7).value).toBe("Alice Coach");
       expect(row2.getCell(8).value).toBe(2); // slots
-      expect(row2.getCell(9).value).toBe(18); // 1800 / 100
-      expect(row2.getCell(10).value).toBe(36);
-      expect(row2.getCell(11).value).toBe("warm-up");
+      expect(row2.getCell(9).value).toBe(18); // cage: 1800 / 100, per 30 min
+      expect(row2.getCell(10).value).toBe("per 30 min"); // cage rate basis
+      expect(row2.getCell(11).value).toBe(36); // $ total
+      expect(row2.getCell(12).value).toBe("warm-up");
 
       const row4 = sheet.getRow(4); // s3 — zero-rate session
       expect(row4.getCell(9).value).toBe(0); // rate 0
-      expect(row4.getCell(10).value).toBe(0); // total 0
+      expect(row4.getCell(11).value).toBe(0); // total 0
+    });
+
+    // Weight-room rate displays PER HOUR (×2) with a "per hr" basis, while
+    // the $ TOTAL stays unchanged (snapshot/sums untouched).
+    it("displays weight-room rate per hour with a per-hr basis", async () => {
+      const buf = await build(makeReport());
+      const wb = await loadWorkbook(buf);
+      const sheet = wb.getWorksheet("Detail")!;
+
+      const row3 = sheet.getRow(3); // s2 — Weight Room 1, 700 cents/30min
+      expect(row3.getCell(6).value).toBe("Weight Room 1");
+      expect(row3.getCell(9).value).toBe(14); // 700 * 2 / 100 = per-hour rate
+      expect(row3.getCell(10).value).toBe("per hr"); // weight-room basis
+      expect(row3.getCell(11).value).toBe(14); // $ total unchanged (1400 / 100)
+    });
+
+    it("has the expected detail headers including Rate basis", async () => {
+      const buf = await build(makeReport());
+      const wb = await loadWorkbook(buf);
+      const sheet = wb.getWorksheet("Detail")!;
+      const headers = (sheet.getRow(1).values as unknown[]).slice(1);
+      expect(headers).toEqual([
+        "Date",
+        "Day",
+        "Start",
+        "End",
+        "Duration (min)",
+        "Resource",
+        "Coach",
+        "Slots",
+        "Rate",
+        "Rate basis",
+        "$",
+        "Note",
+      ]);
     });
   });
 

@@ -82,10 +82,16 @@ function Row({
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  // Weight room is ENTERED + DISPLAYED per HOUR (cents × 2); cages &
+  // bullpens stay per 30 min. Storage is always per-30-min cents.
+  const isWeightRoom = row.resourceType === "weight_room";
+  const fmtRate = isWeightRoom ? formatDollarsPerHour : formatDollars;
+  const rateUnitLabel = isWeightRoom ? "default / hr" : "default / 30 min";
+
   const hasOverride = row.override !== null;
-  const defaultDollars = formatDollars(row.defaultCents);
+  const defaultDollars = fmtRate(row.defaultCents);
   const overrideDollars = row.override
-    ? formatDollars(row.override.ratePer30MinCents)
+    ? fmtRate(row.override.ratePer30MinCents)
     : "";
 
   // Re-key the form when the override changes (server re-fetched).
@@ -155,7 +161,7 @@ function Row({
       <div className="hidden sm:block text-xs text-fg-muted">
         <p className="font-mono tnum tabular-nums">${defaultDollars}</p>
         <p className="text-[10px] text-fg-subtle uppercase tracking-wider mt-0.5">
-          default / 30 min
+          {rateUnitLabel}
         </p>
       </div>
 
@@ -221,7 +227,7 @@ function Row({
         description={
           <>
             Future sessions for {RESOURCE_LABEL[row.resourceType]} will bill
-            at the default of ${defaultDollars} per 30 min. Past sessions
+            at the default of ${defaultDollars} per {isWeightRoom ? "hour" : "30 min"}. Past sessions
             keep the rate they were billed at.
           </>
         }
@@ -235,4 +241,9 @@ function Row({
 
 function formatDollars(cents: number): string {
   return (cents / 100).toFixed(2);
+}
+
+// Per-HOUR display: stored cents are per 30 min, so an hour is ×2.
+function formatDollarsPerHour(cents: number): string {
+  return ((cents * 2) / 100).toFixed(2);
 }

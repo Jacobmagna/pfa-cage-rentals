@@ -36,6 +36,14 @@ const FIELD_NAME: Record<RateDefaultsRow["type"], string> = {
   weight_room: "weightRoomDollars",
 };
 
+// Cage & bullpen are entered + displayed per 30 min; weight room is
+// per hour (stored per-30-min cents, converted on save/display).
+const FIELD_UNIT: Record<RateDefaultsRow["type"], string> = {
+  cage: "/ 30 min",
+  bullpen: "/ 30 min",
+  weight_room: "/ hr",
+};
+
 export function RateDefaultsCard({ rows }: { rows: RateDefaultsRow[] }) {
   const [state, action, pending] = useActionState(
     updateRateDefaultsFormAction,
@@ -56,7 +64,14 @@ export function RateDefaultsCard({ rows }: { rows: RateDefaultsRow[] }) {
       }
     }
     const row = byType.get(type);
-    return row ? (row.ratePer30MinCents / 100).toFixed(2) : "";
+    if (!row) return "";
+    // Weight room is entered + displayed PER HOUR (stored per-30-min cents,
+    // so * 2). Cage & bullpen stay per-30-min. Mirrors the program-rate
+    // per-hour pattern.
+    if (type === "weight_room") {
+      return ((row.ratePer30MinCents * 2) / 100).toFixed(2);
+    }
+    return (row.ratePer30MinCents / 100).toFixed(2);
   };
 
   const formKey = state.ok
@@ -72,8 +87,9 @@ export function RateDefaultsCard({ rows }: { rows: RateDefaultsRow[] }) {
           Default rental rates
         </h2>
         <p className="mt-1 text-xs text-fg-muted leading-relaxed">
-          The standard per-30-min rate for each resource type. Changes apply
-          to <span className="text-fg">future sessions only</span> — past
+          The standard rate for each resource type — see the unit beside
+          each field. Changes apply to{" "}
+          <span className="text-fg">future sessions only</span> — past
           sessions stay at the rate they were billed at. Per-coach
           discounts override these on{" "}
           <span className="text-fg">/admin/coaches</span>.
@@ -106,6 +122,7 @@ export function RateDefaultsCard({ rows }: { rows: RateDefaultsRow[] }) {
               key={type}
               label={RESOURCE_LABEL[type]}
               name={FIELD_NAME[type]}
+              unit={FIELD_UNIT[type]}
               value={valueFor(type)}
               updatedAt={byType.get(type)?.updatedAt ?? null}
             />
@@ -130,11 +147,13 @@ export function RateDefaultsCard({ rows }: { rows: RateDefaultsRow[] }) {
 function RateField({
   label,
   name,
+  unit,
   value,
   updatedAt,
 }: {
   label: string;
   name: string;
+  unit: string;
   value: string;
   updatedAt: Date | null;
 }) {
@@ -152,13 +171,16 @@ function RateField({
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle text-sm">
           $
         </span>
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-fg-subtle">
+          {unit}
+        </span>
         <input
           type="text"
           inputMode="decimal"
           name={name}
           defaultValue={value}
-          aria-label={`Default rate for ${label}`}
-          className="w-full pl-7 pr-3 h-10 rounded-lg bg-surface border border-line text-fg text-sm tnum tabular-nums focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+          aria-label={`Default rate for ${label} (${unit})`}
+          className="w-full pl-7 pr-16 h-10 rounded-lg bg-surface border border-line text-fg text-sm tnum tabular-nums focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
         />
       </span>
     </label>

@@ -143,4 +143,28 @@ describe("activeTab", () => {
   it("returns cage for /admin/coaches/123 with no role (back-compat, records gated on admin)", () => {
     expect(activeTab("/admin/coaches/123")).toBe("cage");
   });
+
+  it("returns master for /master/schedule with no role", () => {
+    expect(activeTab("/master/schedule")).toBe("master");
+  });
+
+  it("returns master for /master/schedule when role is admin", () => {
+    expect(activeTab("/master/schedule", "admin")).toBe("master");
+  });
+
+  it("returns master for /master/schedule when role is coach", () => {
+    expect(activeTab("/master/schedule", "coach")).toBe("master");
+  });
+
+  it("returns master for /master/work-schedule with no role", () => {
+    expect(activeTab("/master/work-schedule")).toBe("master");
+  });
+
+  it("returns master for /master/work-schedule when role is admin", () => {
+    expect(activeTab("/master/work-schedule", "admin")).toBe("master");
+  });
+
+  it("returns master for /master/work-schedule when role is coach", () => {
+    expect(activeTab("/master/work-schedule", "coach")).toBe("master");
+  });
 });

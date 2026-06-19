@@ -45,13 +45,23 @@ function hrefFor(key: TabKey, base: string): string {
     case "records":
       // Admin-only tab; coaches never receive it, so the admin base is fine.
       return `${base}/records`;
+    case "master":
+      // Master is a TOP-LEVEL route (/master), not base-relative.
+      return "/master/schedule";
   }
 }
 
-export function TabNav({ role }: { role: "admin" | "coach" }) {
+export function TabNav({
+  role,
+  scheduleAdmin = false,
+}: {
+  role: "admin" | "coach";
+  scheduleAdmin?: boolean;
+}) {
   const pathname = usePathname() ?? "";
   const base = role === "admin" ? "/admin" : "/coach";
-  const tabs = role === "coach" ? COACH_TABS : ADMIN_TABS;
+  const tabs = role === "coach" ? [...COACH_TABS] : [...ADMIN_TABS];
+  if (role === "admin" || scheduleAdmin) tabs.push({ key: "master", label: "Master" });
   const current = activeTab(pathname, role);
 
   return (

@@ -5,10 +5,12 @@ declare module "next-auth" {
     user: {
       id: string;
       role: "coach" | "admin";
+      scheduleAdmin: boolean;
     } & DefaultSession["user"];
   }
 
   interface User {
     role?: "coach" | "admin";
+    scheduleAdmin?: boolean;
   }
 }

@@ -93,6 +93,11 @@ export const users = pgTable("users", {
   // NULL = unknown. Shown read-only on /admin/coaches/[id].
   phone: text("phone"),
   role: roleEnum("role").notNull().default("coach"),
+  // Master Schedule Manager (Add-On Part 1). Additive, reversible flag that
+  // grants a COACH read/write access to the Master schedule (cage + work
+  // grids) WITHOUT admin rights. Meaningful only for role="coach"; admins
+  // always have schedule access. NOT NULL default false backfills cleanly.
+  scheduleAdmin: boolean("schedule_admin").notNull().default(false),
   // Payment handles. Admin sees Zelle on /admin/coaches/[id] and
   // /admin/payments as a reconciliation hint. Coach-facing surfaces
   // never expose them. NULL = not set.

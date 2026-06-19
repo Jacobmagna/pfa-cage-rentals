@@ -159,6 +159,7 @@ export default async function CoachHome() {
       </header>
 
       <SmsReminderCard
+        surface="home"
         initialPhone={smsRow?.phone ?? null}
         initialOptIn={smsRow?.smsOptIn ?? false}
         initialPromptAnswered={smsRow?.smsPromptAnsweredAt != null}

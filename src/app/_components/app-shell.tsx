@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { Settings } from "lucide-react";
 import { auth, signOut } from "@/auth";
 import { TabNav } from "./tab-nav";
 
@@ -55,6 +56,16 @@ export async function AppShell({
             <span className="hidden sm:inline text-xs text-white/70">
               {displayName}
             </span>
+            {role === "coach" && (
+              <Link
+                href="/coach/settings"
+                aria-label="Settings"
+                title="Settings"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/20 bg-white/5 text-white/80 hover:text-white hover:bg-white/10"
+              >
+                <Settings className="h-4 w-4" aria-hidden="true" />
+              </Link>
+            )}
             <form
               action={async () => {
                 "use server";

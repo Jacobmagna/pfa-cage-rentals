@@ -5,6 +5,13 @@
 // program name, its default pay rate (or "—" when unset), and inline forms
 // to save or remove this coach's override for that program.
 //
+// DESIGN-1: each row now also carries a per-program PAY MODE toggle —
+// Hourly (the per-30-min rate, entered/displayed per hour) vs Per session
+// (a flat per-session dollar amount). The visible amount field swaps with
+// the mode; the inactive field is kept as a hidden input so the payload
+// always carries both (mirrors the coach-wide pay-mode card pattern that
+// this replaces).
+//
 // Each row owns its own useActionState for the save form so error states
 // don't bleed between rows. Remove uses useTransition + the public
 // deleteProgramRateOverride action; revalidatePath in the action refreshes
@@ -22,13 +29,19 @@ import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 
 const INITIAL_STATE: ProgramRateOverrideActionResult = { ok: true };
 
+type PayMode = "hourly" | "per_session";
+
 export type ProgramRateOverrideRow = {
   programId: string;
   programName: string;
   /** Program's default pay rate per 30 min, in cents. null = unset. */
   defaultCents: number | null;
   override: {
-    ratePer30MinCents: number;
+    payMode: PayMode;
+    /** Per-30-min cents for hourly overrides; null for per-session. */
+    ratePer30MinCents: number | null;
+    /** Flat per-session cents for per-session overrides; null for hourly. */
+    perSessionRateCents: number | null;
     updatedAt: Date;
   } | null;
 };
@@ -45,8 +58,9 @@ export function ProgramRateOverridesCard({
       <header className="px-5 py-4 border-b border-line">
         <h3 className="text-base font-semibold text-fg">Work rates</h3>
         <p className="mt-1 text-xs text-fg-muted leading-relaxed">
-          Override the standard pay rate for this coach per work type.
-          Changes apply to{" "}
+          Override the standard pay rate for this coach per work type. Pick
+          how each is paid — hourly or a flat per-session amount. Changes
+          apply to{" "}
           <span className="text-fg">future hours only</span> — past logged
           hours stay at the rate they were stamped with.
         </p>
@@ -86,14 +100,37 @@ function Row({
   // the hourly dollars (stored cents × 2 / 100).
   const defaultDollars =
     row.defaultCents !== null ? formatHourlyDollars(row.defaultCents) : null;
-  const overrideDollars = row.override
-    ? formatHourlyDollars(row.override.ratePer30MinCents)
-    : "";
 
-  // Re-key the form when the override changes (server re-fetched). Without
-  // this, the input keeps its prior defaultValue across re-renders.
+  // Seed the hourly + per-session fields independently from the stored
+  // override (whichever mode it was). On a validation error, echo the
+  // admin's submitted values so nothing is lost.
+  const overrideMode: PayMode = row.override?.payMode ?? "hourly";
+  const overrideHourly =
+    row.override && row.override.ratePer30MinCents !== null
+      ? formatHourlyDollars(row.override.ratePer30MinCents)
+      : "";
+  const overrideFlat =
+    row.override && row.override.perSessionRateCents !== null
+      ? formatFlatDollars(row.override.perSessionRateCents)
+      : "";
+
+  const seededMode: PayMode = !state.ok ? state.values.payMode : overrideMode;
+  const seededHourly = !state.ok ? state.values.rateDollars : overrideHourly;
+  const seededFlat = !state.ok
+    ? state.values.perSessionDollars
+    : overrideFlat;
+
+  // Controlled mode so the amount field swaps live as the admin toggles.
+  const [mode, setMode] = useState<PayMode>(seededMode);
+
+  // Re-key the form when the override changes (server re-fetched) or on a
+  // validation error. Re-keying remounts the form so the controlled mode +
+  // defaultValues re-seed. Include payMode + both amounts so a same-cents
+  // mode flip still re-seeds.
   const formKey = state.ok
-    ? `${row.programId}-${row.override?.ratePer30MinCents ?? "none"}`
+    ? `${row.programId}-${overrideMode}-${
+        row.override?.ratePer30MinCents ?? "none"
+      }-${row.override?.perSessionRateCents ?? "none"}`
     : `${row.programId}-err-${state.error.code}-${state.error.message}`;
 
   const handleRemove = () => {
@@ -118,21 +155,15 @@ function Row({
     });
   };
 
-  // Use the user's submitted value on error so they don't lose their
-  // typing; otherwise show the stored override (or blank).
-  const inputDefault =
-    !state.ok && state.values.rateDollars
-      ? state.values.rateDollars
-      : overrideDollars;
-
   return (
     <form
       action={action}
       key={formKey}
-      className="px-5 py-4 grid grid-cols-[1fr_auto] sm:grid-cols-[140px_120px_1fr_auto] items-center gap-3"
+      className="px-5 py-4 grid grid-cols-1 sm:grid-cols-[140px_110px_1fr_auto] sm:items-start gap-3"
     >
       <input type="hidden" name="coachId" defaultValue={coachId} />
       <input type="hidden" name="programId" defaultValue={row.programId} />
+      <input type="hidden" name="payMode" value={mode} readOnly />
 
       <div className="min-w-0">
         <p className="text-sm font-medium text-fg truncate">
@@ -156,21 +187,96 @@ function Row({
         </p>
       </div>
 
-      <div className="col-span-2 sm:col-span-1">
-        <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle text-sm">
-            $
-          </span>
-          <input
-            type="text"
-            inputMode="decimal"
-            name="rateDollars"
-            defaultValue={inputDefault}
-            placeholder={defaultDollars ?? "0.00"}
-            aria-label={`Override pay rate for ${row.programName}`}
-            className="w-full pl-7 pr-3 h-10 rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
-          />
+      <div className="min-w-0">
+        {/* Mode toggle (segmented). The hidden payMode input above mirrors
+            this so the payload carries the selected mode. */}
+        <div
+          role="radiogroup"
+          aria-label={`Pay mode for ${row.programName}`}
+          className="inline-flex rounded-lg border border-line p-0.5 mb-2"
+        >
+          <button
+            type="button"
+            role="radio"
+            aria-checked={mode === "hourly"}
+            onClick={() => setMode("hourly")}
+            className={`px-3 h-7 rounded-md text-xs font-medium transition-colors ${
+              mode === "hourly"
+                ? "bg-gold text-gold-ink shadow-[var(--shadow-sm)]"
+                : "text-fg-muted hover:text-fg"
+            }`}
+          >
+            Hourly
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={mode === "per_session"}
+            onClick={() => setMode("per_session")}
+            className={`px-3 h-7 rounded-md text-xs font-medium transition-colors ${
+              mode === "per_session"
+                ? "bg-gold text-gold-ink shadow-[var(--shadow-sm)]"
+                : "text-fg-muted hover:text-fg"
+            }`}
+          >
+            Per session
+          </button>
         </div>
+
+        {/* The visible amount field swaps with the mode; the inactive one is
+            kept as a hidden input so the payload always carries both. */}
+        {mode === "hourly" ? (
+          <>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle text-sm">
+                $
+              </span>
+              <input
+                type="text"
+                inputMode="decimal"
+                name="rateDollars"
+                defaultValue={seededHourly}
+                placeholder={defaultDollars ?? "0.00"}
+                aria-label={`Override hourly pay rate for ${row.programName}`}
+                className="w-full pl-7 pr-3 h-10 rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+              />
+            </div>
+            <span className="block text-[10px] text-fg-subtle mt-1">
+              Per hour
+            </span>
+            <input
+              type="hidden"
+              name="perSessionDollars"
+              defaultValue={seededFlat}
+            />
+          </>
+        ) : (
+          <>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle text-sm">
+                $
+              </span>
+              <input
+                type="text"
+                inputMode="decimal"
+                name="perSessionDollars"
+                defaultValue={seededFlat}
+                placeholder="0.00"
+                aria-label={`Per-session pay amount for ${row.programName}`}
+                className="w-full pl-7 pr-3 h-10 rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+              />
+            </div>
+            <span className="block text-[10px] text-fg-subtle mt-1">
+              Flat per session
+            </span>
+            <input
+              type="hidden"
+              name="rateDollars"
+              defaultValue={seededHourly}
+            />
+          </>
+        )}
+
         {!state.ok ? (
           <p role="alert" className="mt-1 text-[11px] text-danger">
             {state.error.message}
@@ -183,7 +289,7 @@ function Row({
         ) : null}
       </div>
 
-      <div className="flex items-center gap-2 justify-self-end">
+      <div className="flex items-center gap-2 sm:justify-self-end">
         <button
           type="submit"
           disabled={pending || removing}
@@ -230,7 +336,12 @@ function Row({
   );
 }
 
-// Stored cents are PER 30 MIN; the UI shows rates PER HOUR, so double.
+// Stored cents are PER 30 MIN; the UI shows hourly rates PER HOUR, so double.
 function formatHourlyDollars(centsPer30Min: number): string {
   return ((centsPer30Min * 2) / 100).toFixed(2);
+}
+
+// Per-session cents are a FLAT amount — no ×2.
+function formatFlatDollars(cents: number): string {
+  return (cents / 100).toFixed(2);
 }

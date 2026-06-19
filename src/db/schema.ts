@@ -265,10 +265,19 @@ export const coachRateOverrides = pgTable(
   ],
 );
 
+// QA2 #6 — how a coach is paid for logged work. "hourly" (the default for
+// every coach) = the existing per-30-min rate snapshot on hour_logs; per
+// "per_session" = a flat per-session amount (coachPaySettings.perSessionRateCents)
+// snapshotted onto each log at write time.
+export const coachPayMode = pgEnum("coach_pay_mode", ["hourly", "per_session"]);
+
 // Per-(coach, program) pay-rate override for logged program hours.
 // Mirrors coach_rate_overrides but keyed on (coach, program) instead of
-// (coach, resource_type): when present it wins over the program's
-// default_rate_per_30_min_cents. Both FKs cascade — an override row has
+// (coach, resource_type). DESIGN-1: this row now also carries the
+// PER-PROGRAM pay mode (previously the coach-wide coach_pay_settings.payMode).
+// For an "hourly" override, ratePer30MinCents wins over the program's
+// default_rate_per_30_min_cents; for a "per_session" override, the flat
+// perSessionRateCents applies instead. Both FKs cascade — an override row has
 // no meaning without its coach + program. Composite PK enforces one
 // override per (coach, program).
 export const programRateOverrides = pgTable(
@@ -280,7 +289,17 @@ export const programRateOverrides = pgTable(
     programId: text("program_id")
       .notNull()
       .references(() => programs.id, { onDelete: "cascade" }),
-    ratePer30MinCents: integer("rate_per_30_min_cents").notNull(),
+    // DESIGN-1: pay mode is now PER-PROGRAM (was the coach-wide
+    // coach_pay_settings.payMode). "hourly" (default) → ratePer30MinCents
+    // applies; "per_session" → perSessionRateCents (a flat amount) applies.
+    // Reuses the coach_pay_mode enum.
+    payMode: coachPayMode("pay_mode").notNull().default("hourly"),
+    // NULLABLE now (was NOT NULL): a per_session override row has no hourly
+    // rate. An hourly override (and every pre-existing row) carries the
+    // per-30-min cents; when present it wins over the program default.
+    ratePer30MinCents: integer("rate_per_30_min_cents"),
+    // Flat per-session pay in cents; non-null only when payMode = "per_session".
+    perSessionRateCents: integer("per_session_rate_cents"),
     updatedAt: timestamp("updated_at", { mode: "date" })
       .notNull()
       .defaultNow()
@@ -599,12 +618,6 @@ export const coachPayments = pgTable(
     index("coach_payments_status_paid_idx").on(table.status, table.paidAt),
   ],
 );
-
-// QA2 #6 — how a coach is paid for logged work. "hourly" (the default for
-// every coach) = the existing per-30-min rate snapshot on hour_logs; per
-// "per_session" = a flat per-session amount (coachPaySettings.perSessionRateCents)
-// snapshotted onto each log at write time.
-export const coachPayMode = pgEnum("coach_pay_mode", ["hourly", "per_session"]);
 
 // QA2 #6 — per-coach pay-mode settings. One row per coach (coachId is the PK
 // + FK, cascade-deleted with the user). payMode defaults to "hourly" so a

@@ -33,6 +33,8 @@ import {
 } from "@/db/schema";
 import { ZodError } from "zod";
 import { logHourInternal } from "@/lib/server/hour-log-actions";
+import { upsertProgramRateOverrideInternal } from "@/lib/server/program-rate-override-actions";
+import { workPayForLog } from "@/lib/billing";
 import { ProgramInactiveError } from "@/lib/errors";
 import {
   ensureFixtureUsers,
@@ -96,6 +98,20 @@ async function createProgram(active: boolean): Promise<{
   const [row] = await db
     .insert(programs)
     .values({ name, active })
+    .returning({ id: programs.id, name: programs.name });
+  return row;
+}
+
+// Like createProgram but stamps a program-level default per-30-min pay
+// rate. DESIGN-1: this default is what resolveRateCentsForProgram falls
+// back to when a (coach, program) override is absent or on per_session.
+async function createProgramWithDefaultRate(
+  defaultRatePer30MinCents: number,
+): Promise<{ id: string; name: string }> {
+  const name = `HourLog Test Program ${uniqueSuffix()}`;
+  const [row] = await db
+    .insert(programs)
+    .values({ name, active: true, defaultRatePer30MinCents })
     .returning({ id: programs.id, name: programs.name });
   return row;
 }
@@ -267,5 +283,194 @@ describe("logHourInternal", () => {
     expect(audit).toHaveLength(1);
     expect(audit[0].actorUserId).toBe(fixtures.coach.id);
     expect(audit[0].entityType).toBe("hour_log");
+  });
+});
+
+// End-to-end coverage of the DESIGN-1 per-(coach, program) pay mode
+// through the REAL write path (logHourInternal). The key invariants:
+//   - the pay mode + rates are stamped PER (coach, program), so two
+//     programs the SAME coach logs against can carry totally different
+//     snapshots in the same run;
+//   - a per_session override stamps a flat perSessionRateCents (and the
+//     hourly rate falls through to the program default per the resolver);
+//   - hour_logs is an IMMUTABLE snapshot: changing the override later
+//     never re-rates an already-logged row.
+//
+// hour_logs is NOT truncated by truncateMutables(), so every assertion is
+// scoped to the freshly-created log row's id. program_rate_overrides is
+// keyed (coachId, programId); each test creates a unique program, so the
+// PK never collides across tests or reruns.
+describe("DESIGN-1 per-program pay mode", () => {
+  // Helper: log an hour (10:00–11:00 tomorrow) against `programId` for the
+  // given coach, creating the matching scheduled block first so the log
+  // POSTs clean (the snapshot stamp is the same whether posted or held,
+  // but posting keeps the test close to real coach usage).
+  async function logCleanHour(args: {
+    programId: string;
+    coachId: string;
+    coach: FixtureUsers["admin"];
+    startHour?: number;
+    endHour?: number;
+  }) {
+    const startAt = tomorrowAt(args.startHour ?? 10);
+    const endAt = tomorrowAt(args.endHour ?? 11);
+    await createScheduledBlock({
+      programId: args.programId,
+      coachId: args.coachId,
+      startAt,
+      endAt,
+    });
+    return logHourInternal(args.coach, {
+      programId: args.programId,
+      startAt,
+      endAt,
+      note: null,
+      source: "schedule-confirm",
+    });
+  }
+
+  async function readLog(id: string) {
+    const [row] = await db.select().from(hourLogs).where(eq(hourLogs.id, id));
+    return row;
+  }
+
+  it("stamps independent snapshots when the same coach logs against an hourly program and a per_session program", async () => {
+    const coach = fixtures.coach;
+    // Both programs carry the same default rate so we can prove the
+    // per-program override (not the default) drives program A's snapshot.
+    const programA = await createProgramWithDefaultRate(1800);
+    const programB = await createProgramWithDefaultRate(1800);
+
+    // A = hourly $50/hr → 2500 cents per 30 min.
+    await upsertProgramRateOverrideInternal(fixtures.admin, {
+      coachId: coach.id,
+      programId: programA.id,
+      payMode: "hourly",
+      ratePer30MinCents: 2500,
+    });
+    // B = per_session $75 flat → 7500 cents.
+    await upsertProgramRateOverrideInternal(fixtures.admin, {
+      coachId: coach.id,
+      programId: programB.id,
+      payMode: "per_session",
+      perSessionRateCents: 7500,
+    });
+
+    // Log a 1-hour block against each program.
+    const logA = await logCleanHour({
+      programId: programA.id,
+      coachId: coach.id,
+      coach,
+      startHour: 10,
+      endHour: 11,
+    });
+    // Different window for B so the two scheduled blocks don't overlap.
+    const logB = await logCleanHour({
+      programId: programB.id,
+      coachId: coach.id,
+      coach,
+      startHour: 13,
+      endHour: 14,
+    });
+
+    const rowA = await readLog(logA.id);
+    const rowB = await readLog(logB.id);
+
+    // A: hourly snapshot stamped from the override, no per-session amount.
+    expect(rowA.ratePer30MinCents).toBe(2500);
+    expect(rowA.perSessionRateCents).toBeNull();
+    // B: per-session flat amount stamped; the hourly rate falls through to
+    // the program default (resolveRateCentsForProgram ignores per_session).
+    expect(rowB.perSessionRateCents).toBe(7500);
+    expect(rowB.ratePer30MinCents).toBe(1800);
+
+    // Pay: A = $50/hr × 1hr = $50 = 5000 cents.
+    expect(workPayForLog(rowA)).toBe(5000);
+    // B = flat $75 = 7500 cents, regardless of the 1-hour duration.
+    expect(workPayForLog(rowB)).toBe(7500);
+  });
+
+  it("per_session pay is independent of the logged duration", async () => {
+    const coach = fixtures.coach;
+    const program = await createProgramWithDefaultRate(1800);
+    await upsertProgramRateOverrideInternal(fixtures.admin, {
+      coachId: coach.id,
+      programId: program.id,
+      payMode: "per_session",
+      perSessionRateCents: 7500,
+    });
+
+    // A 3-hour block (15:00–18:00) on the same per_session override.
+    const log = await logCleanHour({
+      programId: program.id,
+      coachId: coach.id,
+      coach,
+      startHour: 15,
+      endHour: 18,
+    });
+    const row = await readLog(log.id);
+    expect(row.perSessionRateCents).toBe(7500);
+    // Flat $75 even though the block is 3 hours long.
+    expect(workPayForLog(row)).toBe(7500);
+  });
+
+  it("no override → stamps the program default hourly rate, no per-session", async () => {
+    const coach = fixtures.coach;
+    const program = await createProgramWithDefaultRate(1800);
+    // No upsertProgramRateOverrideInternal call: this (coach, program)
+    // pair has no override row.
+
+    const log = await logCleanHour({
+      programId: program.id,
+      coachId: coach.id,
+      coach,
+      startHour: 10,
+      endHour: 11,
+    });
+    const row = await readLog(log.id);
+    expect(row.ratePer30MinCents).toBe(1800);
+    expect(row.perSessionRateCents).toBeNull();
+    // $18/30min × 2 slots (1hr) = $36 = 3600 cents.
+    expect(workPayForLog(row)).toBe(3600);
+  });
+
+  it("changing the override after logging never re-rates an existing log (immutable snapshot)", async () => {
+    const coach = fixtures.coach;
+    const program = await createProgramWithDefaultRate(1800);
+
+    // Start on per_session $75.
+    await upsertProgramRateOverrideInternal(fixtures.admin, {
+      coachId: coach.id,
+      programId: program.id,
+      payMode: "per_session",
+      perSessionRateCents: 7500,
+    });
+
+    const log = await logCleanHour({
+      programId: program.id,
+      coachId: coach.id,
+      coach,
+      startHour: 10,
+      endHour: 11,
+    });
+    const before = await readLog(log.id);
+    expect(before.perSessionRateCents).toBe(7500);
+    expect(before.ratePer30MinCents).toBe(1800);
+    const payBefore = workPayForLog(before);
+    expect(payBefore).toBe(7500);
+
+    // Renegotiate: flip the SAME (coach, program) override to hourly at a
+    // different rate. This must NOT touch the already-logged row.
+    await upsertProgramRateOverrideInternal(fixtures.admin, {
+      coachId: coach.id,
+      programId: program.id,
+      payMode: "hourly",
+      ratePer30MinCents: 9999,
+    });
+
+    const after = await readLog(log.id);
+    expect(after.perSessionRateCents).toBe(7500);
+    expect(after.ratePer30MinCents).toBe(1800);
+    expect(workPayForLog(after)).toBe(payBefore);
   });
 });

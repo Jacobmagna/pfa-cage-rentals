@@ -70,14 +70,20 @@ export async function upsertProgramRateOverrideInternal(
     .values({
       coachId: parsed.coachId,
       programId: parsed.programId,
-      ratePer30MinCents: parsed.ratePer30MinCents,
+      payMode: parsed.payMode,
+      ratePer30MinCents: parsed.ratePer30MinCents ?? null,
+      perSessionRateCents: parsed.perSessionRateCents ?? null,
     })
     .onConflictDoUpdate({
       target: [
         programRateOverrides.coachId,
         programRateOverrides.programId,
       ],
-      set: { ratePer30MinCents: parsed.ratePer30MinCents },
+      set: {
+        payMode: parsed.payMode,
+        ratePer30MinCents: parsed.ratePer30MinCents ?? null,
+        perSessionRateCents: parsed.perSessionRateCents ?? null,
+      },
     })
     .returning();
 

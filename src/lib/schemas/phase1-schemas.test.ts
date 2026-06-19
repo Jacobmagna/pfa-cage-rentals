@@ -81,13 +81,26 @@ describe("updateProgramSchema", () => {
 });
 
 describe("upsertProgramRateOverrideSchema", () => {
-  const base = { coachId: "c1", programId: "p1" };
+  // DESIGN-1: an override now carries a per-program payMode. Hourly rows
+  // need ratePer30MinCents; per_session rows need perSessionRateCents.
+  const base = { coachId: "c1", programId: "p1", payMode: "hourly" as const };
 
-  it("accepts a valid override", () => {
+  it("accepts a valid hourly override", () => {
     expect(
       upsertProgramRateOverrideSchema.safeParse({
         ...base,
         ratePer30MinCents: 1800,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts a valid per-session override", () => {
+    expect(
+      upsertProgramRateOverrideSchema.safeParse({
+        coachId: "c1",
+        programId: "p1",
+        payMode: "per_session",
+        perSessionRateCents: 7500,
       }).success,
     ).toBe(true);
   });
@@ -110,11 +123,50 @@ describe("upsertProgramRateOverrideSchema", () => {
     ).toBe(false);
   });
 
+  it("rejects an hourly override with no rate (superRefine)", () => {
+    expect(
+      upsertProgramRateOverrideSchema.safeParse({ ...base }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a per-session override with no amount (superRefine)", () => {
+    expect(
+      upsertProgramRateOverrideSchema.safeParse({
+        coachId: "c1",
+        programId: "p1",
+        payMode: "per_session",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a per-session amount over the $10,000 cap", () => {
+    expect(
+      upsertProgramRateOverrideSchema.safeParse({
+        coachId: "c1",
+        programId: "p1",
+        payMode: "per_session",
+        perSessionRateCents: 1_000_001,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects an invalid payMode", () => {
+    expect(
+      upsertProgramRateOverrideSchema.safeParse({
+        coachId: "c1",
+        programId: "p1",
+        payMode: "weekly",
+        ratePer30MinCents: 1800,
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects a missing programId", () => {
     expect(
       upsertProgramRateOverrideSchema.safeParse({
         coachId: "c1",
         programId: "",
+        payMode: "hourly",
         ratePer30MinCents: 1800,
       }).success,
     ).toBe(false);

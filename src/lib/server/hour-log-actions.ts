@@ -23,7 +23,6 @@
 import { and, desc, eq, gte, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  coachPaySettings,
   hourLogs,
   programRateOverrides,
   programScheduleBlockCoaches,
@@ -32,7 +31,6 @@ import {
   users,
 } from "@/db/schema";
 import { type AuthedSession } from "@/lib/authz";
-import { rateForProgram } from "@/lib/billing";
 import {
   DuplicateHourLogError,
   HeldHourLogNotFoundError,
@@ -53,62 +51,55 @@ import {
 import { formatPfaTime12h } from "@/lib/timezone";
 import { safeLogAudit } from "./audit-helpers";
 
-// Resolves the per-30-min cents pay rate to stamp on a new hour_logs
-// row. Reads the (coach, program) override from program_rate_overrides,
-// then delegates to billing.rateForProgram, falling back to the
-// program's default_rate_per_30_min_cents and finally null (no rate
-// set → $0 pay). Mirrors resolveRateCents in session-actions.ts.
-export async function resolveRateCentsForProgram(args: {
-  coachId: string;
-  programId: string;
-  programDefaultCents: number | null;
-}): Promise<number | null> {
-  const [override] = await db
-    .select()
-    .from(programRateOverrides)
-    .where(
-      and(
-        eq(programRateOverrides.coachId, args.coachId),
-        eq(programRateOverrides.programId, args.programId),
-      ),
-    );
-  return rateForProgram(
-    args.programId,
-    args.coachId,
-    override
-      ? [
-          {
-            coachId: override.coachId,
-            programId: override.programId,
-            ratePer30MinCents: override.ratePer30MinCents,
-          },
-        ]
-      : [],
-    args.programDefaultCents,
-  );
+// DESIGN-1: the (coach, program) pay mode + rates now live on a SINGLE
+// program_rate_overrides row, fetched ONCE per log (in logHourInternal)
+// and threaded into both pure resolvers below. The row's `payMode`
+// decides which snapshot applies. Both resolvers are pure (no DB) so the
+// branch space is unit-testable without mocks. `ProgramRateOverrideRow`
+// is the inferred SELECT shape of the override row (null = no override).
+type ProgramRateOverrideRow = typeof programRateOverrides.$inferSelect;
+
+// Resolves the per-30-min cents HOURLY pay rate to stamp on a new
+// hour_logs row, from the already-fetched (coach, program) override row.
+// When the override is on "hourly" mode with a rate set, that rate wins;
+// otherwise we fall back to the program's default_rate_per_30_min_cents
+// (which may itself be null → $0 pay until an admin sets one). A
+// per_session override has a null hourly rate and so also falls through
+// to the program default here — harmless, since the per-session snapshot
+// (below) is what the read path uses for those logs.
+export function resolveRateCentsForProgram(
+  override: ProgramRateOverrideRow | undefined | null,
+  programDefaultCents: number | null,
+): number | null {
+  if (
+    override &&
+    override.payMode === "hourly" &&
+    override.ratePer30MinCents != null
+  ) {
+    return override.ratePer30MinCents;
+  }
+  return programDefaultCents;
 }
 
-// QA2 #6 — resolves the per-session pay snapshot (cents) to stamp on a new
-// hour_logs row. Returns the coach's coachPaySettings.perSessionRateCents ONLY
-// when the coach is on the "per_session" pay mode AND has a positive rate set;
-// otherwise null (every hourly coach, every coach with no settings row, and any
-// per_session coach with a missing/non-positive rate → hourly snapshot applies).
-// Preserves the immutable-snapshot rule: changing a coach's mode never re-bills.
-export async function resolvePerSessionRateCents(
-  coachId: string,
-): Promise<number | null> {
-  const [settings] = await db
-    .select()
-    .from(coachPaySettings)
-    .where(eq(coachPaySettings.coachId, coachId))
-    .limit(1);
+// DESIGN-1 — resolves the per-session pay snapshot (cents) to stamp on a new
+// hour_logs row, from the same already-fetched (coach, program) override row.
+// Returns the override's perSessionRateCents ONLY when that override is on the
+// "per_session" pay mode with a positive integer amount; otherwise null (every
+// hourly override, every (coach, program) pair with no override row, and any
+// per_session override with a missing/non-positive amount → the hourly
+// ratePer30MinCents snapshot applies instead). Preserves the immutable-snapshot
+// rule: changing a coach's per-program mode never re-rates existing logs.
+export function resolvePerSessionRateCents(
+  override: ProgramRateOverrideRow | undefined | null,
+): number | null {
   if (
-    settings?.payMode === "per_session" &&
-    typeof settings.perSessionRateCents === "number" &&
-    Number.isInteger(settings.perSessionRateCents) &&
-    settings.perSessionRateCents > 0
+    override &&
+    override.payMode === "per_session" &&
+    typeof override.perSessionRateCents === "number" &&
+    Number.isInteger(override.perSessionRateCents) &&
+    override.perSessionRateCents > 0
   ) {
-    return settings.perSessionRateCents;
+    return override.perSessionRateCents;
   }
   return null;
 }
@@ -129,21 +120,34 @@ export async function logHourInternal(
     throw new ProgramInactiveError(program.id, program.name);
   }
 
-  // Stamp the resolved pay rate as a snapshot (cents per 30-min slot),
-  // mirroring sessions_billing. May be null when the program has no
-  // rate set → $0 pay; reads treat null as 0.
-  const ratePer30MinCents = await resolveRateCentsForProgram({
-    coachId: actor.id,
-    programId: parsed.programId,
-    programDefaultCents: program.defaultRatePer30MinCents,
-  });
+  // DESIGN-1: fetch the (coach, program) override row ONCE — its payMode
+  // decides BOTH pay snapshots below. Per-program now, not coach-wide.
+  const [override] = await db
+    .select()
+    .from(programRateOverrides)
+    .where(
+      and(
+        eq(programRateOverrides.coachId, actor.id),
+        eq(programRateOverrides.programId, parsed.programId),
+      ),
+    )
+    .limit(1);
 
-  // QA2 #6 — per-session pay snapshot. Non-null only when the coach is on the
-  // "per_session" pay mode with a positive rate; otherwise null = hourly basis
-  // (the ratePer30MinCents snapshot above applies). Snapshotted alongside the
-  // hourly rate so a later mode change never re-bills this log. Applies to ALL
-  // insert paths (coach self-log, schedule-confirm auto-confirm, held).
-  const perSessionRateCents = await resolvePerSessionRateCents(actor.id);
+  // Stamp the resolved HOURLY pay rate as a snapshot (cents per 30-min
+  // slot), mirroring sessions_billing. May be null when neither the
+  // override nor the program sets a rate → $0 pay; reads treat null as 0.
+  const ratePer30MinCents = resolveRateCentsForProgram(
+    override,
+    program.defaultRatePer30MinCents,
+  );
+
+  // DESIGN-1 — per-session pay snapshot. Non-null only when this
+  // (coach, program) override is on the "per_session" pay mode with a
+  // positive amount; otherwise null = hourly basis (the ratePer30MinCents
+  // snapshot above applies). Snapshotted alongside the hourly rate so a
+  // later mode change never re-rates this log. Applies to ALL insert paths
+  // (coach self-log, schedule-confirm auto-confirm, held).
+  const perSessionRateCents = resolvePerSessionRateCents(override);
 
   // 1b security B — held-then-approve gate. Runs for EVERY source. The
   // `source` flag (client-supplied) must NOT be able to bypass this check:

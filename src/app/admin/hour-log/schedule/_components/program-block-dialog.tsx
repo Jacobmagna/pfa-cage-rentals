@@ -17,10 +17,9 @@ import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Pencil, Plus, Repeat, Trash2, X } from "lucide-react";
 import {
   cancelSeriesOccurrenceAction,
-  createProgramScheduleBlockFormAction,
   deleteProgramScheduleBlockAction,
   editProgramScheduleSeriesFormAction,
-  updateProgramScheduleBlockFormAction,
+  submitProgramScheduleBlockFormAction,
   type ProgramScheduleActionResult,
 } from "../form-actions";
 import { TimeSelect } from "@/app/_components/time-select";
@@ -242,9 +241,7 @@ export function ProgramBlockDialog({
   const isSeries = Boolean(editInitial?.seriesId && editSeriesInitial);
 
   const [state, formAction, pending] = useActionState(
-    isEdit
-      ? updateProgramScheduleBlockFormAction
-      : createProgramScheduleBlockFormAction,
+    submitProgramScheduleBlockFormAction,
     INITIAL_STATE,
   );
   // RECUR-b2: dedicated action state for the whole-series edit form. Lives

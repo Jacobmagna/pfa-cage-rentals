@@ -20,7 +20,39 @@ describe("parseTimeToHHMM — flexible parse", () => {
 
   it("parses hour-only forms", () => {
     expect(parseTimeToHHMM("2pm")).toBe("14:00");
-    expect(parseTimeToHHMM("2")).toBe("02:00");
+    // bare "2" defaults to PM (see "bare-hour PM default" below)
+    expect(parseTimeToHHMM("2")).toBe("14:00");
+  });
+});
+
+describe("parseTimeToHHMM — bare-hour PM default (Jacob QA 2026-06-18)", () => {
+  it("bare hours 1–7 default to PM", () => {
+    expect(parseTimeToHHMM("1")).toBe("13:00");
+    expect(parseTimeToHHMM("3")).toBe("15:00");
+    expect(parseTimeToHHMM("7")).toBe("19:00");
+    expect(parseTimeToHHMM("330")).toBe("15:30");
+    expect(parseTimeToHHMM("3:30")).toBe("15:30");
+  });
+
+  it("bare hours 8–11 stay AM (morning camps)", () => {
+    expect(parseTimeToHHMM("8")).toBe("08:00");
+    expect(parseTimeToHHMM("9")).toBe("09:00");
+    expect(parseTimeToHHMM("11")).toBe("11:00");
+  });
+
+  it("bare 12 stays noon, bare 0 stays midnight", () => {
+    expect(parseTimeToHHMM("12")).toBe("12:00");
+    expect(parseTimeToHHMM("0")).toBe("00:00");
+  });
+
+  it("explicit am overrides the default", () => {
+    expect(parseTimeToHHMM("3am")).toBe("03:00");
+    expect(parseTimeToHHMM("7 am")).toBe("07:00");
+  });
+
+  it("4-digit 24-hour entries are left literal", () => {
+    expect(parseTimeToHHMM("1430")).toBe("14:30");
+    expect(parseTimeToHHMM("0700")).toBe("07:00");
   });
 });
 

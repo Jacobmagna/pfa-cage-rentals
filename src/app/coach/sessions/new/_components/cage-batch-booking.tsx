@@ -1,16 +1,18 @@
 "use client";
 
 // Batch booking panel for the W3.5b "Select multiple slots" flow on the
-// CageCalendar. The coach taps several green slots on ONE resource row,
-// then this panel collects ONE optional note. Submitting turns each
-// selected 30-min slot into a SEPARATE session via the single batch action
-// logOwnSessionsBatch (one resourceId, many time ranges) — so the whole
+// CageCalendar. The coach taps several green slots — now across ANY
+// resources (cages, bullpens, weight rooms) — then this panel collects
+// ONE optional note. Submitting turns each selected 30-min slot into a
+// SEPARATE session via the single batch action logOwnSessionsBatch (each
+// slot carries its OWN resourceId, many time ranges) — so the whole
 // selection is one atomic batch insert, never multiple calls.
 //
-// Single-resource constraint: the parent guarantees every selected slot
-// belongs to the same `resource` (a cross-resource tap resets the
-// selection upstream), so we never split a submit across resources — that
-// would risk partial failure under neon-http's no-transaction model.
+// Multi-resource: every selected slot carries its own resourceId, so the
+// batch can span several cages/resources. The rate is billed per resource
+// type by the action; we never split a submit across multiple calls — one
+// atomic insert keeps neon-http's no-transaction model safe from partial
+// failure.
 //
 // Typed server errors (overlap / blocked / a race) are translated to
 // friendly inline copy, mirroring cage-slot-booking.tsx / form-actions.ts.
@@ -24,8 +26,10 @@ import {
   ResourceNotFoundError,
   SessionOverlapError,
 } from "@/lib/errors";
-import { selectionToSortedRanges } from "@/lib/coach-calendar";
-import { SCHEDULE_GRID_FIRST_HOUR } from "@/lib/schedule-grid-utils";
+import {
+  SCHEDULE_GRID_FIRST_HOUR,
+  expandSlotKeys,
+} from "@/lib/schedule-grid-utils";
 import { formatPfaTime12h, pfaWallClockAt } from "@/lib/timezone";
 
 // Friendly translation of the typed batch errors — same intent as
@@ -42,16 +46,17 @@ function translateError(err: unknown): string {
 }
 
 export function CageBatchBooking({
-  resource,
+  resources,
   selectedDate,
-  slotIndexes,
+  selection,
   onBooked,
   onCancel,
 }: {
-  resource: ResourceOption;
+  /** Full resource list — used to resolve each slot's resource name. */
+  resources: ResourceOption[];
   selectedDate: Date;
-  /** Selected slot indices on `resource` (any order — sorted here). */
-  slotIndexes: Set<number>;
+  /** Selected slot keys `${resourceId}|${slotIndex}` (any order). */
+  selection: Set<string>;
   /** Called after a successful batch log so the parent re-fetches + confirms. */
   onBooked: (count: number) => void;
   onCancel: () => void;
@@ -60,16 +65,32 @@ export function CageBatchBooking({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  // Deterministic, time-sorted list of the selected slots (each = 30 min).
-  const ranges = selectionToSortedRanges(slotIndexes, SCHEDULE_GRID_FIRST_HOUR);
-  const count = ranges.length;
-
-  // Resolve each slot to its concrete [startAt, endAt) for display + submit.
-  const sessions = ranges.map((r) => {
+  // Deterministic, (resourceId, slotIndex)-sorted list of selected slots
+  // (each = 30 min), resolved to concrete [startAt, endAt) for display +
+  // submit.
+  const expanded = expandSlotKeys(selection, SCHEDULE_GRID_FIRST_HOUR);
+  const rows = expanded.map((r) => {
     const startAt = pfaWallClockAt(selectedDate, r.hour, r.minute);
     const endAt = new Date(startAt.getTime() + 30 * 60_000);
-    return { startAt, endAt };
+    return { resourceId: r.resourceId, startAt, endAt };
   });
+  const count = rows.length;
+
+  // Group rows by resource for the grouped display — each group keeps its
+  // resolved start times in sorted order (expandSlotKeys already sorted).
+  const groups: Array<{ resourceId: string; starts: Date[] }> = [];
+  for (const row of rows) {
+    const last = groups[groups.length - 1];
+    if (last && last.resourceId === row.resourceId) {
+      last.starts.push(row.startAt);
+    } else {
+      groups.push({ resourceId: row.resourceId, starts: [row.startAt] });
+    }
+  }
+  const cageCount = groups.length;
+
+  const resourceName = (id: string) =>
+    resources.find((r) => r.id === id)?.name ?? "Unknown";
 
   const handleSubmit = () => {
     setError(null);
@@ -78,10 +99,10 @@ export function CageBatchBooking({
     startTransition(async () => {
       try {
         await logOwnSessionsBatch({
-          resourceId: resource.id,
-          slots: sessions.map((s) => ({
-            startAt: s.startAt,
-            endAt: s.endAt,
+          slots: rows.map((r) => ({
+            resourceId: r.resourceId,
+            startAt: r.startAt,
+            endAt: r.endAt,
             note: trimmedNote,
           })),
         });
@@ -101,11 +122,26 @@ export function CageBatchBooking({
           <p className="text-xs uppercase tracking-wider text-fg-muted">
             Book {count} {count === 1 ? "slot" : "slots"}
           </p>
-          <p className="text-sm font-semibold text-fg">{resource.name}</p>
-          <p className="text-sm text-fg-muted">
-            {sessions.map((s) => formatPfaTime12h(s.startAt)).join(", ")} —{" "}
-            {count} {count === 1 ? "rental" : "rentals"} of 30 min
-          </p>
+          {cageCount > 1 ? (
+            <p className="text-sm text-fg-muted">
+              across {cageCount} cages
+            </p>
+          ) : null}
+          {/* Grouped by cage — name + its slot times. */}
+          <div className="space-y-1 pt-1">
+            {groups.map((g) => (
+              <div key={g.resourceId} className="space-y-0.5">
+                <p className="text-sm font-semibold text-fg">
+                  {resourceName(g.resourceId)}
+                </p>
+                <p className="text-sm text-fg-muted">
+                  {g.starts.map((s) => formatPfaTime12h(s)).join(", ")} —{" "}
+                  {g.starts.length}{" "}
+                  {g.starts.length === 1 ? "rental" : "rentals"} of 30 min
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
         <button
           type="button"

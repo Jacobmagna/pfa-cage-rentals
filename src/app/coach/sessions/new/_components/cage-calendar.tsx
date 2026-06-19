@@ -118,14 +118,12 @@ export function CageCalendar({
   const [confirmation, setConfirmation] = useState<string | null>(null);
 
   // ── Batch multi-select (W3.5b) ───────────────────────────────────
-  // When ON, tapping green slots builds a selection scoped to ONE
-  // resource row (the batch action is single-resource). A cross-resource
-  // tap RESETS the selection to that new resource.
+  // When ON, tapping green slots builds a selection that can span ANY
+  // resources. The selection is a flat set of `${resourceId}|${slotIndex}`
+  // keys; the batch action carries each slot's own resourceId so one
+  // atomic insert covers a mix of cages.
   const [multiSelect, setMultiSelect] = useState(false);
-  const [selection, setSelection] = useState<{
-    resourceId: string | null;
-    slotIndexes: Set<number>;
-  }>({ resourceId: null, slotIndexes: new Set() });
+  const [selection, setSelection] = useState<Set<string>>(new Set());
   // Whether the booking form modal is open for the current selection
   // (serves both the single-slot and batch paths).
   const [formOpen, setFormOpen] = useState(false);
@@ -160,7 +158,7 @@ export function CageCalendar({
   }, [refresh, dateStr]);
 
   const clearSelection = () => {
-    setSelection({ resourceId: null, slotIndexes: new Set() });
+    setSelection(new Set());
     setFormOpen(false);
   };
 
@@ -260,9 +258,7 @@ export function CageCalendar({
             selected?.resourceId === mobileResource.id &&
             selected.slotIndex === slotIdx,
           isBatchSelected:
-            multiSelect &&
-            selection.resourceId === mobileResource.id &&
-            selection.slotIndexes.has(slotIdx),
+            multiSelect && selection.has(`${mobileResource.id}|${slotIdx}`),
           isRevealed:
             revealed?.resourceId === mobileResource.id &&
             revealed.slotIndex === slotIdx,
@@ -270,11 +266,12 @@ export function CageCalendar({
       })
     : [];
 
-  // Active batch-selection resource + count (derived during render).
-  const selectionResource = selection.resourceId
-    ? resources.find((r) => r.id === selection.resourceId) ?? null
-    : null;
-  const selectionCount = selection.slotIndexes.size;
+  // Batch-selection count + how many distinct cages it spans (derived
+  // during render). Keys are `${resourceId}|${slotIndex}`.
+  const selectionCount = selection.size;
+  const selectionCageCount = new Set(
+    [...selection].map((k) => k.split("|")[0]),
+  ).size;
 
   // How many consecutive free 30-min slots start at the selected slot —
   // the booking-duration headroom. Multiplied by 30 gives the max rental
@@ -336,24 +333,17 @@ export function CageCalendar({
     });
   };
 
-  // Toggle a green slot in the batch selection. A tap on a slot whose
-  // resource differs from the active one (with a non-empty set) RESETS
-  // the selection to that new resource — one active resource at a time.
+  // Toggle a green slot in the batch selection. Selections can span ANY
+  // resources — toggling a slot just adds/removes its
+  // `${resourceId}|${slotIndex}` key; slots on other cages persist.
   const toggleSelectSlot = (resourceId: string, slotIndex: number) => {
     setFormOpen(false);
     setSelection((prev) => {
-      // Different resource than the active selection → reset to the new
-      // resource with just this slot.
-      if (prev.resourceId !== null && prev.resourceId !== resourceId) {
-        return { resourceId, slotIndexes: new Set([slotIndex]) };
-      }
-      const next = new Set(prev.slotIndexes);
-      if (next.has(slotIndex)) next.delete(slotIndex);
-      else next.add(slotIndex);
-      return {
-        resourceId: next.size === 0 ? null : resourceId,
-        slotIndexes: next,
-      };
+      const key = `${resourceId}|${slotIndex}`;
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
     });
   };
 
@@ -462,7 +452,7 @@ export function CageCalendar({
         </button>
         {multiSelect ? (
           <p className="text-[11px] text-fg-subtle">
-            Tap open slots in one row, then book them together.
+            Tap open slots across any cages, then book them together.
           </p>
         ) : null}
       </div>
@@ -481,17 +471,20 @@ export function CageCalendar({
           clear "Schedule" action without hunting below the grid. Serves
           BOTH the single-slot and batch paths. */}
       {(!multiSelect && selected && selectedResource) ||
-      (multiSelect && selectionCount > 0 && selectionResource) ? (
+      (multiSelect && selectionCount > 0) ? (
         // Offsets track the AppShell header height so the bar rests below it
         // rather than sliding under the z-40 header: mobile two-row ≈110px,
         // desktop one-row h-16=64px.
         <div className="sticky top-[110px] md:top-16 z-30 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gold/40 bg-gold/5 px-4 py-3 shadow-[var(--shadow-sm)] backdrop-blur supports-[backdrop-filter]:bg-page/80">
           <p className="text-sm font-medium text-fg">
-            {multiSelect && selectionResource ? (
+            {multiSelect && selectionCount > 0 ? (
               <>
                 {selectionCount} {selectionCount === 1 ? "slot" : "slots"}{" "}
-                selected ·{" "}
-                <span className="text-fg-muted">{selectionResource.name}</span>
+                across{" "}
+                <span className="text-fg-muted">
+                  {selectionCageCount}{" "}
+                  {selectionCageCount === 1 ? "cage" : "cages"}
+                </span>
               </>
             ) : selectedResource ? (
               <>
@@ -574,9 +567,7 @@ export function CageCalendar({
               const isSelected =
                 selected?.resourceId === r.id && selected.slotIndex === slotIdx;
               const isBatchSelected =
-                multiSelect &&
-                selection.resourceId === r.id &&
-                selection.slotIndexes.has(slotIdx);
+                multiSelect && selection.has(`${r.id}|${slotIdx}`);
               const { hour, minute } = slotHourMinute(slotIdx);
               return (
                 <SlotCell
@@ -659,7 +650,7 @@ export function CageCalendar({
         </div>
         <p className="text-fg-subtle">
           {multiSelect
-            ? "Tap open slots in a single row to select them, then book the batch. Tapping a slot in a different row starts a new selection."
+            ? "Tap open slots across any cages to select them, then book the batch together."
             : "Tap an open slot to book it. Tap a red slot to see who has it."}{" "}
           <span className="hidden md:inline">
             Rotate your phone or scroll sideways to see the full day.
@@ -679,7 +670,7 @@ export function CageCalendar({
         open={
           formOpen &&
           ((!multiSelect && !!selected && !!selectedResource) ||
-            (multiSelect && selectionCount > 0 && !!selectionResource))
+            (multiSelect && selectionCount > 0))
         }
         onClose={() => setFormOpen(false)}
       >
@@ -692,11 +683,11 @@ export function CageCalendar({
             onBooked={handleBooked}
             onCancel={() => setFormOpen(false)}
           />
-        ) : multiSelect && selectionResource && selectionCount > 0 ? (
+        ) : multiSelect && selectionCount > 0 ? (
           <CageBatchBooking
-            resource={selectionResource}
+            resources={resources}
             selectedDate={selectedDate}
-            slotIndexes={selection.slotIndexes}
+            selection={selection}
             onBooked={handleBatchBooked}
             onCancel={() => setFormOpen(false)}
           />

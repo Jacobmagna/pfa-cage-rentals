@@ -51,30 +51,73 @@ export const updateSessionSchema = sessionBase
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 export type UpdateSessionInput = z.infer<typeof updateSessionSchema>;
 
-// Batch-create: one coach + one resource, with N per-slot rows (each
-// with its own start/end/note). Used by the multi-slot UI on
-// /coach/sessions/new and the admin session dialogs. Hard cap at 50
-// slots — a half-day of back-to-back 30-min lessons is ~20, so 50
-// covers any reasonable case while preventing pathological inputs from
-// blowing up the server.
-export const createSessionBatchSchema = z.object({
-  coachId: z.string().min(1, "coachId is required"),
-  resourceId: z.string().min(1, "resourceId is required"),
-  slots: z
-    .array(
-      z
-        .object({
-          startAt: z.coerce.date(),
-          endAt: z.coerce.date(),
-          note: z.string().max(500).nullish(),
-        })
-        .refine(maxDur, maxDurError),
-    )
-    .min(1, "at least one slot is required")
-    .max(50, "too many slots — max 50 per submission"),
-});
+// Batch-create: one coach + N per-slot rows (each with its own
+// start/end/note, and OPTIONALLY its own resource). Used by the
+// multi-slot UI on /coach/sessions/new and the admin session dialogs.
+//
+// Multi-resource support: a single atomic batch can span multiple cages
+// (or a cage + a bullpen), each row billed at ITS resource type's rate.
+// Each slot may carry its own `resourceId`; if it doesn't, the slot
+// falls back to the top-level `resourceId`. Both `resourceId` fields are
+// optional at the shape level, but the superRefine below guarantees
+// every slot resolves to SOME resourceId. Back-compat: the old
+// single-resource shape (top-level `resourceId` + slots with no
+// per-slot resourceId) still parses and behaves exactly as before.
+//
+// Hard cap at 50 slots — a half-day of back-to-back 30-min lessons is
+// ~20, so 50 covers any reasonable case while preventing pathological
+// inputs from blowing up the server.
+export const createSessionBatchSchema = z
+  .object({
+    coachId: z.string().min(1, "coachId is required"),
+    // Optional top-level default resource — a slot without its own
+    // resourceId inherits this. Still required in practice (the
+    // superRefine rejects a slot that resolves to nothing), but no
+    // longer mandatory at the shape level so per-slot resources can
+    // fully supply it.
+    resourceId: z.string().min(1).optional(),
+    slots: z
+      .array(
+        z
+          .object({
+            startAt: z.coerce.date(),
+            endAt: z.coerce.date(),
+            note: z.string().max(500).nullish(),
+            // Optional per-slot resource. When present it WINS over the
+            // top-level resourceId for that slot.
+            resourceId: z.string().min(1).optional(),
+          })
+          .refine(maxDur, maxDurError),
+      )
+      .min(1, "at least one slot is required")
+      .max(50, "too many slots — max 50 per submission"),
+  })
+  .superRefine((val, ctx) => {
+    // Every slot must resolve to a resourceId via slot-or-top-level.
+    val.slots.forEach((slot, i) => {
+      if (!effectiveResourceId(slot, val.resourceId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "resourceId is required (slot or top-level)",
+          path: ["slots", i, "resourceId"],
+        });
+      }
+    });
+  });
 
 export type CreateSessionBatchInput = z.infer<typeof createSessionBatchSchema>;
+
+// Single source of truth for slot→resource resolution: a slot's own
+// resourceId wins; otherwise it inherits the batch's top-level
+// resourceId. Shared by the schema's superRefine, the batch action, and
+// the tests so the rule can never drift between them. Returns undefined
+// only when NEITHER is set (the case the superRefine rejects).
+export function effectiveResourceId(
+  slot: { resourceId?: string },
+  topResourceId?: string,
+): string | undefined {
+  return slot.resourceId ?? topResourceId;
+}
 
 // 1b security: a coach's request to remove a PAST cage rental (an
 // admin approves/denies it). `reason` is the coach's optional "why

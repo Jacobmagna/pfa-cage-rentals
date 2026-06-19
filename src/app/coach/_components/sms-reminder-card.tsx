@@ -15,6 +15,15 @@
 // just hides the card for THIS view (client state) so it reappears next
 // visit until the coach actually saves.
 //
+// PLACEMENT (`surface` prop, DESIGN-2): the card lives in two places.
+//   • surface="home" (default, /coach) → acts as a FIRST-LOGIN setup
+//     prompt only. Once the prompt has been answered (already-answered on
+//     load, or live after Save), it COLLAPSES (renders nothing) and never
+//     shows the compact management card here. "Not now" is offered here.
+//   • surface="settings" (/coach/settings) → the ongoing management home.
+//     Never collapses: shows the setup form when unanswered (no "Not now")
+//     and the compact "Text reminders" management card once answered.
+//
 // Server contract (src/app/coach/actions.ts → src/lib/server/sms-actions.ts):
 //   • saveSmsSetup({ optIn, phone }) — first-login save + later phone edits.
 //   • setSmsOptIn({ optIn })         — later toggle (phone must be on file).
@@ -41,10 +50,12 @@ export function SmsReminderCard({
   initialPhone,
   initialOptIn,
   initialPromptAnswered,
+  surface = "home",
 }: {
   initialPhone: string | null;
   initialOptIn: boolean;
   initialPromptAnswered: boolean;
+  surface?: "home" | "settings";
 }) {
   const [promptAnswered, setPromptAnswered] = useState(initialPromptAnswered);
   const [phone, setPhone] = useState(initialPhone ?? "");
@@ -60,6 +71,10 @@ export function SmsReminderCard({
   const [draftOptIn, setDraftOptIn] = useState(initialOptIn);
 
   if (!promptAnswered && dismissed) return null;
+  // On the home page the card is the first-login prompt only: once the
+  // prompt has been answered (on load or live after Save), collapse for
+  // good. The compact management card only ever lives on /coach/settings.
+  if (surface === "home" && promptAnswered) return null;
 
   // ── First-login setup prompt ──────────────────────────────────────
   if (!promptAnswered) {
@@ -195,14 +210,16 @@ export function SmsReminderCard({
           >
             {isPending ? "Saving…" : "Save"}
           </button>
-          <button
-            type="button"
-            onClick={() => setDismissed(true)}
-            disabled={isPending}
-            className="text-sm font-medium text-fg-muted underline-offset-2 transition hover:text-fg hover:underline disabled:opacity-50"
-          >
-            Not now
-          </button>
+          {surface === "home" ? (
+            <button
+              type="button"
+              onClick={() => setDismissed(true)}
+              disabled={isPending}
+              className="text-sm font-medium text-fg-muted underline-offset-2 transition hover:text-fg hover:underline disabled:opacity-50"
+            >
+              Not now
+            </button>
+          ) : null}
         </div>
       </section>
     );

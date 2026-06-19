@@ -118,14 +118,16 @@ function ConfirmCard({
           <CalendarClock className="h-4.5 w-4.5" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-fg">
-            {block.programName}
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="truncate text-sm font-semibold text-fg">
+              {block.programName}
+            </span>
             {block.overdue ? (
-              <span className="ml-2 inline-flex items-center rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger align-middle">
+              <span className="shrink-0 inline-flex items-center rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger">
                 Overdue
               </span>
             ) : null}
-          </p>
+          </div>
           <p className="text-xs text-fg-muted tabular-nums">
             {block.whenLabel}
           </p>

@@ -72,6 +72,14 @@ export function parseTimeToHHMM(raw: string): string {
     } else {
       if (hour !== 12) hour += 12; // 1–11 PM → +12; 12 PM stays 12
     }
+  } else if (digits.length <= 3 && hour >= 1 && hour <= 7) {
+    // No am/pm typed: a bare 12-hour-style hour of 1–7 means afternoon/
+    // evening at this facility (open 8 AM–10 PM), so default it to PM
+    // (1–7 → 13:00–19:00). 8–11 stay AM (morning camps), 12 stays noon,
+    // and 0 / 13–23 / 4-digit 24h entries like "1430" are left literal.
+    // An explicit "am" still overrides (e.g. "3am" → 03:00). Jacob's QA
+    // decision 2026-06-18: bare hours default toward PM.
+    hour += 12;
   }
 
   if (hour > 23) return "";

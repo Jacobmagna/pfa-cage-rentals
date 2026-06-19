@@ -58,11 +58,6 @@ export function AuditTable({ rows }: { rows: AuditRow[] }) {
               </td>
               <td className="px-4 py-3 text-sm">
                 <p className="text-fg">{row.actorName ?? row.actorEmail ?? "—"}</p>
-                {row.actorName ? (
-                  <p className="text-[11px] text-fg-subtle mt-0.5">
-                    {row.actorEmail}
-                  </p>
-                ) : null}
               </td>
               <td className="px-4 py-3">
                 <span

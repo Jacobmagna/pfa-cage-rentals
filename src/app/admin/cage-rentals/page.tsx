@@ -128,7 +128,7 @@ export default async function AdminHome() {
         />
         <StatCard
           icon={<ClipboardList className="h-4 w-4" />}
-          label="Active blocks today"
+          label="Resources held today"
           value={blocksToday.toString()}
           sub={blocksToday === 0 ? "Cages all bookable" : "Resources held"}
         />

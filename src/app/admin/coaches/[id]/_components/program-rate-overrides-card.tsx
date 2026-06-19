@@ -7,10 +7,13 @@
 //
 // DESIGN-1: each row now also carries a per-program PAY MODE toggle —
 // Hourly (the per-30-min rate, entered/displayed per hour) vs Per session
-// (a flat per-session dollar amount). The visible amount field swaps with
-// the mode; the inactive field is kept as a hidden input so the payload
-// always carries both (mirrors the coach-wide pay-mode card pattern that
-// this replaces).
+// (a flat per-session dollar amount). BOTH amount fields are always
+// rendered as CONTROLLED inputs with independent state, so the payload
+// always carries both `rateDollars` and `perSessionDollars` (the server
+// reads only the one matching `payMode`). The mode toggle only swaps which
+// field is visible — values NEVER bleed across a mode flip (the two inputs
+// are stable, distinctly-keyed DOM nodes, so React never reconciles them as
+// the same element).
 //
 // Each row owns its own useActionState for the save form so error states
 // don't bleed between rows. Remove uses useTransition + the public
@@ -123,6 +126,16 @@ function Row({
   // Controlled mode so the amount field swaps live as the admin toggles.
   const [mode, setMode] = useState<PayMode>(seededMode);
 
+  // The two amount fields are CONTROLLED with INDEPENDENT state so a value
+  // typed in one mode can never bleed into the other when the admin toggles
+  // (the old uncontrolled defaultValue inputs shared a DOM position and
+  // React reconciled them as one node, leaking e.g. a per-session "$100"
+  // into the hourly field → a silent pay-basis flip on Save). Seeded from
+  // the same seededHourly/seededFlat values; the formKey remount re-runs
+  // these useState calls so a successful save re-seeds from refreshed props.
+  const [hourlyVal, setHourlyVal] = useState(seededHourly);
+  const [flatVal, setFlatVal] = useState(seededFlat);
+
   // Re-key the form when the override changes (server re-fetched) or on a
   // validation error. Re-keying remounts the form so the controlled mode +
   // defaultValues re-seed. Include payMode + both amounts so a same-cents
@@ -178,18 +191,27 @@ function Row({
         )}
       </div>
 
+      {/* Left column: in hourly mode show the program's default hourly rate;
+          in per-session mode the hourly default is irrelevant, so show a
+          plain "—" with a "per session" caption. Driven by controlled mode
+          so the toggle visibly updates this column live. */}
       <div className="hidden sm:block text-xs text-fg-muted">
         <p className="font-mono tnum tabular-nums">
-          {defaultDollars !== null ? `$${defaultDollars}` : "—"}
+          {mode === "per_session"
+            ? "—"
+            : defaultDollars !== null
+              ? `$${defaultDollars}`
+              : "—"}
         </p>
         <p className="text-[10px] text-fg-subtle uppercase tracking-wider mt-0.5">
-          default / hr
+          {mode === "per_session" ? "per session" : "default / hr"}
         </p>
       </div>
 
       <div className="min-w-0">
         {/* Mode toggle (segmented). The hidden payMode input above mirrors
-            this so the payload carries the selected mode. */}
+            this so the payload carries the selected mode. It ONLY swaps which
+            amount field is visible — it never clears or copies either value. */}
         <div
           role="radiogroup"
           aria-label={`Pay mode for ${row.programName}`}
@@ -223,59 +245,53 @@ function Row({
           </button>
         </div>
 
-        {/* The visible amount field swaps with the mode; the inactive one is
-            kept as a hidden input so the payload always carries both. */}
-        {mode === "hourly" ? (
-          <>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle text-sm">
-                $
-              </span>
-              <input
-                type="text"
-                inputMode="decimal"
-                name="rateDollars"
-                defaultValue={seededHourly}
-                placeholder={defaultDollars ?? "0.00"}
-                aria-label={`Override hourly pay rate for ${row.programName}`}
-                className="w-full pl-7 pr-3 h-10 rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
-              />
-            </div>
-            <span className="block text-[10px] text-fg-subtle mt-1">
-              Per hour
+        {/* BOTH fields are ALWAYS rendered as stable, distinctly-keyed,
+            CONTROLLED inputs so the payload always carries both names and
+            values never bleed across a mode toggle. The inactive field's
+            CONTAINER is `hidden` (HTML hidden attr) — the <input> stays in
+            the DOM with name + controlled value so it still submits. */}
+        <div hidden={mode !== "hourly"}>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle text-sm">
+              $
             </span>
             <input
-              type="hidden"
-              name="perSessionDollars"
-              defaultValue={seededFlat}
-            />
-          </>
-        ) : (
-          <>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle text-sm">
-                $
-              </span>
-              <input
-                type="text"
-                inputMode="decimal"
-                name="perSessionDollars"
-                defaultValue={seededFlat}
-                placeholder="0.00"
-                aria-label={`Per-session pay amount for ${row.programName}`}
-                className="w-full pl-7 pr-3 h-10 rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
-              />
-            </div>
-            <span className="block text-[10px] text-fg-subtle mt-1">
-              Flat per session
-            </span>
-            <input
-              type="hidden"
+              key="rate"
+              type="text"
+              inputMode="decimal"
               name="rateDollars"
-              defaultValue={seededHourly}
+              value={hourlyVal}
+              onChange={(e) => setHourlyVal(e.target.value)}
+              placeholder={defaultDollars ?? "0.00"}
+              aria-label={`Override hourly pay rate for ${row.programName}`}
+              className="w-full pl-7 pr-3 h-10 rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
             />
-          </>
-        )}
+          </div>
+          <span className="block text-[10px] text-fg-subtle mt-1">
+            Per hour
+          </span>
+        </div>
+        <div hidden={mode !== "per_session"}>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle text-sm">
+              $
+            </span>
+            <input
+              key="persession"
+              type="text"
+              inputMode="decimal"
+              name="perSessionDollars"
+              value={flatVal}
+              onChange={(e) => setFlatVal(e.target.value)}
+              placeholder="0.00"
+              aria-label={`Per-session pay amount for ${row.programName}`}
+              className="w-full pl-7 pr-3 h-10 rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+            />
+          </div>
+          <span className="block text-[10px] text-fg-subtle mt-1">
+            Flat per session
+          </span>
+        </div>
 
         {!state.ok ? (
           <p role="alert" className="mt-1 text-[11px] text-danger">

@@ -260,31 +260,40 @@ export default async function AdminCoachDetailPage({
       : (RESOURCE_LABEL[suffix] ?? suffix);
     const kind = isProgram ? "Work rate" : "Rental rate";
 
-    // Pull the per-30-min cents out of the diff's before/after snapshots.
+    // Pull the rate snapshot out of the diff's before/after. A PER-SESSION
+    // program override (DESIGN-1) stamps ratePer30MinCents = null and puts the
+    // money in perSessionRateCents, so we must read both keys.
     const diff = (r.diff ?? {}) as {
-      before?: { ratePer30MinCents?: number } | null;
-      after?: { ratePer30MinCents?: number } | null;
+      before?: { ratePer30MinCents?: number; perSessionRateCents?: number } | null;
+      after?: { ratePer30MinCents?: number; perSessionRateCents?: number } | null;
     };
-    const beforeCents = diff.before?.ratePer30MinCents ?? null;
-    const afterCents = diff.after?.ratePer30MinCents ?? null;
 
     // Weight room resource overrides are DISPLAYED per HOUR (cents × 2),
     // like program rates; cages & bullpens stay per 30 min.
     const isHourly = isProgram || suffix === "weight_room";
-    const fmt = (cents: number | null): string | null =>
-      cents == null
-        ? null
-        : isHourly
-          ? `$${((cents * 2) / 100).toFixed(2)} / hr`
-          : `$${(cents / 100).toFixed(2)} / 30 min`;
+    const fmtSnap = (
+      snap: { ratePer30MinCents?: number; perSessionRateCents?: number } | null | undefined,
+    ): string | null => {
+      if (!snap) return null;
+      // Per-session is a FLAT amount → cents/100 with "/ session" (no ×2).
+      if (snap.perSessionRateCents != null) {
+        return `$${(snap.perSessionRateCents / 100).toFixed(2)} / session`;
+      }
+      if (snap.ratePer30MinCents != null) {
+        return isHourly
+          ? `$${((snap.ratePer30MinCents * 2) / 100).toFixed(2)} / hr`
+          : `$${(snap.ratePer30MinCents / 100).toFixed(2)} / 30 min`;
+      }
+      return null;
+    };
 
     return {
       id: r.id,
       action: r.action,
       target,
       kind,
-      beforeLabel: fmt(beforeCents),
-      afterLabel: fmt(afterCents),
+      beforeLabel: fmtSnap(diff.before),
+      afterLabel: fmtSnap(diff.after),
       ts: r.ts,
       actor: r.actorName ?? r.actorEmail ?? "—",
     };

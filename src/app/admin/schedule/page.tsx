@@ -1,6 +1,4 @@
-import Link from "next/link";
 import { and, asc, eq, gte, lt } from "drizzle-orm";
-import { ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import {
   blockedTimes,
@@ -9,6 +7,7 @@ import {
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
+import { RentalsSubnav } from "@/app/admin/_components/rentals-subnav";
 import { listActiveCoaches } from "@/lib/server/coaches";
 import { formatPfaDateLong, parsePfaInput, pfaDayEnd, pfaDayStart } from "@/lib/timezone";
 import { AutoRefresh } from "./_components/auto-refresh";
@@ -103,14 +102,8 @@ export default async function AdminSchedulePage({
   const sessionCount = sessions.length;
 
   return (
-    <>
-      <Link
-        href="/admin/cage-rentals"
-        className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
-      >
-        <ArrowLeft className="h-3.5 w-3.5" />
-        Back to Rentals
-      </Link>
+    <div className="space-y-6">
+      <RentalsSubnav />
 
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div className="space-y-1.5">
@@ -142,7 +135,7 @@ export default async function AdminSchedulePage({
       />
 
       <AutoRefresh />
-    </>
+    </div>
   );
 }
 

@@ -1,6 +1,6 @@
-import Link from "next/link";
-import { ArrowLeft, Inbox } from "lucide-react";
+import { Inbox } from "lucide-react";
 import { requireRole } from "@/lib/authz";
+import { RentalsSubnav } from "@/app/admin/_components/rentals-subnav";
 import { loadPendingRemovalRequests } from "@/lib/server/session-removal-actions";
 import { formatPfaDateMedium, formatPfaTime12h } from "@/lib/timezone";
 import { RemovalRequestRowActions } from "./removal-request-row-actions";
@@ -19,14 +19,8 @@ export default async function RemovalRequestsPage() {
   const requests = await loadPendingRemovalRequests();
 
   return (
-    <>
-      <Link
-        href="/admin/cage-rentals"
-        className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg mb-6 transition-colors"
-      >
-        <ArrowLeft className="h-3.5 w-3.5" />
-        Back to Rentals
-      </Link>
+    <div className="space-y-6">
+      <RentalsSubnav />
 
       <div className="mb-6 space-y-1.5">
         <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
@@ -117,6 +111,6 @@ export default async function RemovalRequestsPage() {
           </table>
         </div>
       )}
-    </>
+    </div>
   );
 }

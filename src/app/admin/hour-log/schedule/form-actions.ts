@@ -205,6 +205,21 @@ export async function updateProgramScheduleBlockFormAction(
   }
 }
 
+export async function submitProgramScheduleBlockFormAction(
+  _prev: ProgramScheduleActionResult,
+  formData: FormData,
+): Promise<ProgramScheduleActionResult> {
+  const id = formData.get("id")?.toString();
+  // A present hidden `id` means an edit of an existing block; its absence
+  // means a create (one-off OR recurring — createProgramScheduleBlockFormAction
+  // branches on the `recurring` field internally). A single stable action
+  // avoids the React useActionState deferred-action race that previously let
+  // the update action fire on a create (-> spurious "Missing block id").
+  return id
+    ? updateProgramScheduleBlockFormAction(_prev, formData)
+    : createProgramScheduleBlockFormAction(_prev, formData);
+}
+
 // RECUR-b2: edit the WHOLE series (locked model — no single-occurrence
 // edit). Reads the hidden seriesId, rebuilds the full editable series
 // definition from the form via buildSeriesInput (which prefers the

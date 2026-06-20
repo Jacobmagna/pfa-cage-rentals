@@ -61,7 +61,11 @@ export function TabNav({
   const pathname = usePathname() ?? "";
   const base = role === "admin" ? "/admin" : "/coach";
   const tabs = role === "coach" ? [...COACH_TABS] : [...ADMIN_TABS];
-  if (role === "admin" || scheduleAdmin) tabs.push({ key: "master", label: "Master" });
+  // Master tab is for FLAGGED COACHES only. Real admins manage schedules
+  // from their own admin nav (/admin/schedule), so they don't get this tab
+  // — the requireScheduleAccess guard still lets admins reach /master if
+  // they navigate there directly; they just won't see/use the tab.
+  if (role === "coach" && scheduleAdmin) tabs.push({ key: "master", label: "Master" });
   const current = activeTab(pathname, role);
 
   return (

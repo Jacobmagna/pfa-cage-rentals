@@ -39,7 +39,11 @@ export async function ensureFixtureUsers(): Promise<FixtureUsers> {
     })
     .onConflictDoUpdate({
       target: users.email,
-      set: { role: "admin", name: "Integration Admin" },
+      // deletedAt: null un-soft-deletes a fixture a prior suite (e.g. the
+      // J9 account-deletion / archive tests) may have left tombstoned —
+      // active-coach surfaces filter isNull(deletedAt), so a stale
+      // deletedAt makes the fixture invisible to the code under test.
+      set: { role: "admin", name: "Integration Admin", deletedAt: null },
     });
 
   // Plain coach: role coach, scheduleAdmin explicitly false. Forcing the
@@ -54,7 +58,12 @@ export async function ensureFixtureUsers(): Promise<FixtureUsers> {
     })
     .onConflictDoUpdate({
       target: users.email,
-      set: { role: "coach", name: "Integration Coach", scheduleAdmin: false },
+      set: {
+        role: "coach",
+        name: "Integration Coach",
+        scheduleAdmin: false,
+        deletedAt: null,
+      },
     });
 
   // Flagged coach ("Schedule Manager"): role coach, scheduleAdmin true.
@@ -74,6 +83,7 @@ export async function ensureFixtureUsers(): Promise<FixtureUsers> {
         role: "coach",
         name: "Integration Flagged Coach",
         scheduleAdmin: true,
+        deletedAt: null,
       },
     });
 

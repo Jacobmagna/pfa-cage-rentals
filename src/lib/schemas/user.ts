@@ -29,6 +29,17 @@ export const deleteCoachSchema = z.object({
   coachId: z.string().min(1, "coachId is required"),
 });
 
+// Schedule-Manager grant/revoke input. `enabled` is the new value of the
+// coach's schedule_admin flag. Role is NOT accepted here — see the file
+// header: this never elevates anyone to admin, it only toggles a coach's
+// scoped Master-schedule access, and the public action is requireRole("admin")
+// gated so a coach can never call it (no self-escalation).
+export const setScheduleAdminSchema = z.object({
+  coachId: z.string().min(1, "coachId is required"),
+  enabled: z.boolean(),
+});
+
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 export type DeleteCoachInput = z.infer<typeof deleteCoachSchema>;
+export type SetScheduleAdminInput = z.infer<typeof setScheduleAdminSchema>;

@@ -30,6 +30,8 @@ import {
 import { updateUserHandlesInternal } from "@/lib/server/handles-actions";
 import { updateCoachNotesInternal } from "@/lib/server/coach-notes-actions";
 import { updateCoachPaySettingsInternal } from "@/lib/server/coach-pay-settings-actions";
+import { setScheduleAdminInternal } from "@/lib/server/schedule-admin-actions";
+import { setScheduleAdminSchema } from "@/lib/schemas/user";
 
 function revalidateOverrideSurfaces(coachId: string) {
   revalidatePath(`/admin/coaches/${coachId}`);
@@ -100,6 +102,21 @@ export async function updateCoachNotes(input: unknown) {
   const session = await requireRole("admin");
   const result = await updateCoachNotesInternal(session.user, input);
   revalidatePath(`/admin/coaches/${result.id}`);
+  return result;
+}
+
+// Schedule Manager Part 2 — grant/revoke the schedule_admin flag on a
+// coach. requireRole("admin") is the anti-escalation boundary: a coach
+// (even a flagged "Schedule Manager") is redirected before reaching the
+// mutation, so no one can self-grant or grant another coach. Revalidates
+// the coach detail page (so the Schedule Manager card re-renders the new
+// state) and /admin/coaches (the list may surface the flag later).
+export async function setCoachScheduleAdmin(input: unknown) {
+  const session = await requireRole("admin");
+  const { coachId, enabled } = setScheduleAdminSchema.parse(input);
+  const result = await setScheduleAdminInternal(session.user, coachId, enabled);
+  revalidatePath(`/admin/coaches/${coachId}`);
+  revalidatePath("/admin/coaches");
   return result;
 }
 

@@ -35,6 +35,7 @@ import {
 import { DeleteCoachCard } from "./_components/delete-coach-card";
 import { CoachPaymentsCard } from "./_components/coach-payments-card";
 import { CoachHandlesCard } from "./_components/handles-card";
+import { ScheduleManagerCard } from "./_components/schedule-manager-card";
 
 // Coach detail page. Renders the coach identity header + the H3
 // rate-override editor (one row per resource type, inline save +
@@ -80,6 +81,7 @@ export default async function AdminCoachDetailPage({
           phone: users.phone,
           zelleContact: users.zelleContact,
           notes: users.notes,
+          scheduleAdmin: users.scheduleAdmin,
           smsOptIn: users.smsOptIn,
           smsConsentAt: users.smsConsentAt,
           smsOptOut: users.smsOptOut,
@@ -335,6 +337,11 @@ export default async function AdminCoachDetailPage({
       <RateHistoryCard rows={rateHistoryRows} />
 
       <CoachNotesCard coachId={coach.id} initialNotes={coach.notes} />
+
+      <ScheduleManagerCard
+        coachId={coach.id}
+        initialEnabled={coach.scheduleAdmin}
+      />
 
       <CoachHandlesCard
         coachId={coach.id}

@@ -124,10 +124,10 @@ export function SmsReminderCard({
           Want a text reminder if you forget to log work?
         </h2>
         <p className="mt-2 text-sm text-fg-muted leading-relaxed">
-          PFA can send you a text message reminder if it looks like you had
-          scheduled work but didn&apos;t log it. This is optional — you can
-          turn it on or off any time. Standard message and data rates may
-          apply; reply STOP to opt out.
+          PFA Engine (operated by Magna Software LLC) can send you a text
+          message reminder if it looks like you had scheduled work but
+          didn&apos;t log it. This is optional — you can turn it on or off any
+          time. Message &amp; data rates may apply; reply STOP to cancel.
         </p>
 
         <div className="mt-4 space-y-4">
@@ -166,10 +166,9 @@ export function SmsReminderCard({
               className="cursor-pointer text-xs text-fg-muted leading-snug"
             >
               I agree to receive account-notification text messages from PFA
-              Engine (a daily reminder to log my coaching hours). Message
-              frequency is about 1 message per day on days with unlogged hours.
-              Message and data rates may apply. Reply STOP to opt out, HELP for
-              help. See our{" "}
+              Engine, operated by Magna Software LLC — about 1 reminder per day
+              on days with unlogged hours. Message &amp; data rates may apply.
+              Reply STOP to cancel, HELP for help. See{" "}
               <a
                 href="/sms-terms"
                 target="_blank"
@@ -389,8 +388,9 @@ export function SmsReminderCard({
 function ConsentNote({ className }: { className?: string }) {
   return (
     <p className={`text-xs text-fg-subtle leading-snug ${className ?? ""}`}>
-      Message and data rates may apply; about 1 message/day on days with
-      unlogged hours. Reply STOP to opt out, HELP for help. See our{" "}
+      Account-notification texts from PFA Engine, operated by Magna Software
+      LLC — about 1 message/day on days with unlogged hours. Message &amp; data
+      rates may apply. Reply STOP to cancel, HELP for help. See{" "}
       <a
         href="/sms-terms"
         target="_blank"

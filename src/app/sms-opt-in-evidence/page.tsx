@@ -99,10 +99,10 @@ export default function SmsOptInEvidencePage() {
         <Section title="The exact consent disclosure">
           <p>This is the verbatim text a coach agrees to when they opt in:</p>
           <blockquote className="mt-2 rounded-lg border border-line bg-surface-2 p-4 text-fg">
-            I agree to receive account-notification text messages from PFA Engine
-            (a daily reminder to log my coaching hours). Message frequency is
-            about 1 message per day on days with unlogged hours. Message and data
-            rates may apply. Reply STOP to opt out, HELP for help.
+            I agree to receive account-notification text messages from PFA
+            Engine, operated by Magna Software LLC — about 1 reminder per day on
+            days with unlogged hours. Message &amp; data rates may apply. Reply
+            STOP to cancel, HELP for help. See SMS Terms and Privacy Policy.
           </blockquote>
         </Section>
 

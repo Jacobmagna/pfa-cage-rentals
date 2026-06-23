@@ -31,7 +31,15 @@ export const dynamic = "force-dynamic";
 
 // The canonical, fixed URL Twilio's "A message comes in" webhook MUST be set
 // to. Used to reconstruct the signed string (avoids proxy host/proto drift).
-export const INBOUND_WEBHOOK_URL = "https://pfaengine.com/api/sms/inbound";
+//
+// MUST be the WWW host: www.pfaengine.com is the primary production domain, so
+// the bare apex (pfaengine.com) 307-redirects to www at the Vercel edge. A
+// Twilio webhook pointed at the apex would hit that redirect (Twilio doesn't
+// reliably follow webhook redirects, and the signature wouldn't match anyway),
+// so both this constant AND the Twilio Messaging Service inbound webhook are
+// set to the www host that serves the route directly.
+export const INBOUND_WEBHOOK_URL =
+  "https://www.pfaengine.com/api/sms/inbound";
 
 /** XML-escape a string for safe interpolation inside a TwiML <Message>. */
 function escapeXml(s: string): string {

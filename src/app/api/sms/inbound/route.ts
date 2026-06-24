@@ -1,8 +1,9 @@
 // 1b #25 — inbound SMS webhook (STOP / HELP / START). Twilio POSTs an
 // application/x-www-form-urlencoded body here whenever a coach texts our
 // number. We keep the APP's own opt-in/opt-out state in sync with what they
-// text so the in-app toggle reflects reality (Twilio's Advanced Opt-Out also
-// tracks STOP at the carrier level — belt and suspenders).
+// text so the in-app toggle + reminder cron reflect reality. We send NO reply
+// — Twilio's Opt-Out Management owns the STOP/HELP/START confirmations at the
+// carrier level (replying here too would double-text on START / bounce on STOP).
 //
 // DORMANCY: until go-live there is no Twilio number pointed here and no
 // TWILIO_AUTH_TOKEN set. With the token UNSET this route is INERT — it returns
@@ -41,26 +42,9 @@ export const dynamic = "force-dynamic";
 export const INBOUND_WEBHOOK_URL =
   "https://www.pfaengine.com/api/sms/inbound";
 
-/** XML-escape a string for safe interpolation inside a TwiML <Message>. */
-function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
 /** Empty TwiML — a valid "do nothing / no reply" response. */
 function emptyTwiml(): string {
   return "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response/>";
-}
-
-/** TwiML that replies with a single <Message>. */
-function messageTwiml(text: string): string {
-  return `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(
-    text,
-  )}</Message></Response>`;
 }
 
 function xmlResponse(twiml: string, status = 200): NextResponse {
@@ -70,12 +54,14 @@ function xmlResponse(twiml: string, status = 200): NextResponse {
   });
 }
 
-const STOP_REPLY =
-  "You're unsubscribed from PFA Engine reminders and won't get more texts. Reply START to resubscribe.";
-const HELP_REPLY =
-  "PFA Engine reminders: we text when you have unlogged work. Msg & data rates may apply. Reply STOP to unsubscribe. Help: contact PFA Sports Academy, mdm@pfasports.com.";
-const START_REPLY =
-  "You're resubscribed to PFA Engine reminders. Reply STOP to opt out anytime.";
+// This webhook sends NO user-facing reply. Twilio's Messaging Service Opt-Out
+// Management owns the STOP / HELP / START confirmations — it sends them at the
+// carrier level (exempt from the opt-out suppression). If this webhook ALSO
+// replied, a coach would get TWO texts on START and a bounced (21610) reply on
+// STOP. So we stay silent (empty TwiML) and only mirror the coach's own
+// opt-in/out state into our DB so the admin UI + reminder cron reflect reality.
+// Carrier STOP enforcement is independent: a send to an opted-out number fails
+// 21610, which the cron self-heals.
 
 export type InboundResult = {
   twiml: string;
@@ -96,11 +82,9 @@ export async function handleInboundSms(args: {
 }): Promise<InboundResult> {
   const keyword = classifyInboundKeyword(args.body);
 
-  // HELP / none never change state and don't need a phone match.
-  if (keyword === "help") {
-    return { twiml: messageTwiml(HELP_REPLY), keyword, matchedUserIds: [] };
-  }
-  if (keyword === "none") {
+  // HELP / none never change state and don't need a phone match. We never
+  // reply (Twilio Opt-Out Management sends the HELP text); just acknowledge.
+  if (keyword === "help" || keyword === "none") {
     return { twiml: emptyTwiml(), keyword, matchedUserIds: [] };
   }
 
@@ -121,14 +105,9 @@ export async function handleInboundSms(args: {
   }
 
   if (matchedUserIds.length === 0) {
-    // No coach on file with that number — reply per the keyword anyway (so the
-    // sender still gets a compliant STOP/START confirmation) but no state
-    // changes.
-    return {
-      twiml: messageTwiml(keyword === "stop" ? STOP_REPLY : START_REPLY),
-      keyword,
-      matchedUserIds: [],
-    };
+    // No coach on file with that number — nothing to sync. Twilio still sends
+    // the STOP/START confirmation; we stay silent.
+    return { twiml: emptyTwiml(), keyword, matchedUserIds: [] };
   }
 
   if (keyword === "stop") {
@@ -158,11 +137,7 @@ export async function handleInboundSms(args: {
     });
   }
 
-  return {
-    twiml: messageTwiml(keyword === "stop" ? STOP_REPLY : START_REPLY),
-    keyword,
-    matchedUserIds,
-  };
+  return { twiml: emptyTwiml(), keyword, matchedUserIds };
 }
 
 export async function POST(req: Request) {

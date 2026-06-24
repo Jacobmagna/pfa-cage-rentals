@@ -69,7 +69,9 @@ describe("handleInboundSms state transitions", () => {
     const res = await handleInboundSms({ from: coachPhoneRaw, body: "STOP" });
     expect(res.keyword).toBe("stop");
     expect(res.matchedUserIds).toContain(coachId);
-    expect(res.twiml).toContain("unsubscribed");
+    // We never reply — Twilio Opt-Out Management sends the confirmation. We
+    // only sync the coach's DB state (asserted below).
+    expect(res.twiml).toContain("<Response/>");
     const state = await readState();
     expect(state.smsOptOut).toBe(true);
     expect(state.smsOptIn).toBe(false);
@@ -80,9 +82,8 @@ describe("handleInboundSms state transitions", () => {
     const res = await handleInboundSms({ from: coachPhoneRaw, body: "HELP" });
     expect(res.keyword).toBe("help");
     expect(res.matchedUserIds).toHaveLength(0);
-    // TwiML is XML, so the '&' in the body is escaped to '&amp;'. The
-    // recipient still sees a literal '&'. Assert the actual on-the-wire form.
-    expect(res.twiml).toContain("Msg &amp; data rates may apply");
+    // We never reply — Twilio Opt-Out Management sends the HELP text.
+    expect(res.twiml).toContain("<Response/>");
     const after = await readState();
     expect(after).toEqual(before);
   });
@@ -91,7 +92,8 @@ describe("handleInboundSms state transitions", () => {
     const res = await handleInboundSms({ from: coachPhoneRaw, body: "start" });
     expect(res.keyword).toBe("start");
     expect(res.matchedUserIds).toContain(coachId);
-    expect(res.twiml).toContain("resubscribed");
+    // We never reply — Twilio Opt-Out Management sends the confirmation.
+    expect(res.twiml).toContain("<Response/>");
     const state = await readState();
     expect(state.smsOptOut).toBe(false);
     expect(state.smsOptIn).toBe(true);

@@ -172,14 +172,14 @@ function Row({
     <form
       action={action}
       key={formKey}
-      className="px-5 py-4 grid grid-cols-1 sm:grid-cols-[140px_110px_1fr_auto] sm:items-start gap-3"
+      className="px-5 py-4 grid grid-cols-1 sm:grid-cols-[minmax(160px,1.2fr)_110px_1fr_auto] sm:items-start gap-3"
     >
       <input type="hidden" name="coachId" defaultValue={coachId} />
       <input type="hidden" name="programId" defaultValue={row.programId} />
       <input type="hidden" name="payMode" value={mode} readOnly />
 
       <div className="min-w-0">
-        <p className="text-sm font-medium text-fg truncate">
+        <p className="text-sm font-medium text-fg break-words leading-snug">
           {row.programName}
         </p>
         {row.override ? (

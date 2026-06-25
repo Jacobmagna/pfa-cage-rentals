@@ -38,6 +38,11 @@ export type HistoryRow = {
   startAt: Date;
   endAt: Date;
   note: string | null;
+  // Snapshotted cents-per-30-min rate + the computed amount owed for this
+  // rental (totalFromSnapshot, server-side). Both read the row's stamped
+  // rate so they can't drift from a later override change.
+  ratePer30MinCents: number;
+  amountCents: number;
   // 1b security: a PAST rental (startAt <= now) can't be deleted/edited-
   // billable by the coach — they request admin removal instead.
   isPast: boolean;
@@ -173,9 +178,15 @@ export function SessionsHistoryClient({
                   ) : null}
                 </div>
 
-                <span className="text-xs font-mono tabular-nums text-fg-muted whitespace-nowrap">
-                  {formatDuration(row.startAt, row.endAt)}
-                </span>
+                <div className="text-right whitespace-nowrap tabular-nums">
+                  <p className="text-sm font-semibold text-fg leading-tight">
+                    {formatMoney(row.amountCents)}
+                  </p>
+                  <p className="text-[11px] text-fg-subtle leading-tight">
+                    {formatRatePerHour(row.ratePer30MinCents)} ·{" "}
+                    {formatDuration(row.startAt, row.endAt)}
+                  </p>
+                </div>
 
                 <div className="flex items-center gap-0.5 whitespace-nowrap">
                   {/* Edit stays available on every row — for PAST rentals the
@@ -480,6 +491,21 @@ function formatTimeRange(start: Date, end: Date): string {
     minute: "2-digit",
   });
   return `${startTime} – ${endTime}`;
+}
+
+// Cents → "$66" or "$66.50" (drop the trailing ".00" so whole-dollar
+// rentals stay clean — rates are whole-dollar today but a future fractional
+// rate still renders correctly).
+function formatMoney(cents: number): string {
+  const dollars = cents / 100;
+  return Number.isInteger(dollars)
+    ? `$${dollars.toLocaleString("en-US")}`
+    : `$${dollars.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// Stored rate is per 30 min; an hour is ×2. Renders e.g. "$44/hr".
+function formatRatePerHour(ratePer30MinCents: number): string {
+  return `${formatMoney(ratePer30MinCents * 2)}/hr`;
 }
 
 function formatDuration(start: Date, end: Date): string {

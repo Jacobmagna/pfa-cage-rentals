@@ -4,6 +4,7 @@ import { ArrowLeft, CalendarPlus } from "lucide-react";
 import { db } from "@/db";
 import { resources, sessionsBilling } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
+import { totalFromSnapshot } from "@/lib/billing";
 import { pendingRemovalSessionIds } from "@/lib/server/session-removal-actions";
 import { parsePfaInput, pfaDayEnd } from "@/lib/timezone";
 import { SessionsHistoryClient, type HistoryRow } from "./_components/sessions-history-client";
@@ -18,10 +19,11 @@ const PAGE_SIZE = 20;
 // Pagination is offset-based via ?page=N — cursor would be overkill
 // for v1 scale (~100 rows per coach per month).
 //
-// Money is admin-only: this surface used to render charge totals via
-// billing.ts, but coach-facing dollar amounts are deferred to a V2
-// invoice section (rates are variable per coach and Dad invoices
-// manually). Coaches see what they booked, not what they earned.
+// Each rental row shows what the coach OWES for it: the cost is
+// computed read-side from the row's snapshotted ratePer30MinCents via
+// totalFromSnapshot (immutable — a later rate change never re-bills a
+// past rental), plus the per-hour rate as a caption. No running total
+// here — the coach's balance lives on the Home dashboard.
 
 type SearchParams = Promise<{
   page?: string;
@@ -118,6 +120,7 @@ export default async function CoachSessionsPage({
         startAt: sessionsBilling.startAt,
         endAt: sessionsBilling.endAt,
         note: sessionsBilling.note,
+        ratePer30MinCents: sessionsBilling.ratePer30MinCents,
       })
       .from(sessionsBilling)
       .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
@@ -145,6 +148,10 @@ export default async function CoachSessionsPage({
     startAt: r.startAt,
     endAt: r.endAt,
     note: r.note,
+    // What the coach owes for this rental, read from the row's own
+    // snapshotted rate (never recomputed from current overrides).
+    ratePer30MinCents: r.ratePer30MinCents,
+    amountCents: totalFromSnapshot(r.startAt, r.endAt, r.ratePer30MinCents),
     isPast: r.startAt <= now,
     removalPending: pendingRemoval.has(r.id),
   }));

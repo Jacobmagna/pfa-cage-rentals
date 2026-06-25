@@ -2,6 +2,7 @@ export const ADMIN_EMAILS: readonly string[] = [
   "jacob@themagnas.com",
   "mdm@pfasports.com",
   "esther@pfasports.com",
+  "aryana@pfasports.com",
 ] as const;
 
 export function isAdminEmail(email: string | null | undefined): boolean {

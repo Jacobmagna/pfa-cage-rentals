@@ -237,10 +237,15 @@ describe("expandSlotKeys", () => {
     );
   });
 
-  it("expands keys across 3 resources sorted by (resourceId, slotIndex)", () => {
-    // Intentionally unsorted input; expect deterministic (resourceId,
+  it("expands keys across resources sorted by (date, resourceId, slotIndex)", () => {
+    // Intentionally unsorted input; expect deterministic (date, resourceId,
     // slotIndex) ordering out.
-    const keys = ["cage2|0", "cage1|3", "cage1|0", "bullpen1|2"];
+    const keys = [
+      "2026-05-01|cage2|0",
+      "2026-05-01|cage1|3",
+      "2026-05-01|cage1|0",
+      "2026-05-01|bullpen1|2",
+    ];
     const out = expandSlotKeys(keys, SCHEDULE_GRID_FIRST_HOUR);
     expect(out.map((s) => `${s.resourceId}|${s.slotIndex}`)).toEqual([
       "bullpen1|2",
@@ -250,20 +255,39 @@ describe("expandSlotKeys", () => {
     ]);
   });
 
+  it("spans MULTIPLE days, sorting earlier dates first", () => {
+    // The cross-day selection: same cage, two days, unsorted in.
+    const keys = [
+      "2026-05-02|cage1|0",
+      "2026-05-01|cage1|2",
+      "2026-05-01|cage1|0",
+    ];
+    const out = expandSlotKeys(keys, SCHEDULE_GRID_FIRST_HOUR);
+    expect(out.map((s) => `${s.date}|${s.slotIndex}`)).toEqual([
+      "2026-05-01|0",
+      "2026-05-01|2",
+      "2026-05-02|0",
+    ]);
+  });
+
   it("maps slotIndex to the correct hour/minute (firstHour=8)", () => {
-    const out = expandSlotKeys(["r|0", "r|1", "r|2", "r|3"], 8);
+    const out = expandSlotKeys(
+      ["2026-05-01|r|0", "2026-05-01|r|1", "2026-05-01|r|2", "2026-05-01|r|3"],
+      8,
+    );
     expect(out).toEqual([
-      { resourceId: "r", slotIndex: 0, hour: 8, minute: 0 },
-      { resourceId: "r", slotIndex: 1, hour: 8, minute: 30 },
-      { resourceId: "r", slotIndex: 2, hour: 9, minute: 0 },
-      { resourceId: "r", slotIndex: 3, hour: 9, minute: 30 },
+      { date: "2026-05-01", resourceId: "r", slotIndex: 0, hour: 8, minute: 0 },
+      { date: "2026-05-01", resourceId: "r", slotIndex: 1, hour: 8, minute: 30 },
+      { date: "2026-05-01", resourceId: "r", slotIndex: 2, hour: 9, minute: 0 },
+      { date: "2026-05-01", resourceId: "r", slotIndex: 3, hour: 9, minute: 30 },
     ]);
   });
 
   it("honors a non-default firstHour", () => {
-    const [slot] = expandSlotKeys(["r|2"], 10);
+    const [slot] = expandSlotKeys(["2026-05-01|r|2"], 10);
     // 10 + floor(2/2)=1 → 11:00
     expect(slot).toEqual({
+      date: "2026-05-01",
       resourceId: "r",
       slotIndex: 2,
       hour: 11,
@@ -271,11 +295,19 @@ describe("expandSlotKeys", () => {
     });
   });
 
-  it("splits on the FIRST | only and skips malformed keys", () => {
-    // No resourceId in this repo ever contains "|", but be defensive.
-    const out = expandSlotKeys(["nope", "|3", "r|x", "good|4"], 8);
+  it("skips malformed keys (need date|resourceId|slotIndex)", () => {
+    const out = expandSlotKeys(
+      ["nope", "r|3", "2026-05-01|r|x", "2026-05-01||3", "2026-05-01|good|4"],
+      8,
+    );
     expect(out).toEqual([
-      { resourceId: "good", slotIndex: 4, hour: 10, minute: 0 },
+      {
+        date: "2026-05-01",
+        resourceId: "good",
+        slotIndex: 4,
+        hour: 10,
+        minute: 0,
+      },
     ]);
   });
 });

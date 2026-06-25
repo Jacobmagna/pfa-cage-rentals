@@ -1,12 +1,13 @@
 "use client";
 
-// Batch booking panel for the W3.5b "Select multiple slots" flow on the
-// CageCalendar. The coach taps several green slots — now across ANY
-// resources (cages, bullpens, weight rooms) — then this panel collects
-// ONE optional note. Submitting turns each selected 30-min slot into a
-// SEPARATE session via the single batch action logOwnSessionsBatch (each
-// slot carries its OWN resourceId, many time ranges) — so the whole
-// selection is one atomic batch insert, never multiple calls.
+// Batch booking panel for the "Select multiple slots" flow on the
+// CageCalendar. The coach taps several green slots — across ANY resources
+// (cages, bullpens, weight rooms) AND ANY days (the selection persists as they
+// navigate day to day) — then this panel collects ONE optional note.
+// Submitting turns each selected 30-min slot into a SEPARATE session via the
+// single batch action logOwnSessionsBatch (each slot carries its OWN
+// resourceId + its own day's time range) — so the whole selection is one
+// atomic batch insert, never multiple calls.
 //
 // Multi-resource: every selected slot carries its own resourceId, so the
 // batch can span several cages/resources. The rate is billed per resource
@@ -30,7 +31,11 @@ import {
   SCHEDULE_GRID_FIRST_HOUR,
   expandSlotKeys,
 } from "@/lib/schedule-grid-utils";
-import { formatPfaTime12h, pfaWallClockAt } from "@/lib/timezone";
+import {
+  formatPfaDateMedium,
+  formatPfaTime12h,
+  pfaWallClockToUtc,
+} from "@/lib/timezone";
 
 // Friendly translation of the typed batch errors — same intent as
 // form-actions.ts `translate`, inlined for this panel.
@@ -47,15 +52,17 @@ function translateError(err: unknown): string {
 
 export function CageBatchBooking({
   resources,
-  selectedDate,
   selection,
   onBooked,
   onCancel,
 }: {
   /** Full resource list — used to resolve each slot's resource name. */
   resources: ResourceOption[];
-  selectedDate: Date;
-  /** Selected slot keys `${resourceId}|${slotIndex}` (any order). */
+  /**
+   * Selected slot keys `${date}|${resourceId}|${slotIndex}` (any order). The
+   * leading PFA-local date means a selection can span MULTIPLE days — each slot
+   * carries its own day, so no single "selected date" is needed here.
+   */
   selection: Set<string>;
   /** Called after a successful batch log so the parent re-fetches + confirms. */
   onBooked: (count: number) => void;
@@ -65,29 +72,40 @@ export function CageBatchBooking({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  // Deterministic, (resourceId, slotIndex)-sorted list of selected slots
+  // Deterministic, (date, resourceId, slotIndex)-sorted list of selected slots
   // (each = 30 min), resolved to concrete [startAt, endAt) for display +
-  // submit.
+  // submit. Each slot's startAt is built from ITS OWN day, so the batch can
+  // span multiple days in one atomic insert.
   const expanded = expandSlotKeys(selection, SCHEDULE_GRID_FIRST_HOUR);
   const rows = expanded.map((r) => {
-    const startAt = pfaWallClockAt(selectedDate, r.hour, r.minute);
+    const hh = String(r.hour).padStart(2, "0");
+    const mm = r.minute === 0 ? "00" : "30";
+    const startAt = pfaWallClockToUtc(r.date, `${hh}:${mm}`);
     const endAt = new Date(startAt.getTime() + 30 * 60_000);
-    return { resourceId: r.resourceId, startAt, endAt };
+    return { date: r.date, resourceId: r.resourceId, startAt, endAt };
   });
   const count = rows.length;
+  const dayCount = new Set(rows.map((r) => r.date)).size;
+  const cageCount = new Set(rows.map((r) => r.resourceId)).size;
 
-  // Group rows by resource for the grouped display — each group keeps its
-  // resolved start times in sorted order (expandSlotKeys already sorted).
-  const groups: Array<{ resourceId: string; starts: Date[] }> = [];
+  // Group rows by DAY, then by resource within each day, for the review list
+  // (rows are already sorted by date → resourceId → slotIndex).
+  type CageGroup = { resourceId: string; starts: Date[] };
+  type DayGroup = { date: string; label: string; cages: CageGroup[] };
+  const days: DayGroup[] = [];
   for (const row of rows) {
-    const last = groups[groups.length - 1];
-    if (last && last.resourceId === row.resourceId) {
-      last.starts.push(row.startAt);
-    } else {
-      groups.push({ resourceId: row.resourceId, starts: [row.startAt] });
+    let day = days[days.length - 1];
+    if (!day || day.date !== row.date) {
+      day = { date: row.date, label: formatPfaDateMedium(row.startAt), cages: [] };
+      days.push(day);
     }
+    let cage = day.cages[day.cages.length - 1];
+    if (!cage || cage.resourceId !== row.resourceId) {
+      cage = { resourceId: row.resourceId, starts: [] };
+      day.cages.push(cage);
+    }
+    cage.starts.push(row.startAt);
   }
-  const cageCount = groups.length;
 
   const resourceName = (id: string) =>
     resources.find((r) => r.id === id)?.name ?? "Unknown";
@@ -122,23 +140,32 @@ export function CageBatchBooking({
           <p className="text-xs uppercase tracking-wider text-fg-muted">
             Book {count} {count === 1 ? "slot" : "slots"}
           </p>
-          {cageCount > 1 ? (
+          {dayCount > 1 || cageCount > 1 ? (
             <p className="text-sm text-fg-muted">
-              across {cageCount} cages
+              across {dayCount} {dayCount === 1 ? "day" : "days"} ·{" "}
+              {cageCount} {cageCount === 1 ? "cage" : "cages"}
             </p>
           ) : null}
-          {/* Grouped by cage — name + its slot times. */}
-          <div className="space-y-1 pt-1">
-            {groups.map((g) => (
-              <div key={g.resourceId} className="space-y-0.5">
-                <p className="text-sm font-semibold text-fg">
-                  {resourceName(g.resourceId)}
+          {/* Grouped by day, then cage — a date header, then each cage's name
+              and its slot times under that day. */}
+          <div className="space-y-2 pt-1">
+            {days.map((d) => (
+              <div key={d.date} className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-fg-muted">
+                  {d.label}
                 </p>
-                <p className="text-sm text-fg-muted">
-                  {g.starts.map((s) => formatPfaTime12h(s)).join(", ")} —{" "}
-                  {g.starts.length}{" "}
-                  {g.starts.length === 1 ? "rental" : "rentals"} of 30 min
-                </p>
+                {d.cages.map((g) => (
+                  <div key={g.resourceId} className="space-y-0.5 pl-0.5">
+                    <p className="text-sm font-semibold text-fg">
+                      {resourceName(g.resourceId)}
+                    </p>
+                    <p className="text-sm text-fg-muted">
+                      {g.starts.map((s) => formatPfaTime12h(s)).join(", ")} —{" "}
+                      {g.starts.length}{" "}
+                      {g.starts.length === 1 ? "rental" : "rentals"} of 30 min
+                    </p>
+                  </div>
+                ))}
               </div>
             ))}
           </div>

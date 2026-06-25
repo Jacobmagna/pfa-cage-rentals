@@ -117,11 +117,14 @@ export function CageCalendar({
   const [revealed, setRevealed] = useState<SelectedSlot | null>(null);
   const [confirmation, setConfirmation] = useState<string | null>(null);
 
-  // ── Batch multi-select (W3.5b) ───────────────────────────────────
+  // ── Batch multi-select (cross-cage + cross-day) ──────────────────
   // When ON, tapping green slots builds a selection that can span ANY
-  // resources. The selection is a flat set of `${resourceId}|${slotIndex}`
-  // keys; the batch action carries each slot's own resourceId so one
-  // atomic insert covers a mix of cages.
+  // resources AND ANY days. The selection is a flat set of
+  // `${date}|${resourceId}|${slotIndex}` keys — the leading PFA-local date is
+  // what lets picks PERSIST as the coach navigates day to day (day-nav no
+  // longer clears it). The batch action carries each slot's own resourceId +
+  // its own day's time range, so one atomic insert covers a mix of cages
+  // across multiple days.
   const [multiSelect, setMultiSelect] = useState(false);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   // Whether the booking form modal is open for the current selection
@@ -162,12 +165,15 @@ export function CageCalendar({
     setFormOpen(false);
   };
 
+  // Cleared on day navigation: the single-slot panel, the occupant reveal,
+  // any confirmation, and the open form. The batch `selection` is DELIBERATELY
+  // NOT cleared here — it persists across days so the coach can accumulate
+  // slots on multiple days and book them together (cross-day multi-select).
   const resetTransient = () => {
     setSelected(null);
     setRevealed(null);
     setConfirmation(null);
     setFormOpen(false);
-    clearSelection();
   };
 
   const goPrevDay = () => {
@@ -258,7 +264,8 @@ export function CageCalendar({
             selected?.resourceId === mobileResource.id &&
             selected.slotIndex === slotIdx,
           isBatchSelected:
-            multiSelect && selection.has(`${mobileResource.id}|${slotIdx}`),
+            multiSelect &&
+            selection.has(`${dateStr}|${mobileResource.id}|${slotIdx}`),
           isRevealed:
             revealed?.resourceId === mobileResource.id &&
             revealed.slotIndex === slotIdx,
@@ -266,11 +273,15 @@ export function CageCalendar({
       })
     : [];
 
-  // Batch-selection count + how many distinct cages it spans (derived
-  // during render). Keys are `${resourceId}|${slotIndex}`.
+  // Batch-selection count + how many distinct DAYS and cages it spans
+  // (derived during render). Keys are `${date}|${resourceId}|${slotIndex}`,
+  // so the date is part [0] and the resourceId is part [1].
   const selectionCount = selection.size;
-  const selectionCageCount = new Set(
+  const selectionDayCount = new Set(
     [...selection].map((k) => k.split("|")[0]),
+  ).size;
+  const selectionCageCount = new Set(
+    [...selection].map((k) => k.split("|")[1]),
   ).size;
 
   // How many consecutive free 30-min slots start at the selected slot —
@@ -334,12 +345,13 @@ export function CageCalendar({
   };
 
   // Toggle a green slot in the batch selection. Selections can span ANY
-  // resources — toggling a slot just adds/removes its
-  // `${resourceId}|${slotIndex}` key; slots on other cages persist.
+  // resources AND ANY days — the key is `${date}|${resourceId}|${slotIndex}`,
+  // so a slot is identified by the day it's on. Toggling adds/removes one key;
+  // slots on other cages AND other days persist (cross-day multi-select).
   const toggleSelectSlot = (resourceId: string, slotIndex: number) => {
     setFormOpen(false);
     setSelection((prev) => {
-      const key = `${resourceId}|${slotIndex}`;
+      const key = `${dateStr}|${resourceId}|${slotIndex}`;
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -452,7 +464,8 @@ export function CageCalendar({
         </button>
         {multiSelect ? (
           <p className="text-[11px] text-fg-subtle">
-            Tap open slots across any cages, then book them together.
+            Tap open slots across any cages — change days and your picks stay —
+            then book them all together.
           </p>
         ) : null}
       </div>
@@ -480,8 +493,9 @@ export function CageCalendar({
             {multiSelect && selectionCount > 0 ? (
               <>
                 {selectionCount} {selectionCount === 1 ? "slot" : "slots"}{" "}
-                across{" "}
                 <span className="text-fg-muted">
+                  across {selectionDayCount}{" "}
+                  {selectionDayCount === 1 ? "day" : "days"} ·{" "}
                   {selectionCageCount}{" "}
                   {selectionCageCount === 1 ? "cage" : "cages"}
                 </span>
@@ -567,7 +581,7 @@ export function CageCalendar({
               const isSelected =
                 selected?.resourceId === r.id && selected.slotIndex === slotIdx;
               const isBatchSelected =
-                multiSelect && selection.has(`${r.id}|${slotIdx}`);
+                multiSelect && selection.has(`${dateStr}|${r.id}|${slotIdx}`);
               const { hour, minute } = slotHourMinute(slotIdx);
               return (
                 <SlotCell
@@ -650,7 +664,7 @@ export function CageCalendar({
         </div>
         <p className="text-fg-subtle">
           {multiSelect
-            ? "Tap open slots across any cages to select them, then book the batch together."
+            ? "Tap open slots across any cages and days — your selection stays as you switch days — then book them all together."
             : "Tap an open slot to book it. Tap a red slot to see who has it."}{" "}
           <span className="hidden md:inline">
             Rotate your phone or scroll sideways to see the full day.
@@ -686,7 +700,6 @@ export function CageCalendar({
         ) : multiSelect && selectionCount > 0 ? (
           <CageBatchBooking
             resources={resources}
-            selectedDate={selectedDate}
             selection={selection}
             onBooked={handleBatchBooked}
             onCancel={() => setFormOpen(false)}

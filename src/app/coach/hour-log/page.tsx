@@ -1,5 +1,5 @@
 import { Clock } from "lucide-react";
-import { and, asc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, lte, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
   hourLogs,
@@ -7,6 +7,7 @@ import {
   programs,
   programScheduleBlockCoaches,
   programScheduleBlocks,
+  users,
 } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
 import {
@@ -53,8 +54,13 @@ export default async function CoachHourLogPage() {
   const nowMs = now.getTime();
   const windowStart = new Date(nowMs - LOOKBACK_MS);
 
-  const [programOptions, candidateBlocks, recentLogs, cancelledFlags] =
-    await Promise.all([
+  const [
+    programOptions,
+    candidateBlocks,
+    recentLogs,
+    cancelledFlags,
+    coachRoster,
+  ] = await Promise.all([
     db
       .select({ id: programs.id, name: programs.name })
       .from(programs)
@@ -111,6 +117,20 @@ export default async function CoachHourLogPage() {
           eq(programBlockCoachFlags.kind, "cancelled"),
         ),
       ),
+    // W3-handoff: other active coaches, for the "gave it to another coach"
+    // picker. Excludes self + soft-deleted; admins (role != coach) are not
+    // hand-off targets.
+    db
+      .select({ id: users.id, name: users.name, email: users.email })
+      .from(users)
+      .where(
+        and(
+          eq(users.role, "coach"),
+          isNull(users.deletedAt),
+          ne(users.id, coachId),
+        ),
+      )
+      .orderBy(asc(users.name)),
   ]);
 
   const cancelledBlockIds = new Set(cancelledFlags.map((f) => f.blockId));
@@ -151,10 +171,19 @@ export default async function CoachHourLogPage() {
 
   const displayName = user.name ?? user.email;
 
+  // Roster for the hand-off picker: a stable display name per coach.
+  const coachOptions = coachRoster.map((c) => ({
+    id: c.id,
+    name: c.name ?? c.email,
+  }));
+
   return (
     <div className="space-y-6 max-w-md mx-auto">
       {confirmableBlocks.length > 0 ? (
-        <ScheduleConfirmList blocks={confirmableBlocks} />
+        <ScheduleConfirmList
+          blocks={confirmableBlocks}
+          coaches={coachOptions}
+        />
       ) : null}
 
       {programOptions.length === 0 ? (

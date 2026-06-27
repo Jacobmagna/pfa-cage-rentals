@@ -320,6 +320,42 @@ export class NotASeriesOccurrenceError extends Error {
   }
 }
 
+// Coach-side shift hand-off / no-cover: the acting coach is not a member
+// of the block they tried to give away or mark unworked (stale client row,
+// already handed off, or a direct RPC call with someone else's block).
+export class NotAssignedToBlockError extends Error {
+  readonly code = "NOT_ASSIGNED_TO_BLOCK" as const;
+  constructor(
+    public readonly blockId: string,
+    public readonly coachId: string,
+  ) {
+    super(`Coach ${coachId} is not assigned to block ${blockId}`);
+    this.name = "NotAssignedToBlockError";
+  }
+}
+
+// Coach-side shift hand-off / no-cover: the block already has a posted
+// hour-log for this coach, so it can't be given away or marked unworked
+// (it already happened and was logged). The coach edits the log instead.
+export class BlockAlreadyLoggedError extends Error {
+  readonly code = "BLOCK_ALREADY_LOGGED" as const;
+  constructor(public readonly blockId: string) {
+    super(`Block ${blockId} already has a logged hour for this coach`);
+    this.name = "BlockAlreadyLoggedError";
+  }
+}
+
+// Coach-side shift hand-off: the chosen recipient isn't a valid hand-off
+// target — not an active coach, or the same coach trying to hand off to
+// themselves.
+export class InvalidHandoffTargetError extends Error {
+  readonly code = "INVALID_HANDOFF_TARGET" as const;
+  constructor(public readonly toCoachId: string) {
+    super(`${toCoachId} is not a valid hand-off recipient`);
+    this.name = "InvalidHandoffTargetError";
+  }
+}
+
 // Athlete edit/delete/assign referenced an athletes id that doesn't
 // exist (stale client row, or a direct RPC call with a bogus id).
 export class AthleteNotFoundError extends Error {

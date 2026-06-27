@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { CalendarClock, Check } from "lucide-react";
-import { logOwnHour } from "../actions";
+import { CalendarClock, Check, ChevronDown, UserPlus, X } from "lucide-react";
+import { cancelOwnBlock, logOwnHour, reassignOwnBlock } from "../actions";
 
 // QA10 W3.7 — "Confirm your scheduled hours". One card per scheduled
 // program block whose end is within 15 min of now (the server filters
@@ -10,10 +10,14 @@ import { logOwnHour } from "../actions";
 // card has a one-click "Confirm these hours" button that calls the
 // existing logOwnHour action with the block's exact program + start/end.
 //
+// W3-handoff: each card also offers two secondary actions for a shift the
+// coach DIDN'T work — "Gave it to another coach" (reassigns the block to a
+// chosen coach) and "Didn't work it" (marks it not-worked / no cover, which
+// surfaces in the admin needs-review queue). Both remove the card on success.
+//
 // On success the card is removed from the LOCAL list (a pure render-time
-// filter over confirmedIds + failed… kept in component state — no
-// setState-in-effect) and the page revalidates (logOwnHour revalidates
-// /coach/hour-log) so a refresh shows the same result from the DB.
+// filter over resolvedIds kept in component state — no setState-in-effect)
+// and the page revalidates so a refresh shows the same result from the DB.
 //
 // Dates are rebuilt from the passed ISO strings before the call; the
 // display label (e.g. "Today, 4:00 – 5:00 PM") is precomputed on the
@@ -29,18 +33,24 @@ export type ConfirmableBlock = {
   overdue: boolean;
 };
 
+export type CoachOption = {
+  id: string;
+  name: string;
+};
+
 export function ScheduleConfirmList({
   blocks,
+  coaches,
 }: {
   blocks: ConfirmableBlock[];
+  coaches: CoachOption[];
 }) {
-  // IDs the coach has successfully confirmed this session → filtered out
-  // of the rendered list (adjust-during-render, no effect).
-  const [confirmedIds, setConfirmedIds] = useState<Set<string>>(
-    () => new Set(),
-  );
+  // IDs the coach has resolved this session (confirmed, handed off, or
+  // marked not-worked) → filtered out of the rendered list (adjust-during-
+  // render, no effect).
+  const [resolvedIds, setResolvedIds] = useState<Set<string>>(() => new Set());
 
-  const visible = blocks.filter((b) => !confirmedIds.has(b.id));
+  const visible = blocks.filter((b) => !resolvedIds.has(b.id));
   if (visible.length === 0) return null;
 
   return (
@@ -50,7 +60,8 @@ export function ScheduleConfirmList({
           Confirm your scheduled hours
         </p>
         <p className="text-sm text-fg-muted">
-          Your scheduled work hours — confirm each once it&rsquo;s done.
+          Your scheduled work hours — confirm each once it&rsquo;s done, or
+          say if you didn&rsquo;t work it.
         </p>
       </div>
 
@@ -59,8 +70,9 @@ export function ScheduleConfirmList({
           <ConfirmCard
             key={block.id}
             block={block}
-            onConfirmed={() =>
-              setConfirmedIds((prev) => {
+            coaches={coaches}
+            onResolved={() =>
+              setResolvedIds((prev) => {
                 const next = new Set(prev);
                 next.add(block.id);
                 return next;
@@ -73,23 +85,44 @@ export function ScheduleConfirmList({
   );
 }
 
+type CardMode = "idle" | "handoff" | "nocover";
+
 function ConfirmCard({
   block,
-  onConfirmed,
+  coaches,
+  onResolved,
 }: {
   block: ConfirmableBlock;
-  onConfirmed: () => void;
+  coaches: CoachOption[];
+  onResolved: () => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<CardMode>("idle");
+  const [toCoachId, setToCoachId] = useState("");
+  const [note, setNote] = useState("");
 
-  const busy = pending;
+  const canHandOff = coaches.length > 0;
 
-  const handleConfirm = () => {
+  const run = (op: () => Promise<unknown>, friendlyError: string) => {
     setError(null);
     startTransition(async () => {
       try {
-        await logOwnHour({
+        await op();
+        onResolved();
+      } catch {
+        // Server actions redact thrown error details in production, so we
+        // show a friendly, actionable message and leave the card so the
+        // coach can retry or use the manual form below.
+        setError(friendlyError);
+      }
+    });
+  };
+
+  const handleConfirm = () =>
+    run(
+      () =>
+        logOwnHour({
           programId: block.programId,
           startAt: new Date(block.startIso),
           endAt: new Date(block.endIso),
@@ -97,19 +130,23 @@ function ConfirmCard({
           // the block's exact times, so it skips the manual anomaly check
           // and always posts immediately.
           source: "schedule-confirm",
-        });
-        onConfirmed();
-      } catch {
-        // Server actions redact thrown error details in production, so we
-        // can't reliably read the specific code on the client. Show a
-        // friendly, actionable message and leave the card so the coach
-        // can retry or fall back to the manual form below.
-        setError(
-          "Couldn't log these hours — the work may no longer be active. Try again, or use the manual form below.",
-        );
-      }
-    });
+        }),
+      "Couldn't log these hours — the work may no longer be active. Try again, or use the manual form below.",
+    );
+
+  const handleHandOff = () => {
+    if (!toCoachId) return;
+    run(
+      () => reassignOwnBlock({ blockId: block.id, toCoachId }),
+      "Couldn't hand off this shift — try again, or ask an admin.",
+    );
   };
+
+  const handleNoCover = () =>
+    run(
+      () => cancelOwnBlock({ blockId: block.id, note }),
+      "Couldn't update this shift — try again, or ask an admin.",
+    );
 
   return (
     <li className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] p-3.5">
@@ -135,13 +172,117 @@ function ConfirmCard({
         <button
           type="button"
           onClick={handleConfirm}
-          disabled={busy}
+          disabled={pending}
           className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-gold px-3.5 h-9 text-sm font-semibold text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
           <Check className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
-          {pending ? "Confirming…" : "Confirm these hours"}
+          {pending && mode === "idle" ? "Confirming…" : "Confirm these hours"}
         </button>
       </div>
+
+      {/* Secondary actions for a shift the coach DIDN'T work. */}
+      {mode === "idle" ? (
+        <div className="mt-2.5 flex items-center gap-3 pl-12 text-xs">
+          {canHandOff ? (
+            <button
+              type="button"
+              onClick={() => {
+                setError(null);
+                setMode("handoff");
+              }}
+              disabled={pending}
+              className="font-medium text-fg-muted hover:text-fg underline-offset-2 hover:underline disabled:opacity-50 transition-colors"
+            >
+              Gave it to another coach
+            </button>
+          ) : null}
+          {canHandOff ? <span className="text-fg-subtle">·</span> : null}
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setMode("nocover");
+            }}
+            disabled={pending}
+            className="font-medium text-fg-muted hover:text-fg underline-offset-2 hover:underline disabled:opacity-50 transition-colors"
+          >
+            Didn&rsquo;t work it
+          </button>
+        </div>
+      ) : null}
+
+      {/* Hand-off: pick the coach who took the shift. */}
+      {mode === "handoff" ? (
+        <div className="mt-3 space-y-2.5 border-t border-line pt-3">
+          <p className="text-xs font-medium text-fg-muted">
+            Who did you give this shift to?
+          </p>
+          <div className="relative">
+            <select
+              value={toCoachId}
+              onChange={(e) => setToCoachId(e.target.value)}
+              disabled={pending}
+              aria-label="Coach who took the shift"
+              className="w-full appearance-none rounded-lg bg-surface border border-line text-fg px-3 h-10 pr-8 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40 disabled:opacity-50"
+            >
+              <option value="" disabled>
+                Choose a coach…
+              </option>
+              {coaches.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              aria-hidden
+              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-fg-subtle"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleHandOff}
+              disabled={pending || !toCoachId}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-gold px-3.5 h-9 text-sm font-semibold text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            >
+              <UserPlus className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />
+              {pending ? "Handing off…" : "Hand off shift"}
+            </button>
+            <CancelMode disabled={pending} onClick={() => setMode("idle")} />
+          </div>
+        </div>
+      ) : null}
+
+      {/* No cover: optional reason, then mark not-worked. */}
+      {mode === "nocover" ? (
+        <div className="mt-3 space-y-2.5 border-t border-line pt-3">
+          <p className="text-xs font-medium text-fg-muted">
+            Mark this shift as not worked? Your admin will see it for review.
+          </p>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            disabled={pending}
+            rows={2}
+            maxLength={500}
+            placeholder="Reason (optional)"
+            className="w-full rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle px-3 py-2 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40 resize-none disabled:opacity-50"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleNoCover}
+              disabled={pending}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-surface-2 px-3.5 h-9 text-sm font-semibold text-fg hover:bg-surface disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            >
+              {pending ? "Saving…" : "Didn't work it"}
+            </button>
+            <CancelMode disabled={pending} onClick={() => setMode("idle")} />
+          </div>
+        </div>
+      ) : null}
+
       {error ? (
         <p
           role="alert"
@@ -151,5 +292,25 @@ function ConfirmCard({
         </p>
       ) : null}
     </li>
+  );
+}
+
+function CancelMode({
+  disabled,
+  onClick,
+}: {
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center gap-1 rounded-lg px-2 h-9 text-sm font-medium text-fg-muted hover:text-fg hover:bg-surface-2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+    >
+      <X className="h-4 w-4" aria-hidden="true" />
+      Cancel
+    </button>
   );
 }

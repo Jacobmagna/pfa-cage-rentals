@@ -15,6 +15,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
   hourLogs,
+  programBlockCoachFlags,
   programScheduleBlockCoaches,
   programScheduleBlocks,
   programs,
@@ -37,6 +38,15 @@ const NOW = new Date("2026-03-10T15:00:00.000Z");
 const blockStart = new Date("2026-03-09T17:00:00.000Z");
 const blockEnd = new Date("2026-03-09T18:00:00.000Z");
 
+// Trailing-week window for the 7-day re-nag. Now = Mar 10 (PDT). Window =
+// [Mar 3 00:00 PST = 08:00 UTC, Mar 10 00:00 PDT = 07:00 UTC).
+//   • 6 days ago (Mar 4, PST) 10 AM = 18:00 UTC → INSIDE the window.
+const weekAgoStart = new Date("2026-03-04T18:00:00.000Z");
+const weekAgoEnd = new Date("2026-03-04T19:00:00.000Z");
+//   • 8 days ago (Mar 2, PST) 10 AM = 18:00 UTC → OUTSIDE (older than a week).
+const tooOldStart = new Date("2026-03-02T18:00:00.000Z");
+const tooOldEnd = new Date("2026-03-02T19:00:00.000Z");
+
 function uniqueSuffix(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -45,6 +55,9 @@ let optedInCoachId: string; // opted in, valid phone, did NOT log → recipient
 let loggedCoachId: string; // opted in, valid phone, DID log → not a recipient
 let optedOutCoachId: string; // opted in toggle but smsOptOut=true → excluded
 let noPhoneCoachId: string; // opted in, no phone → excluded
+let weekAgoCoachId: string; // unlogged shift 6 days ago → STILL a recipient
+let tooOldCoachId: string; // unlogged shift 8 days ago → aged out, NOT a recipient
+let cancelledCoachId: string; // unlogged shift but marked no-cover → excluded
 let adminId: string;
 let programId: string;
 const createdUserIds: string[] = [];
@@ -111,6 +124,25 @@ beforeAll(async () => {
     .returning({ id: users.id });
   noPhoneCoachId = noPhone.id;
 
+  const mkCoach = async (label: string, phone: string | null, optOut = false) => {
+    const [u] = await db
+      .insert(users)
+      .values({
+        email: `sms-${label}-${suffix}@pfa.invalid`,
+        name: `SMS ${label}`,
+        role: "coach",
+        phone,
+        smsOptIn: true,
+        smsOptOut: optOut,
+      })
+      .returning({ id: users.id });
+    createdUserIds.push(u.id);
+    return u.id;
+  };
+  weekAgoCoachId = await mkCoach("weekago", "4155550104");
+  tooOldCoachId = await mkCoach("tooold", "4155550105");
+  cancelledCoachId = await mkCoach("cancelled", "4155550106");
+
   createdUserIds.push(
     adminId,
     optedInCoachId,
@@ -125,27 +157,30 @@ beforeAll(async () => {
     .returning({ id: programs.id });
   programId = program.id;
 
-  // One block per coach, all scheduled yesterday-Pacific, each coach a member.
-  const mk = async (coachId: string) => {
+  // One block per coach. Default to yesterday-Pacific; some coaches get a
+  // different start/end to exercise the trailing-week window.
+  const mk = async (
+    coachId: string,
+    startAt: Date = blockStart,
+    endAt: Date = blockEnd,
+  ): Promise<string> => {
     const [b] = await db
       .insert(programScheduleBlocks)
-      .values({
-        programId,
-        scheduledCoachId: coachId,
-        startAt: blockStart,
-        endAt: blockEnd,
-        createdBy: adminId,
-      })
+      .values({ programId, scheduledCoachId: coachId, startAt, endAt, createdBy: adminId })
       .returning({ id: programScheduleBlocks.id });
     await db
       .insert(programScheduleBlockCoaches)
       .values({ blockId: b.id, coachId });
     createdBlockIds.push(b.id);
+    return b.id;
   };
   await mk(optedInCoachId);
   await mk(loggedCoachId);
   await mk(optedOutCoachId);
   await mk(noPhoneCoachId);
+  await mk(weekAgoCoachId, weekAgoStart, weekAgoEnd); // 6 days ago → in window
+  await mk(tooOldCoachId, tooOldStart, tooOldEnd); // 8 days ago → aged out
+  const cancelledBlockId = await mk(cancelledCoachId); // yesterday, but no-cover
 
   // loggedCoach DID log a matching posted hour → not a recipient.
   await db.insert(hourLogs).values({
@@ -155,6 +190,15 @@ beforeAll(async () => {
     endAt: blockEnd,
     status: "posted",
     createdBy: loggedCoachId,
+  });
+
+  // cancelledCoach marked their shift no-cover → 'cancelled' flag suppresses
+  // the reminder even though it's unlogged + in window.
+  await db.insert(programBlockCoachFlags).values({
+    blockId: cancelledBlockId,
+    coachId: cancelledCoachId,
+    kind: "cancelled",
+    createdBy: cancelledCoachId,
   });
 });
 
@@ -193,21 +237,28 @@ describe("recipient selection (dry-run, against seeded data)", () => {
     if (summary.status !== "dry-run") return;
 
     const ids = summary.recipients.map((r) => r.coachId);
-    // Only the opted-in coach who did NOT log is a recipient.
+    // Opted-in coach who did NOT log → recipient (shift yesterday).
     expect(ids).toContain(optedInCoachId);
+    // Unlogged shift 6 days ago is STILL within the trailing week → recipient.
+    expect(ids).toContain(weekAgoCoachId);
     // Logged coach excluded (their block was logged).
     expect(ids).not.toContain(loggedCoachId);
     // Opted-out coach excluded (carrier STOP).
     expect(ids).not.toContain(optedOutCoachId);
     // No-phone coach excluded.
     expect(ids).not.toContain(noPhoneCoachId);
+    // Unlogged shift 8 days ago has aged out of the week → NOT a recipient
+    // (the "remind for a week then stop" behavior).
+    expect(ids).not.toContain(tooOldCoachId);
+    // Marked no-cover ('cancelled' flag) → suppressed even though unlogged.
+    expect(ids).not.toContain(cancelledCoachId);
 
     // The recipient's phone is normalized to E.164.
     const me = summary.recipients.find((r) => r.coachId === optedInCoachId);
     expect(me?.phone).toBe("+14155550101");
 
-    // window is the prior Pacific day.
-    expect(summary.window.forDate).toBe("2026-03-09");
+    // window.forDate is the SEND day (today Pacific), not the shift day.
+    expect(summary.window.forDate).toBe("2026-03-10");
   });
 
   it("dry-run writes NOTHING to sms_reminder_log", async () => {

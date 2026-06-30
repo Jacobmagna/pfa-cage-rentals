@@ -17,6 +17,7 @@ import { and, eq, gte, inArray, isNull, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
   hourLogs,
+  programBlockCoachFlags,
   programScheduleBlockCoaches,
   programScheduleBlocks,
   smsReminderLog,
@@ -48,12 +49,21 @@ export function isPacific8am(now: Date): boolean {
   return pfaParts(now).hour === 8;
 }
 
+// How many Pacific mornings a still-unlogged shift keeps getting the 8 AM
+// reminder. The job looks back this many days, so a shift gets reminded the
+// morning after it (and each morning thereafter) until it's logged / handed
+// off / marked no-cover, OR until it falls out of this trailing window — then
+// the texts stop even if it's still unlogged (Mark's "a week then stop").
+export const REMINDER_LOOKBACK_DAYS = 7;
+
 export type ReminderWindow = {
-  // Half-open UTC range for "yesterday" in the Pacific calendar.
+  // Half-open UTC range covering the trailing REMINDER_LOOKBACK_DAYS Pacific
+  // days (everything before today's Pacific midnight, back a week).
   startUtc: Date;
   endUtc: Date;
-  // The Pacific ISO date the reminder is ABOUT (the dedup key), e.g.
-  // "2026-06-09".
+  // The Pacific ISO date the reminder is SENT on (today) — the per-morning
+  // dedup key, so the two DST cron fires can't double-text, but the NEXT
+  // morning is a new key and an unlogged shift gets re-reminded.
   forDate: string;
 };
 
@@ -71,22 +81,26 @@ export type ReminderSummary =
     };
 
 /**
- * The half-open UTC range for the PACIFIC calendar day BEFORE `now`, plus
- * that day's Pacific ISO date string (the dedup key). PURE + deterministic.
+ * The half-open UTC range covering the trailing REMINDER_LOOKBACK_DAYS Pacific
+ * days (everything before today's Pacific midnight, back a week), plus TODAY's
+ * Pacific ISO date string (the per-morning send/dedup key). PURE + deterministic.
  *
- * `pfaDayStart(now)` is today's Pacific midnight (in UTC); stepping back 1ms
- * lands on the last instant of YESTERDAY (Pacific) regardless of DST, and
- * `pfaDayStart` of that snaps to yesterday's Pacific midnight. `endUtc` is
- * today's Pacific midnight. (A fixed −25h step would overshoot into the
- * day-before-yesterday on a 24h Pacific day.)
+ * `endUtc` = today's Pacific midnight (so a shift scheduled today, not yet
+ * overdue, is excluded). `startUtc` steps back one Pacific day at a time
+ * (subtract 1ms → `pfaDayStart`) REMINDER_LOOKBACK_DAYS times so DST never
+ * over/undershoots a day. A shift on day D is therefore in-window on the
+ * mornings of D+1 … D+REMINDER_LOOKBACK_DAYS, then drops out.
  */
-export function yesterdayPacificWindow(now: Date): ReminderWindow {
+export function reminderWindow(now: Date): ReminderWindow {
   const todayStart = pfaDayStart(now);
-  const yesterdayStart = pfaDayStart(new Date(todayStart.getTime() - 1));
+  let startUtc = todayStart;
+  for (let i = 0; i < REMINDER_LOOKBACK_DAYS; i++) {
+    startUtc = pfaDayStart(new Date(startUtc.getTime() - 1));
+  }
   return {
-    startUtc: yesterdayStart,
+    startUtc,
     endUtc: todayStart,
-    forDate: formatPfaDate(yesterdayStart),
+    forDate: formatPfaDate(todayStart),
   };
 }
 
@@ -111,11 +125,12 @@ export async function runSmsReminders(opts?: {
     return { status: "disabled" };
   }
 
-  const window = yesterdayPacificWindow(now);
+  const window = reminderWindow(now);
 
-  // 1. Candidate (block, member-coach) pairs: program blocks that fall in
-  //    yesterday's Pacific window. (We key on startAt within the day — a
-  //    block scheduled yesterday is a reminder candidate.)
+  // 1. Candidate (block, member-coach) pairs: program blocks whose start
+  //    falls in the trailing-week Pacific window. A block stays a candidate
+  //    every morning until it's logged (step 2) or flagged (below), or until
+  //    it ages out of the window — giving the "remind for a week then stop".
   const candidateRows = await db
     .select({
       blockId: programScheduleBlocks.id,
@@ -136,13 +151,33 @@ export async function runSmsReminders(opts?: {
       ),
     );
 
-  const candidates: ReminderCandidate[] = candidateRows.map((r) => ({
+  let candidates: ReminderCandidate[] = candidateRows.map((r) => ({
     blockId: r.blockId,
     coachId: r.coachId,
     programId: r.programId,
     startMs: r.startAt.getTime(),
     endMs: r.endAt.getTime(),
   }));
+
+  // Stop reminding about a (block, coach) the coach has marked NO-COVER
+  // (kind='cancelled') or that an admin has acknowledged as a NO-SHOW
+  // (kind='no_show') — same suppression the needs-review queue uses. (A
+  // handed-off shift drops out automatically: the giver is no longer a member,
+  // so they're never in candidateRows.)
+  if (candidates.length > 0) {
+    const blockIds = [...new Set(candidates.map((c) => c.blockId))];
+    const flagRows = await db
+      .select({
+        blockId: programBlockCoachFlags.blockId,
+        coachId: programBlockCoachFlags.coachId,
+      })
+      .from(programBlockCoachFlags)
+      .where(inArray(programBlockCoachFlags.blockId, blockIds));
+    const flagged = new Set(flagRows.map((f) => `${f.blockId}:${f.coachId}`));
+    candidates = candidates.filter(
+      (c) => !flagged.has(`${c.blockId}:${c.coachId}`),
+    );
+  }
 
   if (candidates.length === 0) {
     return dryRun

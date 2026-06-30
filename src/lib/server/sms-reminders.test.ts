@@ -1,5 +1,5 @@
 // Tests for the PURE helpers in sms-reminders.ts: the Pacific-8AM cron gate
-// and the "yesterday Pacific" window derivation. The rest of the module hits
+// and the trailing-week Pacific window derivation. The rest of the module hits
 // the DB and is exercised by the integration suite.
 //
 // `sms-reminders.ts` imports `@/db`, which throws at module load if
@@ -8,15 +8,18 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 let isPacific8am: (now: Date) => boolean;
-let yesterdayPacificWindow: (now: Date) => {
+let reminderWindow: (now: Date) => {
   startUtc: Date;
   endUtc: Date;
   forDate: string;
 };
+let REMINDER_LOOKBACK_DAYS: number;
 
 beforeAll(async () => {
   process.env.DATABASE_URL ??= "postgresql://user:pass@localhost.tld/testdb";
-  ({ isPacific8am, yesterdayPacificWindow } = await import("./sms-reminders"));
+  ({ isPacific8am, reminderWindow, REMINDER_LOOKBACK_DAYS } = await import(
+    "./sms-reminders"
+  ));
 });
 
 describe("isPacific8am", () => {
@@ -48,35 +51,46 @@ describe("isPacific8am", () => {
   });
 });
 
-describe("yesterdayPacificWindow", () => {
-  it("returns the prior Pacific calendar day as a half-open UTC window (PDT)", () => {
-    // Now = 8 AM Pacific on 2026-06-09 (15:00 UTC). Yesterday = 2026-06-08.
-    const w = yesterdayPacificWindow(new Date("2026-06-09T15:00:00.000Z"));
-    expect(w.forDate).toBe("2026-06-08");
-    // PDT midnight (00:00) of Jun 8 = 07:00 UTC; of Jun 9 = 07:00 UTC.
-    expect(w.startUtc.toISOString()).toBe("2026-06-08T07:00:00.000Z");
-    expect(w.endUtc.toISOString()).toBe("2026-06-09T07:00:00.000Z");
+describe("reminderWindow", () => {
+  it("forDate is TODAY's Pacific date (the send day, not the shift day) (PDT)", () => {
+    // Now = 8 AM Pacific on 2026-06-09 (15:00 UTC).
+    const w = reminderWindow(new Date("2026-06-09T15:00:00.000Z"));
+    expect(w.forDate).toBe("2026-06-09");
   });
 
-  it("computes the correct prior day even just after midnight Pacific", () => {
-    // 00:30 Pacific on Jun 9 (PDT) = 07:30 UTC → yesterday is still Jun 8.
-    const w = yesterdayPacificWindow(new Date("2026-06-09T07:30:00.000Z"));
-    expect(w.forDate).toBe("2026-06-08");
+  it("spans the trailing REMINDER_LOOKBACK_DAYS, ending at today's Pacific midnight (PDT)", () => {
+    const w = reminderWindow(new Date("2026-06-09T15:00:00.000Z"));
+    // endUtc = today's PDT midnight (Jun 9 00:00 PDT = 07:00 UTC).
+    expect(w.endUtc.toISOString()).toBe("2026-06-09T07:00:00.000Z");
+    // startUtc = 7 Pacific days earlier (Jun 2 00:00 PDT = 07:00 UTC).
+    expect(w.startUtc.toISOString()).toBe("2026-06-02T07:00:00.000Z");
+    // Exactly REMINDER_LOOKBACK_DAYS apart (no DST flip in this span).
+    const days = (w.endUtc.getTime() - w.startUtc.getTime()) / 86_400_000;
+    expect(days).toBe(REMINDER_LOOKBACK_DAYS);
+  });
+
+  it("uses today's date even just after midnight Pacific", () => {
+    // 00:30 Pacific on Jun 9 (PDT) = 07:30 UTC → send day is Jun 9.
+    const w = reminderWindow(new Date("2026-06-09T07:30:00.000Z"));
+    expect(w.forDate).toBe("2026-06-09");
   });
 
   it("works in PST (winter, UTC-8)", () => {
-    // 8 AM Pacific on 2026-01-09 (PST) = 16:00 UTC. Yesterday = 2026-01-08.
-    const w = yesterdayPacificWindow(new Date("2026-01-09T16:00:00.000Z"));
-    expect(w.forDate).toBe("2026-01-08");
-    // PST midnight of Jan 8 = 08:00 UTC; of Jan 9 = 08:00 UTC.
-    expect(w.startUtc.toISOString()).toBe("2026-01-08T08:00:00.000Z");
+    // 8 AM Pacific on 2026-01-09 (PST) = 16:00 UTC.
+    const w = reminderWindow(new Date("2026-01-09T16:00:00.000Z"));
+    expect(w.forDate).toBe("2026-01-09");
+    // PST midnight of Jan 9 = 08:00 UTC; 7 days earlier (Jan 2) = 08:00 UTC.
     expect(w.endUtc.toISOString()).toBe("2026-01-09T08:00:00.000Z");
+    expect(w.startUtc.toISOString()).toBe("2026-01-02T08:00:00.000Z");
   });
 
-  it("the window is exactly the day before today's Pacific midnight", () => {
-    const now = new Date("2026-06-09T15:00:00.000Z");
-    const w = yesterdayPacificWindow(now);
-    // endUtc is today's Pacific midnight; startUtc is yesterday's.
-    expect(w.endUtc.getTime()).toBeGreaterThan(w.startUtc.getTime());
+  it("steps day-by-day so a DST spring-forward in the span stays exactly 7 days", () => {
+    // DST spring-forward is 2026-03-08. Now = 8 AM Pacific 2026-03-10 (PDT,
+    // 15:00 UTC). The 7-day window crosses the flip (Mar 3 PST → Mar 10 PDT).
+    const w = reminderWindow(new Date("2026-03-10T15:00:00.000Z"));
+    expect(w.forDate).toBe("2026-03-10");
+    // endUtc = Mar 10 00:00 PDT = 07:00 UTC; startUtc = Mar 3 00:00 PST = 08:00 UTC.
+    expect(w.endUtc.toISOString()).toBe("2026-03-10T07:00:00.000Z");
+    expect(w.startUtc.toISOString()).toBe("2026-03-03T08:00:00.000Z");
   });
 });

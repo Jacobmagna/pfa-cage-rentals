@@ -1164,10 +1164,12 @@ export const attendanceRecords = pgTable(
 // inserted, so a doubled cron fire (the two DST-spanning vercel.json
 // entries) can never double-text a coach.
 //
-// `forDate` is the Pacific ISO date the reminder is ABOUT (the day the
-// unlogged work was scheduled, e.g. "2026-06-09"), stored as a text string
-// rather than a timestamp so the dedup key is the human calendar day, not a
-// UTC instant. `status` records the outcome: "sent" (Twilio accepted),
+// `forDate` is the Pacific ISO date the reminder was SENT on (today, e.g.
+// "2026-06-09"), stored as a text string rather than a timestamp so the dedup
+// key is the human calendar day, not a UTC instant. NB: the reminder now nags
+// about ANY unlogged shift in the trailing week (REMINDER_LOOKBACK_DAYS), so
+// `forDate` is the SEND-day (one text per coach per morning) — NOT the
+// specific shift's date. `status` records the outcome: "sent" (Twilio accepted),
 // "failed" (Twilio error — see `error`), "skipped_optout" (coach was opted
 // out at send time), "no_phone" (no valid phone on file). `twilioSid` is the
 // message SID on a successful send. DORMANT until go-live: nothing writes

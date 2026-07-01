@@ -40,6 +40,8 @@ export default async function AdminCoachesPage() {
         name: users.name,
         email: users.email,
         createdAt: users.createdAt,
+        smsOptIn: users.smsOptIn,
+        smsOptOut: users.smsOptOut,
       })
       .from(users)
       .where(and(eq(users.role, "coach"), isNull(users.deletedAt)))
@@ -96,6 +98,7 @@ export default async function AdminCoachesPage() {
       email: c.email,
       joinedAt: c.createdAt,
       lastActivityAt: lastActivity.get(c.id) ?? null,
+      receivesTexts: c.smsOptIn && !c.smsOptOut,
       sessionsThisMonth: t?.count ?? 0,
       owedThisMonthCents: t?.cents ?? 0,
       isSynthetic: isSyntheticUserEmail(c.email),

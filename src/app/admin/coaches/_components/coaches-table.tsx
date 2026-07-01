@@ -20,6 +20,7 @@ export type CoachRow = {
   email: string;
   joinedAt: Date;
   lastActivityAt: Date | null;
+  receivesTexts: boolean;
   sessionsThisMonth: number;
   owedThisMonthCents: number;
   isSynthetic: boolean;
@@ -36,6 +37,7 @@ type SortKey =
   | "email"
   | "joinedAt"
   | "lastActivityAt"
+  | "receivesTexts"
   | "sessionsThisMonth"
   | "owedThisMonthCents";
 type SortDir = "asc" | "desc";
@@ -47,6 +49,7 @@ const DEFAULT_DIR: Record<SortKey, SortDir> = {
   email: "asc",
   joinedAt: "desc",
   lastActivityAt: "desc",
+  receivesTexts: "desc",
   sessionsThisMonth: "desc",
   owedThisMonthCents: "desc",
 };
@@ -122,7 +125,7 @@ export function CoachesTable({
         </div>
       ) : (
     <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
-      <table className="w-full min-w-[720px] text-sm">
+      <table className="w-full min-w-[820px] text-sm">
         <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
           <tr>
             <SortHeader
@@ -149,6 +152,13 @@ export function CoachesTable({
             <SortHeader
               label="Last activity"
               col="lastActivityAt"
+              align="left"
+              sort={sort}
+              onClick={onHeaderClick}
+            />
+            <SortHeader
+              label="Receives texts"
+              col="receivesTexts"
               align="left"
               sort={sort}
               onClick={onHeaderClick}
@@ -181,7 +191,7 @@ export function CoachesTable({
               key={row.id}
               className="border-t border-line hover:bg-surface-2 transition-colors"
             >
-              <td className="px-4 py-3 max-w-[18rem]">
+              <td className="px-4 py-3 max-w-[16rem]">
                 <div className="flex min-w-0 items-center gap-2">
                   <Link
                     href={`/admin/coaches/${row.id}`}
@@ -200,7 +210,14 @@ export function CoachesTable({
                   ) : null}
                 </div>
               </td>
-              <td className="px-4 py-3 text-fg-muted text-xs">{row.email}</td>
+              <td className="px-4 py-3 text-fg-muted text-xs">
+                <span
+                  className="block max-w-[14rem] truncate"
+                  title={row.email}
+                >
+                  {row.email}
+                </span>
+              </td>
               <td className="px-4 py-3 text-fg-muted font-mono tnum tabular-nums text-xs whitespace-nowrap">
                 {formatJoined(row.joinedAt)}
               </td>
@@ -209,6 +226,13 @@ export function CoachesTable({
                   <span className="text-fg-subtle">—</span>
                 ) : (
                   formatLastActivity(row.lastActivityAt)
+                )}
+              </td>
+              <td className="px-4 py-3 text-xs">
+                {row.receivesTexts ? (
+                  <span className="text-fg">Yes</span>
+                ) : (
+                  <span className="text-fg-subtle">No</span>
                 )}
               </td>
               <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-muted">
@@ -277,7 +301,7 @@ function SortHeader({
     <th
       scope="col"
       className={[
-        "px-4 py-3 font-semibold",
+        "px-4 py-3 font-semibold whitespace-nowrap",
         align === "right" ? "text-right" : "text-left",
       ].join(" ")}
     >
@@ -313,6 +337,8 @@ function compareByKey(a: CoachRow, b: CoachRow, key: SortKey): number {
       return a.joinedAt.getTime() - b.joinedAt.getTime();
     case "lastActivityAt":
       return (a.lastActivityAt?.getTime() ?? 0) - (b.lastActivityAt?.getTime() ?? 0);
+    case "receivesTexts":
+      return (a.receivesTexts ? 1 : 0) - (b.receivesTexts ? 1 : 0);
     case "sessionsThisMonth":
       return a.sessionsThisMonth - b.sessionsThisMonth;
     case "owedThisMonthCents":

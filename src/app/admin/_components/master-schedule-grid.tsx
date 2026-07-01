@@ -128,7 +128,7 @@ function statusAccent(status: MasterProgramBlock["status"]): string {
   }
 }
 
-function inRange(when: Date): boolean {
+export function inRange(when: Date): boolean {
   // Mirrors the interactive grids' visibility filter: only render bars
   // whose start is inside the 8 AM–10 PM window. placeOnGrid still clips
   // the span for anything straddling an edge.
@@ -175,6 +175,8 @@ export type PaintPointerDown = (args: {
   // resourceId for the cage section; "" for the program (lane-stacked) section.
   rowId: string;
   slotIndex: number;
+  // Lane index for the program section (per-lane occupancy); absent for cage.
+  laneIdx?: number;
   clientX: number;
   clientY: number;
 }) => void;
@@ -188,11 +190,11 @@ export type RegisterGridNode = (
 ) => void;
 
 // The currently-painted range to highlight, as resolved by the wrapper. For the
-// cage section `resourceId` pins the row; for the program section it spans the
-// whole section (all lane rows) since programs aren't per-resource.
+// cage section `resourceId` pins the row; for the program section `laneIdx`
+// pins the single lane row being painted (occupancy is per-lane).
 export type PaintOverlay =
   | { section: "resource"; resourceId: string; minSlot: number; maxSlot: number }
-  | { section: "program"; minSlot: number; maxSlot: number }
+  | { section: "program"; laneIdx: number; minSlot: number; maxSlot: number }
   | null;
 
 export function MasterScheduleGrid({
@@ -813,23 +815,34 @@ function ProgramGrid({
   // logical cell per 30 minutes (slotIdx 0..27), each spanning 2 underlying
   // 15-min template columns. So occupancy is tracked per 15-min slot, then a
   // 30-min cell counts as occupied if EITHER of its two sub-slots is taken.
-  const occupied15 = new Set<number>();
+  // PER-LANE occupancy: overlapping blocks lane-stack, so a 30-min cell is
+  // free/clickable on a lane only when THAT lane has no block over it. Tracking
+  // occupancy globally (across all lanes) wrongly disables free cells on other
+  // lanes (e.g. a 8–10 block on lane 0 shouldn't gate lane 1's 9–10 cells).
+  const occupiedByLane: Set<number>[] = Array.from(
+    { length: laneRows },
+    () => new Set<number>(),
+  );
   for (const b of blocks) {
     // #15B: exclude the actively-dragged block's own slots so a shift-in-place
     // (e.g. nudging it) isn't rejected as "dropping onto itself".
     if (dragEnabled && b.id === draggingId) continue;
+    const lane = laneByBlockId.get(b.id);
+    if (lane === undefined) continue;
     const placement = placeOnGrid15(b.startAt, b.endAt);
     if (!placement) continue;
     // placeOnGrid15.col is 1-based with NO leading label column (slot 0 →
     // col 1). Recover the 0-based 15-min slot index.
     const startSlot = placement.col - 1;
     for (let i = 0; i < placement.span; i++) {
-      occupied15.add(startSlot + i);
+      occupiedByLane[lane].add(startSlot + i);
     }
   }
-  // A 30-min cell (slotIdx 0..27) is occupied if either 15-min sub-slot is.
-  const isCellOccupied = (slotIdx: number): boolean =>
-    occupied15.has(slotIdx * 2) || occupied15.has(slotIdx * 2 + 1);
+  // A 30-min cell (slotIdx 0..27) is occupied on a lane if either 15-min
+  // sub-slot is taken on THAT lane.
+  const isCellOccupied = (laneIdx: number, slotIdx: number): boolean =>
+    (occupiedByLane[laneIdx]?.has(slotIdx * 2) ?? false) ||
+    (occupiedByLane[laneIdx]?.has(slotIdx * 2 + 1) ?? false);
 
   return (
     <div
@@ -865,7 +878,7 @@ function ProgramGrid({
           is the 0..27 30-min index; the wrapper decodes it via *2. */}
       {Array.from({ length: laneRows }).map((_, laneIdx) =>
         Array.from({ length: SCHEDULE_GRID_SLOTS }).map((_, slotIdx) => {
-          const isOccupied = isCellOccupied(slotIdx);
+          const isOccupied = isCellOccupied(laneIdx, slotIdx);
           const cellClass = [
             "border-b border-line bg-surface-2/40",
             slotIdx % 2 === 0
@@ -898,6 +911,7 @@ function ProgramGrid({
                     section: "program",
                     rowId: "",
                     slotIndex: slotIdx,
+                    laneIdx,
                     clientX: e.clientX,
                     clientY: e.clientY,
                   })
@@ -967,7 +981,8 @@ function ProgramGrid({
       )}
 
       {/* #15: program paint highlight — a blue dashed overlay across the painted
-          30-min range, spanning all lane rows (programs aren't per-resource).
+          30-min range, in the painted LANE only (occupancy is per-lane, so the
+          paint anchors to a single lane row rather than spanning all lanes).
           #8: minSlot/maxSlot are 30-min indices (0..27); each spans 2 underlying
           template columns, so the overlay starts at `min*2 + 2` (the +2 clears
           the 120px label column) and spans `(max - min + 1) * 2` columns. */}
@@ -979,7 +994,7 @@ function ProgramGrid({
               <div
                 aria-hidden
                 style={{
-                  gridRow: `1 / span ${laneRows}`,
+                  gridRow: programPaint.laneIdx + 1,
                   gridColumn: `${min * 2 + 2} / span ${(max - min + 1) * 2}`,
                   pointerEvents: "none",
                   zIndex: 5,

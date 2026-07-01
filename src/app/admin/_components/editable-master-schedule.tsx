@@ -24,6 +24,7 @@ import {
 } from "@dnd-kit/core";
 import {
   MasterScheduleGrid,
+  inRange,
   type BlockClick,
   type EmptyCellClick,
   type MasterBlockedTime,
@@ -71,6 +72,7 @@ import {
   slotStartAt,
   slotStartAt15,
 } from "@/lib/schedule-grid-utils";
+import { assignLanes } from "@/lib/schedule-lanes";
 import { formatPfaTime } from "@/lib/timezone";
 
 // Drag id prefix (e.g. "session-…" / "program-block-…") → bare entity id, so
@@ -195,6 +197,7 @@ export function EditableMasterSchedule({
     section: "resource" | "program";
     rowId: string; // resourceId for cage; "" for program
     slotIndex: number;
+    laneIdx?: number; // painted lane for the program section (per-lane occupancy)
     x: number;
     y: number;
   } | null>(null);
@@ -219,13 +222,14 @@ export function EditableMasterSchedule({
   });
 
   // Is the given slot occupied in the painting section? Cage = per-resource
-  // (sessions + blocked times on that resourceId); program = any visible block
-  // covers that 15-min column (lane-agnostic). Excludes nothing — these are
-  // empty-cell paints, so any occupied slot is a hard stop.
+  // (sessions + blocked times on that resourceId); program = per-LANE (only a
+  // block on THAT lane covering that 30-min column counts). Excludes nothing —
+  // these are empty-cell paints, so any occupied slot is a hard stop.
   const isSlotOccupied = (
     section: "resource" | "program",
     rowId: string,
     slotIndex: number,
+    laneIdx: number,
   ): boolean => {
     if (section === "resource") {
       for (const s of sessionsRef.current) {
@@ -245,8 +249,20 @@ export function EditableMasterSchedule({
       return false;
     }
     // #8: the program paint layer is 30-min (slotIndex 0..27). A 30-min slot is
-    // occupied if EITHER of its two 15-min sub-slots is covered by a block.
-    for (const b of programBlocksRef.current) {
+    // occupied on a lane if EITHER of its two 15-min sub-slots is covered by a
+    // block ON THAT LANE. Occupancy is PER-LANE: recompute the same lane
+    // assignment the child grid uses. CRITICAL: the child assigns lanes over
+    // the SAME `inRange`-FILTERED (8AM–10PM) set it renders, so we must filter
+    // here identically — else an out-of-range block that overlaps a visible one
+    // shifts every later block's lane index and the laneIdx the child passed
+    // would point at the wrong lane. assignLanes is deterministic over the same
+    // filtered list, so the indices then align exactly.
+    const visible = programBlocksRef.current.filter((b) => inRange(b.startAt));
+    const { laneByBlockId } = assignLanes(
+      visible.map((b) => ({ id: b.id, startAt: b.startAt, endAt: b.endAt })),
+    );
+    for (const b of visible) {
+      if (laneByBlockId.get(b.id) !== laneIdx) continue;
       const p = placeOnGrid15(b.startAt, b.endAt);
       if (!p) continue;
       // placeOnGrid15.col is 1-based with NO leading label column (slot 0 →
@@ -291,13 +307,21 @@ export function EditableMasterSchedule({
     section,
     rowId,
     slotIndex,
+    laneIdx,
     clientX,
     clientY,
   }) => {
     // Clear any stale suppress flag from a prior gesture whose trailing click
     // never landed (dialog took focus, pointer moved off, etc.).
     suppressNextClickRef.current = false;
-    paintStartRef.current = { section, rowId, slotIndex, x: clientX, y: clientY };
+    paintStartRef.current = {
+      section,
+      rowId,
+      slotIndex,
+      laneIdx,
+      x: clientX,
+      y: clientY,
+    };
   };
 
   // Wrap the single-cell create so a completed paint swallows the trailing
@@ -369,6 +393,7 @@ export function EditableMasterSchedule({
               }
             : {
                 section: "program",
+                laneIdx: start.laneIdx ?? 0,
                 minSlot: start.slotIndex,
                 maxSlot: start.slotIndex,
               },
@@ -388,7 +413,8 @@ export function EditableMasterSchedule({
         dir > 0 ? i <= targetSlot : i >= targetSlot;
         i += dir
       ) {
-        if (isSlotOccupied(start.section, start.rowId, i)) break;
+        if (isSlotOccupied(start.section, start.rowId, i, start.laneIdx ?? 0))
+          break;
         clamped = i;
       }
       // current is the active overlay; the anchor slot lives in start.slotIndex,
@@ -404,7 +430,12 @@ export function EditableMasterSchedule({
                 minSlot: min,
                 maxSlot: max,
               }
-            : { section: "program", minSlot: min, maxSlot: max },
+            : {
+                section: "program",
+                laneIdx: start.laneIdx ?? 0,
+                minSlot: min,
+                maxSlot: max,
+              },
         );
       }
     };

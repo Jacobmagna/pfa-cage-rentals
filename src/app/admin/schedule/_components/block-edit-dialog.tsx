@@ -8,7 +8,15 @@
 // Create-side blocks still go through ScheduleCreateDialog's Block
 // tab; this component is edit-only.
 
-import { useActionState, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useActionState,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type FormEvent,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Repeat, Trash2, X } from "lucide-react";
 import {
@@ -16,7 +24,12 @@ import {
   updateBlockFormAction,
   type BlockActionResult,
 } from "../form-actions";
-import { cancelBlockOccurrence, deleteBlockSeries } from "../actions";
+import {
+  cancelBlockOccurrence,
+  deleteBlockSeries,
+  editBlockSeries,
+  getBlockSeries,
+} from "../actions";
 import type { ResourceOption } from "@/app/admin/sessions/_components/sessions-client";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
@@ -27,6 +40,44 @@ import {
   formatPfaTime12h,
 } from "@/lib/timezone";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
+import { CagePicker } from "./cage-picker";
+import {
+  FREQUENCY_OPTIONS,
+  freqIntervalForKind,
+  kindForFreqInterval,
+  monthlyHint,
+  weekdayFromIso,
+  type FrequencyKind,
+} from "@/app/admin/hour-log/schedule/_components/recurrence-frequency.logic";
+import type { BlockSeriesResult } from "@/lib/server/block-series-actions";
+
+// The series pattern the "Apply to all" form seeds from — the getBlockSeries
+// read-action's return shape. Fetched lazily when the admin first ticks the
+// toggle (never on plain dialog open).
+type SeriesPattern = {
+  id: string;
+  resourceIds: string[];
+  reason: string;
+  daysOfWeek: number[];
+  frequency: "weekly" | "monthly";
+  interval: number;
+  startTime: string;
+  endTime: string;
+  startsOn: string;
+  endsOn: string;
+};
+
+// Weekday pills for the series-edit recurrence controls. Mirrors the create
+// dialog's local `{ i, label }` pill shape (Sun=0 .. Sat=6, getUTCDay order).
+const WEEKDAY_PILLS = [
+  { i: 0, label: "S" },
+  { i: 1, label: "M" },
+  { i: 2, label: "T" },
+  { i: 3, label: "W" },
+  { i: 4, label: "T" },
+  { i: 5, label: "F" },
+  { i: 6, label: "S" },
+] as const;
 
 export type BlockEditInitialValues = {
   id: string;
@@ -67,6 +118,42 @@ export function BlockEditDialog({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const isSeries = Boolean(initial?.seriesId);
 
+  // "Apply to all in this recurring series" toggle (default UNCHECKED —
+  // single-occurrence edit). When ticked, we lazily fetch the series' pattern
+  // (getBlockSeries) and reveal the series-edit form seeded from it.
+  const [applyToSeries, setApplyToSeries] = useState(false);
+  const [seriesPattern, setSeriesPattern] = useState<SeriesPattern | null>(
+    null,
+  );
+  const [seriesLoading, setSeriesLoading] = useState(false);
+  const [seriesLoadError, setSeriesLoadError] = useState<string | null>(null);
+
+  // Lazy-fetch the series pattern the first time the admin ticks the toggle.
+  // A plain async handler triggered by the checkbox onChange — NOT a setState-
+  // in-an-open-transition-effect (which the repo's lint forbids). Cached across
+  // toggles once loaded (keyed on the current seriesId).
+  const handleToggleSeries = async (checked: boolean) => {
+    setApplyToSeries(checked);
+    if (!checked) return;
+    if (!initial?.seriesId) return;
+    if (seriesPattern && seriesPattern.id === initial.seriesId) return;
+    setSeriesLoadError(null);
+    setSeriesLoading(true);
+    try {
+      const pattern = await getBlockSeries(initial.seriesId);
+      if (!pattern) {
+        setSeriesLoadError("That series was already removed — refreshing.");
+        router.refresh();
+        return;
+      }
+      setSeriesPattern(pattern);
+    } catch {
+      setSeriesLoadError("Couldn't load the series settings — try again.");
+    } finally {
+      setSeriesLoading(false);
+    }
+  };
+
   // This dialog is edit-only; an existing block always opens to the
   // read-only summary first (QA2-5), with an Edit button to reveal the
   // form. With no `initial` (defensive) we fall straight to the form.
@@ -79,7 +166,15 @@ export function BlockEditDialog({
   const [prevOpen, setPrevOpen] = useState(open);
   if (open !== prevOpen) {
     setPrevOpen(open);
-    if (open) setView(isEdit ? "summary" : "edit");
+    if (open) {
+      setView(isEdit ? "summary" : "edit");
+      // Reset the series-edit toggle + its fetched pattern on each (re)open so
+      // opening a different block doesn't inherit the prior one's series state.
+      setApplyToSeries(false);
+      setSeriesPattern(null);
+      setSeriesLoading(false);
+      setSeriesLoadError(null);
+    }
   }
 
   useEffect(() => {
@@ -248,6 +343,59 @@ export function BlockEditDialog({
             </div>
           </div>
         </div>
+      ) : applyToSeries && isSeries && initial ? (
+        // ── "Apply to all" series-edit mode ────────────────────────────────
+        <div className="space-y-5 p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="text-xs uppercase tracking-[0.14em] text-fg-muted">
+                  Edit
+                </p>
+                <span className="inline-flex items-center gap-1 rounded-full border border-line-strong bg-surface-2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
+                  <Repeat className="h-3 w-3" />
+                  Recurring
+                </span>
+              </div>
+              <h2 className="text-xl font-semibold tracking-tight mt-0.5">
+                Block
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex items-center justify-center h-8 w-8 -mr-1 -mt-1 rounded-md text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <SeriesToggle
+            checked={applyToSeries}
+            onChange={handleToggleSeries}
+          />
+
+          {seriesLoadError ? (
+            <div
+              role="alert"
+              className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+            >
+              {seriesLoadError}
+            </div>
+          ) : null}
+
+          {seriesLoading || !seriesPattern ? (
+            <p className="text-sm text-fg-muted">Loading series settings…</p>
+          ) : (
+            <SeriesEditForm
+              key={seriesPattern.id}
+              pattern={seriesPattern}
+              resources={resources}
+              onClose={onClose}
+            />
+          )}
+        </div>
       ) : (
       <form
         action={formAction}
@@ -291,6 +439,10 @@ export function BlockEditDialog({
           >
             {state.error.message}
           </div>
+        ) : null}
+
+        {isSeries ? (
+          <SeriesToggle checked={applyToSeries} onChange={handleToggleSeries} />
         ) : null}
 
         <div className="space-y-3">
@@ -477,6 +629,386 @@ function RemovalButtons({
         <Trash2 className="h-4 w-4" />
         Delete series
       </button>
+    </div>
+  );
+}
+
+// "Apply to all in this recurring series" toggle. Mirrors the work-log program
+// dialog's copy exactly. Unchecked → single-occurrence edit; checked → the
+// series-edit form (seeded lazily from getBlockSeries).
+function SeriesToggle({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="rounded-md border border-line bg-surface-2/40 px-3 py-2.5">
+      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          className="h-4 w-4 rounded border-line text-gold accent-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+        />
+        <span className="text-sm text-fg">
+          Apply to all in this recurring series
+        </span>
+      </label>
+      <p className="text-[11px] text-fg-subtle mt-1 ml-[1.625rem] leading-snug">
+        Unchecked changes only this occurrence.
+      </p>
+    </div>
+  );
+}
+
+// Series-edit form: cages / reason / start-end time / recurrence controls,
+// seeded from the series' pattern. Submits via a client transition (mirrors
+// ScheduleCreateDialog's BlockTab + this dialog's direct action calls) rather
+// than a form action, to avoid the useActionState action-swap race. On a clean
+// save (nothing skipped) it closes; any skip keeps it open with a report.
+function SeriesEditForm({
+  pattern,
+  resources,
+  onClose,
+}: {
+  pattern: SeriesPattern;
+  resources: ResourceOption[];
+  onClose: () => void;
+}) {
+  const [resourceIds, setResourceIds] = useState<string[]>(
+    pattern.resourceIds,
+  );
+  const [reason, setReason] = useState(pattern.reason);
+  const [startTime, setStartTime] = useState(pattern.startTime);
+  const [endTime, setEndTime] = useState(pattern.endTime);
+  const [startsOn, setStartsOn] = useState(pattern.startsOn);
+  const [endsOn, setEndsOn] = useState(pattern.endsOn);
+  const [freqKind, setFreqKind] = useState<FrequencyKind>(() =>
+    kindForFreqInterval(pattern.frequency, pattern.interval),
+  );
+  const [everyN, setEveryN] = useState(() =>
+    pattern.frequency === "weekly" && pattern.interval >= 3
+      ? pattern.interval
+      : 3,
+  );
+  const [daysOfWeek, setDaysOfWeek] = useState<number[]>(pattern.daysOfWeek);
+
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<BlockSeriesResult | null>(null);
+
+  const { frequency, interval } = freqIntervalForKind(freqKind, everyN);
+  const isMonthly = frequency === "monthly";
+  // Monthly derives its weekday from the season-start date (same convention as
+  // the create + program dialogs). Fall back to the stored days otherwise.
+  const monthlyWeekday = weekdayFromIso(startsOn);
+  const submitDays =
+    isMonthly && monthlyWeekday !== null ? [monthlyWeekday] : daysOfWeek;
+
+  const toggleResource = (id: string) => {
+    setError(null);
+    setResourceIds((prev) =>
+      prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id],
+    );
+  };
+
+  const toggleDay = (i: number) => {
+    setError(null);
+    setDaysOfWeek((prev) =>
+      prev.includes(i) ? prev.filter((d) => d !== i) : [...prev, i].sort(),
+    );
+  };
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (pending) return; // guard the Enter key / double-submit race
+    setError(null);
+    if (resourceIds.length === 0) {
+      setError("Pick at least one cage.");
+      return;
+    }
+    if (!reason.trim()) {
+      setError("Enter a reason.");
+      return;
+    }
+    if (!startTime || !endTime) {
+      setError("Pick a time.");
+      return;
+    }
+    if (startTime >= endTime) {
+      setError("Start must be before end.");
+      return;
+    }
+    if (!startsOn) {
+      setError("Pick a 'starts' date.");
+      return;
+    }
+    if (!endsOn) {
+      setError("Pick a 'repeats until' date.");
+      return;
+    }
+    if (submitDays.length === 0) {
+      setError("Pick at least one weekday.");
+      return;
+    }
+
+    startTransition(async () => {
+      try {
+        const res = await editBlockSeries(pattern.id, {
+          resourceIds,
+          reason: reason.trim(),
+          daysOfWeek: submitDays,
+          startTime,
+          endTime,
+          startsOn,
+          endsOn,
+          frequency,
+          interval,
+        });
+        setResult(res);
+        // Clean save (nothing skipped) → close; the server revalidate refreshes
+        // the grid. Any skip keeps the dialog open so the report shows.
+        if (res.skippedRentals.length === 0 && res.skippedBlocked === 0) {
+          onClose();
+        }
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to update the series.",
+        );
+      }
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      {error ? (
+        <div
+          role="alert"
+          className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+        >
+          {error}
+        </div>
+      ) : null}
+
+      <CagePicker
+        resources={resources}
+        selected={resourceIds}
+        onToggle={toggleResource}
+      />
+
+      <Field
+        label="Reason"
+        hint="Free text — e.g. 'Summer Camp Group 5', 'HVAC repair'."
+      >
+        <input
+          type="text"
+          required
+          maxLength={120}
+          value={reason}
+          onChange={(e) => {
+            setReason(e.target.value);
+            setError(null);
+          }}
+          placeholder="What's this block for?"
+          className={inputStyles}
+        />
+      </Field>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Start">
+          <TimeSelect
+            name="startTime"
+            variant="start"
+            required
+            value={startTime}
+            onChange={(v) => {
+              setStartTime(v);
+              setError(null);
+            }}
+            className={selectStyles}
+          />
+        </Field>
+        <Field label="End">
+          <TimeSelect
+            name="endTime"
+            variant="end"
+            required
+            value={endTime}
+            onChange={(v) => {
+              setEndTime(v);
+              setError(null);
+            }}
+            className={selectStyles}
+          />
+        </Field>
+      </div>
+
+      <div className="rounded-lg border border-line bg-page/50 p-3.5 space-y-3">
+        <Field label="Frequency">
+          <select
+            value={freqKind}
+            onChange={(e) => {
+              setFreqKind(e.target.value as FrequencyKind);
+              setError(null);
+            }}
+            className={selectStyles}
+          >
+            {FREQUENCY_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        {freqKind === "everyN" ? (
+          <Field label="Every N weeks">
+            <input
+              type="number"
+              min={1}
+              value={everyN}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                setEveryN(Number.isFinite(n) && n >= 1 ? n : 1);
+                setError(null);
+              }}
+              className={inputStyles}
+            />
+          </Field>
+        ) : null}
+
+        {isMonthly ? (
+          <p className="text-xs text-fg-muted">
+            {monthlyHint(startsOn) || "Pick a start date to set the pattern."}
+          </p>
+        ) : (
+          <div>
+            <span className="block text-xs uppercase tracking-wider text-fg-muted mb-1.5">
+              On these days
+            </span>
+            <div className="flex gap-1.5">
+              {WEEKDAY_PILLS.map((d) => {
+                const on = submitDays.includes(d.i);
+                return (
+                  <button
+                    key={d.i}
+                    type="button"
+                    onClick={() => toggleDay(d.i)}
+                    aria-pressed={on}
+                    className={[
+                      "h-8 w-8 rounded-full text-xs font-semibold transition-colors",
+                      on
+                        ? "bg-gold text-gold-ink"
+                        : "border border-line text-fg-muted hover:text-fg hover:border-line-strong",
+                    ].join(" ")}
+                  >
+                    {d.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Starts">
+            <DateInput
+              required
+              value={startsOn}
+              onChange={(iso) => {
+                setStartsOn(iso);
+                setError(null);
+              }}
+              className={inputStyles}
+            />
+          </Field>
+          <Field
+            label="Repeats until"
+            hint="Last date the block can occur (inclusive)."
+          >
+            <DateInput
+              required
+              value={endsOn}
+              onChange={(iso) => {
+                setEndsOn(iso);
+                setError(null);
+              }}
+              className={inputStyles}
+            />
+          </Field>
+        </div>
+      </div>
+
+      {result ? <SeriesReport result={result} /> : null}
+
+      {result ? (
+        <div className="flex items-center justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md bg-gold text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover h-9 px-4 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          >
+            Done
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-line bg-surface-2 text-fg-muted hover:text-fg hover:border-line-strong h-9 px-4 text-sm font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={pending}
+            className="rounded-md bg-gold text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          >
+            {pending ? "Saving…" : "Save series"}
+          </button>
+        </div>
+      )}
+    </form>
+  );
+}
+
+// Skip-and-continue report after a series edit — the future-regenerate result.
+// Mirrors ScheduleCreateDialog's BlockReport presentation.
+function SeriesReport({ result }: { result: BlockSeriesResult }) {
+  return (
+    <div
+      className={[
+        "rounded-md border px-3 py-2.5 text-xs space-y-1.5",
+        result.created === 0
+          ? "border-danger/30 bg-danger/10 text-danger"
+          : "border-line-strong bg-surface-2 text-fg",
+      ].join(" ")}
+    >
+      <p className="font-semibold">
+        {result.created === 0
+          ? "Couldn't block anything — all conflicted."
+          : `Blocked ${result.created} slot${result.created === 1 ? "" : "s"}.`}
+      </p>
+      {result.skippedRentals.length > 0 ? (
+        <div className="space-y-0.5">
+          <p className="text-fg-muted">
+            Skipped {result.skippedRentals.length} (already rented):
+          </p>
+          <ul className="list-disc pl-4 text-fg-muted">
+            {result.skippedRentals.map((s) => (
+              <li key={s.label}>{s.label}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {result.skippedBlocked > 0 ? (
+        <p className="text-fg-muted">
+          {result.skippedBlocked} already blocked (skipped).
+        </p>
+      ) : null}
     </div>
   );
 }

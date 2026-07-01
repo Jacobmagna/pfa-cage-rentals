@@ -25,6 +25,7 @@ import {
   editBlockSeriesInternal,
 } from "@/lib/server/block-series-actions";
 import { generateOccurrences } from "@/lib/schedule-recurrence";
+import { formatPfaDate } from "@/lib/timezone";
 import {
   BlockedTimeSeriesNotFoundError,
   BlockNotFoundError,
@@ -596,6 +597,93 @@ describe("editBlockSeriesInternal", () => {
     expect(res.created).toBe(newFuture.length - 1);
   });
 
+  it("CAGE-SCOPED cancel + regenerate: cancelling one cage's date does NOT drop it on the other cage", async () => {
+    // Multi-cage weekly series over BOTH cages, spanning several weeks so a
+    // future date materializes on both.
+    const base = {
+      resourceIds: [cageId, cage2Id],
+      reason: "Two-cage camp",
+      daysOfWeek: [1, 3],
+      startTime: "10:00",
+      endTime: "11:00",
+      startsOn: isoDaysFromToday(1),
+      endsOn: isoDaysFromToday(29),
+    };
+    const created = await createBlockSeriesInternal(fixtures.admin, base);
+    createdSeriesIds.push(created.seriesId!);
+
+    // Pick a future date D that materialized on BOTH cages.
+    const blocks = await seriesBlocks(created.seriesId!);
+    const cage1Dates = new Set(
+      blocks.filter((b) => b.resourceId === cageId).map((b) => formatPfaDate(b.startAt)),
+    );
+    const cage2Block = blocks.find(
+      (b) => b.resourceId === cage2Id && cage1Dates.has(formatPfaDate(b.startAt)),
+    );
+    expect(cage2Block).toBeDefined();
+    const D = formatPfaDate(cage2Block!.startAt);
+
+    // Cancel ONLY cage 2's occurrence on D.
+    await cancelBlockSeriesOccurrenceInternal(fixtures.admin, cage2Block!.id);
+
+    // skipDates records a COMPOSITE key (cage-scoped), not a bare date.
+    const [series] = await db
+      .select()
+      .from(blockedTimesSeries)
+      .where(eq(blockedTimesSeries.id, created.seriesId!));
+    expect(series.skipDates).toContain(`${cage2Id}|${D}`);
+    expect(series.skipDates).not.toContain(D);
+
+    // Edit the series with the SAME pattern (only reason changes) → regenerate.
+    await editBlockSeriesInternal(fixtures.admin, created.seriesId!, {
+      ...base,
+      reason: "Two-cage camp (edited)",
+    });
+
+    // AFTER regenerate: cage 1 STILL has a block on D; cage 2 does NOT.
+    const after = await seriesBlocks(created.seriesId!);
+    const cage1OnD = after.filter(
+      (b) => b.resourceId === cageId && formatPfaDate(b.startAt) === D,
+    );
+    const cage2OnD = after.filter(
+      (b) => b.resourceId === cage2Id && formatPfaDate(b.startAt) === D,
+    );
+    expect(cage1OnD).toHaveLength(1);
+    expect(cage2OnD).toHaveLength(0);
+  });
+
+  it("LEGACY bare-date skip is GLOBAL: skips the date on ALL cages (back-compat)", async () => {
+    const base = {
+      resourceIds: [cageId, cage2Id],
+      reason: "Two-cage camp",
+      daysOfWeek: [1, 3],
+      startTime: "10:00",
+      endTime: "11:00",
+      startsOn: isoDaysFromToday(1),
+      endsOn: isoDaysFromToday(29),
+    };
+    const created = await createBlockSeriesInternal(fixtures.admin, base);
+    createdSeriesIds.push(created.seriesId!);
+
+    // Pick a future date D present on both cages.
+    const blocks = await seriesBlocks(created.seriesId!);
+    const D = formatPfaDate(blocks[0].startAt);
+
+    // Manually set a LEGACY bare-date skip (pre-multi-cage shape).
+    await db
+      .update(blockedTimesSeries)
+      .set({ skipDates: [D] })
+      .where(eq(blockedTimesSeries.id, created.seriesId!));
+
+    // Regenerate with the same pattern.
+    await editBlockSeriesInternal(fixtures.admin, created.seriesId!, { ...base });
+
+    // Bare date is a global skip → NO cage has a block on D.
+    const after = await seriesBlocks(created.seriesId!);
+    const onD = after.filter((b) => formatPfaDate(b.startAt) === D);
+    expect(onD).toHaveLength(0);
+  });
+
   it("rejects an unknown series id (BlockedTimeSeriesNotFoundError)", async () => {
     await expect(
       editBlockSeriesInternal(fixtures.admin, "00000000-0000-0000-0000-000000000000", {
@@ -640,7 +728,10 @@ describe("cancelBlockSeriesOccurrenceInternal", () => {
       .select()
       .from(blockedTimesSeries)
       .where(eq(blockedTimesSeries.id, created.seriesId!));
-    expect(series.skipDates).toContain(res.cancelledDate);
+    // cancelledDate stays the plain date for the caller/UI, but skipDates stores
+    // the CAGE-SCOPED composite key "<resourceId>|<date>".
+    expect(res.cancelledDate).toBe(formatPfaDate(target.startAt));
+    expect(series.skipDates).toContain(`${target.resourceId}|${res.cancelledDate}`);
   });
 
   it("rejects a non-series (one-off) block (NotASeriesOccurrenceError)", async () => {

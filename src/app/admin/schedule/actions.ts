@@ -15,6 +15,9 @@
 // Any future direct caller (paint UI, etc.) gets the right behavior.
 
 import { revalidatePath } from "next/cache";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { blockedTimesSeries } from "@/db/schema";
 import { requireScheduleAccess } from "@/lib/authz";
 import {
   createBlockInternal,
@@ -69,6 +72,31 @@ export async function editBlockSeries(seriesId: string, input: unknown) {
   const result = await editBlockSeriesInternal(session.user, seriesId, input);
   revalidateScheduleSurfaces();
   return result;
+}
+
+// BLOCK-RECUR: read a series' pattern for the edit-series dialog (on-demand).
+// READ-ONLY — no revalidate. Returns only the fields the edit form needs
+// (never skipDates/createdBy/timestamps), or null if the series is gone.
+export async function getBlockSeries(seriesId: string) {
+  await requireScheduleAccess();
+  const [series] = await db
+    .select()
+    .from(blockedTimesSeries)
+    .where(eq(blockedTimesSeries.id, seriesId))
+    .limit(1);
+  if (!series) return null;
+  return {
+    id: series.id,
+    resourceIds: series.resourceIds,
+    reason: series.reason,
+    daysOfWeek: series.daysOfWeek,
+    frequency: series.frequency,
+    interval: series.interval,
+    startTime: series.startTime,
+    endTime: series.endTime,
+    startsOn: series.startsOn,
+    endsOn: series.endsOn,
+  };
 }
 
 // BLOCK-RECUR: cancel a single occurrence of a recurring block series

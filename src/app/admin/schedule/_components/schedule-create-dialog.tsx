@@ -660,6 +660,7 @@ function BlockTab({
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (pending) return; // guard the Enter key / double-submit race
     setError(null);
     if (resourceIds.length === 0) {
       setError("Pick at least one cage.");
@@ -667,8 +668,9 @@ function BlockTab({
     }
 
     // Build the operations: independent → one per cage (each with its own
-    // fields); unified → one op covering all selected cages.
-    type Op = { resourceIds: string[]; values: BlockFieldValues };
+    // fields); unified → one op covering all selected cages. `label` names the
+    // cage for a per-op error message in independent mode.
+    type Op = { resourceIds: string[]; values: BlockFieldValues; label?: string };
     let ops: Op[];
     if (useIndependent) {
       for (const r of selected) {
@@ -688,6 +690,7 @@ function BlockTab({
       ops = selected.map((r) => ({
         resourceIds: [r.id],
         values: fieldRefs.current[r.id]!.getValues(),
+        label: r.name,
       }));
     } else {
       const handle = fieldRefs.current.unified;
@@ -704,47 +707,59 @@ function BlockTab({
     }
 
     startTransition(async () => {
-      try {
-        let created = 0;
-        const skippedRentals: BlockBatchResult["skippedRentals"] = [];
-        let skippedBlocked = 0;
-        for (const op of ops) {
-          const v = op.values;
-          if (v.repeats) {
-            const res = await createBlockSeries({
-              resourceIds: op.resourceIds,
-              reason: v.reason.trim(),
-              daysOfWeek: v.daysOfWeek,
-              startTime: v.startTime,
-              endTime: v.endTime,
-              startsOn: v.date,
-              endsOn: v.endsOn,
-              frequency: v.frequency,
-              interval: v.interval,
-            });
-            created += res.created;
-            skippedRentals.push(...res.skippedRentals);
-            skippedBlocked += res.skippedBlocked;
-          } else {
-            const res = await createBlocksBatch({
-              resourceIds: op.resourceIds,
-              startAt: parsePfaInput(v.date, v.startTime),
-              endAt: parsePfaInput(v.date, v.endTime),
-              reason: v.reason.trim(),
-            });
-            created += res.created;
-            skippedRentals.push(...res.skippedRentals);
-            skippedBlocked += res.skippedBlocked;
-          }
+      // Ops are INDEPENDENT committed writes (no cross-op transaction on
+      // neon-http). Run each in its own try so one cage's failure doesn't
+      // discard the cages that already succeeded — accumulate results + collect
+      // per-cage errors, then surface BOTH (partial success is shown, not lost;
+      // re-submitting is safe because the succeeded cages' slots are now
+      // already-blocked and skip on retry).
+      let created = 0;
+      const skippedRentals: BlockBatchResult["skippedRentals"] = [];
+      let skippedBlocked = 0;
+      const opErrors: string[] = [];
+      for (const op of ops) {
+        const v = op.values;
+        try {
+          const res = v.repeats
+            ? await createBlockSeries({
+                resourceIds: op.resourceIds,
+                reason: v.reason.trim(),
+                daysOfWeek: v.daysOfWeek,
+                startTime: v.startTime,
+                endTime: v.endTime,
+                startsOn: v.date,
+                endsOn: v.endsOn,
+                frequency: v.frequency,
+                interval: v.interval,
+              })
+            : await createBlocksBatch({
+                resourceIds: op.resourceIds,
+                startAt: parsePfaInput(v.date, v.startTime),
+                endAt: parsePfaInput(v.date, v.endTime),
+                reason: v.reason.trim(),
+              });
+          created += res.created;
+          skippedRentals.push(...res.skippedRentals);
+          skippedBlocked += res.skippedBlocked;
+        } catch (err) {
+          const msg =
+            err instanceof Error
+              ? err.message
+              : "Failed to create the block(s).";
+          opErrors.push(op.label ? `${op.label}: ${msg}` : msg);
         }
-        setResult({ created, skippedRentals, skippedBlocked });
-        // Clean success (blocked everything, nothing skipped) → close. If
-        // anything was skipped, keep the dialog open so the admin reads it.
-        if (created > 0 && skippedRentals.length === 0) onCancel();
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to create the block(s).",
-        );
+      }
+      setResult({ created, skippedRentals, skippedBlocked });
+      if (opErrors.length > 0) {
+        setError(opErrors.join(" · "));
+      } else if (
+        created > 0 &&
+        skippedRentals.length === 0 &&
+        skippedBlocked === 0
+      ) {
+        // Fully clean (everything blocked, nothing skipped) → close. Any skip
+        // (rental OR already-blocked) keeps the dialog open so the report shows.
+        onCancel();
       }
     });
   };

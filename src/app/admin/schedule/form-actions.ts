@@ -6,7 +6,7 @@
 // banner copy, anything else re-thrown to the Next error boundary.
 
 import { ZodError } from "zod";
-import { createBlock, deleteBlock, updateBlock } from "./actions";
+import { deleteBlock, updateBlock } from "./actions";
 import { BlockNotFoundError } from "@/lib/errors";
 
 // Revalidation invariant: ./actions.ts owns revalidatePath for the
@@ -87,19 +87,6 @@ function translate(err: unknown, values: BlockFormValues): BlockActionResult {
     };
   }
   throw err;
-}
-
-export async function createBlockFormAction(
-  _prev: BlockActionResult,
-  formData: FormData,
-): Promise<BlockActionResult> {
-  const values = snapshot(formData);
-  try {
-    await createBlock(buildInput(formData));
-    return { ok: true };
-  } catch (err) {
-    return translate(err, values);
-  }
 }
 
 export async function updateBlockFormAction(

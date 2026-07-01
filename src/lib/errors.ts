@@ -356,6 +356,17 @@ export class InvalidHandoffTargetError extends Error {
   }
 }
 
+// BLOCK-RECUR: edit/cancel referenced a blocked_times_series id that doesn't
+// exist (stale client row or a bogus RPC call). Mirrors
+// ProgramScheduleSeriesNotFoundError.
+export class BlockedTimeSeriesNotFoundError extends Error {
+  readonly code = "BLOCKED_TIME_SERIES_NOT_FOUND" as const;
+  constructor(public readonly seriesId: string) {
+    super(`Blocked-time series ${seriesId} not found`);
+    this.name = "BlockedTimeSeriesNotFoundError";
+  }
+}
+
 // Athlete edit/delete/assign referenced an athletes id that doesn't
 // exist (stale client row, or a direct RPC call with a bogus id).
 export class AthleteNotFoundError extends Error {

@@ -23,6 +23,15 @@ import {
   createBlockFormAction,
   type BlockActionResult,
 } from "../form-actions";
+import { createBlockSeries } from "../actions";
+import {
+  FREQUENCY_OPTIONS,
+  freqIntervalForKind,
+  monthlyHint,
+  weekdayFromIso,
+  type FrequencyKind,
+} from "@/app/admin/hour-log/schedule/_components/recurrence-frequency.logic";
+import type { BlockSeriesResult } from "@/lib/server/block-series-actions";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
 import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
@@ -560,6 +569,16 @@ function SessionTab({
   );
 }
 
+const WEEKDAY_PILLS = [
+  { i: 0, label: "S" },
+  { i: 1, label: "M" },
+  { i: 2, label: "T" },
+  { i: 3, label: "W" },
+  { i: 4, label: "T" },
+  { i: 5, label: "F" },
+  { i: 6, label: "S" },
+] as const;
+
 function BlockTab({
   action,
   state,
@@ -581,12 +600,125 @@ function BlockTab({
   resources: ResourceOption[];
   onCancel: () => void;
 }) {
+  // Controlled fields (the recurrence path reads date/time/reason live to
+  // build the series input). Re-seeded whenever defaults change.
+  const [live, setLive] = useState({
+    resourceId: defaults.resourceId,
+    date: defaults.date,
+    startTime: defaults.startTime,
+    endTime: defaults.endTime,
+    reason: defaults.reason,
+  });
+  const [prevDefaults, setPrevDefaults] = useState(defaults);
+
+  // Recurrence state.
+  const [repeats, setRepeats] = useState(false);
+  const [freqKind, setFreqKind] = useState<FrequencyKind>("weekly");
+  const [everyN, setEveryN] = useState(3);
+  const [pillsTouched, setPillsTouched] = useState(false);
+  const [daysOfWeek, setDaysOfWeek] = useState<number[]>([]);
+  const [endsOn, setEndsOn] = useState("");
+
+  const [seriesPending, startSeries] = useTransition();
+  const [seriesError, setSeriesError] = useState<string | null>(null);
+  const [seriesResult, setSeriesResult] = useState<BlockSeriesResult | null>(
+    null,
+  );
+
+  if (defaults !== prevDefaults) {
+    setPrevDefaults(defaults);
+    setLive({
+      resourceId: defaults.resourceId,
+      date: defaults.date,
+      startTime: defaults.startTime,
+      endTime: defaults.endTime,
+      reason: defaults.reason,
+    });
+    setSeriesError(null);
+    setSeriesResult(null);
+  }
+
+  // Weekday pills default to the chosen date's weekday until the admin
+  // toggles one (then they own the set). Monthly ignores daysOfWeek (the
+  // weekday comes from the start date), so we send the date's weekday there.
+  const dateWeekday = weekdayFromIso(live.date);
+  const effectiveDays =
+    pillsTouched
+      ? daysOfWeek
+      : dateWeekday !== null
+        ? [dateWeekday]
+        : [];
+  const isMonthly = freqKind === "monthly";
+  const submitDays =
+    isMonthly && dateWeekday !== null ? [dateWeekday] : effectiveDays;
+
+  const toggleDay = (i: number) => {
+    setPillsTouched(true);
+    const base = pillsTouched ? daysOfWeek : effectiveDays;
+    setDaysOfWeek(
+      base.includes(i) ? base.filter((d) => d !== i) : [...base, i].sort(),
+    );
+  };
+
+  const canSubmitSeries =
+    !!live.resourceId &&
+    !!live.date &&
+    !!live.reason.trim() &&
+    !!endsOn &&
+    submitDays.length > 0;
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    if (!repeats) return; // one-off path: let the form action handle it
+    e.preventDefault();
+    if (!canSubmitSeries) return;
+    setSeriesError(null);
+    const { frequency, interval } = freqIntervalForKind(freqKind, everyN);
+    startSeries(async () => {
+      try {
+        const res = await createBlockSeries({
+          resourceId: live.resourceId,
+          reason: live.reason.trim(),
+          daysOfWeek: submitDays,
+          startTime: live.startTime,
+          endTime: live.endTime,
+          startsOn: live.date,
+          endsOn,
+          frequency,
+          interval,
+        });
+        setSeriesResult(res);
+        // Clean success (blocked everything, nothing skipped) → close. If
+        // anything was skipped, keep the dialog open so the admin reads the
+        // report first.
+        if (res.created > 0 && res.skippedRentals.length === 0) onCancel();
+      } catch (err) {
+        setSeriesError(
+          err instanceof Error
+            ? err.message
+            : "Failed to create the recurring block.",
+        );
+      }
+    });
+  };
+
   const formKey = state.ok
     ? `block-${defaults.resourceId}-${defaults.date}-${defaults.startTime}`
     : `block-err-${state.error.code}-${state.error.message}`;
 
+  const busy = pending || seriesPending;
+  const submitLabel = busy
+    ? "Saving…"
+    : repeats
+      ? "Create recurring block"
+      : "Create block";
+
   return (
-    <form action={action} key={formKey} className="space-y-3">
+    <form
+      action={action}
+      onSubmit={handleSubmit}
+      key={formKey}
+      className="space-y-3"
+    >
       {!state.ok ? (
         <div
           role="alert"
@@ -595,12 +727,23 @@ function BlockTab({
           {state.error.message}
         </div>
       ) : null}
+      {seriesError ? (
+        <div
+          role="alert"
+          className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+        >
+          {seriesError}
+        </div>
+      ) : null}
 
       <Field label="Resource">
         <select
           name="resourceId"
           required
-          defaultValue={defaults.resourceId}
+          value={live.resourceId}
+          onChange={(e) =>
+            setLive((p) => ({ ...p, resourceId: e.target.value }))
+          }
           className={selectStyles}
         >
           <option value="" disabled>
@@ -614,7 +757,37 @@ function BlockTab({
         </select>
       </Field>
 
-      <DateAndTimeRow defaults={defaults} />
+      <div className="grid grid-cols-3 gap-3">
+        <Field label={repeats ? "Starts" : "Date"}>
+          <DateInput
+            name="date"
+            required
+            value={live.date}
+            onChange={(iso) => setLive((p) => ({ ...p, date: iso }))}
+            className={inputStyles}
+          />
+        </Field>
+        <Field label="Start">
+          <TimeSelect
+            name="startTime"
+            variant="start"
+            required
+            value={live.startTime}
+            onChange={(v) => setLive((p) => ({ ...p, startTime: v }))}
+            className={selectStyles}
+          />
+        </Field>
+        <Field label="End">
+          <TimeSelect
+            name="endTime"
+            variant="end"
+            required
+            value={live.endTime}
+            onChange={(v) => setLive((p) => ({ ...p, endTime: v }))}
+            className={selectStyles}
+          />
+        </Field>
+      </div>
 
       <Field
         label="Reason"
@@ -625,51 +798,153 @@ function BlockTab({
           name="reason"
           required
           maxLength={120}
-          defaultValue={defaults.reason}
+          value={live.reason}
+          onChange={(e) => setLive((p) => ({ ...p, reason: e.target.value }))}
           placeholder="What's this block for?"
           className={inputStyles}
         />
       </Field>
 
-      <FormButtons pending={pending} submitLabel="Create block" onCancel={onCancel} />
-    </form>
-  );
-}
+      {/* Repeats toggle + recurrence controls (mirrors the work-schedule
+          "Repeats" feature; drives createBlockSeries on submit). */}
+      <label className="flex items-center gap-2.5 pt-1 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={repeats}
+          onChange={(e) => setRepeats(e.target.checked)}
+          className="h-4 w-4 rounded border-line text-gold focus-visible:ring-2 focus-visible:ring-gold/40"
+        />
+        <span className="text-sm font-medium text-fg">Repeats</span>
+      </label>
 
-function DateAndTimeRow({
-  defaults,
-}: {
-  defaults: { date: string; startTime: string; endTime: string };
-}) {
-  return (
-    <div className="grid grid-cols-3 gap-3">
-      <Field label="Date">
-        <DateInput
-          name="date"
-          required
-          defaultValue={defaults.date}
-          className={inputStyles}
+      {repeats ? (
+        <div className="rounded-lg border border-line bg-page/50 p-3.5 space-y-3">
+          <Field label="Frequency">
+            <select
+              value={freqKind}
+              onChange={(e) => setFreqKind(e.target.value as FrequencyKind)}
+              className={selectStyles}
+            >
+              {FREQUENCY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          {freqKind === "everyN" ? (
+            <Field label="Every N weeks">
+              <input
+                type="number"
+                min={1}
+                value={everyN}
+                onChange={(e) => setEveryN(Number(e.target.value))}
+                className={inputStyles}
+              />
+            </Field>
+          ) : null}
+
+          {isMonthly ? (
+            <p className="text-xs text-fg-muted">
+              {monthlyHint(live.date) || "Pick a start date to set the pattern."}
+            </p>
+          ) : (
+            <div>
+              <span className="block text-xs uppercase tracking-wider text-fg-muted mb-1.5">
+                On these days
+              </span>
+              <div className="flex gap-1.5">
+                {WEEKDAY_PILLS.map((d) => {
+                  const on = submitDays.includes(d.i);
+                  return (
+                    <button
+                      key={d.i}
+                      type="button"
+                      onClick={() => toggleDay(d.i)}
+                      aria-pressed={on}
+                      className={[
+                        "h-8 w-8 rounded-full text-xs font-semibold transition-colors",
+                        on
+                          ? "bg-gold text-gold-ink"
+                          : "border border-line text-fg-muted hover:text-fg hover:border-line-strong",
+                      ].join(" ")}
+                    >
+                      {d.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <Field label="Repeats until" hint="Last date the block can occur (inclusive).">
+            <DateInput
+              required
+              value={endsOn}
+              onChange={(iso) => setEndsOn(iso)}
+              className={inputStyles}
+            />
+          </Field>
+        </div>
+      ) : null}
+
+      {/* Skip-and-continue report after a recurring create. */}
+      {seriesResult ? (
+        <div
+          className={[
+            "rounded-md border px-3 py-2.5 text-xs space-y-1.5",
+            seriesResult.created === 0
+              ? "border-danger/30 bg-danger/10 text-danger"
+              : "border-line-strong bg-surface-2 text-fg",
+          ].join(" ")}
+        >
+          <p className="font-semibold">
+            {seriesResult.created === 0
+              ? "Couldn't block any dates — all conflicted."
+              : `Blocked ${seriesResult.created} date${
+                  seriesResult.created === 1 ? "" : "s"
+                }.`}
+          </p>
+          {seriesResult.skippedRentals.length > 0 ? (
+            <div className="space-y-0.5">
+              <p className="text-fg-muted">
+                Skipped {seriesResult.skippedRentals.length} (already rented):
+              </p>
+              <ul className="list-disc pl-4 text-fg-muted">
+                {seriesResult.skippedRentals.map((s) => (
+                  <li key={s.label}>{s.label}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {seriesResult.skippedBlocked > 0 ? (
+            <p className="text-fg-muted">
+              {seriesResult.skippedBlocked} already blocked (skipped).
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {seriesResult && seriesResult.created > 0 ? (
+        <div className="flex items-center justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-md bg-gold text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover h-9 px-4 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          >
+            Done
+          </button>
+        </div>
+      ) : (
+        <FormButtons
+          pending={busy}
+          submitLabel={submitLabel}
+          onCancel={onCancel}
+          disabled={repeats && !canSubmitSeries}
         />
-      </Field>
-      <Field label="Start">
-        <TimeSelect
-          name="startTime"
-          variant="start"
-          required
-          defaultValue={defaults.startTime}
-          className={selectStyles}
-        />
-      </Field>
-      <Field label="End">
-        <TimeSelect
-          name="endTime"
-          variant="end"
-          required
-          defaultValue={defaults.endTime}
-          className={selectStyles}
-        />
-      </Field>
-    </div>
+      )}
+    </form>
   );
 }
 

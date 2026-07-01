@@ -10,12 +10,13 @@
 
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Trash2, X } from "lucide-react";
+import { Pencil, Repeat, Trash2, X } from "lucide-react";
 import {
   deleteBlockAction,
   updateBlockFormAction,
   type BlockActionResult,
 } from "../form-actions";
+import { cancelBlockOccurrence, deleteBlockSeries } from "../actions";
 import type { ResourceOption } from "@/app/admin/sessions/_components/sessions-client";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
@@ -33,7 +34,13 @@ export type BlockEditInitialValues = {
   startAt: Date;
   endAt: Date;
   reason: string;
+  // BLOCK-RECUR: set when this block is an occurrence of a recurring series.
+  seriesId?: string | null;
 };
+
+// Which removal the confirm dialog is about: a one-off block, a single
+// occurrence of a series (records a skipDate), or the entire series.
+type RemoveMode = "single" | "occurrence" | "series";
 
 const INITIAL_STATE: BlockActionResult = { ok: true };
 
@@ -56,8 +63,9 @@ export function BlockEditDialog({
     INITIAL_STATE,
   );
   const [deleting, setDeleting] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [removeMode, setRemoveMode] = useState<RemoveMode | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const isSeries = Boolean(initial?.seriesId);
 
   // This dialog is edit-only; an existing block always opens to the
   // read-only summary first (QA2-5), with an Edit button to reveal the
@@ -134,19 +142,27 @@ export function BlockEditDialog({
     );
   }, [initial, resources]);
 
-  const handleDelete = () => {
+  const handleDelete = (mode: RemoveMode) => {
     if (!initial) return;
     setDeleteError(null);
-    setConfirmOpen(true);
+    setRemoveMode(mode);
   };
 
   const handleConfirmDelete = async () => {
-    if (!initial) return;
+    if (!initial || !removeMode) return;
     setDeleteError(null);
     setDeleting(true);
     try {
-      await deleteBlockAction(initial.id);
-      setConfirmOpen(false);
+      if (removeMode === "series" && initial.seriesId) {
+        await deleteBlockSeries(initial.seriesId);
+      } else if (removeMode === "occurrence") {
+        // Records the date in the series' skipDates so an edit-regenerate
+        // won't recreate it, then removes just this occurrence.
+        await cancelBlockOccurrence(initial.id);
+      } else {
+        await deleteBlockAction(initial.id);
+      }
+      setRemoveMode(null);
       onClose();
     } catch {
       // Benign "already gone" (another admin removed it, or a transient
@@ -171,9 +187,15 @@ export function BlockEditDialog({
               <p className="text-xs uppercase tracking-[0.14em] text-fg-muted">
                 Blocked time
               </p>
-              <h2 className="text-xl font-semibold tracking-tight mt-0.5">
-                Block
-              </h2>
+              <div className="flex items-center gap-2 mt-0.5">
+                <h2 className="text-xl font-semibold tracking-tight">Block</h2>
+                {isSeries ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-line-strong bg-surface-2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
+                    <Repeat className="h-3 w-3" />
+                    Recurring
+                  </span>
+                ) : null}
+              </div>
             </div>
             <button
               type="button"
@@ -201,15 +223,11 @@ export function BlockEditDialog({
           </dl>
 
           <div className="flex items-center justify-between gap-2 pt-2">
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={deleting}
-              className="inline-flex items-center gap-1.5 rounded-md border border-danger/30 bg-danger/10 text-danger hover:bg-danger/20 h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
-            >
-              <Trash2 className="h-4 w-4" />
-              {deleting ? "Deleting…" : "Delete block"}
-            </button>
+            <RemovalButtons
+              isSeries={isSeries}
+              deleting={deleting}
+              onRemove={handleDelete}
+            />
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -339,15 +357,12 @@ export function BlockEditDialog({
         </div>
 
         <div className="flex items-center justify-between gap-2 pt-2">
-          <button
-            type="button"
-            onClick={handleDelete}
-            disabled={deleting || pending}
-            className="inline-flex items-center gap-1.5 rounded-md border border-danger/30 bg-danger/10 text-danger hover:bg-danger/20 h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
-          >
-            <Trash2 className="h-4 w-4" />
-            {deleting ? "Deleting…" : "Delete block"}
-          </button>
+          <RemovalButtons
+            isSeries={isSeries}
+            deleting={deleting}
+            disabled={pending}
+            onRemove={handleDelete}
+          />
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -369,18 +384,28 @@ export function BlockEditDialog({
       )}
 
       <ConfirmDialog
-        open={confirmOpen}
+        open={removeMode !== null}
         onOpenChange={(next) => {
           if (!deleting) {
-            setConfirmOpen(next);
-            if (!next) setDeleteError(null);
+            if (!next) {
+              setRemoveMode(null);
+              setDeleteError(null);
+            }
           }
         }}
-        title="Delete this block?"
+        title={
+          removeMode === "series"
+            ? "Delete the entire recurring block?"
+            : removeMode === "occurrence"
+              ? "Remove this occurrence?"
+              : "Delete this block?"
+        }
         description={
           <>
             {initial
-              ? `"${initial.reason}" · ${formatPfaDateMedium(initial.startAt)} · ${formatPfaTime(initial.startAt)} – ${formatPfaTime(initial.endAt)}. This can't be undone.`
+              ? removeMode === "series"
+                ? `This removes EVERY occurrence of "${initial.reason}" (past and future). This can't be undone.`
+                : `"${initial.reason}" · ${formatPfaDateMedium(initial.startAt)} · ${formatPfaTime(initial.startAt)} – ${formatPfaTime(initial.endAt)}. This can't be undone.`
               : null}
             {deleteError ? (
               <span role="alert" className="mt-2 block text-danger">
@@ -389,11 +414,70 @@ export function BlockEditDialog({
             ) : null}
           </>
         }
-        confirmLabel={deleting ? "Deleting…" : "Delete block"}
+        confirmLabel={
+          deleting
+            ? "Removing…"
+            : removeMode === "series"
+              ? "Delete series"
+              : removeMode === "occurrence"
+                ? "Remove occurrence"
+                : "Delete block"
+        }
         onConfirm={handleConfirmDelete}
         isPending={deleting}
       />
     </dialog>
+  );
+}
+
+// Removal affordance(s). A one-off block gets a single "Delete block". A
+// recurring occurrence gets two: "Remove this occurrence" (records a skipDate)
+// and "Delete series" (all occurrences).
+function RemovalButtons({
+  isSeries,
+  deleting,
+  disabled = false,
+  onRemove,
+}: {
+  isSeries: boolean;
+  deleting: boolean;
+  disabled?: boolean;
+  onRemove: (mode: RemoveMode) => void;
+}) {
+  const busy = deleting || disabled;
+  if (!isSeries) {
+    return (
+      <button
+        type="button"
+        onClick={() => onRemove("single")}
+        disabled={busy}
+        className="inline-flex items-center gap-1.5 rounded-md border border-danger/30 bg-danger/10 text-danger hover:bg-danger/20 h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
+      >
+        <Trash2 className="h-4 w-4" />
+        {deleting ? "Deleting…" : "Delete block"}
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => onRemove("occurrence")}
+        disabled={busy}
+        className="inline-flex items-center gap-1.5 rounded-md border border-line-strong bg-surface-2 text-fg-muted hover:text-fg h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+      >
+        Remove this one
+      </button>
+      <button
+        type="button"
+        onClick={() => onRemove("series")}
+        disabled={busy}
+        className="inline-flex items-center gap-1.5 rounded-md border border-danger/30 bg-danger/10 text-danger hover:bg-danger/20 h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
+      >
+        <Trash2 className="h-4 w-4" />
+        Delete series
+      </button>
+    </div>
   );
 }
 

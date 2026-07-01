@@ -548,6 +548,15 @@ export const blockedTimes = pgTable(
       () => programScheduleBlocks.id,
       { onDelete: "cascade" },
     ),
+    // BLOCK-RECUR: when this block is a materialized occurrence of a
+    // recurring blocked-time series, it links back to the editable series
+    // definition. NULL = a one-off block (the pre-existing behavior). ON
+    // DELETE CASCADE so deleting a series removes its occurrences (mirrors
+    // program_schedule_blocks.seriesId).
+    seriesId: text("blocked_time_series_id").references(
+      () => blockedTimesSeries.id,
+      { onDelete: "cascade" },
+    ),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),
@@ -556,8 +565,47 @@ export const blockedTimes = pgTable(
   (table) => [
     index("blocked_times_resource_start_idx").on(table.resourceId, table.startAt),
     index("blocked_times_program_block_idx").on(table.programScheduleBlockId),
+    index("blocked_times_series_idx").on(table.seriesId),
   ],
 );
+
+// BLOCK-RECUR: editable definition of a RECURRING blocked-time (an admin
+// blocks a cage every Mon/Wed 3–5pm through August). Materializes one
+// blocked_times row per occurrence (seriesId links back), exactly like
+// program_schedule_series → program_schedule_blocks — but scoped to a
+// SINGLE resource + a free-text reason (no coaches, no separate occupancy
+// table: a blocked_times row IS the occupancy). daysOfWeek uses
+// getUTCDay() (0=Sun..6=Sat); startTime/endTime are PFA wall-clock "HH:MM";
+// startsOn/endsOn are PFA "YYYY-MM-DD" (endsOn inclusive); skipDates holds
+// cancelled-occurrence dates so an edit-series regenerate won't recreate them.
+export const blockedTimesSeries = pgTable("blocked_times_series", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  resourceId: text("resource_id")
+    .notNull()
+    .references(() => resources.id),
+  reason: text("reason").notNull(),
+  daysOfWeek: integer("days_of_week").array().notNull(),
+  frequency: recurrenceFrequency("frequency").notNull().default("weekly"),
+  interval: integer("recurrence_interval").notNull().default(1),
+  startTime: text("start_time").notNull(),
+  endTime: text("end_time").notNull(),
+  startsOn: text("starts_on").notNull(),
+  endsOn: text("ends_on").notNull(),
+  skipDates: text("skip_dates")
+    .array()
+    .notNull()
+    .default(sql`'{}'`),
+  createdBy: text("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "date" })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
 
 export const paymentMethod = pgEnum("payment_method", [
   "venmo",

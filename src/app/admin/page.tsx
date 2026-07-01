@@ -242,6 +242,7 @@ export default async function AdminHome({
         startAt: blockedTimes.startAt,
         endAt: blockedTimes.endAt,
         reason: blockedTimes.reason,
+        seriesId: blockedTimes.seriesId,
       })
       .from(blockedTimes)
       .where(
@@ -414,6 +415,7 @@ export default async function AdminHome({
           startAt: b.startAt,
           endAt: b.endAt,
           reason: b.reason,
+          seriesId: b.seriesId,
         },
       ]),
     );

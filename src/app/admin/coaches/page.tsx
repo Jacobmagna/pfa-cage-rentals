@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { and, asc, eq, gte, isNull, lt } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, lt, sql } from "drizzle-orm";
 import { Archive, ArrowLeft } from "lucide-react";
 import { db } from "@/db";
-import { sessionsBilling, users } from "@/db/schema";
+import { auditLog, sessionsBilling, users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import { totalFromSnapshot } from "@/lib/billing";
 import {
@@ -33,7 +33,7 @@ export default async function AdminCoachesPage() {
   const monthStart = pfaMonthStart(now);
   const monthEndExclusive = pfaMonthEnd(now);
 
-  const [coachRows, sessionRows] = await Promise.all([
+  const [coachRows, sessionRows, activityRows] = await Promise.all([
     db
       .select({
         id: users.id,
@@ -58,6 +58,16 @@ export default async function AdminCoachesPage() {
           lt(sessionsBilling.startAt, monthEndExclusive),
         ),
       ),
+    // neon-http returns SQL aggregates (max) as strings, not Date objects,
+    // so we type it string|null and wrap in new Date() below (same pattern as
+    // /admin/records). ts is NOT NULL, so within a group max() is never null.
+    db
+      .select({
+        actorUserId: auditLog.actorUserId,
+        lastActivityAt: sql<string | null>`max(${auditLog.ts})`,
+      })
+      .from(auditLog)
+      .groupBy(auditLog.actorUserId),
   ]);
 
   // Pre-aggregate per coach. Doing it server-side means the client
@@ -72,6 +82,12 @@ export default async function AdminCoachesPage() {
     totals.set(s.coachId, entry);
   }
 
+  const lastActivity = new Map<string, Date>(
+    activityRows
+      .filter((r) => r.lastActivityAt !== null)
+      .map((r) => [r.actorUserId, new Date(r.lastActivityAt as string)]),
+  );
+
   const rows: CoachRow[] = coachRows.map((c) => {
     const t = totals.get(c.id);
     return {
@@ -79,6 +95,7 @@ export default async function AdminCoachesPage() {
       name: c.name,
       email: c.email,
       joinedAt: c.createdAt,
+      lastActivityAt: lastActivity.get(c.id) ?? null,
       sessionsThisMonth: t?.count ?? 0,
       owedThisMonthCents: t?.cents ?? 0,
       isSynthetic: isSyntheticUserEmail(c.email),

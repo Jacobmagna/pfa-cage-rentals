@@ -19,6 +19,7 @@ export type CoachRow = {
   name: string | null;
   email: string;
   joinedAt: Date;
+  lastActivityAt: Date | null;
   sessionsThisMonth: number;
   owedThisMonthCents: number;
   isSynthetic: boolean;
@@ -34,6 +35,7 @@ type SortKey =
   | "name"
   | "email"
   | "joinedAt"
+  | "lastActivityAt"
   | "sessionsThisMonth"
   | "owedThisMonthCents";
 type SortDir = "asc" | "desc";
@@ -44,6 +46,7 @@ const DEFAULT_DIR: Record<SortKey, SortDir> = {
   name: "asc",
   email: "asc",
   joinedAt: "desc",
+  lastActivityAt: "desc",
   sessionsThisMonth: "desc",
   owedThisMonthCents: "desc",
 };
@@ -144,6 +147,13 @@ export function CoachesTable({
               onClick={onHeaderClick}
             />
             <SortHeader
+              label="Last activity"
+              col="lastActivityAt"
+              align="left"
+              sort={sort}
+              onClick={onHeaderClick}
+            />
+            <SortHeader
               label="Sessions"
               col="sessionsThisMonth"
               align="right"
@@ -193,6 +203,13 @@ export function CoachesTable({
               <td className="px-4 py-3 text-fg-muted text-xs">{row.email}</td>
               <td className="px-4 py-3 text-fg-muted font-mono tnum tabular-nums text-xs whitespace-nowrap">
                 {formatJoined(row.joinedAt)}
+              </td>
+              <td className="px-4 py-3 text-fg-muted font-mono tnum tabular-nums text-xs whitespace-nowrap">
+                {row.lastActivityAt === null ? (
+                  <span className="text-fg-subtle">—</span>
+                ) : (
+                  formatLastActivity(row.lastActivityAt)
+                )}
               </td>
               <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-muted">
                 {row.sessionsThisMonth === 0 ? (
@@ -294,6 +311,8 @@ function compareByKey(a: CoachRow, b: CoachRow, key: SortKey): number {
       return a.email.localeCompare(b.email);
     case "joinedAt":
       return a.joinedAt.getTime() - b.joinedAt.getTime();
+    case "lastActivityAt":
+      return (a.lastActivityAt?.getTime() ?? 0) - (b.lastActivityAt?.getTime() ?? 0);
     case "sessionsThisMonth":
       return a.sessionsThisMonth - b.sessionsThisMonth;
     case "owedThisMonthCents":
@@ -307,6 +326,17 @@ function formatJoined(d: Date): string {
     month: "short",
     day: "numeric",
     year: "numeric",
+  });
+}
+
+function formatLastActivity(d: Date): string {
+  return d.toLocaleString("en-US", {
+    timeZone: PFA_TIMEZONE,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   });
 }
 

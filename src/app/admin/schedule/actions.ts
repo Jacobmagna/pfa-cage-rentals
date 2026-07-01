@@ -23,6 +23,7 @@ import {
 } from "@/lib/server/block-actions";
 import {
   cancelBlockSeriesOccurrenceInternal,
+  createBlocksBatchInternal,
   createBlockSeriesInternal,
   deleteBlockSeriesInternal,
   editBlockSeriesInternal,
@@ -49,6 +50,15 @@ export async function createBlock(input: unknown) {
 export async function createBlockSeries(input: unknown) {
   const session = await requireScheduleAccess();
   const result = await createBlockSeriesInternal(session.user, input);
+  revalidateScheduleSurfaces();
+  return result;
+}
+
+// MULTI-CAGE: create a ONE-OFF block over one OR MANY resources at once, with
+// skip-and-continue conflict handling. Returns a batch summary for the dialog.
+export async function createBlocksBatch(input: unknown) {
+  const session = await requireScheduleAccess();
+  const result = await createBlocksBatchInternal(session.user, input);
   revalidateScheduleSurfaces();
   return result;
 }

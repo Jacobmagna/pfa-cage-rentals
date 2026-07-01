@@ -1,11 +1,12 @@
-// Integration tests for src/lib/server/block-series-actions.ts (BLOCK-RECUR).
-// Hits the real Neon dev branch. Same direct-internal pattern as the other
-// suites — call the *Internal exports with the fixture admin actor.
+// Integration tests for src/lib/server/block-series-actions.ts (BLOCK-RECUR +
+// MULTI-CAGE). Hits the real Neon dev branch. Same direct-internal pattern as
+// the other suites — call the *Internal exports with the fixture admin actor.
 //
 // truncateMutables() TRUNCATEs blocked_times + sessions_billing + audit_log,
 // so each test starts with a clean resource. blocked_times_series is NOT
 // truncated, so we delete created series in afterEach (cascade clears any
-// remaining occurrence blocks). Requires migration 0040 on the dev branch.
+// remaining occurrence blocks). Requires migrations 0040 + 0041 on the dev
+// branch (0041 adds blocked_times_series.resource_ids).
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
@@ -18,6 +19,7 @@ import {
 } from "@/db/schema";
 import {
   cancelBlockSeriesOccurrenceInternal,
+  createBlocksBatchInternal,
   createBlockSeriesInternal,
   deleteBlockSeriesInternal,
   editBlockSeriesInternal,
@@ -40,12 +42,14 @@ vi.mock("@/auth", () => ({ auth: vi.fn() }));
 
 let fixtures: FixtureUsers;
 let cageId: string;
+let cage2Id: string;
 const createdSeriesIds: string[] = [];
 
 beforeAll(async () => {
   fixtures = await ensureFixtureUsers();
-  const { cage1 } = await getSeededResources();
+  const { cage1, cage2 } = await getSeededResources();
   cageId = cage1.id;
+  cage2Id = cage2.id;
 });
 
 beforeEach(async () => {
@@ -69,11 +73,15 @@ function isoDaysFromToday(delta: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-// Insert a rental on the cage covering a given UTC instant window.
-async function insertRental(startAt: Date, endAt: Date): Promise<void> {
+// Insert a rental on a resource covering a given UTC instant window.
+async function insertRental(
+  startAt: Date,
+  endAt: Date,
+  resourceId: string = cageId,
+): Promise<void> {
   await db.insert(sessionsBilling).values({
     coachId: fixtures.coach.id,
-    resourceId: cageId,
+    resourceId,
     startAt,
     endAt,
     ratePer30MinCents: 2200,
@@ -81,9 +89,13 @@ async function insertRental(startAt: Date, endAt: Date): Promise<void> {
   });
 }
 
-async function insertOneOffBlock(startAt: Date, endAt: Date): Promise<void> {
+async function insertOneOffBlock(
+  startAt: Date,
+  endAt: Date,
+  resourceId: string = cageId,
+): Promise<void> {
   await db.insert(blockedTimes).values({
-    resourceId: cageId,
+    resourceId,
     startAt,
     endAt,
     reason: "pre-existing one-off",
@@ -104,7 +116,7 @@ describe("createBlockSeriesInternal", () => {
     const startsOn = isoDaysFromToday(1);
     const endsOn = isoDaysFromToday(15);
     const input = {
-      resourceId: cageId,
+      resourceIds: [cageId],
       reason: "Court maintenance",
       daysOfWeek: [1, 3],
       startTime: "15:00",
@@ -139,6 +151,9 @@ describe("createBlockSeriesInternal", () => {
       .where(eq(blockedTimesSeries.id, res.seriesId!));
     expect(series.daysOfWeek).toEqual([1, 3]);
     expect(series.reason).toBe("Court maintenance");
+    // MULTI-CAGE: single-cage series records its one cage in both columns.
+    expect(series.resourceId).toBe(cageId);
+    expect(series.resourceIds).toEqual([cageId]);
 
     const [audit] = await db
       .select()
@@ -153,6 +168,87 @@ describe("createBlockSeriesInternal", () => {
     expect(audit).toBeDefined();
   });
 
+  it("MULTI-CAGE: materializes one row per (cage, date) across all cages", async () => {
+    const startsOn = isoDaysFromToday(1);
+    const endsOn = isoDaysFromToday(15);
+    const occ = generateOccurrences({
+      daysOfWeek: [1, 3],
+      startTime: "15:00",
+      endTime: "17:00",
+      startsOn,
+      endsOn,
+    });
+
+    const res = await createBlockSeriesInternal(fixtures.admin, {
+      resourceIds: [cageId, cage2Id],
+      reason: "Two-cage camp",
+      daysOfWeek: [1, 3],
+      startTime: "15:00",
+      endTime: "17:00",
+      startsOn,
+      endsOn,
+    });
+    if (res.seriesId) createdSeriesIds.push(res.seriesId);
+
+    // created counts rows across BOTH cages.
+    expect(res.created).toBe(occ.length * 2);
+    const blocks = await seriesBlocks(res.seriesId!);
+    expect(blocks).toHaveLength(occ.length * 2);
+    expect(blocks.filter((b) => b.resourceId === cageId)).toHaveLength(
+      occ.length,
+    );
+    expect(blocks.filter((b) => b.resourceId === cage2Id)).toHaveLength(
+      occ.length,
+    );
+
+    const [series] = await db
+      .select()
+      .from(blockedTimesSeries)
+      .where(eq(blockedTimesSeries.id, res.seriesId!));
+    expect(series.resourceId).toBe(cageId); // denormalized primary = first
+    expect(series.resourceIds.sort()).toEqual([cageId, cage2Id].sort());
+  });
+
+  it("MULTI-CAGE: skip-and-continue is PER CAGE (one cage's rental doesn't block the other)", async () => {
+    const startsOn = isoDaysFromToday(1);
+    const endsOn = isoDaysFromToday(15);
+    const occ = generateOccurrences({
+      daysOfWeek: [1, 3],
+      startTime: "15:00",
+      endTime: "17:00",
+      startsOn,
+      endsOn,
+    });
+    // Rent CAGE 1 over its first occurrence only. Cage 2 stays free.
+    await insertRental(occ[0].startAt, occ[0].endAt, cageId);
+
+    const res = await createBlockSeriesInternal(fixtures.admin, {
+      resourceIds: [cageId, cage2Id],
+      reason: "Two-cage camp",
+      daysOfWeek: [1, 3],
+      startTime: "15:00",
+      endTime: "17:00",
+      startsOn,
+      endsOn,
+    });
+    if (res.seriesId) createdSeriesIds.push(res.seriesId);
+
+    // Cage 1 skips 1; Cage 2 blocks all. created = (occ-1) + occ.
+    expect(res.created).toBe(occ.length * 2 - 1);
+    expect(res.skippedRentals).toHaveLength(1);
+    expect(res.skippedRentals[0].resourceName).toBeTruthy();
+    expect(res.skippedRentals[0].label).toContain(
+      res.skippedRentals[0].resourceName,
+    );
+    const blocks = await seriesBlocks(res.seriesId!);
+    expect(blocks.filter((b) => b.resourceId === cage2Id)).toHaveLength(
+      occ.length,
+    );
+    expect(blocks.filter((b) => b.resourceId === cageId)).toHaveLength(
+      occ.length - 1,
+    );
+  });
+
   it("SKIPS an occurrence that overlaps an existing RENTAL and reports it", async () => {
     const startsOn = isoDaysFromToday(1);
     const endsOn = isoDaysFromToday(15);
@@ -164,11 +260,10 @@ describe("createBlockSeriesInternal", () => {
       endsOn,
     });
     expect(occ.length).toBeGreaterThan(1);
-    // Rent the cage over the FIRST occurrence's exact window.
     await insertRental(occ[0].startAt, occ[0].endAt);
 
     const res = await createBlockSeriesInternal(fixtures.admin, {
-      resourceId: cageId,
+      resourceIds: [cageId],
       reason: "Court maintenance",
       daysOfWeek: [1, 3],
       startTime: "15:00",
@@ -183,7 +278,6 @@ describe("createBlockSeriesInternal", () => {
     expect(res.skippedRentals[0].coachName).toBeTruthy();
     expect(res.skippedRentals[0].label).toContain(res.skippedRentals[0].coachName);
     expect(res.skippedBlocked).toBe(0);
-    // Invariant: created + skipped == total occurrences.
     expect(res.created + res.skippedRentals.length + res.skippedBlocked).toBe(
       occ.length,
     );
@@ -202,7 +296,7 @@ describe("createBlockSeriesInternal", () => {
     await insertOneOffBlock(occ[0].startAt, occ[0].endAt);
 
     const res = await createBlockSeriesInternal(fixtures.admin, {
-      resourceId: cageId,
+      resourceIds: [cageId],
       reason: "Court maintenance",
       daysOfWeek: [1, 3],
       startTime: "15:00",
@@ -227,11 +321,10 @@ describe("createBlockSeriesInternal", () => {
       startsOn,
       endsOn,
     });
-    // Rent every occurrence.
     for (const o of occ) await insertRental(o.startAt, o.endAt);
 
     const res = await createBlockSeriesInternal(fixtures.admin, {
-      resourceId: cageId,
+      resourceIds: [cageId],
       reason: "Court maintenance",
       daysOfWeek: [1, 3],
       startTime: "15:00",
@@ -244,15 +337,12 @@ describe("createBlockSeriesInternal", () => {
     expect(res.seriesId).toBeNull();
     expect(res.created).toBe(0);
     expect(res.skippedRentals).toHaveLength(occ.length);
-    const seriesCount = await db.select().from(blockedTimesSeries);
-    // No series row for this attempt (others from prior tests were cleaned).
-    expect(seriesCount.every((s) => s.reason !== "Court maintenance" || false)).toBeDefined();
   });
 
   it("rejects an unknown resource (ResourceNotFoundError)", async () => {
     await expect(
       createBlockSeriesInternal(fixtures.admin, {
-        resourceId: "00000000-0000-0000-0000-000000000000",
+        resourceIds: ["00000000-0000-0000-0000-000000000000"],
         reason: "x",
         daysOfWeek: [1],
         startTime: "15:00",
@@ -263,10 +353,38 @@ describe("createBlockSeriesInternal", () => {
     ).rejects.toBeInstanceOf(ResourceNotFoundError);
   });
 
+  it("rejects when ANY of several resources is unknown", async () => {
+    await expect(
+      createBlockSeriesInternal(fixtures.admin, {
+        resourceIds: [cageId, "00000000-0000-0000-0000-000000000000"],
+        reason: "x",
+        daysOfWeek: [1],
+        startTime: "15:00",
+        endTime: "17:00",
+        startsOn: isoDaysFromToday(1),
+        endsOn: isoDaysFromToday(8),
+      }),
+    ).rejects.toBeInstanceOf(ResourceNotFoundError);
+  });
+
+  it("rejects an empty resourceIds set (zod)", async () => {
+    await expect(
+      createBlockSeriesInternal(fixtures.admin, {
+        resourceIds: [],
+        reason: "x",
+        daysOfWeek: [1],
+        startTime: "15:00",
+        endTime: "17:00",
+        startsOn: isoDaysFromToday(1),
+        endsOn: isoDaysFromToday(8),
+      }),
+    ).rejects.toBeTruthy();
+  });
+
   it("hard-rejects an over-cap date range (>366 occurrences)", async () => {
     await expect(
       createBlockSeriesInternal(fixtures.admin, {
-        resourceId: cageId,
+        resourceIds: [cageId],
         reason: "x",
         daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
         startTime: "15:00",
@@ -278,11 +396,91 @@ describe("createBlockSeriesInternal", () => {
   });
 });
 
+describe("createBlocksBatchInternal (one-off, multi-cage)", () => {
+  it("blocks a single resource (created:1)", async () => {
+    const startAt = new Date();
+    startAt.setUTCHours(startAt.getUTCHours() + 24, 0, 0, 0);
+    const endAt = new Date(startAt.getTime() + 60 * 60 * 1000);
+
+    const res = await createBlocksBatchInternal(fixtures.admin, {
+      resourceIds: [cageId],
+      startAt,
+      endAt,
+      reason: "HVAC repair",
+    });
+    expect(res.created).toBe(1);
+    expect(res.skippedRentals).toHaveLength(0);
+
+    const rows = await db
+      .select()
+      .from(blockedTimes)
+      .where(eq(blockedTimes.resourceId, cageId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].seriesId).toBeNull(); // one-off, not a series
+    expect(rows[0].reason).toBe("HVAC repair");
+  });
+
+  it("blocks MANY resources in one call (one row each)", async () => {
+    const startAt = new Date();
+    startAt.setUTCHours(startAt.getUTCHours() + 24, 0, 0, 0);
+    const endAt = new Date(startAt.getTime() + 60 * 60 * 1000);
+
+    const res = await createBlocksBatchInternal(fixtures.admin, {
+      resourceIds: [cageId, cage2Id],
+      startAt,
+      endAt,
+      reason: "Team event",
+    });
+    expect(res.created).toBe(2);
+    const rows = await db
+      .select()
+      .from(blockedTimes)
+      .where(inArray(blockedTimes.resourceId, [cageId, cage2Id]));
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.seriesId === null)).toBe(true);
+  });
+
+  it("skip-and-continue: skips a rented cage, blocks the free one", async () => {
+    const startAt = new Date();
+    startAt.setUTCHours(startAt.getUTCHours() + 24, 0, 0, 0);
+    const endAt = new Date(startAt.getTime() + 60 * 60 * 1000);
+    await insertRental(startAt, endAt, cageId); // Cage 1 busy
+
+    const res = await createBlocksBatchInternal(fixtures.admin, {
+      resourceIds: [cageId, cage2Id],
+      startAt,
+      endAt,
+      reason: "Team event",
+    });
+    expect(res.created).toBe(1); // only Cage 2
+    expect(res.skippedRentals).toHaveLength(1);
+    const rows = await db
+      .select()
+      .from(blockedTimes)
+      .where(inArray(blockedTimes.resourceId, [cageId, cage2Id]));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].resourceId).toBe(cage2Id);
+  });
+
+  it("rejects an unknown resource", async () => {
+    const startAt = new Date();
+    startAt.setUTCHours(startAt.getUTCHours() + 24, 0, 0, 0);
+    const endAt = new Date(startAt.getTime() + 60 * 60 * 1000);
+    await expect(
+      createBlocksBatchInternal(fixtures.admin, {
+        resourceIds: ["00000000-0000-0000-0000-000000000000"],
+        startAt,
+        endAt,
+        reason: "x",
+      }),
+    ).rejects.toBeInstanceOf(ResourceNotFoundError);
+  });
+});
+
 describe("editBlockSeriesInternal", () => {
   it("regenerates FUTURE occurrences and leaves PAST ones untouched", async () => {
-    // Daily series spanning 10 days past → 10 days future.
     const base = {
-      resourceId: cageId,
+      resourceIds: [cageId],
       reason: "Maintenance",
       daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
       startTime: "10:00",
@@ -303,25 +501,25 @@ describe("editBlockSeriesInternal", () => {
     expect(pastIds.length).toBeGreaterThan(0);
     expect(futureIdsBefore.length).toBeGreaterThan(0);
 
-    // Edit the time window.
     const res = await editBlockSeriesInternal(fixtures.admin, created.seriesId!, {
       ...base,
       startTime: "14:00",
       endTime: "15:00",
     });
-    expect(res.created).toBe(futureIdsBefore.length);
 
     const after = await seriesBlocks(created.seriesId!);
     const pastIdsAfter = after.filter((b) => b.startAt < now).map((b) => b.id).sort();
     const futureIdsAfter = after.filter((b) => b.startAt >= now).map((b) => b.id);
 
-    // Past occurrences untouched (same ids).
+    // res.created == the regenerated FUTURE rows. Compared to the post-edit
+    // future set (not futureIdsBefore) so it's robust to running between the
+    // old (10:00) and new (14:00) start times — otherwise today's occurrence
+    // straddles `now` differently before vs after and the count is off by one.
+    expect(res.created).toBe(futureIdsAfter.length);
     expect(pastIdsAfter).toEqual(pastIds);
-    // Future occurrences were regenerated — the old future ids are gone.
     for (const oldId of futureIdsBefore) {
       expect(futureIdsAfter).not.toContain(oldId);
     }
-    // Series definition updated.
     const [series] = await db
       .select()
       .from(blockedTimesSeries)
@@ -329,9 +527,9 @@ describe("editBlockSeriesInternal", () => {
     expect(series.startTime).toBe("14:00");
   });
 
-  it("skip-and-continue on edit: a future occurrence colliding with a rental is skipped + reported", async () => {
+  it("MULTI-CAGE: adding a cage on edit regenerates future rows for BOTH cages", async () => {
     const base = {
-      resourceId: cageId,
+      resourceIds: [cageId],
       reason: "Maintenance",
       daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
       startTime: "10:00",
@@ -342,8 +540,42 @@ describe("editBlockSeriesInternal", () => {
     const created = await createBlockSeriesInternal(fixtures.admin, base);
     createdSeriesIds.push(created.seriesId!);
 
-    // New definition's future occurrences at 14:00. Rent one of them so the
-    // regenerate must skip it.
+    const now = new Date();
+    // Add cage 2 to the series.
+    await editBlockSeriesInternal(fixtures.admin, created.seriesId!, {
+      ...base,
+      resourceIds: [cageId, cage2Id],
+    });
+
+    const after = await seriesBlocks(created.seriesId!);
+    const future = after.filter((b) => b.startAt >= now);
+    // Every future date now has a row on BOTH cages.
+    expect(future.filter((b) => b.resourceId === cageId).length).toBeGreaterThan(0);
+    expect(future.filter((b) => b.resourceId === cage2Id).length).toBeGreaterThan(0);
+    expect(future.filter((b) => b.resourceId === cageId).length).toBe(
+      future.filter((b) => b.resourceId === cage2Id).length,
+    );
+
+    const [series] = await db
+      .select()
+      .from(blockedTimesSeries)
+      .where(eq(blockedTimesSeries.id, created.seriesId!));
+    expect(series.resourceIds.sort()).toEqual([cageId, cage2Id].sort());
+  });
+
+  it("skip-and-continue on edit: a future occurrence colliding with a rental is skipped + reported", async () => {
+    const base = {
+      resourceIds: [cageId],
+      reason: "Maintenance",
+      daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+      startTime: "10:00",
+      endTime: "11:00",
+      startsOn: isoDaysFromToday(-2),
+      endsOn: isoDaysFromToday(10),
+    };
+    const created = await createBlockSeriesInternal(fixtures.admin, base);
+    createdSeriesIds.push(created.seriesId!);
+
     const now = new Date();
     const newFuture = generateOccurrences({
       daysOfWeek: base.daysOfWeek,
@@ -367,7 +599,7 @@ describe("editBlockSeriesInternal", () => {
   it("rejects an unknown series id (BlockedTimeSeriesNotFoundError)", async () => {
     await expect(
       editBlockSeriesInternal(fixtures.admin, "00000000-0000-0000-0000-000000000000", {
-        resourceId: cageId,
+        resourceIds: [cageId],
         reason: "x",
         daysOfWeek: [1],
         startTime: "10:00",
@@ -382,7 +614,7 @@ describe("editBlockSeriesInternal", () => {
 describe("cancelBlockSeriesOccurrenceInternal", () => {
   it("deletes the occurrence + records its date in the series skipDates", async () => {
     const base = {
-      resourceId: cageId,
+      resourceIds: [cageId],
       reason: "Maintenance",
       daysOfWeek: [1, 3],
       startTime: "10:00",
@@ -442,9 +674,9 @@ describe("cancelBlockSeriesOccurrenceInternal", () => {
 });
 
 describe("deleteBlockSeriesInternal", () => {
-  it("deletes the series and cascades ALL its occurrences", async () => {
+  it("deletes the series and cascades ALL its occurrences (across cages)", async () => {
     const created = await createBlockSeriesInternal(fixtures.admin, {
-      resourceId: cageId,
+      resourceIds: [cageId, cage2Id],
       reason: "Maintenance",
       daysOfWeek: [1, 3],
       startTime: "10:00",

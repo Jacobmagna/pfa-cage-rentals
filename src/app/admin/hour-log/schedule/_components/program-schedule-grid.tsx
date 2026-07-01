@@ -220,10 +220,10 @@ export function ProgramScheduleGrid({
   // Latest-ref pattern: the window-level pointer handlers (paint) are bound
   // once on mount but need the freshest state. These refs sync in a no-dep
   // post-commit effect below; the handler closures read .current so they
-  // never see stale React state. (`occupiedSlotsRef`/`selectedDateRef` are
+  // never see stale React state. (`occupiedByLaneRef`/`selectedDateRef` are
   // assigned later, after those values are computed in render.)
   const paintRef = useRef(paint);
-  const occupiedSlotsRef = useRef<Set<number>>(new Set());
+  const occupiedByLaneRef = useRef<Set<number>[]>([]);
   const selectedDateRef = useRef(selectedDate);
 
   // Convert pointer.clientX → a 30-min CELL slot index (0..27) by measuring
@@ -288,11 +288,13 @@ export function ProgramScheduleGrid({
 
       // Already painting — update endSlot to the pointer's 30-min cell,
       // clamped at the first OCCUPIED cell between startSlot and the pointer
-      // so you can't paint across an existing block. `occupied` is keyed by
-      // 15-min slot, so a 30-min cell `i` is occupied if EITHER sub-slot is.
+      // so you can't paint across an existing block IN THIS LANE. Occupancy is
+      // per-lane, so pull the paint's own lane set; it's keyed by 15-min slot,
+      // so a 30-min cell `i` is occupied if EITHER sub-slot is.
       const targetSlot = slotIndexFromClientX(e.clientX);
       if (targetSlot === null) return;
-      const occupied = occupiedSlotsRef.current;
+      const occupied =
+        occupiedByLaneRef.current[start.laneIdx] ?? new Set<number>();
       const cellOccupied = (cell: number) =>
         occupied.has(cell * 2) || occupied.has(cell * 2 + 1);
       const dir = targetSlot >= current.startSlot ? 1 : -1;
@@ -438,20 +440,26 @@ export function ProgramScheduleGrid({
   );
   const laneRows = Math.max(laneCount, 1);
 
-  // QA10 W3.8a: occupancy is now by TIME (not per program). A slot column is
-  // occupied if ANY visible block covers it, so empty-cell clicks only land
-  // on free time. Keyed by slot index.
+  // QA10 W3.8a: occupancy is now PER-LANE (each lane row tracks its own busy
+  // slots). A cell in lane L is occupied only if a block assigned to lane L
+  // covers it — so lane 1's free time stays clickable even when lane 0 is
+  // busy at the same clock time. Keyed by slot index, one Set per lane.
   //
   // Skip the actively-dragged block's own footprint so its current slots
   // stay droppable (a small shift within its own span would otherwise be
   // impossible — mirrors the cage grid's draggingSessionId exclusion).
-  const occupiedSlots = new Set<number>();
+  const occupiedByLane: Set<number>[] = Array.from(
+    { length: laneRows },
+    () => new Set<number>(),
+  );
   for (const b of visibleBlocks) {
     if (b.id === draggingBlockId) continue;
+    const lane = laneByBlockId.get(b.id);
+    if (lane === undefined) continue;
     const placement = placeOnGrid15(b.startAt, b.endAt);
     if (!placement) continue;
     for (let i = 0; i < placement.span; i++) {
-      occupiedSlots.add(placement.col - 1 + i);
+      occupiedByLane[lane].add(placement.col - 1 + i);
     }
   }
 
@@ -461,7 +469,7 @@ export function ProgramScheduleGrid({
   // and is flagged by react-hooks in React 19.)
   useEffect(() => {
     paintRef.current = paint;
-    occupiedSlotsRef.current = occupiedSlots;
+    occupiedByLaneRef.current = occupiedByLane;
     selectedDateRef.current = selectedDate;
   });
 
@@ -558,8 +566,8 @@ export function ProgramScheduleGrid({
                   laneIdx={laneIdx}
                   slotIdx={slotIdx}
                   isOccupied={
-                    occupiedSlots.has(slotIdx * 2) ||
-                    occupiedSlots.has(slotIdx * 2 + 1)
+                    (occupiedByLane[laneIdx]?.has(slotIdx * 2) ?? false) ||
+                    (occupiedByLane[laneIdx]?.has(slotIdx * 2 + 1) ?? false)
                   }
                   isDragging={draggingBlockId !== null}
                   onCreate={() => openCreateAt(slotIdx)}

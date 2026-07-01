@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, asc, eq, gte, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, lt, ne, sql } from "drizzle-orm";
 import { Archive, ArrowLeft } from "lucide-react";
 import { db } from "@/db";
 import { auditLog, sessionsBilling, users } from "@/db/schema";
@@ -60,15 +60,21 @@ export default async function AdminCoachesPage() {
           lt(sessionsBilling.startAt, monthEndExclusive),
         ),
       ),
-    // neon-http returns SQL aggregates (max) as strings, not Date objects,
-    // so we type it string|null and wrap in new Date() below (same pattern as
-    // /admin/records). ts is NOT NULL, so within a group max() is never null.
+    // "Last activity" = the coach's most recent REAL in-app action. Exclude
+    // `user_sms_consent` rows: those are written by the SMS inbound webhook
+    // when a coach texts STOP/START (a carrier opt-out, not app activity).
+    // neon-http returns a raw `max()` aggregate as a tz-naive STRING (e.g.
+    // "2026-07-01 18:25:22.877" — no Z), NOT a Date, so we type it string|null
+    // and normalize to UTC in new Date() below (append T…Z) so the wall-clock
+    // render is correct regardless of the runtime timezone. Uses the
+    // audit_log_actor_idx (actor_user_id, ts) index (migration 0042).
     db
       .select({
         actorUserId: auditLog.actorUserId,
         lastActivityAt: sql<string | null>`max(${auditLog.ts})`,
       })
       .from(auditLog)
+      .where(ne(auditLog.entityType, "user_sms_consent"))
       .groupBy(auditLog.actorUserId),
   ]);
 
@@ -87,7 +93,12 @@ export default async function AdminCoachesPage() {
   const lastActivity = new Map<string, Date>(
     activityRows
       .filter((r) => r.lastActivityAt !== null)
-      .map((r) => [r.actorUserId, new Date(r.lastActivityAt as string)]),
+      // The tz-naive string ("YYYY-MM-DD HH:MM:SS.ffffff") is UTC wall-clock;
+      // rewrite to ISO-with-Z so new Date() parses it as UTC on any runtime.
+      .map((r) => [
+        r.actorUserId,
+        new Date((r.lastActivityAt as string).replace(" ", "T") + "Z"),
+      ]),
   );
 
   const rows: CoachRow[] = coachRows.map((c) => {

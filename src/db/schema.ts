@@ -730,6 +730,10 @@ export const auditLog = pgTable(
   (table) => [
     index("audit_log_entity_idx").on(table.entityType, table.entityId),
     index("audit_log_ts_idx").on(table.ts),
+    // Serves the per-actor MAX(ts) "last activity" lookup on /admin/coaches
+    // (GROUP BY actor_user_id) — the composite lets Postgres read each
+    // actor's latest ts straight from the index.
+    index("audit_log_actor_idx").on(table.actorUserId, table.ts),
   ],
 );
 

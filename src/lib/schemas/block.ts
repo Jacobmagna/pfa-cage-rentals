@@ -26,6 +26,25 @@ export const updateBlockSchema = createBlockSchema.partial();
 export type CreateBlockInput = z.infer<typeof createBlockSchema>;
 export type UpdateBlockInput = z.infer<typeof updateBlockSchema>;
 
+// MULTI-CAGE: a ONE-OFF (non-recurring) block spanning one OR MANY resources
+// in a single action, with skip-and-continue conflict handling per resource
+// (mirrors the recurring series). Same shape as createBlockSchema but
+// resourceIds is a non-empty set. Cap mirrors the series' resourceIds cap.
+export const createBlocksBatchSchema = z.object({
+  resourceIds: z
+    .array(z.string().min(1, "resourceId is required"))
+    .min(1, "Pick at least one resource")
+    .max(20, "Too many resources"),
+  startAt: z.coerce.date(),
+  endAt: z.coerce.date(),
+  reason: z
+    .string()
+    .min(1, "Reason is required")
+    .max(120, "Reason is at most 120 characters"),
+});
+
+export type CreateBlocksBatchInput = z.infer<typeof createBlocksBatchSchema>;
+
 // ---------------------------------------------------------------------------
 // BLOCK-RECUR: recurring blocked-time SERIES schemas. Mirrors the program
 // series schema (src/lib/schemas/program-schedule.ts) but scoped to a SINGLE
@@ -42,7 +61,13 @@ const BLOCK_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const BLOCK_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const blockSeriesShape = {
-  resourceId: z.string().min(1, "resourceId is required"),
+  // MULTI-CAGE: the full set of resources this recurring block covers (1..N).
+  // One materialized occurrence per (resource, date). Non-empty; the action
+  // de-dupes + verifies every id exists.
+  resourceIds: z
+    .array(z.string().min(1, "resourceId is required"))
+    .min(1, "Pick at least one resource")
+    .max(20, "Too many resources"),
   reason: z
     .string()
     .min(1, "Reason is required")

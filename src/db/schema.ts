@@ -582,9 +582,21 @@ export const blockedTimesSeries = pgTable("blocked_times_series", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
+  // Denormalized PRIMARY resource (= resourceIds[0]). Kept NOT NULL + FK for
+  // back-compat with the migration-0040 single-cage rows; the full cage set
+  // for a multi-cage recurring block lives in `resourceIds` below.
   resourceId: text("resource_id")
     .notNull()
     .references(() => resources.id),
+  // MULTI-CAGE (migration 0041): the full set of resources this recurring
+  // block covers. One materialized blocked_times row per (resource, date),
+  // all sharing this series' id. A plain text[] (no FK — same array-column
+  // pattern as daysOfWeek / skipDates); the action validates every id exists.
+  // Backfilled from resource_id for existing single-cage series.
+  resourceIds: text("resource_ids")
+    .array()
+    .notNull()
+    .default(sql`'{}'`),
   reason: text("reason").notNull(),
   daysOfWeek: integer("days_of_week").array().notNull(),
   frequency: recurrenceFrequency("frequency").notNull().default("weekly"),

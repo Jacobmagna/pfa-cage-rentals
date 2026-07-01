@@ -26,7 +26,7 @@
 // mutation. The edit path uses a snapshot/restore saga (mirrors the program
 // series edit) so a mid-regenerate failure restores the prior future blocks.
 
-import { and, eq, gt, gte, lt } from "drizzle-orm";
+import { and, eq, gt, gte, inArray, lt } from "drizzle-orm";
 import * as Sentry from "@sentry/nextjs";
 import { db } from "@/db";
 import {
@@ -44,6 +44,7 @@ import {
   ResourceNotFoundError,
 } from "@/lib/errors";
 import {
+  createBlocksBatchSchema,
   createBlockSeriesSchema,
   editBlockSeriesSchema,
 } from "@/lib/schemas/block";
@@ -81,17 +82,26 @@ class BlockSlotTakenError extends Error {
 }
 
 // A rental occurrence we skipped, surfaced to the admin so they can follow up.
+// MULTI-CAGE: resourceName names the specific cage the collision was on so the
+// report reads e.g. "Aug 3 · 3:00 – 5:00 PM · Cage 2 · Coach Smith".
 export type SkippedRental = {
   date: string; // PFA "YYYY-MM-DD"
+  resourceName: string;
   coachName: string;
-  label: string; // e.g. "Mon, Aug 3 · 3:00 – 5:00 PM · Coach Smith"
+  label: string;
 };
 
-export type BlockSeriesResult = {
-  seriesId: string | null; // null when nothing could be blocked (no series made)
+// Shared result shape for a skip-and-continue block mutation (batch one-off or
+// recurring series). `created` counts materialized blocked_times ROWS across
+// ALL resources (cages × surviving dates), not distinct dates.
+export type BlockBatchResult = {
   created: number;
   skippedRentals: SkippedRental[];
-  skippedBlocked: number; // occurrences that were already blocked (silent skip)
+  skippedBlocked: number; // (resource, date) pairs already blocked (silent skip)
+};
+
+export type BlockSeriesResult = BlockBatchResult & {
+  seriesId: string | null; // null when nothing could be blocked (no series made)
 };
 
 // Half-open [start, end) overlap — matches the blocked_times / sessions_billing
@@ -101,14 +111,23 @@ function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): boolean {
   return aStart.getTime() < bEnd.getTime() && aEnd.getTime() > bStart.getTime();
 }
 
-async function getResourceOrThrow(resourceId: string) {
-  const [row] = await db
-    .select()
-    .from(resources)
-    .where(eq(resources.id, resourceId))
-    .limit(1);
-  if (!row) throw new ResourceNotFoundError(resourceId);
-  return row;
+// MULTI-CAGE: de-dupe (preserving order) + validate that EVERY resource id
+// exists, returning a Map<id, name> for the conflict report. Throws
+// ResourceNotFoundError naming the first missing id — matches the single-cage
+// path's behavior. The deduped id order is the caller's responsibility to
+// reuse (resourceIds[0] becomes the series' denormalized primary).
+async function resolveResourceNamesOrThrow(
+  resourceIds: string[],
+): Promise<Map<string, string>> {
+  const ids = [...new Set(resourceIds)];
+  const rows = ids.length
+    ? await db.select().from(resources).where(inArray(resources.id, ids))
+    : [];
+  const byId = new Map(rows.map((r) => [r.id, r.name]));
+  for (const id of ids) {
+    if (!byId.has(id)) throw new ResourceNotFoundError(id);
+  }
+  return byId;
 }
 
 // Classify each occurrence against what's already on the resource in the
@@ -119,6 +138,7 @@ async function getResourceOrThrow(resourceId: string) {
 // future blocks are being regenerated).
 async function partitionOccurrences(
   resourceId: string,
+  resourceName: string,
   occurrences: Occurrence[],
 ): Promise<{
   toInsert: Occurrence[];
@@ -181,10 +201,11 @@ async function partitionOccurrences(
       const coachName = rental.coachName ?? rental.coachEmail;
       skippedRentals.push({
         date: formatPfaDate(o.startAt),
+        resourceName,
         coachName,
         label: `${formatPfaDate(o.startAt)} · ${formatPfaTime12h(
           o.startAt,
-        )} – ${formatPfaTime12h(o.endAt)} · ${coachName}`,
+        )} – ${formatPfaTime12h(o.endAt)} · ${resourceName} · ${coachName}`,
       });
       continue;
     }
@@ -206,10 +227,13 @@ export async function createBlockSeriesInternal(
   input: unknown,
 ): Promise<BlockSeriesResult> {
   const parsed = createBlockSeriesSchema.parse(input);
-  const resource = await getResourceOrThrow(parsed.resourceId);
+  // MULTI-CAGE: de-dupe (preserving first-seen order) + validate every cage.
+  const resourceIds = [...new Set(parsed.resourceIds)];
+  const nameById = await resolveResourceNamesOrThrow(resourceIds);
 
   // Generate FIRST so an invalid recurrence (over-cap, etc.) throws before we
-  // write anything.
+  // write anything. Dates are cage-independent — generate once, then partition
+  // per cage.
   const occurrences = generateOccurrences({
     daysOfWeek: parsed.daysOfWeek,
     startTime: parsed.startTime,
@@ -220,19 +244,32 @@ export async function createBlockSeriesInternal(
     interval: parsed.interval,
   });
 
-  const { toInsert, skippedRentals, skippedBlocked } =
-    await partitionOccurrences(parsed.resourceId, occurrences);
+  // Partition per cage; a row is one (cage, surviving date) pair. Skip-and-
+  // continue is applied INDEPENDENTLY per cage, so Cage 1 can be fully blocked
+  // while Cage 2 skips the two dates it's already rented.
+  const rows: { resourceId: string; startAt: Date; endAt: Date }[] = [];
+  const skippedRentals: SkippedRental[] = [];
+  let skippedBlocked = 0;
+  for (const rid of resourceIds) {
+    const part = await partitionOccurrences(rid, nameById.get(rid)!, occurrences);
+    for (const o of part.toInsert) {
+      rows.push({ resourceId: rid, startAt: o.startAt, endAt: o.endAt });
+    }
+    skippedRentals.push(...part.skippedRentals);
+    skippedBlocked += part.skippedBlocked;
+  }
 
-  // Nothing bookable → don't create an empty series; hand back the report so
-  // the UI can say "couldn't block any — all N already rented/blocked".
-  if (toInsert.length === 0) {
+  // Nothing bookable on any cage → don't create an empty series; hand back the
+  // report so the UI can say "couldn't block any — all already rented/blocked".
+  if (rows.length === 0) {
     return { seriesId: null, created: 0, skippedRentals, skippedBlocked };
   }
 
   const [series] = await db
     .insert(blockedTimesSeries)
     .values({
-      resourceId: parsed.resourceId,
+      resourceId: resourceIds[0], // denormalized primary (back-compat)
+      resourceIds,
       reason: parsed.reason,
       daysOfWeek: parsed.daysOfWeek,
       frequency: parsed.frequency,
@@ -251,10 +288,10 @@ export async function createBlockSeriesInternal(
   // orphan empty series, then rethrow for the caller/UI.
   try {
     await db.insert(blockedTimes).values(
-      toInsert.map((o) => ({
-        resourceId: parsed.resourceId,
-        startAt: o.startAt,
-        endAt: o.endAt,
+      rows.map((r) => ({
+        resourceId: r.resourceId,
+        startAt: r.startAt,
+        endAt: r.endAt,
         reason: parsed.reason,
         seriesId: series.id,
         createdBy: actor.id,
@@ -274,7 +311,7 @@ export async function createBlockSeriesInternal(
       });
     }
     if (isExclusionViolation(insertErr)) {
-      throw new BlockSlotTakenError(resource.name);
+      throw new BlockSlotTakenError(nameById.get(resourceIds[0]) ?? "Resource");
     }
     throw insertErr;
   }
@@ -286,7 +323,8 @@ export async function createBlockSeriesInternal(
     action: "create",
     after: {
       ...(series as unknown as Record<string, unknown>),
-      occurrenceCount: toInsert.length,
+      occurrenceCount: rows.length,
+      resourceCount: resourceIds.length,
       skippedRentalCount: skippedRentals.length,
       skippedBlockedCount: skippedBlocked,
     },
@@ -294,10 +332,87 @@ export async function createBlockSeriesInternal(
 
   return {
     seriesId: series.id,
-    created: toInsert.length,
+    created: rows.length,
     skippedRentals,
     skippedBlocked,
   };
+}
+
+// MULTI-CAGE: a ONE-OFF (non-recurring) block over one OR MANY resources in a
+// single action, with the SAME skip-and-continue policy as the series path
+// (skip a cage that's already rented/blocked at this exact time, report the
+// rentals). Returns a batch summary (no series row). For a single resource
+// this is equivalent to createBlockInternal but with the skip-and-continue
+// report instead of a hard overlap error — the multi-cage create dialog routes
+// every ≥2-cage one-off (and each independent one-off sub-form) through here.
+export async function createBlocksBatchInternal(
+  actor: Actor,
+  input: unknown,
+): Promise<BlockBatchResult> {
+  const parsed = createBlocksBatchSchema.parse(input);
+  if (parsed.startAt.getTime() >= parsed.endAt.getTime()) {
+    throw new Error("Block start must be before end");
+  }
+  const resourceIds = [...new Set(parsed.resourceIds)];
+  const nameById = await resolveResourceNamesOrThrow(resourceIds);
+
+  // A one-off block is a single "occurrence" spanning [startAt, endAt).
+  const occ: Occurrence = {
+    date: formatPfaDate(parsed.startAt),
+    startAt: parsed.startAt,
+    endAt: parsed.endAt,
+  };
+
+  const rows: { resourceId: string; startAt: Date; endAt: Date }[] = [];
+  const skippedRentals: SkippedRental[] = [];
+  let skippedBlocked = 0;
+  for (const rid of resourceIds) {
+    const part = await partitionOccurrences(rid, nameById.get(rid)!, [occ]);
+    for (const o of part.toInsert) {
+      rows.push({ resourceId: rid, startAt: o.startAt, endAt: o.endAt });
+    }
+    skippedRentals.push(...part.skippedRentals);
+    skippedBlocked += part.skippedBlocked;
+  }
+
+  if (rows.length === 0) {
+    return { created: 0, skippedRentals, skippedBlocked };
+  }
+
+  let inserted: (typeof blockedTimes.$inferSelect)[];
+  try {
+    inserted = await db
+      .insert(blockedTimes)
+      .values(
+        rows.map((r) => ({
+          resourceId: r.resourceId,
+          startAt: r.startAt,
+          endAt: r.endAt,
+          reason: parsed.reason,
+          createdBy: actor.id,
+        })),
+      )
+      .returning();
+  } catch (insertErr) {
+    if (isExclusionViolation(insertErr)) {
+      throw new BlockSlotTakenError(nameById.get(resourceIds[0]) ?? "Resource");
+    }
+    throw insertErr;
+  }
+
+  // Audit each inserted block individually (mirrors createBlockInternal's
+  // per-block "block" entity, so single + batch one-offs share an audit shape).
+  for (const b of inserted) {
+    await safeLogAudit(db, {
+      actorUserId: actor.id,
+      entityType: "block",
+      entityId: b.id,
+      action: "create",
+      after: b as unknown as Record<string, unknown>,
+    });
+  }
+
+  return { created: inserted.length, skippedRentals, skippedBlocked };
 }
 
 export async function editBlockSeriesInternal(
@@ -313,7 +428,11 @@ export async function editBlockSeriesInternal(
   if (!existing) throw new BlockedTimeSeriesNotFoundError(seriesId);
 
   const parsed = editBlockSeriesSchema.parse(input);
-  const resource = await getResourceOrThrow(parsed.resourceId);
+  // MULTI-CAGE: the edit may change the cage SET (add/remove cages). Validate
+  // the new set; the regenerate below deletes ALL of this series' future blocks
+  // (every cage) and recreates them for the new set.
+  const resourceIds = [...new Set(parsed.resourceIds)];
+  const nameById = await resolveResourceNamesOrThrow(resourceIds);
 
   // Regenerate FUTURE occurrences only; past/in-progress blocks stay as a
   // historical record. Carry the existing skipDates so a cancelled occurrence
@@ -356,15 +475,30 @@ export async function editBlockSeriesInternal(
         ),
       );
 
-    const { toInsert, skippedRentals, skippedBlocked } =
-      await partitionOccurrences(parsed.resourceId, futureOccurrences);
+    // Partition the future occurrences per cage (skip-and-continue per cage),
+    // building one row per (cage, surviving date).
+    const rows: { resourceId: string; startAt: Date; endAt: Date }[] = [];
+    const skippedRentals: SkippedRental[] = [];
+    let skippedBlocked = 0;
+    for (const rid of resourceIds) {
+      const part = await partitionOccurrences(
+        rid,
+        nameById.get(rid)!,
+        futureOccurrences,
+      );
+      for (const o of part.toInsert) {
+        rows.push({ resourceId: rid, startAt: o.startAt, endAt: o.endAt });
+      }
+      skippedRentals.push(...part.skippedRentals);
+      skippedBlocked += part.skippedBlocked;
+    }
 
-    if (toInsert.length > 0) {
+    if (rows.length > 0) {
       await db.insert(blockedTimes).values(
-        toInsert.map((o) => ({
-          resourceId: parsed.resourceId,
-          startAt: o.startAt,
-          endAt: o.endAt,
+        rows.map((r) => ({
+          resourceId: r.resourceId,
+          startAt: r.startAt,
+          endAt: r.endAt,
           reason: parsed.reason,
           seriesId,
           createdBy: actor.id,
@@ -373,7 +507,7 @@ export async function editBlockSeriesInternal(
     }
     result = {
       seriesId,
-      created: toInsert.length,
+      created: rows.length,
       skippedRentals,
       skippedBlocked,
     };
@@ -410,7 +544,7 @@ export async function editBlockSeriesInternal(
       }
     }
     if (isExclusionViolation(regenErr)) {
-      throw new BlockSlotTakenError(resource.name);
+      throw new BlockSlotTakenError(nameById.get(resourceIds[0]) ?? "Resource");
     }
     throw new Error(
       "Failed to update the recurring block; the original schedule was " +
@@ -424,7 +558,8 @@ export async function editBlockSeriesInternal(
   const [updated] = await db
     .update(blockedTimesSeries)
     .set({
-      resourceId: parsed.resourceId,
+      resourceId: resourceIds[0], // denormalized primary (back-compat)
+      resourceIds,
       reason: parsed.reason,
       daysOfWeek: parsed.daysOfWeek,
       frequency: parsed.frequency,

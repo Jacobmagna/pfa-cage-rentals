@@ -68,6 +68,7 @@ import {
   type MasterSession,
 } from "@/app/admin/_components/master-schedule-grid";
 import { EditableMasterSchedule } from "@/app/admin/_components/editable-master-schedule";
+import { HomeQuickActions } from "@/app/admin/_components/home-quick-actions";
 import type { SessionFormInitialValues } from "@/app/admin/sessions/_components/session-form-dialog";
 import type { BlockEditInitialValues } from "@/app/admin/schedule/_components/block-edit-dialog";
 import type {
@@ -113,15 +114,16 @@ export default async function AdminHome({
 
   const params = await searchParams;
   const selectedDate = parseDateInput(params.date) ?? startOfToday();
-  // Master Schedule is the hero at the top of Home, so it defaults to
-  // EXPANDED. It collapses only when explicitly closed via ?schedule=closed.
-  const scheduleOpen = params.schedule !== "closed";
+  // Master Schedule now starts COLLAPSED — the 4 quick-action buttons are the
+  // primary Home entry points. It expands only when explicitly opened via
+  // ?schedule=open.
+  const scheduleOpen = params.schedule === "open";
 
-  // Toggle-bar href: open → add schedule=closed; closed → drop it. Both
+  // Toggle-bar href: open → drop the param; closed → add schedule=open. Both
   // preserve the current ?date so navigating in/out keeps the selected day.
   const toggleHref = scheduleOpen
-    ? buildAdminHref({ date: params.date, schedule: "closed" })
-    : buildAdminHref({ date: params.date });
+    ? buildAdminHref({ date: params.date })
+    : buildAdminHref({ date: params.date, schedule: "open" });
 
   // Card windows are anchored to NOW, never the selected day.
   const now = new Date();
@@ -696,6 +698,15 @@ export default async function AdminHome({
           Today at a glance across cage rentals and programs.
         </p>
       </header>
+
+      <HomeQuickActions
+        cageCoaches={activeCoaches}
+        cageResources={cageResourceOptions}
+        programs={masterPrograms}
+        programCoaches={activeCoaches}
+        programResources={programResourceOptions}
+        selectedDate={selectedDate}
+      />
 
       <section aria-labelledby="master-schedule-heading" className="mb-10">
         <h2 id="master-schedule-heading" className="sr-only">

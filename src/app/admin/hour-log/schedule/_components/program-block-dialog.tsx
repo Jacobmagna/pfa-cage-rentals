@@ -950,9 +950,11 @@ export function ProgramBlockDialog({
                   onChange={(iso) => {
                     setFormDate(iso);
                     if (!isEdit) {
-                      setSelectedDays(
-                        new Set([pfaWeekdayIndex(parsePfaInput(iso, "12:00"))]),
-                      );
+                      // Guard: weekdayFromIso returns null for an empty/partial
+                      // date, so a mid-typed value can't reach parsePfaInput and
+                      // throw (which would white-screen the dialog).
+                      const wd = weekdayFromIso(iso);
+                      if (wd !== null) setSelectedDays(new Set([wd]));
                       setRecurError(null);
                     }
                   }}
@@ -1283,11 +1285,21 @@ export function ProgramBlockDialog({
                     />
                   </Field>
 
-                  <p className="text-[11px] text-fg-subtle leading-snug">
-                    Creates a block from{" "}
-                    {formatPfaDateMedium(parsePfaInput(formDate, "12:00"))}{" "}
-                    through the end date.
-                  </p>
+                  {/* Guard the parse: only resolve formDate to a label when
+                      it's a valid ISO date (weekdayFromIso != null), else the
+                      empty/partial case would throw in parsePfaInput and crash
+                      the dialog. */}
+                  {weekdayFromIso(formDate) !== null ? (
+                    <p className="text-[11px] text-fg-subtle leading-snug">
+                      Creates a block from{" "}
+                      {formatPfaDateMedium(parsePfaInput(formDate, "12:00"))}{" "}
+                      through the end date.
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-fg-subtle leading-snug">
+                      Creates a repeating block through the end date.
+                    </p>
+                  )}
 
                   {recurError ? (
                     <p

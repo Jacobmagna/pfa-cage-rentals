@@ -111,6 +111,18 @@ function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): boolean {
   return aStart.getTime() < bEnd.getTime() && aEnd.getTime() > bStart.getTime();
 }
 
+// MULTI-CAGE: is `date` skipped for `resourceId`? skipDates hold cage-scoped
+// composite keys "<resourceId>|<date>". A bare-date entry (no "|") is a LEGACY
+// global skip — it predates multi-cage series and, for the single-cage series
+// it came from, correctly means "skip this date on every cage" (back-compat).
+function isDateSkipped(
+  skipSet: Set<string>,
+  resourceId: string,
+  date: string,
+): boolean {
+  return skipSet.has(date) || skipSet.has(`${resourceId}|${date}`);
+}
+
 // MULTI-CAGE: de-dupe (preserving order) + validate that EVERY resource id
 // exists, returning a Map<id, name> for the conflict report. Throws
 // ResourceNotFoundError naming the first missing id — matches the single-cage
@@ -435,8 +447,14 @@ export async function editBlockSeriesInternal(
   const nameById = await resolveResourceNamesOrThrow(resourceIds);
 
   // Regenerate FUTURE occurrences only; past/in-progress blocks stay as a
-  // historical record. Carry the existing skipDates so a cancelled occurrence
-  // isn't resurrected. The past/future split is `now`.
+  // historical record. The past/future split is `now`.
+  //
+  // MULTI-CAGE: generate the FULL occurrence set with NO skip here, then apply
+  // skipDates PER CAGE below. skipDates entries are cage-scoped composite keys
+  // "<resourceId>|<date>", so a cancelled occurrence on one cage isn't resurrected
+  // yet doesn't silently drop the same date on the series' OTHER cages. A LEGACY
+  // bare-date entry (no "|") predates multi-cage and is treated as a GLOBAL skip
+  // (correct for the single-cage series it came from — back-compat, no backfill).
   const now = new Date();
   const allOccurrences = generateOccurrences({
     daysOfWeek: parsed.daysOfWeek,
@@ -446,9 +464,9 @@ export async function editBlockSeriesInternal(
     endsOn: parsed.endsOn,
     frequency: parsed.frequency,
     interval: parsed.interval,
-    skipDates: existing.skipDates,
   });
   const futureOccurrences = allOccurrences.filter((o) => o.startAt >= now);
+  const skipSet = new Set(existing.skipDates);
 
   // DATA-LOSS GUARD (no transactions): snapshot this series' FUTURE blocks
   // before deleting, so a mid-regenerate failure can restore them verbatim.
@@ -481,10 +499,16 @@ export async function editBlockSeriesInternal(
     const skippedRentals: SkippedRental[] = [];
     let skippedBlocked = 0;
     for (const rid of resourceIds) {
+      // Drop this cage's cancelled dates before partitioning: a composite
+      // "<rid>|<date>" skip applies only to THIS cage; a legacy bare date is a
+      // global skip that applies to every cage.
+      const cageOccurrences = futureOccurrences.filter(
+        (o) => !isDateSkipped(skipSet, rid, o.date),
+      );
       const part = await partitionOccurrences(
         rid,
         nameById.get(rid)!,
-        futureOccurrences,
+        cageOccurrences,
       );
       for (const o of part.toInsert) {
         rows.push({ resourceId: rid, startAt: o.startAt, endAt: o.endAt });
@@ -636,11 +660,16 @@ export async function cancelBlockSeriesOccurrenceInternal(
     .limit(1);
   if (!series) throw new BlockedTimeSeriesNotFoundError(block.seriesId);
 
-  // Add the occurrence's PFA date to skipDates (deduped) so an edit-series
-  // regenerate won't recreate it, then delete the block.
+  // MULTI-CAGE: skipDates entries are cage-scoped composite keys
+  // "<resourceId>|<date>" so cancelling one cage's occurrence doesn't drop the
+  // same date on the series' OTHER cages when an edit-series regenerates. A
+  // LEGACY bare-date entry (no "|") predates multi-cage and is treated as a
+  // GLOBAL skip on regenerate (correct for the single-cage series it came from).
+  // Add this occurrence's cage-scoped key (deduped), then delete the block.
   const occurrenceDate = formatPfaDate(block.startAt);
+  const skipKey = `${block.resourceId}|${occurrenceDate}`;
   const nextSkipDates = Array.from(
-    new Set([...series.skipDates, occurrenceDate]),
+    new Set([...series.skipDates, skipKey]),
   ).sort();
 
   await db
@@ -656,7 +685,7 @@ export async function cancelBlockSeriesOccurrenceInternal(
     entityId: series.id,
     action: "update",
     before: { skipDates: series.skipDates },
-    after: { skipDates: nextSkipDates, cancelledOccurrence: occurrenceDate },
+    after: { skipDates: nextSkipDates, cancelledOccurrence: skipKey },
   });
 
   return { seriesId: series.id, cancelledDate: occurrenceDate };

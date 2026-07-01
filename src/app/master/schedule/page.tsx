@@ -96,6 +96,7 @@ export default async function AdminSchedulePage({
     startAt: b.startAt,
     endAt: b.endAt,
     reason: b.reason,
+    seriesId: b.seriesId,
   }));
 
   const dateLabel = formatPfaDateLong(selectedDate);

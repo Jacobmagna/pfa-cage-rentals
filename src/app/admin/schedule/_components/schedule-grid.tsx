@@ -68,6 +68,9 @@ export type ScheduleBlock = {
   startAt: Date;
   endAt: Date;
   reason: string;
+  // BLOCK-RECUR: set when this block is an occurrence of a recurring series
+  // (drives the "recurring" chip + series actions in the edit dialog).
+  seriesId?: string | null;
 };
 
 type DialogState =
@@ -677,6 +680,7 @@ export function ScheduleGrid({
                   startAt: dialog.block.startAt,
                   endAt: dialog.block.endAt,
                   reason: dialog.block.reason,
+                  seriesId: dialog.block.seriesId ?? null,
                 }
               : undefined
           }

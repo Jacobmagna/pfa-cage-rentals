@@ -27,6 +27,7 @@
 // series edit) so a mid-regenerate failure restores the prior future blocks.
 
 import { and, eq, gt, gte, lt } from "drizzle-orm";
+import * as Sentry from "@sentry/nextjs";
 import { db } from "@/db";
 import {
   blockedTimes,
@@ -53,6 +54,31 @@ import { safeLogAudit } from "./audit-helpers";
 const AUDIT_ENTITY = "blocked_times_series";
 
 type Actor = AuthedSession["user"];
+
+// Postgres EXCLUDE-constraint violation (blocked_times_no_overlap). Mirrors
+// isExclusionViolation in block-actions.ts. A recurring insert pre-filters
+// conflicts, so this only fires on a concurrent booking/block landing in the
+// TOCTOU gap — we translate it to a friendly retry message instead of a raw
+// 23P01 reaching the admin.
+function isExclusionViolation(err: unknown): boolean {
+  if (err && typeof err === "object" && "code" in err && err.code === "23P01") {
+    return true;
+  }
+  if (err instanceof Error && err.cause) {
+    return isExclusionViolation(err.cause);
+  }
+  return false;
+}
+
+class BlockSlotTakenError extends Error {
+  readonly code = "BLOCK_SLOT_TAKEN" as const;
+  constructor(resourceName: string) {
+    super(
+      `${resourceName} was just booked or blocked while saving this recurring block. Reopen and try again — the conflicting slot will be skipped.`,
+    );
+    this.name = "BlockSlotTakenError";
+  }
+}
 
 // A rental occurrence we skipped, surfaced to the admin so they can follow up.
 export type SkippedRental = {
@@ -180,7 +206,7 @@ export async function createBlockSeriesInternal(
   input: unknown,
 ): Promise<BlockSeriesResult> {
   const parsed = createBlockSeriesSchema.parse(input);
-  await getResourceOrThrow(parsed.resourceId);
+  const resource = await getResourceOrThrow(parsed.resourceId);
 
   // Generate FIRST so an invalid recurrence (over-cap, etc.) throws before we
   // write anything.
@@ -219,16 +245,39 @@ export async function createBlockSeriesInternal(
     })
     .returning();
 
-  await db.insert(blockedTimes).values(
-    toInsert.map((o) => ({
-      resourceId: parsed.resourceId,
-      startAt: o.startAt,
-      endAt: o.endAt,
-      reason: parsed.reason,
-      seriesId: series.id,
-      createdBy: actor.id,
-    })),
-  );
+  // neon-http has no transactions: if the occurrence insert fails (e.g. a
+  // concurrent booking trips the EXCLUDE constraint in the gap after the
+  // conflict scan), delete the just-created series row so we never leave an
+  // orphan empty series, then rethrow for the caller/UI.
+  try {
+    await db.insert(blockedTimes).values(
+      toInsert.map((o) => ({
+        resourceId: parsed.resourceId,
+        startAt: o.startAt,
+        endAt: o.endAt,
+        reason: parsed.reason,
+        seriesId: series.id,
+        createdBy: actor.id,
+      })),
+    );
+  } catch (insertErr) {
+    try {
+      await db
+        .delete(blockedTimesSeries)
+        .where(eq(blockedTimesSeries.id, series.id));
+    } catch (cleanupErr) {
+      // The orphan-series cleanup failed — surface it so ops can remove the
+      // empty series row; we still throw the original error to the admin.
+      Sentry.captureException(cleanupErr, {
+        tags: { component: "block-series", op: "create-cleanup" },
+        extra: { seriesId: series.id },
+      });
+    }
+    if (isExclusionViolation(insertErr)) {
+      throw new BlockSlotTakenError(resource.name);
+    }
+    throw insertErr;
+  }
 
   await safeLogAudit(db, {
     actorUserId: actor.id,
@@ -264,7 +313,7 @@ export async function editBlockSeriesInternal(
   if (!existing) throw new BlockedTimeSeriesNotFoundError(seriesId);
 
   const parsed = editBlockSeriesSchema.parse(input);
-  await getResourceOrThrow(parsed.resourceId);
+  const resource = await getResourceOrThrow(parsed.resourceId);
 
   // Regenerate FUTURE occurrences only; past/in-progress blocks stay as a
   // historical record. Carry the existing skipDates so a cancelled occurrence
@@ -340,15 +389,28 @@ export async function editBlockSeriesInternal(
             gte(blockedTimes.startAt, now),
           ),
         );
-    } catch {
-      /* cleanup best-effort */
+    } catch (cleanupErr) {
+      // Cleanup of partial regenerate output failed — capture so the restore
+      // collision (if any) is diagnosable, then still attempt the restore.
+      Sentry.captureException(cleanupErr, {
+        tags: { component: "block-series", op: "edit-cleanup" },
+        extra: { seriesId },
+      });
     }
     if (futureBlocks.length > 0) {
       try {
         await db.insert(blockedTimes).values(futureBlocks);
-      } catch {
-        /* restore best-effort */
+      } catch (restoreErr) {
+        // Restore FAILED — the future schedule may now be gone. This is the
+        // silent-data-loss path; capture loudly so ops can recover manually.
+        Sentry.captureException(restoreErr, {
+          tags: { component: "block-series", op: "edit-restore-failed" },
+          extra: { seriesId, lostBlockCount: futureBlocks.length },
+        });
       }
+    }
+    if (isExclusionViolation(regenErr)) {
+      throw new BlockSlotTakenError(resource.name);
     }
     throw new Error(
       "Failed to update the recurring block; the original schedule was " +

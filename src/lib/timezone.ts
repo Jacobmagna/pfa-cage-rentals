@@ -21,9 +21,17 @@ export const PFA_TIMEZONE = "America/Los_Angeles";
  * client. Used by report rows + anywhere we need a date as a string.
  */
 export function formatPfaDate(d: Date): string {
-  // en-CA's short date format is YYYY-MM-DD — gives us the ISO shape
-  // for free without manual padding logic.
-  return d.toLocaleDateString("en-CA", { timeZone: PFA_TIMEZONE });
+  // Build the ISO shape from explicit PFA-local parts (pfaParts reads the
+  // named year/month/day fields, so it's locale-independent) rather than
+  // trusting a locale's DEFAULT date format. Some browsers don't honor
+  // "en-CA"'s YYYY-MM-DD short format and fall back to US "M/D/YYYY", which
+  // then poisons every downstream parsePfaInput / DateInput consumer (e.g.
+  // white-screens the recurring-block dialogs). This is byte-identical where
+  // en-CA already worked and correct where it didn't. pfaParts + pad2 are
+  // hoisted function declarations, so calling them before their definition
+  // below is fine.
+  const p = pfaParts(d);
+  return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
 }
 
 /**

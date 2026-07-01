@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   formatPfaDate,
   formatPfaTime,
@@ -13,6 +13,31 @@ import {
   pfaWallClockAt,
   pfaWallClockToUtc,
 } from "./timezone";
+
+// Regression: formatPfaDate must NOT depend on a locale's default date
+// FORMAT. Some browsers ignore "en-CA"'s YYYY-MM-DD short format and fall
+// back to US "M/D/YYYY" from toLocaleDateString, which produced strings like
+// "7/1/2026" that then crashed every downstream parsePfaInput consumer (the
+// recurring-block dialogs white-screened). The fix derives the ISO string
+// from pfaParts (formatToParts named fields), so simulating that fallback by
+// stubbing toLocaleDateString to return US format must NOT change the output.
+describe("formatPfaDate locale-fallback resilience", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns ISO even when toLocaleDateString falls back to US format", () => {
+    const spy = vi
+      .spyOn(Date.prototype, "toLocaleDateString")
+      .mockReturnValue("7/1/2026");
+    const utc = pfaWallClockToUtc("2026-07-01", "12:00");
+    // Sanity: the stub is actually active (proves the old code path would break).
+    expect(utc.toLocaleDateString()).toBe("7/1/2026");
+    expect(formatPfaDate(utc)).toBe("2026-07-01");
+    expect(formatPfaDate(utc)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    spy.mockRestore();
+  });
+});
 
 describe("pfaWallClockToUtc", () => {
   it("converts a PDT wall-clock to UTC (May = UTC-7)", () => {

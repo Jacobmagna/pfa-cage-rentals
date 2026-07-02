@@ -20,6 +20,11 @@ const ERROR_COPY: Record<string, string> = {
     "Too many sign-in attempts for this email. Try again in an hour.",
   "ip-limit":
     "Too many sign-in attempts from your network. Try again in an hour.",
+  // requestMagicLink: the Resend send itself failed (e.g. the free-tier
+  // daily cap → 429, or a transient network error). Actionable — the
+  // coach just needs to retry rather than hitting a raw 500 page.
+  "send-failed":
+    "We couldn't send your sign-in link right now. Please try again in a moment.",
   // Auth.js: the email already exists under a different provider link
   // path. Because allowDangerousEmailAccountLinking is enabled on the
   // Google provider, this code is rare — but Resend can still surface

@@ -139,7 +139,7 @@ describe("createBlockSeriesInternal", () => {
     expect(res.seriesId).toBeTruthy();
     expect(res.created).toBe(expected.length);
     expect(res.skippedRentals).toHaveLength(0);
-    expect(res.skippedBlocked).toBe(0);
+    expect(res.skippedBlocked).toHaveLength(0);
 
     const blocks = await seriesBlocks(res.seriesId!);
     expect(blocks).toHaveLength(expected.length);
@@ -278,10 +278,10 @@ describe("createBlockSeriesInternal", () => {
     expect(res.skippedRentals).toHaveLength(1);
     expect(res.skippedRentals[0].coachName).toBeTruthy();
     expect(res.skippedRentals[0].label).toContain(res.skippedRentals[0].coachName);
-    expect(res.skippedBlocked).toBe(0);
-    expect(res.created + res.skippedRentals.length + res.skippedBlocked).toBe(
-      occ.length,
-    );
+    expect(res.skippedBlocked).toHaveLength(0);
+    expect(
+      res.created + res.skippedRentals.length + res.skippedBlocked.length,
+    ).toBe(occ.length);
   });
 
   it("SKIPS SILENTLY an occurrence that overlaps an existing BLOCK", async () => {
@@ -308,7 +308,12 @@ describe("createBlockSeriesInternal", () => {
     if (res.seriesId) createdSeriesIds.push(res.seriesId);
 
     expect(res.created).toBe(occ.length - 1);
-    expect(res.skippedBlocked).toBe(1);
+    expect(res.skippedBlocked).toHaveLength(1);
+    // QA-3: the skip now carries per-occurrence detail read back from the
+    // overlapping blocked_times row (date/resourceName/blockedByLabel).
+    expect(res.skippedBlocked[0].date).toBe(formatPfaDate(occ[0].startAt));
+    expect(res.skippedBlocked[0].resourceName).toBeTruthy();
+    expect(res.skippedBlocked[0].blockedByLabel).toBe("pre-existing one-off");
     expect(res.skippedRentals).toHaveLength(0);
   });
 

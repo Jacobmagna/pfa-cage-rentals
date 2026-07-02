@@ -21,9 +21,12 @@ const INITIAL_STATE: HandlesActionResult = { ok: true };
 export function CoachHandlesCard({
   coachId,
   initialZelleContact,
+  readOnly = false,
 }: {
   coachId: string;
   initialZelleContact: string | null;
+  /** QA-2: archived coaches render the handle read-only (no save). */
+  readOnly?: boolean;
 }) {
   const [state, action, pending] = useActionState(
     updateCoachHandlesFormAction,
@@ -78,21 +81,25 @@ export function CoachHandlesCard({
             name="zelleContact"
             defaultValue={zelleDefault}
             maxLength={200}
+            disabled={readOnly}
             placeholder="email or phone"
-            className={inputStyles}
+            className={`${inputStyles} disabled:opacity-60 disabled:cursor-not-allowed`}
           />
         </Field>
 
-        <div className="flex items-center justify-end gap-2">
-          <button
-            type="submit"
-            disabled={pending}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
-          >
-            <Check className="h-4 w-4" strokeWidth={2.5} />
-            {pending ? "Saving…" : "Save Zelle contact"}
-          </button>
-        </div>
+        {/* QA-2: no Save button for an archived coach (copy chip stays usable). */}
+        {readOnly ? null : (
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="submit"
+              disabled={pending}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            >
+              <Check className="h-4 w-4" strokeWidth={2.5} />
+              {pending ? "Saving…" : "Save Zelle contact"}
+            </button>
+          </div>
+        )}
       </form>
     </section>
   );

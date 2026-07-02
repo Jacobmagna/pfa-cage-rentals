@@ -11,7 +11,7 @@ import {
   useTransition,
   type FormEvent,
 } from "react";
-import { X } from "lucide-react";
+import { X, GripHorizontal } from "lucide-react";
 import {
   createSessionFormAction,
   type ActionResult as SessionActionResult,
@@ -23,6 +23,8 @@ import type {
 } from "@/app/admin/sessions/_components/sessions-client";
 import { createBlockSeries, createBlocksBatch } from "../actions";
 import { CagePicker } from "./cage-picker";
+import { RepeatsUntilPresets } from "./repeats-until-presets";
+import { BlockSkipReport } from "./block-skip-report";
 import {
   FREQUENCY_OPTIONS,
   freqIntervalForKind,
@@ -30,7 +32,10 @@ import {
   weekdayFromIso,
   type FrequencyKind,
 } from "@/app/admin/hour-log/schedule/_components/recurrence-frequency.logic";
-import type { BlockBatchResult } from "@/lib/server/block-series-actions";
+import type {
+  BlockBatchResult,
+  SkippedBlock,
+} from "@/lib/server/block-series-actions";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
 import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
@@ -60,6 +65,122 @@ export type CreatePrefill = {
 
 const SESSION_INITIAL: SessionActionResult = { ok: true };
 
+// ── Desktop-only draggable dialog ─────────────────────────────────────────
+// Lets the admin nudge the dialog aside to read the schedule grid behind it.
+// Desktop only (fine pointer, ≥768px): on mobile the dialog stays a normal
+// centered modal with no grip and no pointer handlers. The offset is a
+// translate on top of the base `m-auto` centering, clamped to the viewport so
+// the dialog can never be dragged off-screen, and reset to center on close.
+
+function useIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(min-width: 768px) and (pointer: fine)");
+    const update = () => setIsDesktop(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  return isDesktop;
+}
+
+function useDraggableDialog(
+  dialogRef: React.RefObject<HTMLDialogElement | null>,
+  isDesktop: boolean,
+  isOpen: boolean,
+) {
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  // Pointer origin + the offset at grab time, so we apply a clean delta.
+  const drag = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    baseX: number;
+    baseY: number;
+  } | null>(null);
+
+  // Reopen centered: reset the offset when the dialog closes. Uses the
+  // render-time prev-prop comparison (single commit) rather than an effect —
+  // matches this file's convention and satisfies react-hooks/set-state-in-effect.
+  const [prevOpen, setPrevOpen] = useState(isOpen);
+  if (isOpen !== prevOpen) {
+    setPrevOpen(isOpen);
+    if (!isOpen && (offset.x !== 0 || offset.y !== 0)) setOffset({ x: 0, y: 0 });
+  }
+
+  // Clamp so the dialog stays fully within the viewport. `offset` is relative
+  // to the centered position, so the max travel each way is the gap between the
+  // dialog edge and the window edge at rest (half the leftover space). We back
+  // out that rest gap from the live rect (which already includes the current
+  // offset) to get symmetric bounds.
+  const clamp = (x: number, y: number) => {
+    const dialog = dialogRef.current;
+    if (!dialog) return { x, y };
+    const rect = dialog.getBoundingClientRect();
+    const restLeft = rect.left - offset.x;
+    const restTop = rect.top - offset.y;
+    const maxX = Math.max(0, window.innerWidth - rect.width - restLeft);
+    const minX = -Math.max(0, restLeft);
+    const maxY = Math.max(0, window.innerHeight - rect.height - restTop);
+    const minY = -Math.max(0, restTop);
+    return {
+      x: Math.min(maxX, Math.max(minX, x)),
+      y: Math.min(maxY, Math.max(minY, y)),
+    };
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!isDesktop || e.button !== 0) return;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    drag.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      baseX: offset.x,
+      baseY: offset.y,
+    };
+    setDragging(true);
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (!d || d.pointerId !== e.pointerId) return;
+    const next = clamp(
+      d.baseX + (e.clientX - d.startX),
+      d.baseY + (e.clientY - d.startY),
+    );
+    setOffset(next);
+  };
+
+  const endDrag = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (!d || d.pointerId !== e.pointerId) return;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* pointer already released */
+    }
+    drag.current = null;
+    setDragging(false);
+  };
+
+  const recenter = () => setOffset({ x: 0, y: 0 });
+
+  const handleProps = isDesktop
+    ? {
+        onPointerDown,
+        onPointerMove,
+        onPointerUp: endDrag,
+        onPointerCancel: endDrag,
+        onDoubleClick: recenter,
+      }
+    : {};
+
+  return { offset, dragging, handleProps };
+}
+
 export function ScheduleCreateDialog({
   open,
   onClose,
@@ -82,6 +203,12 @@ export function ScheduleCreateDialog({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState<"session" | "block">(defaultTab);
+  const isDesktop = useIsDesktop();
+  const { offset, dragging, handleProps } = useDraggableDialog(
+    dialogRef,
+    isDesktop,
+    open,
+  );
 
   // React 19 pattern for "reset internal state when a prop transitions":
   // store the previous `open` in state, compare during render, and
@@ -172,10 +299,24 @@ export function ScheduleCreateDialog({
   return (
     <dialog
       ref={dialogRef}
-      className="m-auto w-full max-w-lg rounded-xl border border-line bg-surface text-fg p-0 shadow-[var(--shadow-lg)] backdrop:bg-page/70 backdrop:backdrop-blur-sm"
+      style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
+      className="m-auto w-full max-w-lg rounded-xl border border-line bg-surface text-fg p-0 shadow-[var(--shadow-lg)] backdrop:bg-page/30"
     >
       <div className="p-6 space-y-5">
-        <div className="flex items-start justify-between gap-4">
+        <div
+          {...handleProps}
+          className={[
+            "flex items-start justify-between gap-4",
+            // Desktop-only drag affordance: the top header is the grab-zone so
+            // the admin can slide the dialog aside to read the grid. The form
+            // body below never initiates drag.
+            isDesktop
+              ? dragging
+                ? "cursor-grabbing select-none"
+                : "cursor-grab"
+              : "",
+          ].join(" ")}
+        >
           <div>
             <p className="text-xs uppercase tracking-[0.14em] text-fg-muted">
               New
@@ -184,14 +325,26 @@ export function ScheduleCreateDialog({
               {tab === "session" ? "Session" : "Block"}
             </h2>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex items-center justify-center h-8 w-8 -mr-1 -mt-1 rounded-md text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-1 -mr-1 -mt-1">
+            {isDesktop ? (
+              <GripHorizontal
+                className="h-4 w-4 text-fg-subtle"
+                aria-hidden="true"
+              />
+            ) : null}
+            <button
+              type="button"
+              onClick={onClose}
+              // Stop pointerdown from starting a drag when the admin aims for
+              // the close button (the button lives inside the drag grab-zone).
+              onPointerDown={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center justify-center h-8 w-8 rounded-md text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Tab toggle */}
@@ -716,7 +869,7 @@ function BlockTab({
       // already-blocked and skip on retry).
       let created = 0;
       const skippedRentals: BlockBatchResult["skippedRentals"] = [];
-      let skippedBlocked = 0;
+      const skippedBlocked: SkippedBlock[] = [];
       const opErrors: string[] = [];
       for (const op of ops) {
         const v = op.values;
@@ -741,7 +894,7 @@ function BlockTab({
               });
           created += res.created;
           skippedRentals.push(...res.skippedRentals);
-          skippedBlocked += res.skippedBlocked;
+          skippedBlocked.push(...res.skippedBlocked);
         } catch (err) {
           const msg =
             err instanceof Error
@@ -756,7 +909,7 @@ function BlockTab({
       } else if (
         created > 0 &&
         skippedRentals.length === 0 &&
-        skippedBlocked === 0
+        skippedBlocked.length === 0
       ) {
         // Fully clean (everything blocked, nothing skipped) → close. Any skip
         // (rental OR already-blocked) keeps the dialog open so the report shows.
@@ -1075,11 +1228,11 @@ const BlockFields = forwardRef<BlockFieldsHandle, { initial: BlockFieldInitial }
               label="Repeats until"
               hint="Last date the block can occur (inclusive)."
             >
-              <DateInput
-                required
-                value={endsOn}
-                onChange={(iso) => setEndsOn(iso)}
-                className={inputStyles}
+              <RepeatsUntilPresets
+                startsOn={live.date}
+                endsOn={endsOn}
+                onEndsOnChange={setEndsOn}
+                dateInputClassName={inputStyles}
               />
             </Field>
           </div>
@@ -1092,39 +1245,7 @@ const BlockFields = forwardRef<BlockFieldsHandle, { initial: BlockFieldInitial }
 // Combined skip-and-continue report after a create (one-off or recurring, one
 // or many cages). `created` counts materialized blocks across all cages.
 function BlockReport({ result }: { result: BlockBatchResult }) {
-  return (
-    <div
-      className={[
-        "rounded-md border px-3 py-2.5 text-xs space-y-1.5",
-        result.created === 0
-          ? "border-danger/30 bg-danger/10 text-danger"
-          : "border-line-strong bg-surface-2 text-fg",
-      ].join(" ")}
-    >
-      <p className="font-semibold">
-        {result.created === 0
-          ? "Couldn't block anything — all conflicted."
-          : `Blocked ${result.created} slot${result.created === 1 ? "" : "s"}.`}
-      </p>
-      {result.skippedRentals.length > 0 ? (
-        <div className="space-y-0.5">
-          <p className="text-fg-muted">
-            Skipped {result.skippedRentals.length} (already rented):
-          </p>
-          <ul className="list-disc pl-4 text-fg-muted">
-            {result.skippedRentals.map((s) => (
-              <li key={s.label}>{s.label}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {result.skippedBlocked > 0 ? (
-        <p className="text-fg-muted">
-          {result.skippedBlocked} already blocked (skipped).
-        </p>
-      ) : null}
-    </div>
-  );
+  return <BlockSkipReport result={result} />;
 }
 
 function FormButtons({

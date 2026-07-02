@@ -41,9 +41,12 @@ export type RateOverrideRow = {
 export function RateOverridesCard({
   coachId,
   rows,
+  readOnly = false,
 }: {
   coachId: string;
   rows: RateOverrideRow[];
+  /** QA-2: archived coaches render this card read-only (no save/remove). */
+  readOnly?: boolean;
 }) {
   return (
     <section className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] overflow-hidden">
@@ -60,7 +63,12 @@ export function RateOverridesCard({
       </header>
       <div className="divide-y divide-line/60">
         {rows.map((row) => (
-          <Row key={row.resourceType} coachId={coachId} row={row} />
+          <Row
+            key={row.resourceType}
+            coachId={coachId}
+            row={row}
+            readOnly={readOnly}
+          />
         ))}
       </div>
     </section>
@@ -70,9 +78,11 @@ export function RateOverridesCard({
 function Row({
   coachId,
   row,
+  readOnly,
 }: {
   coachId: string;
   row: RateOverrideRow;
+  readOnly: boolean;
 }) {
   const [state, action, pending] = useActionState(
     upsertRateOverrideFormAction,
@@ -176,8 +186,9 @@ function Row({
             name="rateDollars"
             defaultValue={inputDefault}
             placeholder={defaultDollars}
+            disabled={readOnly}
             aria-label={`Override rate for ${RESOURCE_LABEL[row.resourceType]}`}
-            className="w-full pl-7 pr-3 h-10 rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+            className="w-full pl-7 pr-3 h-10 rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle text-sm disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
           />
         </div>
         {!state.ok ? (
@@ -195,28 +206,32 @@ function Row({
         ) : null}
       </div>
 
-      <div className="flex items-center gap-2 justify-self-end">
-        <button
-          type="submit"
-          disabled={pending || removing}
-          className="inline-flex items-center justify-center gap-1 rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
-        >
-          <Check className="h-3.5 w-3.5" />
-          {pending ? "Saving…" : "Save"}
-        </button>
-        {hasOverride ? (
+      {/* QA-2: hide the Save/Remove controls entirely for an archived coach —
+          the inputs are already disabled and the server guards reject writes. */}
+      {readOnly ? null : (
+        <div className="flex items-center gap-2 justify-self-end">
           <button
-            type="button"
-            onClick={handleRemove}
+            type="submit"
             disabled={pending || removing}
-            className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-line-strong text-fg-muted hover:text-danger hover:border-danger/40 hover:bg-danger/10 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
-            aria-label={`Remove override for ${RESOURCE_LABEL[row.resourceType]}`}
-            title="Remove override"
+            className="inline-flex items-center justify-center gap-1 rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
           >
-            <Trash2 className="h-4 w-4" />
+            <Check className="h-3.5 w-3.5" />
+            {pending ? "Saving…" : "Save"}
           </button>
-        ) : null}
-      </div>
+          {hasOverride ? (
+            <button
+              type="button"
+              onClick={handleRemove}
+              disabled={pending || removing}
+              className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-line-strong text-fg-muted hover:text-danger hover:border-danger/40 hover:bg-danger/10 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
+              aria-label={`Remove override for ${RESOURCE_LABEL[row.resourceType]}`}
+              title="Remove override"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
+      )}
 
       <ConfirmDialog
         open={confirmOpen}

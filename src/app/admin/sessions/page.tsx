@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { resources, sessionsBilling, users } from "@/db/schema";
+import { resolveArchivedCoachOptions } from "@/lib/server/archived-coach-options";
 import { requireRole } from "@/lib/authz";
 import { RentalsSubnav } from "@/app/admin/_components/rentals-subnav";
 import { listActiveCoaches } from "@/lib/server/coaches";
@@ -95,6 +96,17 @@ export default async function AdminSessionsPage({
   const truncated = rows.length > MAX_ROWS;
   const visibleRows = truncated ? rows.slice(0, MAX_ROWS) : rows;
 
+  // QA-2: the filter dropdown lists ACTIVE coaches only, but a deep-link
+  // (e.g. from an archived coach's detail page) can pre-filter to a coach
+  // that's absent from it. Append those coaches (labeled "(archived)") so
+  // the active filter chip resolves and reads clearly instead of showing
+  // the "All coaches" placeholder while rows are actually filtered.
+  const archivedCoachOptions = await resolveArchivedCoachOptions(
+    allCoaches,
+    filters.coachIds,
+  );
+  const coachFilterOptions = [...allCoaches, ...archivedCoachOptions];
+
   return (
     <div className="space-y-6">
       <RentalsSubnav />
@@ -115,7 +127,7 @@ export default async function AdminSessionsPage({
       </div>
 
       <FiltersForm
-        coaches={allCoaches}
+        coaches={coachFilterOptions}
         resources={resourceOptions}
         values={{
           from: filters.from,

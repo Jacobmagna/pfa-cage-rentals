@@ -24,6 +24,7 @@ import {
 } from "../form-actions";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
+import { RepeatsUntilPresets } from "@/app/admin/schedule/_components/repeats-until-presets";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 import type { BlockReconciliation } from "@/lib/server/reconciliation";
 import {
@@ -1118,15 +1119,17 @@ export function ProgramBlockDialog({
                   />
                 </Field>
                 <Field label="Season ends on">
-                  <DateInput
-                    name="endsOn"
-                    value={seriesEndsOn}
-                    onChange={(iso) => {
+                  {/* The series form submits via a native form action, so the
+                      endsOn ISO rides a hidden input; the presets control just
+                      drives the state that feeds it. */}
+                  <input type="hidden" name="endsOn" value={seriesEndsOn} />
+                  <RepeatsUntilPresets
+                    startsOn={seriesStartsOn}
+                    endsOn={seriesEndsOn}
+                    onEndsOnChange={(iso) => {
                       setSeriesEndsOn(iso);
                       setSeriesError(null);
                     }}
-                    required
-                    aria-label="Season ends on"
                   />
                 </Field>
               </div>
@@ -1273,15 +1276,17 @@ export function ProgramBlockDialog({
                     label="Season ends on"
                     hint="Repeats through this date."
                   >
-                    <DateInput
-                      name="endsOn"
-                      value={endsOn}
-                      onChange={(iso) => {
+                    {/* Native form action submits endsOn via FormData, so the
+                        ISO rides a hidden input; the presets control drives the
+                        state that feeds it. */}
+                    <input type="hidden" name="endsOn" value={endsOn} />
+                    <RepeatsUntilPresets
+                      startsOn={formDate}
+                      endsOn={endsOn}
+                      onEndsOnChange={(iso) => {
                         setEndsOn(iso);
                         setRecurError(null);
                       }}
-                      required
-                      aria-label="Season ends on"
                     />
                   </Field>
 

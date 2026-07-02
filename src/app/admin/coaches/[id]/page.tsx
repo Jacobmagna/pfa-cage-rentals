@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, asc, desc, eq, inArray, isNull, like, or } from "drizzle-orm";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import { db } from "@/db";
 import {
   auditLog,
@@ -33,6 +33,7 @@ import {
   type ProgramRateOverrideRow,
 } from "./_components/program-rate-overrides-card";
 import { DeleteCoachCard } from "./_components/delete-coach-card";
+import { RestoreCoachCard } from "./_components/restore-coach-card";
 import { CoachPaymentsCard } from "./_components/coach-payments-card";
 import { CoachHandlesCard } from "./_components/handles-card";
 import { ScheduleManagerCard } from "./_components/schedule-manager-card";
@@ -85,9 +86,14 @@ export default async function AdminCoachDetailPage({
           smsOptIn: users.smsOptIn,
           smsConsentAt: users.smsConsentAt,
           smsOptOut: users.smsOptOut,
+          deletedAt: users.deletedAt,
         })
         .from(users)
-        .where(and(eq(users.id, id), isNull(users.deletedAt)))
+        // QA-2: no longer gated on isNull(deletedAt). Archived coaches now
+        // RENDER here in READ-ONLY mode (isArchived below drives it). The
+        // page is a lossless read-only window into a soft-deleted coach —
+        // every editor is disabled and the danger card becomes Restore.
+        .where(eq(users.id, id))
         .limit(1),
       db
         .select()
@@ -182,12 +188,18 @@ export default async function AdminCoachDetailPage({
     ]);
 
   const coach = coachResult[0];
-  // Active coaches only: soft-deleted (deletedAt != null) rows behave
-  // like notFound() in admin navigation. Admins are still 404'd here
-  // because /admin/coaches lists role=coach only and the URL is
-  // surrogate-id; landing on an admin's detail page would be a stale
-  // bookmark.
+  // Admins are still 404'd here because /admin/coaches lists role=coach
+  // only and the URL is surrogate-id; landing on an admin's detail page
+  // would be a stale bookmark. QA-2: soft-deleted (deletedAt != null)
+  // coaches are NO LONGER 404'd — they render read-only (isArchived).
   if (!coach || coach.role !== "coach") notFound();
+
+  // QA-2: an archived coach still resolves (the gate above was relaxed),
+  // so drive a fully READ-ONLY render. Every editor card is disabled and
+  // the danger-zone Archive card is swapped for Restore. The server-side
+  // write guards in actions.ts are the real enforcement; readOnly here is
+  // the matching UI.
+  const isArchived = coach.deletedAt !== null;
 
   // Always render one row per resource type; merge in the override
   // when present. The client component decides save-vs-create based
@@ -317,6 +329,11 @@ export default async function AdminCoachDetailPage({
         </p>
         <h1 className="text-3xl font-semibold tracking-tight">
           {coach.name ?? coach.email}
+          {isArchived ? (
+            <span className="ml-2.5 align-middle inline-flex items-center rounded-full bg-surface-2 text-fg-muted ring-1 ring-inset ring-line px-2 py-0.5 text-xs font-medium uppercase tracking-wider">
+              Archived
+            </span>
+          ) : null}
         </h1>
         <p className="text-sm text-fg-muted">{coach.email}</p>
         <p className="text-sm text-fg-muted">
@@ -327,25 +344,67 @@ export default async function AdminCoachDetailPage({
         </p>
       </div>
 
-      <RateOverridesCard coachId={coach.id} rows={rateRows} />
+      {/* QA-2: read-only notice for an archived coach. Explains WHY every
+          editor below is disabled and points to Restore at the bottom. */}
+      {isArchived ? (
+        <div className="mb-6 rounded-xl border border-line bg-surface-2/60 px-4 py-3 text-xs text-fg-muted leading-relaxed">
+          This coach is archived, so this page is <span className="text-fg font-medium">read-only</span>.
+          Their past rentals, work hours, and billing are all preserved below.
+          Restore them from the panel at the bottom to make changes again.
+        </div>
+      ) : null}
+
+      {/* QA-2: deep-links into the EXISTING filterable list pages, pre-scoped
+          to this coach. /admin/sessions reads `coachIds`; /admin/hour-log
+          reads `coachId`. Shown for every coach (handy shortcut), and the
+          only way to reach this coach's rows while archived. */}
+      <div className="mb-6 flex flex-wrap gap-2">
+        <Link
+          href={`/admin/sessions?coachIds=${coach.id}`}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-surface text-fg-muted hover:text-fg hover:-translate-y-px shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] h-9 px-3 text-xs font-medium transition"
+        >
+          See all cage rentals
+          <ArrowUpRight className="h-3.5 w-3.5" />
+        </Link>
+        <Link
+          href={`/admin/hour-log?coachId=${coach.id}`}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-surface text-fg-muted hover:text-fg hover:-translate-y-px shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] h-9 px-3 text-xs font-medium transition"
+        >
+          See all work hours
+          <ArrowUpRight className="h-3.5 w-3.5" />
+        </Link>
+      </div>
+
+      <RateOverridesCard
+        coachId={coach.id}
+        rows={rateRows}
+        readOnly={isArchived}
+      />
 
       <ProgramRateOverridesCard
         coachId={coach.id}
         rows={programRateRows}
+        readOnly={isArchived}
       />
 
       <RateHistoryCard rows={rateHistoryRows} />
 
-      <CoachNotesCard coachId={coach.id} initialNotes={coach.notes} />
+      <CoachNotesCard
+        coachId={coach.id}
+        initialNotes={coach.notes}
+        readOnly={isArchived}
+      />
 
       <ScheduleManagerCard
         coachId={coach.id}
         initialEnabled={coach.scheduleAdmin}
+        readOnly={isArchived}
       />
 
       <CoachHandlesCard
         coachId={coach.id}
         initialZelleContact={coach.zelleContact}
+        readOnly={isArchived}
       />
 
       <SmsReminderStatus
@@ -363,12 +422,18 @@ export default async function AdminCoachDetailPage({
         payments={paymentRows}
       />
 
-      <DeleteCoachCard
-        coachId={coach.id}
-        coachName={coach.name}
-        coachEmail={coach.email}
-        isAdmin={false}
-      />
+      {/* QA-2: Archive danger card when active; Restore panel when archived.
+          Restore is the ONE mutation allowed on an archived coach. */}
+      {isArchived ? (
+        <RestoreCoachCard coachId={coach.id} coachName={coach.name} />
+      ) : (
+        <DeleteCoachCard
+          coachId={coach.id}
+          coachName={coach.name}
+          coachEmail={coach.email}
+          isAdmin={false}
+        />
+      )}
     </>
   );
 }

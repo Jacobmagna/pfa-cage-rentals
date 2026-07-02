@@ -18,9 +18,12 @@ const INITIAL_STATE: NotesActionResult = { ok: true };
 export function CoachNotesCard({
   coachId,
   initialNotes,
+  readOnly = false,
 }: {
   coachId: string;
   initialNotes: string | null;
+  /** QA-2: archived coaches render notes read-only (no save). */
+  readOnly?: boolean;
 }) {
   const [state, action, pending] = useActionState(
     updateCoachNotesFormAction,
@@ -66,8 +69,9 @@ export function CoachNotesCard({
             defaultValue={notesDefault}
             maxLength={COACH_NOTES_MAX}
             rows={5}
+            disabled={readOnly}
             placeholder="Anything worth remembering about this coach…"
-            className="w-full rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle px-3 py-2 text-sm leading-relaxed resize-y focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+            className="w-full rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle px-3 py-2 text-sm leading-relaxed resize-y disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
           />
           <span className="block text-[11px] text-fg-subtle mt-1 leading-snug">
             Up to {COACH_NOTES_MAX.toLocaleString()} characters. Leave blank
@@ -75,16 +79,19 @@ export function CoachNotesCard({
           </span>
         </label>
 
-        <div className="flex items-center justify-end gap-2">
-          <button
-            type="submit"
-            disabled={pending}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
-          >
-            <Check className="h-4 w-4" strokeWidth={2.5} />
-            {pending ? "Saving…" : "Save notes"}
-          </button>
-        </div>
+        {/* QA-2: no Save button for an archived coach. */}
+        {readOnly ? null : (
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="submit"
+              disabled={pending}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            >
+              <Check className="h-4 w-4" strokeWidth={2.5} />
+              {pending ? "Saving…" : "Save notes"}
+            </button>
+          </div>
+        )}
       </form>
     </section>
   );

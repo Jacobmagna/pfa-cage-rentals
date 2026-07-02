@@ -2,9 +2,10 @@
 
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import * as Sentry from "@sentry/nextjs";
 import { signIn } from "@/auth";
 import { db } from "@/db";
 import { users } from "@/db/schema";
@@ -54,7 +55,23 @@ export async function requestMagicLink(formData: FormData): Promise<void> {
     redirect(`/?error=${decision.reason}`);
   }
 
-  await signIn("resend", { email, redirectTo: "/" });
+  // On SUCCESS, signIn throws NEXT_REDIRECT to send the user to `redirectTo`
+  // — that control-flow throw MUST propagate untouched or sign-in breaks for
+  // everyone. So the catch calls unstable_rethrow FIRST (same guard page.tsx
+  // uses) to re-throw framework errors; only a REAL send failure (e.g. the
+  // Resend free-tier 100/day cap → 429, or a transient network error) gets
+  // past it. We capture it to Sentry so the masked prod error is diagnosable
+  // next time, then degrade to the graceful `?error=send-failed` banner.
+  try {
+    await signIn("resend", { email, redirectTo: "/" });
+  } catch (err) {
+    unstable_rethrow(err);
+    Sentry.captureException(err, {
+      tags: { area: "magic-link-send" },
+      extra: { email },
+    });
+    redirect("/?error=send-failed");
+  }
 }
 
 // Lets a signed-in user edit their own display name. Solves two problems:

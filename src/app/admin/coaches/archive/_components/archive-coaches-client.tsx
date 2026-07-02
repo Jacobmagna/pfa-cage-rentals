@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { ArchiveRestore } from "lucide-react";
 import { restoreCoach } from "../../actions";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
@@ -82,12 +83,16 @@ export function ArchiveCoachesClient({
               >
                 <td className="px-4 py-3">
                   <div className="min-w-0 max-w-[16rem]">
-                    <span
-                      className="block truncate font-medium text-fg"
+                    {/* QA-2: name links to the read-only detail page for this
+                        archived coach (past rentals/hours/billing visible
+                        there; every editor disabled until Restore). */}
+                    <Link
+                      href={`/admin/coaches/${row.id}`}
+                      className="block truncate font-medium text-fg hover:text-gold hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 rounded"
                       title={row.name ?? row.email}
                     >
                       {row.name ?? row.email}
-                    </span>
+                    </Link>
                   </div>
                 </td>
                 <td className="px-4 py-3 text-xs text-fg-muted">

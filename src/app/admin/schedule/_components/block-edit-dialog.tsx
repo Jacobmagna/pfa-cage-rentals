@@ -41,6 +41,8 @@ import {
 } from "@/lib/timezone";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 import { CagePicker } from "./cage-picker";
+import { RepeatsUntilPresets } from "./repeats-until-presets";
+import { BlockSkipReport } from "./block-skip-report";
 import {
   FREQUENCY_OPTIONS,
   freqIntervalForKind,
@@ -273,7 +275,7 @@ export function BlockEditDialog({
   return (
     <dialog
       ref={dialogRef}
-      className="m-auto w-full max-w-lg rounded-xl border border-line bg-surface text-fg p-0 shadow-[var(--shadow-lg)] backdrop:bg-page/70 backdrop:backdrop-blur-sm"
+      className="m-auto w-full max-w-lg rounded-xl border border-line bg-surface text-fg p-0 shadow-[var(--shadow-lg)] backdrop:bg-page/30"
     >
       {view === "summary" && initial ? (
         <div className="space-y-5 p-6">
@@ -770,7 +772,7 @@ function SeriesEditForm({
         setResult(res);
         // Clean save (nothing skipped) → close; the server revalidate refreshes
         // the grid. Any skip keeps the dialog open so the report shows.
-        if (res.skippedRentals.length === 0 && res.skippedBlocked === 0) {
+        if (res.skippedRentals.length === 0 && res.skippedBlocked.length === 0) {
           onClose();
         }
       } catch (err) {
@@ -928,14 +930,14 @@ function SeriesEditForm({
             label="Repeats until"
             hint="Last date the block can occur (inclusive)."
           >
-            <DateInput
-              required
-              value={endsOn}
-              onChange={(iso) => {
+            <RepeatsUntilPresets
+              startsOn={startsOn}
+              endsOn={endsOn}
+              onEndsOnChange={(iso) => {
                 setEndsOn(iso);
                 setError(null);
               }}
-              className={inputStyles}
+              dateInputClassName={inputStyles}
             />
           </Field>
         </div>
@@ -978,39 +980,7 @@ function SeriesEditForm({
 // Skip-and-continue report after a series edit — the future-regenerate result.
 // Mirrors ScheduleCreateDialog's BlockReport presentation.
 function SeriesReport({ result }: { result: BlockSeriesResult }) {
-  return (
-    <div
-      className={[
-        "rounded-md border px-3 py-2.5 text-xs space-y-1.5",
-        result.created === 0
-          ? "border-danger/30 bg-danger/10 text-danger"
-          : "border-line-strong bg-surface-2 text-fg",
-      ].join(" ")}
-    >
-      <p className="font-semibold">
-        {result.created === 0
-          ? "Couldn't block anything — all conflicted."
-          : `Blocked ${result.created} slot${result.created === 1 ? "" : "s"}.`}
-      </p>
-      {result.skippedRentals.length > 0 ? (
-        <div className="space-y-0.5">
-          <p className="text-fg-muted">
-            Skipped {result.skippedRentals.length} (already rented):
-          </p>
-          <ul className="list-disc pl-4 text-fg-muted">
-            {result.skippedRentals.map((s) => (
-              <li key={s.label}>{s.label}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {result.skippedBlocked > 0 ? (
-        <p className="text-fg-muted">
-          {result.skippedBlocked} already blocked (skipped).
-        </p>
-      ) : null}
-    </div>
-  );
+  return <BlockSkipReport result={result} />;
 }
 
 function Field({

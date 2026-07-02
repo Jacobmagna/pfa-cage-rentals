@@ -24,9 +24,12 @@ const INITIAL_STATE: ScheduleAdminActionResult = { ok: true };
 export function ScheduleManagerCard({
   coachId,
   initialEnabled,
+  readOnly = false,
 }: {
   coachId: string;
   initialEnabled: boolean;
+  /** QA-2: archived coaches render this toggle read-only (no flip). */
+  readOnly?: boolean;
 }) {
   const [state, action, pending] = useActionState(
     setScheduleAdminFormAction,
@@ -110,7 +113,7 @@ export function ScheduleManagerCard({
                 ? "Turn off Master schedule access for this coach"
                 : "Turn on Master schedule access for this coach"
             }
-            disabled={pending}
+            disabled={pending || readOnly}
             className={[
               "relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 disabled:opacity-50 disabled:cursor-not-allowed",
               enabled ? "bg-gold" : "bg-line-strong",
@@ -125,19 +128,23 @@ export function ScheduleManagerCard({
           </button>
         </div>
 
-        <div className="flex items-center justify-end">
-          <button
-            type="submit"
-            disabled={pending}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
-          >
-            {pending
-              ? "Saving…"
-              : enabled
-                ? "Turn OFF Schedule Manager"
-                : "Turn ON Schedule Manager"}
-          </button>
-        </div>
+        {/* QA-2: no toggle button for an archived coach (the switch above is
+            also disabled). */}
+        {readOnly ? null : (
+          <div className="flex items-center justify-end">
+            <button
+              type="submit"
+              disabled={pending}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            >
+              {pending
+                ? "Saving…"
+                : enabled
+                  ? "Turn OFF Schedule Manager"
+                  : "Turn ON Schedule Manager"}
+            </button>
+          </div>
+        )}
       </form>
     </section>
   );

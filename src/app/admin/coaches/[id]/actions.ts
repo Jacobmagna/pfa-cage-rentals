@@ -13,8 +13,12 @@
 // double-revalidate.
 
 import { revalidatePath } from "next/cache";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { users } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import type { ResourceType } from "@/lib/billing";
+import { CoachArchivedError } from "@/lib/errors";
 import {
   deleteRateOverrideInternal,
   upsertRateOverrideInternal,
@@ -33,6 +37,29 @@ import { updateCoachPaySettingsInternal } from "@/lib/server/coach-pay-settings-
 import { setScheduleAdminInternal } from "@/lib/server/schedule-admin-actions";
 import { setScheduleAdminSchema } from "@/lib/schemas/user";
 
+// QA-2 write guard (defense in depth). The coach-detail page is now
+// REACHABLE for archived coaches (read-only render), so UI-hiding alone
+// isn't enough — a forged direct RPC call could still target an archived
+// coach. Every MUTATING action below loads the target coach and rejects
+// the write if it's archived (deletedAt non-null). Restore is the ONE
+// exception (it's how an archived coach comes back) and never calls this.
+// Handles / notes / schedule-admin internals already re-check deletedAt in
+// their own existing-lookup, but this guard is the uniform, explicit
+// backstop across ALL mutations (including the override / pay-settings
+// paths that key on their own tables and don't touch users.deletedAt).
+async function assertCoachNotArchived(coachId: string): Promise<void> {
+  const [target] = await db
+    .select({ deletedAt: users.deletedAt })
+    .from(users)
+    .where(eq(users.id, coachId))
+    .limit(1);
+  // Unknown id → let the internal throw its own CoachNotFoundError; we
+  // only reject the specifically-archived case here.
+  if (target && target.deletedAt !== null) {
+    throw new CoachArchivedError(coachId);
+  }
+}
+
 function revalidateOverrideSurfaces(coachId: string) {
   revalidatePath(`/admin/coaches/${coachId}`);
   revalidatePath("/admin/coaches");
@@ -40,8 +67,21 @@ function revalidateOverrideSurfaces(coachId: string) {
   // a fully-dynamic searchParams page, no stale cache to bust.
 }
 
+// Pull a coachId out of an unknown action payload for the archived-coach
+// guard. Best-effort: a malformed payload with no usable coachId falls
+// through (guard is a no-op) and the internal's Zod parse rejects it.
+function coachIdFromInput(input: unknown): string | null {
+  if (input && typeof input === "object" && "coachId" in input) {
+    const v = (input as { coachId: unknown }).coachId;
+    return typeof v === "string" ? v : null;
+  }
+  return null;
+}
+
 export async function upsertRateOverride(input: unknown) {
   const session = await requireRole("admin");
+  const coachId = coachIdFromInput(input);
+  if (coachId) await assertCoachNotArchived(coachId);
   const result = await upsertRateOverrideInternal(session.user, input);
   revalidateOverrideSurfaces(result.coachId);
   return result;
@@ -54,6 +94,7 @@ export async function deleteRateOverride(
   resourceType: ResourceType,
 ) {
   const session = await requireRole("admin");
+  await assertCoachNotArchived(coachId);
   await deleteRateOverrideInternal(session.user, { coachId, resourceType });
   revalidateOverrideSurfaces(coachId);
 }
@@ -63,6 +104,8 @@ export async function deleteRateOverride(
 // coach detail page so the program-rate card re-renders.
 export async function upsertProgramRateOverride(input: unknown) {
   const session = await requireRole("admin");
+  const coachId = coachIdFromInput(input);
+  if (coachId) await assertCoachNotArchived(coachId);
   const result = await upsertProgramRateOverrideInternal(session.user, input);
   revalidateOverrideSurfaces(result.coachId);
   return result;
@@ -75,6 +118,7 @@ export async function deleteProgramRateOverride(
   programId: string,
 ) {
   const session = await requireRole("admin");
+  await assertCoachNotArchived(coachId);
   await deleteProgramRateOverrideInternal(session.user, {
     coachId,
     programId,
@@ -89,6 +133,11 @@ export async function deleteProgramRateOverride(
 // handles.
 export async function updateCoachHandles(input: unknown) {
   const session = await requireRole("admin");
+  // Handles payloads key the target on `userId` (not `coachId`).
+  if (input && typeof input === "object" && "userId" in input) {
+    const userId = (input as { userId: unknown }).userId;
+    if (typeof userId === "string") await assertCoachNotArchived(userId);
+  }
   const result = await updateUserHandlesInternal(session.user, input);
   revalidatePath(`/admin/coaches/${result.id}`);
   revalidatePath("/admin/payments");
@@ -100,6 +149,8 @@ export async function updateCoachHandles(input: unknown) {
 // Notes are never shown on coach-facing surfaces, so no other revalidate.
 export async function updateCoachNotes(input: unknown) {
   const session = await requireRole("admin");
+  const coachId = coachIdFromInput(input);
+  if (coachId) await assertCoachNotArchived(coachId);
   const result = await updateCoachNotesInternal(session.user, input);
   revalidatePath(`/admin/coaches/${result.id}`);
   return result;
@@ -114,6 +165,7 @@ export async function updateCoachNotes(input: unknown) {
 export async function setCoachScheduleAdmin(input: unknown) {
   const session = await requireRole("admin");
   const { coachId, enabled } = setScheduleAdminSchema.parse(input);
+  await assertCoachNotArchived(coachId);
   const result = await setScheduleAdminInternal(session.user, coachId, enabled);
   revalidatePath(`/admin/coaches/${coachId}`);
   revalidatePath("/admin/coaches");
@@ -126,6 +178,8 @@ export async function setCoachScheduleAdmin(input: unknown) {
 // the coach detail page so the Work-pay-mode card re-renders.
 export async function updateCoachPaySettings(input: unknown) {
   const session = await requireRole("admin");
+  const coachId = coachIdFromInput(input);
+  if (coachId) await assertCoachNotArchived(coachId);
   const result = await updateCoachPaySettingsInternal(session.user, input);
   revalidatePath(`/admin/coaches/${result.coachId}`);
   return result;

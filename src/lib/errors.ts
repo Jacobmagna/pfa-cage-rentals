@@ -148,6 +148,21 @@ export class CoachAlreadyDeletedError extends Error {
   }
 }
 
+// QA-2: a mutating server action reachable from the coach-detail page
+// was called against an ARCHIVED (soft-deleted) coach. The detail page
+// now RENDERS for archived coaches in read-only mode, so the UI hides
+// every editor — but this is the server-side backstop (defense in depth):
+// any write whose TARGET coach has a non-null deletedAt is rejected here,
+// even a forged direct RPC call. Restore is the only mutation allowed on
+// an archived coach, and it doesn't go through this guard.
+export class CoachArchivedError extends Error {
+  readonly code = "COACH_ARCHIVED" as const;
+  constructor(public readonly coachId: string) {
+    super(`Coach ${coachId} is archived — restore them before making changes`);
+    this.name = "CoachArchivedError";
+  }
+}
+
 // Merge rejected because the source isn't a synthetic import user.
 // Only @imported.local pseudo-coaches can be merged — merging two
 // real coaches would conflate human-vs-human identity changes that

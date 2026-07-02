@@ -91,13 +91,27 @@ export type SkippedRental = {
   label: string;
 };
 
+// A block occurrence we skipped because it overlaps an EXISTING block/program
+// occupancy on the same cage (silent skip in the DECISION logic — this detail
+// is REPORT-ONLY, read back from the overlapping blocked_times row). `date`,
+// `startTime`, `endTime` describe the SKIPPED occurrence; `blockedByLabel` is
+// the overlapping row's `reason` (a program name for PROGRAM occupancy, the
+// free-text reason for a manual block).
+export type SkippedBlock = {
+  date: string; // PFA "YYYY-MM-DD"
+  startTime: string;
+  endTime: string;
+  resourceName: string;
+  blockedByLabel: string;
+};
+
 // Shared result shape for a skip-and-continue block mutation (batch one-off or
 // recurring series). `created` counts materialized blocked_times ROWS across
 // ALL resources (cages × surviving dates), not distinct dates.
 export type BlockBatchResult = {
   created: number;
   skippedRentals: SkippedRental[];
-  skippedBlocked: number; // (resource, date) pairs already blocked (silent skip)
+  skippedBlocked: SkippedBlock[]; // occurrences already blocked (silent skip)
 };
 
 export type BlockSeriesResult = BlockBatchResult & {
@@ -155,10 +169,10 @@ async function partitionOccurrences(
 ): Promise<{
   toInsert: Occurrence[];
   skippedRentals: SkippedRental[];
-  skippedBlocked: number;
+  skippedBlocked: SkippedBlock[];
 }> {
   if (occurrences.length === 0) {
-    return { toInsert: [], skippedRentals: [], skippedBlocked: 0 };
+    return { toInsert: [], skippedRentals: [], skippedBlocked: [] };
   }
   const windowStart = new Date(
     Math.min(...occurrences.map((o) => o.startAt.getTime())),
@@ -186,11 +200,14 @@ async function partitionOccurrences(
     );
 
   // Existing blocks on this resource in the window (any series / one-off /
-  // program occupancy). These are skipped silently.
+  // program occupancy). These are skipped silently by the DECISION logic; we
+  // ALSO read back `reason` so the skip REPORT can name what's already there
+  // (program name for PROGRAM occupancy, free-text reason for a manual block).
   const blockRows = await db
     .select({
       startAt: blockedTimes.startAt,
       endAt: blockedTimes.endAt,
+      reason: blockedTimes.reason,
     })
     .from(blockedTimes)
     .where(
@@ -203,7 +220,7 @@ async function partitionOccurrences(
 
   const toInsert: Occurrence[] = [];
   const skippedRentals: SkippedRental[] = [];
-  let skippedBlocked = 0;
+  const skippedBlocked: SkippedBlock[] = [];
 
   for (const o of occurrences) {
     const rental = sessionRows.find((s) =>
@@ -225,7 +242,15 @@ async function partitionOccurrences(
       overlaps(o.startAt, o.endAt, b.startAt, b.endAt),
     );
     if (blocked) {
-      skippedBlocked += 1;
+      // DECISION unchanged (still a silent skip); we just record detail read
+      // back from the overlapping row so the report can name it.
+      skippedBlocked.push({
+        date: formatPfaDate(o.startAt),
+        startTime: formatPfaTime12h(o.startAt),
+        endTime: formatPfaTime12h(o.endAt),
+        resourceName,
+        blockedByLabel: blocked.reason,
+      });
       continue;
     }
     toInsert.push(o);
@@ -261,14 +286,14 @@ export async function createBlockSeriesInternal(
   // while Cage 2 skips the two dates it's already rented.
   const rows: { resourceId: string; startAt: Date; endAt: Date }[] = [];
   const skippedRentals: SkippedRental[] = [];
-  let skippedBlocked = 0;
+  const skippedBlocked: SkippedBlock[] = [];
   for (const rid of resourceIds) {
     const part = await partitionOccurrences(rid, nameById.get(rid)!, occurrences);
     for (const o of part.toInsert) {
       rows.push({ resourceId: rid, startAt: o.startAt, endAt: o.endAt });
     }
     skippedRentals.push(...part.skippedRentals);
-    skippedBlocked += part.skippedBlocked;
+    skippedBlocked.push(...part.skippedBlocked);
   }
 
   // Nothing bookable on any cage → don't create an empty series; hand back the
@@ -338,7 +363,7 @@ export async function createBlockSeriesInternal(
       occurrenceCount: rows.length,
       resourceCount: resourceIds.length,
       skippedRentalCount: skippedRentals.length,
-      skippedBlockedCount: skippedBlocked,
+      skippedBlockedCount: skippedBlocked.length,
     },
   });
 
@@ -377,14 +402,14 @@ export async function createBlocksBatchInternal(
 
   const rows: { resourceId: string; startAt: Date; endAt: Date }[] = [];
   const skippedRentals: SkippedRental[] = [];
-  let skippedBlocked = 0;
+  const skippedBlocked: SkippedBlock[] = [];
   for (const rid of resourceIds) {
     const part = await partitionOccurrences(rid, nameById.get(rid)!, [occ]);
     for (const o of part.toInsert) {
       rows.push({ resourceId: rid, startAt: o.startAt, endAt: o.endAt });
     }
     skippedRentals.push(...part.skippedRentals);
-    skippedBlocked += part.skippedBlocked;
+    skippedBlocked.push(...part.skippedBlocked);
   }
 
   if (rows.length === 0) {
@@ -497,7 +522,7 @@ export async function editBlockSeriesInternal(
     // building one row per (cage, surviving date).
     const rows: { resourceId: string; startAt: Date; endAt: Date }[] = [];
     const skippedRentals: SkippedRental[] = [];
-    let skippedBlocked = 0;
+    const skippedBlocked: SkippedBlock[] = [];
     for (const rid of resourceIds) {
       // Drop this cage's cancelled dates before partitioning: a composite
       // "<rid>|<date>" skip applies only to THIS cage; a legacy bare date is a
@@ -514,7 +539,7 @@ export async function editBlockSeriesInternal(
         rows.push({ resourceId: rid, startAt: o.startAt, endAt: o.endAt });
       }
       skippedRentals.push(...part.skippedRentals);
-      skippedBlocked += part.skippedBlocked;
+      skippedBlocked.push(...part.skippedBlocked);
     }
 
     if (rows.length > 0) {

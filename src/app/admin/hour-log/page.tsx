@@ -13,6 +13,7 @@ import { db } from "@/db";
 import { hourLogs, programScheduleBlocks, programs } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import { listActiveCoaches } from "@/lib/server/coaches";
+import { resolveArchivedCoachOptions } from "@/lib/server/archived-coach-options";
 import {
   hourLogFiltersToQueryString,
   normalizeHourLogFilters,
@@ -153,6 +154,17 @@ export default async function AdminHourLogPage({
 
   const downloadHref = `/admin/hour-log/download?${hourLogFiltersToQueryString(filters)}`;
 
+  // QA-2: the coach filter dropdown lists ACTIVE coaches only, but a deep-link
+  // (e.g. from an archived coach's detail page) can pre-filter to a coach
+  // absent from it. Append that coach (labeled "(archived)") so the <select>
+  // shows their name as the active filter instead of falling back to the
+  // "All coaches" default while rows are actually filtered.
+  const archivedCoachOptions = await resolveArchivedCoachOptions(
+    coachOptions,
+    filters.coachId ? [filters.coachId] : [],
+  );
+  const coachFilterOptions = [...coachOptions, ...archivedCoachOptions];
+
   return (
     <>
       <Link
@@ -235,7 +247,7 @@ export default async function AdminHourLogPage({
       </section>
 
       <FiltersForm
-        coaches={coachOptions}
+        coaches={coachFilterOptions}
         programs={programOptions}
         values={{
           from: filters.from,

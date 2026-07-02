@@ -743,6 +743,7 @@ export default async function AdminHome({
           <div className="mt-5">
             <WeekNav
               selectedDate={selectedDate}
+              extraParams={{ schedule: "open" }}
               preserveScroll
             />
 

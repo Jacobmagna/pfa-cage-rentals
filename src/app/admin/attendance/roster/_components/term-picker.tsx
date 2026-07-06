@@ -6,12 +6,16 @@
 // null; the "exactly one set" case is rejected by the form-action.
 // Styled to match the existing form inputs/selects.
 
+import { pfaParts } from "@/lib/timezone";
+
 export const SEASONS = ["Spring", "Summer", "Fall", "Winter"] as const;
 
 // currentYear-1 … currentYear+2, computed at render so the range
-// rolls forward over time without a redeploy.
+// rolls forward over time without a redeploy. Uses the FACILITY (Pacific)
+// year — not the viewer's browser year — so an Eastern-time admin sees the
+// same year range California is on across the New Year boundary.
 function yearOptions(): number[] {
-  const current = new Date().getFullYear();
+  const current = pfaParts(new Date()).year;
   const years: number[] = [];
   for (let y = current - 1; y <= current + 2; y += 1) years.push(y);
   return years;

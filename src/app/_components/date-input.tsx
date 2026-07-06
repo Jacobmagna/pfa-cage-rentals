@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { pfaParts } from "@/lib/timezone";
 
 // Typable masked date field — a drop-in replacement for native
 // <input type="date">. The user types digits and the field auto-inserts
@@ -263,17 +264,22 @@ export function DateInput({
   const inputRef = useRef<HTMLInputElement>(null);
   const pendingCaret = useRef<number | null>(null);
 
-  // The user's intended "this year" for the current-year convenience.
-  // Computed once on mount via lazy init — a client Date is correct here
-  // (it's the viewer's local calendar year) and is passed INTO the pure
-  // helper so the helper itself never constructs a Date.
-  const [currentYear] = useState(() => new Date().getFullYear());
+  // The FACILITY (Pacific) "this year" for the current-year convenience —
+  // NOT the viewer's browser year. Computed once on mount via lazy init and
+  // passed INTO the pure helper so the helper itself never constructs a Date.
+  // Pinned to the facility TZ so an admin in another timezone (e.g. Eastern)
+  // auto-fills the same year California is on. pfaParts pins Los Angeles.
+  const [currentYear] = useState(() => pfaParts(new Date()).year);
 
-  // Today's local calendar date as integer parts, captured once on mount
-  // (viewer-local "today" for the calendar's TODAY marker + quick button).
+  // Today's FACILITY (Pacific) calendar date as integer parts, captured once
+  // on mount. Pinned to the facility TZ (not the viewer's browser) so the
+  // calendar's TODAY marker + "Today" quick button always mean the FACILITY's
+  // today: an Eastern-time admin clicking "Today" late at night (when it's
+  // already tomorrow in NY but still today in CA) picks the California day, not
+  // their own next-day. pfaParts.month is 1-indexed (matches the old +1).
   const [today] = useState(() => {
-    const now = new Date();
-    return { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() };
+    const p = pfaParts(new Date());
+    return { year: p.year, month: p.month, day: p.day };
   });
 
   // Popover open state + the month the grid is currently showing. The

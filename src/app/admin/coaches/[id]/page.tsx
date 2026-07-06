@@ -229,6 +229,9 @@ export default async function AdminCoachDetailPage({
       override: o
         ? { ratePer30MinCents: o.ratePer30MinCents, updatedAt: o.updatedAt }
         : null,
+      // Weight-room GROUP rate override. Only meaningful for weight_room;
+      // for cage/bullpen it's carried as null and the card ignores it.
+      groupRatePer30MinCents: o?.groupRatePer30MinCents ?? null,
     };
   });
 

@@ -36,6 +36,13 @@ export type AggregateSessionInput = {
   note: string | null;
   /** Cents-per-30-min rate stamped on the session row at creation. */
   ratePer30MinCents: number;
+  /**
+   * True when this weight-room booking was billed at the group rate
+   * (`sessions_billing.is_group_session`). Reports break these out into a
+   * distinct "Group Weight Room" bucket, separate from regular weight room.
+   * Only meaningful for `resourceType === "weight_room"`.
+   */
+  isGroupSession: boolean;
 };
 
 /**
@@ -74,6 +81,8 @@ export type DetailRow = {
   slots: number;
   resourceName: string;
   resourceType: ResourceType;
+  /** True when a weight-room booking billed at the group rate. */
+  isGroupSession: boolean;
   coachId: string;
   coachName: string;     // Display name; falls back to email if null
   coachEmail: string;
@@ -92,6 +101,14 @@ export type SummaryRow = {
   bullpenTotalCents: number;
   weightRoomSlots: number;
   weightRoomTotalCents: number;
+  /**
+   * Group weight-room sessions (weight_room bookings billed at the group
+   * rate, `is_group_session`). Broken out as a SEPARATE line from regular
+   * weight room — the regular `weightRoom*` totals EXCLUDE these. Same
+   * per-hour display convention as regular weight room.
+   */
+  groupWeightRoomSlots: number;
+  groupWeightRoomTotalCents: number;
   /**
    * Exact program/work HOURS logged in range (fractional — a 45-min block
    * is 0.75). Additive; never a resource type. Program pay bills on the
@@ -151,6 +168,7 @@ export function aggregateReport(
       slots,
       resourceName: s.resourceName,
       resourceType: s.resourceType,
+      isGroupSession: s.isGroupSession,
       coachId: s.coachId,
       coachName: s.coachName ?? s.coachEmail,
       coachEmail: s.coachEmail,
@@ -183,6 +201,8 @@ export function aggregateReport(
         bullpenTotalCents: 0,
         weightRoomSlots: 0,
         weightRoomTotalCents: 0,
+        groupWeightRoomSlots: 0,
+        groupWeightRoomTotalCents: 0,
         programHours: 0,
         programTotalCents: 0,
         totalCents: 0,
@@ -203,8 +223,15 @@ export function aggregateReport(
         entry.bullpenTotalCents += row.totalCents;
         break;
       case "weight_room":
-        entry.weightRoomSlots += row.slots;
-        entry.weightRoomTotalCents += row.totalCents;
+        // Group weight-room bookings break out into their own bucket;
+        // regular weight-room totals EXCLUDE them. cage/bullpen untouched.
+        if (row.isGroupSession) {
+          entry.groupWeightRoomSlots += row.slots;
+          entry.groupWeightRoomTotalCents += row.totalCents;
+        } else {
+          entry.weightRoomSlots += row.slots;
+          entry.weightRoomTotalCents += row.totalCents;
+        }
         break;
     }
     entry.totalCents += row.totalCents;

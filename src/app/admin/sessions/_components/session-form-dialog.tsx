@@ -19,6 +19,7 @@ import { createSessionsBatch } from "../actions";
 import type { CoachOption, ResourceOption } from "./sessions-client";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
+import { GroupPill } from "@/app/_components/group-pill";
 import { SlotLengthToggle } from "@/app/_components/slot-length-toggle";
 import {
   SessionSlotsList,
@@ -37,6 +38,10 @@ export type SessionFormInitialValues = {
   startAt: Date;
   endAt: Date;
   note: string | null;
+  // Display-only (edit mode): true for a weight-room rental billed at the
+  // group rate. Drives the read-only "Group" pill in the dialog header — no
+  // editable checkbox here (create/booking forms own the write side).
+  isGroupSession?: boolean;
 };
 
 // Modal form for creating or editing a session.
@@ -268,9 +273,14 @@ export function SessionFormDialog({
             <p className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
               {mode === "edit" ? "Edit" : "New"}
             </p>
-            <h2 className="text-xl font-semibold tracking-tight mt-0.5">
-              Session details
-            </h2>
+            <div className="flex items-center gap-2 mt-0.5">
+              <h2 className="text-xl font-semibold tracking-tight">
+                Session details
+              </h2>
+              {mode === "edit" && initial?.isGroupSession ? (
+                <GroupPill />
+              ) : null}
+            </div>
           </div>
           <button
             type="button"

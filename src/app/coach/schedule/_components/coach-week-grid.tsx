@@ -21,6 +21,7 @@ import {
   placeVerticalOnGrid15,
 } from "@/lib/schedule-grid-utils";
 import { formatPfaTime12h } from "@/lib/timezone";
+import { GroupMark } from "@/app/_components/group-pill";
 
 type ResourceType = "cage" | "bullpen" | "weight_room";
 
@@ -47,6 +48,8 @@ export type CoachGridSession = {
   resourceType: ResourceType;
   startAt: Date;
   endAt: Date;
+  // Weight-room rental billed at the group rate — drives the compact Group mark.
+  isGroupSession: boolean;
 };
 
 // Local copy of the interactive grids' tiny style helper. Duplicated on
@@ -209,7 +212,11 @@ export function CoachWeekGrid({
             const timeLabel = `${formatPfaTime12h(s.startAt)}–${formatPfaTime12h(
               s.endAt,
             )}`;
-            const tooltip = [s.resourceName, timeLabel]
+            const tooltip = [
+              s.resourceName,
+              s.isGroupSession ? "Group" : null,
+              timeLabel,
+            ]
               .filter(Boolean)
               .join(" · ");
             return (
@@ -231,6 +238,7 @@ export function CoachWeekGrid({
                   <span className="truncate font-medium leading-tight">
                     {s.resourceName}
                   </span>
+                  {s.isGroupSession ? <GroupMark /> : null}
                 </span>
                 <span className="truncate text-[9px] tabular-nums text-fg-subtle">
                   {timeLabel}

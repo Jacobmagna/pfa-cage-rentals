@@ -62,6 +62,7 @@ export function ReportPreview({
                     <th scope="col" className="px-4 py-3 text-right font-semibold">Cage</th>
                     <th scope="col" className="px-4 py-3 text-right font-semibold">Bullpen</th>
                     <th scope="col" className="px-4 py-3 text-right font-semibold">Weight Room</th>
+                    <th scope="col" className="px-4 py-3 text-right font-semibold">Group Weight Room</th>
                   </>
                 ) : null}
                 {includeProgramHours ? (
@@ -96,6 +97,10 @@ export function ReportPreview({
                       <SlotsAndCashCell
                         slots={row.weightRoomSlots}
                         cents={row.weightRoomTotalCents}
+                      />
+                      <SlotsAndCashCell
+                        slots={row.groupWeightRoomSlots}
+                        cents={row.groupWeightRoomTotalCents}
                       />
                     </>
                   ) : null}
@@ -152,7 +157,11 @@ export function ReportPreview({
                   <td className="px-3 py-3 font-mono tnum tabular-nums text-fg">
                     {row.endTime}
                   </td>
-                  <td className="px-3 py-3 text-fg">{row.resourceName}</td>
+                  <td className="px-3 py-3 text-fg">
+                    {row.resourceType === "weight_room" && row.isGroupSession
+                      ? `${row.resourceName} (Group)`
+                      : row.resourceName}
+                  </td>
                   <td className="px-3 py-3 text-fg">
                     <span className="inline-flex items-center gap-1.5 flex-wrap">
                       {row.coachName}

@@ -11,6 +11,7 @@
 // duplicated locally (same convention as the grid).
 
 import { formatPfaTime12h } from "@/lib/timezone";
+import { GroupPill } from "@/app/_components/group-pill";
 import type {
   CoachGridDay,
   CoachGridProgramBlock,
@@ -166,8 +167,9 @@ function SessionRow({
         {timeRange(session.startAt, session.endAt)}
       </span>
       <div className="min-w-0">
-        <p className="font-medium leading-tight text-fg">
-          {session.resourceName}
+        <p className="flex items-center gap-1.5 font-medium leading-tight text-fg">
+          <span className="truncate">{session.resourceName}</span>
+          {session.isGroupSession ? <GroupPill /> : null}
         </p>
       </div>
     </li>

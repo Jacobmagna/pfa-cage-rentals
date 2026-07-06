@@ -227,6 +227,7 @@ export default async function AdminHome({
         startAt: sessionsBilling.startAt,
         endAt: sessionsBilling.endAt,
         note: sessionsBilling.note,
+        isGroupSession: sessionsBilling.isGroupSession,
       })
       .from(sessionsBilling)
       .innerJoin(users, eq(sessionsBilling.coachId, users.id))
@@ -373,6 +374,7 @@ export default async function AdminHome({
     coachName: s.coachName ?? s.coachEmail,
     startAt: s.startAt,
     endAt: s.endAt,
+    isGroupSession: s.isGroupSession,
   }));
   const masterBlocked: MasterBlockedTime[] = blockRows.map((b) => ({
     id: b.id,
@@ -400,6 +402,7 @@ export default async function AdminHome({
           startAt: s.startAt,
           endAt: s.endAt,
           note: s.note,
+          isGroupSession: s.isGroupSession,
         },
       ]),
     );

@@ -10,12 +10,13 @@
 // internals here lets every other test run without mocking framework
 // internals.
 
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
   auditLog,
   coachRateOverrides,
+  rateDefaults,
   sessionsBilling,
   blockedTimes,
 } from "@/db/schema";
@@ -181,6 +182,120 @@ describe("updateSessionInternal", () => {
     expect(diff.before).not.toHaveProperty("coachId");
     expect(diff.before).not.toHaveProperty("resourceId");
     expect(diff.before).not.toHaveProperty("startAt");
+  });
+
+  // GROUP-RATE (4th tier) on the UPDATE path. The group flag itself is NOT
+  // editable here (deferred); group INTENT is preserved from the existing row
+  // and gated on the final resource still being weight-room. When a rate input
+  // (coach or resource) changes, the rate re-resolves WITH that preserved group
+  // status. `rate_defaults` survives TRUNCATE, so the weight_room group default
+  // is snapshotted + restored inline (mirrors the create-group block).
+  describe("group weight-room (4th tier) rate consistency", () => {
+    async function setWeightRoomGroupDefault(cents: number | null) {
+      await db
+        .update(rateDefaults)
+        .set({ groupRatePer30MinCents: cents })
+        .where(eq(rateDefaults.type, "weight_room"));
+    }
+    async function getWeightRoomGroupDefault(): Promise<number | null> {
+      const [row] = await db
+        .select()
+        .from(rateDefaults)
+        .where(eq(rateDefaults.type, "weight_room"));
+      return row?.groupRatePer30MinCents ?? null;
+    }
+
+    let savedGroupDefault: number | null = null;
+    beforeEach(async () => {
+      savedGroupDefault = await getWeightRoomGroupDefault();
+      await setWeightRoomGroupDefault(null);
+    });
+    afterEach(async () => {
+      await setWeightRoomGroupDefault(savedGroupDefault);
+    });
+
+    it("changing the coach on a group weight-room session re-resolves the NEW coach's group rate", async () => {
+      // Coach A group override 1800, Coach B group override 2000. A distinct
+      // pair proves the update resolved B's GROUP rate (not B's regular rate,
+      // not A's rate, not the facility default).
+      await db.insert(coachRateOverrides).values([
+        {
+          coachId: fixtures.coach.id,
+          resourceType: "weight_room",
+          ratePer30MinCents: 700,
+          groupRatePer30MinCents: 1800,
+        },
+        {
+          coachId: fixtures.flaggedCoach.id,
+          resourceType: "weight_room",
+          ratePer30MinCents: 700,
+          groupRatePer30MinCents: 2000,
+        },
+      ]);
+
+      const created = await createSessionInternal(fixtures.admin, {
+        coachId: fixtures.coach.id,
+        resourceId: seeded.weightRoom1.id,
+        startAt: tomorrowAt(10),
+        endAt: tomorrowAt(11),
+        isGroupSession: true,
+      });
+      expect(created.isGroupSession).toBe(true);
+      expect(created.ratePer30MinCents).toBe(1800);
+
+      const updated = await updateSessionInternal(fixtures.admin, created.id, {
+        coachId: fixtures.flaggedCoach.id,
+      });
+
+      // Re-billed at coach B's GROUP rate; group intent preserved.
+      expect(updated.coachId).toBe(fixtures.flaggedCoach.id);
+      expect(updated.isGroupSession).toBe(true);
+      expect(updated.ratePer30MinCents).toBe(2000);
+    });
+
+    it("moving a group session OFF weight-room clears the flag and re-bills at the new resource's regular rate", async () => {
+      await setWeightRoomGroupDefault(1500);
+
+      const created = await createSessionInternal(fixtures.admin, {
+        coachId: fixtures.coach.id,
+        resourceId: seeded.weightRoom1.id,
+        startAt: tomorrowAt(10),
+        endAt: tomorrowAt(11),
+        isGroupSession: true,
+      });
+      expect(created.isGroupSession).toBe(true);
+      expect(created.ratePer30MinCents).toBe(1500);
+
+      const updated = await updateSessionInternal(fixtures.admin, created.id, {
+        resourceId: seeded.cage1.id,
+      });
+
+      // Group flag cleared (no longer weight-room); regular cage rate (2200).
+      expect(updated.isGroupSession).toBe(false);
+      expect(updated.ratePer30MinCents).toBe(2200);
+    });
+
+    it("a time-only edit on a group session preserves the group rate and flag (snapshot immutability)", async () => {
+      await setWeightRoomGroupDefault(1500);
+
+      const created = await createSessionInternal(fixtures.admin, {
+        coachId: fixtures.coach.id,
+        resourceId: seeded.weightRoom1.id,
+        startAt: tomorrowAt(10),
+        endAt: tomorrowAt(11),
+        isGroupSession: true,
+      });
+      expect(created.isGroupSession).toBe(true);
+      expect(created.ratePer30MinCents).toBe(1500);
+
+      const updated = await updateSessionInternal(fixtures.admin, created.id, {
+        endAt: tomorrowAt(11, 30),
+      });
+
+      // No rate input changed → historical rate + group flag both untouched.
+      expect(updated.isGroupSession).toBe(true);
+      expect(updated.ratePer30MinCents).toBe(1500);
+    });
   });
 });
 
@@ -437,5 +552,233 @@ describe("createSessionsBatchInternal multi-resource", () => {
 
     const rows = await db.select().from(sessionsBilling);
     expect(rows).toHaveLength(2);
+  });
+});
+
+// GROUP-RATE (4th tier): a weight-room slot booked as a GROUP session bills
+// at a DISTINCT rate and stamps is_group_session=true. The rate is stamped
+// immutably at insert. `rate_defaults` is NOT truncated between tests
+// (fixtures.truncateMutables), so any group default we set on the
+// weight_room row is snapshotted + restored inline (mirrors the
+// rate-defaults-actions suite's approach).
+describe("createSessionInternal — group weight-room (4th tier)", () => {
+  // Snapshot + restore the weight_room group default so setting it in one
+  // test can't leak into another (rate_defaults survives TRUNCATE).
+  async function setWeightRoomGroupDefault(cents: number | null) {
+    await db
+      .update(rateDefaults)
+      .set({ groupRatePer30MinCents: cents })
+      .where(eq(rateDefaults.type, "weight_room"));
+  }
+  async function getWeightRoomGroupDefault(): Promise<number | null> {
+    const [row] = await db
+      .select()
+      .from(rateDefaults)
+      .where(eq(rateDefaults.type, "weight_room"));
+    return row?.groupRatePer30MinCents ?? null;
+  }
+
+  let savedGroupDefault: number | null = null;
+  beforeEach(async () => {
+    savedGroupDefault = await getWeightRoomGroupDefault();
+    // Ensure a clean NULL baseline for every test in this block.
+    await setWeightRoomGroupDefault(null);
+  });
+  // Restore after each so we never leave a stray group default behind.
+  // (afterEach isn't imported; reset to the saved value at the top of the
+  // NEXT test's beforeEach is insufficient because the block's own
+  // beforeEach forces null — so restore explicitly here.)
+  afterEach(async () => {
+    await setWeightRoomGroupDefault(savedGroupDefault);
+  });
+
+  it("stamps is_group_session=true AND the facility group rate for a weight-room group booking", async () => {
+    await setWeightRoomGroupDefault(1500);
+
+    const created = await createSessionInternal(fixtures.admin, {
+      coachId: fixtures.coach.id,
+      resourceId: seeded.weightRoom1.id,
+      startAt: tomorrowAt(10),
+      endAt: tomorrowAt(11),
+      isGroupSession: true,
+    });
+
+    expect(created.isGroupSession).toBe(true);
+    // Distinct group rate, NOT the regular weight-room default (700).
+    expect(created.ratePer30MinCents).toBe(1500);
+  });
+
+  it("stamps the coach group OVERRIDE ahead of the facility group default", async () => {
+    await setWeightRoomGroupDefault(1500);
+    await db.insert(coachRateOverrides).values({
+      coachId: fixtures.coach.id,
+      resourceType: "weight_room",
+      ratePer30MinCents: 700,
+      groupRatePer30MinCents: 1800,
+    });
+
+    const created = await createSessionInternal(fixtures.admin, {
+      coachId: fixtures.coach.id,
+      resourceId: seeded.weightRoom1.id,
+      startAt: tomorrowAt(10),
+      endAt: tomorrowAt(11),
+      isGroupSession: true,
+    });
+
+    expect(created.isGroupSession).toBe(true);
+    expect(created.ratePer30MinCents).toBe(1800);
+  });
+
+  it("SAFETY FALLBACK: with no group rate configured, a group booking stamps the REGULAR weight-room rate", async () => {
+    // group default left NULL by beforeEach; no coach group override.
+    const created = await createSessionInternal(fixtures.admin, {
+      coachId: fixtures.coach.id,
+      resourceId: seeded.weightRoom1.id,
+      startAt: tomorrowAt(10),
+      endAt: tomorrowAt(11),
+      isGroupSession: true,
+    });
+
+    // is_group_session still records the booking as a group session...
+    expect(created.isGroupSession).toBe(true);
+    // ...but the rate is the regular weight-room default (700) — never
+    // overcharge.
+    expect(created.ratePer30MinCents).toBe(700);
+  });
+
+  it("a NON-group weight-room booking is unaffected by a configured group rate", async () => {
+    await setWeightRoomGroupDefault(1500);
+
+    const created = await createSessionInternal(fixtures.admin, {
+      coachId: fixtures.coach.id,
+      resourceId: seeded.weightRoom1.id,
+      startAt: tomorrowAt(10),
+      endAt: tomorrowAt(11),
+      // isGroupSession omitted → false
+    });
+
+    expect(created.isGroupSession).toBe(false);
+    expect(created.ratePer30MinCents).toBe(700);
+  });
+
+  it("isGroupSession=true on a CAGE booking is ignored (flag false, cage rate)", async () => {
+    await setWeightRoomGroupDefault(1500);
+
+    const created = await createSessionInternal(fixtures.admin, {
+      coachId: fixtures.coach.id,
+      resourceId: seeded.cage1.id,
+      startAt: tomorrowAt(10),
+      endAt: tomorrowAt(11),
+      isGroupSession: true, // meaningless for a cage slot
+    });
+
+    expect(created.isGroupSession).toBe(false);
+    expect(created.ratePer30MinCents).toBe(2200);
+  });
+});
+
+describe("createSessionsBatchInternal — group weight-room (4th tier)", () => {
+  async function setWeightRoomGroupDefault(cents: number | null) {
+    await db
+      .update(rateDefaults)
+      .set({ groupRatePer30MinCents: cents })
+      .where(eq(rateDefaults.type, "weight_room"));
+  }
+  async function getWeightRoomGroupDefault(): Promise<number | null> {
+    const [row] = await db
+      .select()
+      .from(rateDefaults)
+      .where(eq(rateDefaults.type, "weight_room"));
+    return row?.groupRatePer30MinCents ?? null;
+  }
+
+  let savedGroupDefault: number | null = null;
+  beforeEach(async () => {
+    savedGroupDefault = await getWeightRoomGroupDefault();
+    await setWeightRoomGroupDefault(null);
+  });
+  afterEach(async () => {
+    await setWeightRoomGroupDefault(savedGroupDefault);
+  });
+
+  it("stamps group ONLY on the weight-room rows in a mixed batch", async () => {
+    await setWeightRoomGroupDefault(1500);
+
+    const inserted = await createSessionsBatchInternal(fixtures.admin, {
+      coachId: fixtures.coach.id,
+      isGroupSession: true,
+      slots: [
+        // weight-room slot → group rate + is_group_session=true
+        {
+          resourceId: seeded.weightRoom1.id,
+          startAt: tomorrowAt(10),
+          endAt: tomorrowAt(10, 30),
+        },
+        // cage slot → unaffected: regular cage rate + is_group_session=false
+        {
+          resourceId: seeded.cage1.id,
+          startAt: tomorrowAt(10),
+          endAt: tomorrowAt(10, 30),
+        },
+        // bullpen slot → unaffected
+        {
+          resourceId: seeded.bullpen1.id,
+          startAt: tomorrowAt(10),
+          endAt: tomorrowAt(10, 30),
+        },
+      ],
+    });
+
+    const wrRow = inserted.find((r) => r.resourceId === seeded.weightRoom1.id);
+    const cageRow = inserted.find((r) => r.resourceId === seeded.cage1.id);
+    const bullpenRow = inserted.find(
+      (r) => r.resourceId === seeded.bullpen1.id,
+    );
+
+    // Weight-room row: group flag + group rate.
+    expect(wrRow?.isGroupSession).toBe(true);
+    expect(wrRow?.ratePer30MinCents).toBe(1500);
+
+    // Non-weight-room rows: flag false, regular rates unchanged.
+    expect(cageRow?.isGroupSession).toBe(false);
+    expect(cageRow?.ratePer30MinCents).toBe(2200);
+    expect(bullpenRow?.isGroupSession).toBe(false);
+    expect(bullpenRow?.ratePer30MinCents).toBe(2200);
+  });
+
+  it("SAFETY FALLBACK: a group batch with no group rate stamps the regular weight-room rate", async () => {
+    const inserted = await createSessionsBatchInternal(fixtures.admin, {
+      coachId: fixtures.coach.id,
+      isGroupSession: true,
+      slots: [
+        {
+          resourceId: seeded.weightRoom1.id,
+          startAt: tomorrowAt(10),
+          endAt: tomorrowAt(10, 30),
+        },
+      ],
+    });
+
+    expect(inserted[0].isGroupSession).toBe(true);
+    expect(inserted[0].ratePer30MinCents).toBe(700);
+  });
+
+  it("a non-group batch on the weight room is unaffected by a configured group rate", async () => {
+    await setWeightRoomGroupDefault(1500);
+
+    const inserted = await createSessionsBatchInternal(fixtures.admin, {
+      coachId: fixtures.coach.id,
+      // isGroupSession omitted → false
+      slots: [
+        {
+          resourceId: seeded.weightRoom1.id,
+          startAt: tomorrowAt(10),
+          endAt: tomorrowAt(10, 30),
+        },
+      ],
+    });
+
+    expect(inserted[0].isGroupSession).toBe(false);
+    expect(inserted[0].ratePer30MinCents).toBe(700);
   });
 });

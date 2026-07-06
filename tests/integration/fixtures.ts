@@ -117,14 +117,17 @@ export async function getSeededResources() {
   const cage1 = all.find((r) => r.name === "Cage 1");
   const cage2 = all.find((r) => r.name === "Cage 2");
   const bullpen1 = all.find((r) => r.name === "Bullpen 1");
-  if (!cage1 || !cage2 || !bullpen1) {
+  // GROUP-RATE (4th tier): the group weight-room tests need a weight_room
+  // resource. "Weight Room 1" is part of the standard seed (seed-resources.ts).
+  const weightRoom1 = all.find((r) => r.name === "Weight Room 1");
+  if (!cage1 || !cage2 || !bullpen1 || !weightRoom1) {
     throw new Error(
       "Seeded resources not found on integration branch. Run " +
         "`INTEGRATION_DATABASE_URL=... npm run db:seed` against the " +
         "integration Neon branch first.",
     );
   }
-  return { cage1, cage2, bullpen1 };
+  return { cage1, cage2, bullpen1, weightRoom1 };
 }
 
 // Per-test cleanup. TRUNCATE every mutable test-relevant table in one

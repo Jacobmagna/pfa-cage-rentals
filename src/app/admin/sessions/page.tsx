@@ -70,6 +70,7 @@ export default async function AdminSessionsPage({
         endAt: sessionsBilling.endAt,
         note: sessionsBilling.note,
         ratePer30MinCents: sessionsBilling.ratePer30MinCents,
+        isGroupSession: sessionsBilling.isGroupSession,
       })
       .from(sessionsBilling)
       .innerJoin(users, eq(sessionsBilling.coachId, users.id))

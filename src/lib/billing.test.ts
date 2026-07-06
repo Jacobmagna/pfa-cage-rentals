@@ -118,6 +118,91 @@ describe("rateForSlot", () => {
   });
 });
 
+// GROUP-RATE (4th tier): a group weight-room booking bills at a DISTINCT
+// rate via a safe fallback chain that can NEVER overcharge. These lock in
+// (a) the group rate resolves when configured, (b) it falls back to the
+// regular weight-room rate when unset, and (c) every non-group / non-
+// weight-room path is byte-identical to the pre-group behavior.
+describe("rateForSlot — group weight-room (4th tier)", () => {
+  const coachId = "coach-1";
+
+  it("resolves the coach group OVERRIDE when set (highest priority)", () => {
+    const overrides: RateOverride[] = [
+      {
+        coachId,
+        resourceType: "weight_room",
+        ratePer30MinCents: 700,
+        groupRatePer30MinCents: 1500,
+      },
+    ];
+    // isGroupSession=true, group override present → group override wins.
+    expect(
+      rateForSlot("weight_room", coachId, overrides, undefined, true, 1200),
+    ).toBe(1500);
+  });
+
+  it("falls back to the facility group DEFAULT when the coach has no group override", () => {
+    // Coach has a regular weight-room override but no group override.
+    const overrides: RateOverride[] = [
+      { coachId, resourceType: "weight_room", ratePer30MinCents: 900 },
+    ];
+    expect(
+      rateForSlot("weight_room", coachId, overrides, undefined, true, 1200),
+    ).toBe(1200);
+  });
+
+  it("falls back to the coach's REGULAR weight-room override when no group rate is configured (safety fallback)", () => {
+    const overrides: RateOverride[] = [
+      { coachId, resourceType: "weight_room", ratePer30MinCents: 900 },
+    ];
+    // No coach group override, no facility group default (null) → the
+    // regular resolved weight-room rate (900). Never overcharge.
+    expect(
+      rateForSlot("weight_room", coachId, overrides, undefined, true, null),
+    ).toBe(900);
+  });
+
+  it("falls back to the DEFAULT weight-room rate when nothing at all is configured", () => {
+    // No overrides, no facility group default → regular weight-room default.
+    expect(rateForSlot("weight_room", coachId, [], undefined, true, null)).toBe(
+      700,
+    );
+  });
+
+  it("group override on the WEIGHT_ROOM row is ignored for a NON-group weight-room slot", () => {
+    const overrides: RateOverride[] = [
+      {
+        coachId,
+        resourceType: "weight_room",
+        ratePer30MinCents: 700,
+        groupRatePer30MinCents: 1500,
+      },
+    ];
+    // isGroupSession=false → regular weight-room rate, group rate untouched.
+    expect(
+      rateForSlot("weight_room", coachId, overrides, undefined, false, 1200),
+    ).toBe(700);
+  });
+
+  it("isGroupSession=true has NO effect on a cage slot (non-weight-room)", () => {
+    // Even with a facility group default present, a cage slot bills the cage
+    // rate — the group branch is weight-room-only.
+    expect(rateForSlot("cage", coachId, [], undefined, true, 1200)).toBe(2200);
+  });
+
+  it("isGroupSession=true has NO effect on a bullpen slot (non-weight-room)", () => {
+    expect(rateForSlot("bullpen", coachId, [], undefined, true, 1200)).toBe(
+      2200,
+    );
+  });
+
+  it("the default (no group args) weight-room path is byte-identical to before", () => {
+    // Calling with the original 4-arg signature must resolve exactly as the
+    // pre-group code did.
+    expect(rateForSlot("weight_room", coachId, [])).toBe(700);
+  });
+});
+
 describe("rateForProgram", () => {
   const coachId = "coach-1";
   const programId = "program-1";
@@ -226,6 +311,72 @@ describe("computeRate", () => {
         defaults: { cage: 2400, bullpen: 2400, weight_room: 800 },
       }),
     ).toBe(2400);
+  });
+
+  // GROUP-RATE (4th tier) via computeRate — the write-time stamping entry.
+  it("stamps the coach group override for a weight-room group booking", () => {
+    expect(
+      computeRate({
+        coachId,
+        resourceType: "weight_room",
+        overrides: [
+          {
+            coachId,
+            resourceType: "weight_room",
+            ratePer30MinCents: 700,
+            groupRatePer30MinCents: 1500,
+          },
+        ],
+        isGroupSession: true,
+        groupWeightRoomDefaultCents: 1200,
+      }),
+    ).toBe(1500);
+  });
+
+  it("stamps the facility group default when no coach group override", () => {
+    expect(
+      computeRate({
+        coachId,
+        resourceType: "weight_room",
+        overrides: [],
+        isGroupSession: true,
+        groupWeightRoomDefaultCents: 1200,
+      }),
+    ).toBe(1200);
+  });
+
+  it("stamps the regular weight-room rate when NO group rate is configured (safety fallback)", () => {
+    expect(
+      computeRate({
+        coachId,
+        resourceType: "weight_room",
+        overrides: [],
+        isGroupSession: true,
+        groupWeightRoomDefaultCents: null,
+      }),
+    ).toBe(700);
+  });
+
+  it("isGroupSession=true is a no-op for a cage booking", () => {
+    expect(
+      computeRate({
+        coachId,
+        resourceType: "cage",
+        overrides: [],
+        isGroupSession: true,
+        groupWeightRoomDefaultCents: 1200,
+      }),
+    ).toBe(2200);
+  });
+
+  it("omitting the group args resolves the pre-group weight-room rate exactly", () => {
+    expect(
+      computeRate({
+        coachId,
+        resourceType: "weight_room",
+        overrides: [],
+      }),
+    ).toBe(700);
   });
 });
 

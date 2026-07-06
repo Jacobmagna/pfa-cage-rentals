@@ -36,6 +36,13 @@ export type RateOverrideRow = {
     ratePer30MinCents: number;
     updatedAt: Date;
   } | null;
+  /**
+   * Weight-room ONLY: the coach's GROUP weight-room rate override, if set.
+   * null = no group override → group sessions fall back to the regular
+   * weight-room rate. Stored per 30 min, ENTERED/DISPLAYED per hour like
+   * the regular weight-room rate.
+   */
+  groupRatePer30MinCents: number | null;
 };
 
 export function RateOverridesCard({
@@ -104,11 +111,19 @@ function Row({
     ? fmtRate(row.override.ratePer30MinCents)
     : "";
 
+  // GROUP weight-room rate. Same per-hour entry/display as the regular
+  // weight-room rate (stored per 30 min). Blank = falls back to the
+  // regular weight-room rate.
+  const groupDollars =
+    isWeightRoom && row.groupRatePer30MinCents != null
+      ? formatDollarsPerHour(row.groupRatePer30MinCents)
+      : "";
+
   // Re-key the form when the override changes (server re-fetched).
   // Without this, the input keeps its prior defaultValue across
   // optimistic re-renders.
   const formKey = state.ok
-    ? `${row.resourceType}-${row.override?.ratePer30MinCents ?? "none"}`
+    ? `${row.resourceType}-${row.override?.ratePer30MinCents ?? "none"}-${row.groupRatePer30MinCents ?? "none"}`
     : `${row.resourceType}-err-${state.error.code}-${state.error.message}`;
 
   const handleRemove = () => {
@@ -139,6 +154,13 @@ function Row({
     !state.ok && state.values.rateDollars
       ? state.values.rateDollars
       : overrideDollars;
+
+  // Same echo-on-error behavior for the group input so the admin doesn't
+  // lose their typing when the sibling regular-rate input fails validation.
+  const groupInputDefault =
+    !state.ok && state.values.groupRateDollars
+      ? state.values.groupRateDollars
+      : groupDollars;
 
   return (
     <form
@@ -191,6 +213,34 @@ function Row({
             className="w-full pl-7 pr-3 h-10 rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle text-sm disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
           />
         </div>
+        {/* Weight-room ONLY: second input for the GROUP rate. Blank =
+            group sessions fall back to the regular weight-room rate.
+            Entered/displayed per HOUR like the regular weight-room rate. */}
+        {isWeightRoom ? (
+          <div className="mt-2">
+            <label className="block text-[10px] text-fg-subtle uppercase tracking-wider mb-1">
+              Group rate / hr
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle text-sm">
+                $
+              </span>
+              <input
+                type="text"
+                inputMode="decimal"
+                name="groupRateDollars"
+                defaultValue={groupInputDefault}
+                placeholder={defaultDollars}
+                disabled={readOnly}
+                aria-label="Group weight room rate"
+                className="w-full pl-7 pr-3 h-10 rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle text-sm disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+              />
+            </div>
+            <p className="mt-1 text-[10px] text-fg-subtle leading-relaxed">
+              Leave blank to bill group sessions at the regular weight-room rate.
+            </p>
+          </div>
+        ) : null}
         {!state.ok ? (
           <p
             role="alert"

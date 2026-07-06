@@ -22,6 +22,13 @@ const sessionShape = {
   // skips the column when the parsed value is `undefined` and writes
   // when it's `null`. See form-actions.ts buildSessionInput.
   note: z.string().max(500).nullish(),
+  // GROUP-RATE (4th tier): BOOKING-LEVEL flag — only meaningful for a
+  // weight-room slot. Default false so every existing create/edit path is
+  // byte-identical (a slot bills at its regular rate unless the booker
+  // explicitly flags a weight-room group session). createSessionInternal
+  // gates it on the resource type; a group flag on a non-weight-room slot
+  // is ignored.
+  isGroupSession: z.boolean().optional().default(false),
 };
 
 const sessionBase = z.object(sessionShape);
@@ -76,6 +83,11 @@ export const createSessionBatchSchema = z
     // longer mandatory at the shape level so per-slot resources can
     // fully supply it.
     resourceId: z.string().min(1).optional(),
+    // GROUP-RATE (4th tier): BOOKING-LEVEL flag (one toggle for the whole
+    // batch, NOT per-slot). Only meaningful for weight-room rows; in a mixed
+    // batch, non-weight-room rows ignore it. Default false → byte-identical
+    // to the pre-group batch behavior.
+    isGroupSession: z.boolean().optional().default(false),
     slots: z
       .array(
         z

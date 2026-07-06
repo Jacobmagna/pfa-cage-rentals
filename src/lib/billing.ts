@@ -38,6 +38,12 @@ export type RateOverride = {
   coachId: string;
   resourceType: ResourceType;
   ratePer30MinCents: number;
+  // GROUP-RATE (4th tier): a per-coach override of the group weight-room
+  // rate. Only meaningful on a weight_room override row. NULL/undefined =
+  // this coach has no group-rate override → fall through to the facility
+  // group default, then to the regular weight-room rate. Optional so every
+  // existing caller/test that builds a RateOverride keeps compiling.
+  groupRatePer30MinCents?: number | null;
 };
 
 // Program-hour pay: per-PROGRAM default rate + optional per-(coach,
@@ -95,6 +101,16 @@ export function slotsBetween(startAt: Date, endAt: Date): number {
  * pair. Falls back to the supplied `defaults` map (or the module-level
  * DEFAULT_RATES_PER_SLOT_CENTS when omitted).
  *
+ * GROUP-RATE (4th tier): when `isGroupSession` is true AND the resource is
+ * a weight_room, resolve the DISTINCT group rate via the safe fallback
+ * chain (never overcharge):
+ *   coachOverride.groupRatePer30MinCents
+ *     ?? groupWeightRoomDefaultCents (facility default)
+ *     ?? (the regular weight_room resolved rate)
+ * For EVERY other case — cage, bullpen, regular (non-group) weight_room, or
+ * a group flag on a non-weight-room resource — the result is byte-identical
+ * to the pre-group behavior (the `isGroupSession` branch is never entered).
+ *
  * Linear scan is intentional: the overrides list is small.
  */
 export function rateForSlot(
@@ -102,28 +118,50 @@ export function rateForSlot(
   coachId: string,
   overrides: RateOverride[],
   defaults: Record<ResourceType, number> = DEFAULT_RATES_PER_SLOT_CENTS,
+  isGroupSession = false,
+  groupWeightRoomDefaultCents: number | null = null,
 ): number {
   const override = overrides.find(
     (o) => o.coachId === coachId && o.resourceType === resourceType,
   );
-  return override?.ratePer30MinCents ?? defaults[resourceType];
+  // The regular (non-group) resolved rate: per-coach override → default.
+  // This is the pre-group value for EVERY path and the ultimate group
+  // fallback (never overcharge).
+  const regularRate = override?.ratePer30MinCents ?? defaults[resourceType];
+
+  if (resourceType === "weight_room" && isGroupSession) {
+    return (
+      override?.groupRatePer30MinCents ??
+      groupWeightRoomDefaultCents ??
+      regularRate
+    );
+  }
+  return regularRate;
 }
 
 /**
  * Computes the cents-per-30-min-slot rate to STAMP onto a new
  * sessions_billing row: per-coach override → resource-type default.
+ *
+ * GROUP-RATE (4th tier): pass `isGroupSession: true` for a weight-room group
+ * booking to resolve the group rate via the fallback chain in `rateForSlot`.
+ * Omitting it (or false) is byte-identical to the pre-group behavior.
  */
 export function computeRate(args: {
   coachId: string;
   resourceType: ResourceType;
   overrides: RateOverride[];
   defaults?: Record<ResourceType, number>;
+  isGroupSession?: boolean;
+  groupWeightRoomDefaultCents?: number | null;
 }): number {
   return rateForSlot(
     args.resourceType,
     args.coachId,
     args.overrides,
     args.defaults ?? DEFAULT_RATES_PER_SLOT_CENTS,
+    args.isGroupSession ?? false,
+    args.groupWeightRoomDefaultCents ?? null,
   );
 }
 

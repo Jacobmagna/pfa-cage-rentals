@@ -67,6 +67,13 @@ import {
 export async function resolveRateCents(args: {
   coachId: string;
   resourceType: ResourceType;
+  // GROUP-RATE (4th tier): when true AND resourceType === "weight_room",
+  // resolve the DISTINCT group rate via the safe fallback chain
+  // (coach group override → facility group default → regular weight-room
+  // rate). Defaults to false, so every existing caller resolves the exact
+  // same rate as before — the byte-identical guarantee for cage / bullpen /
+  // regular weight-room paths.
+  isGroupSession?: boolean;
 }): Promise<number> {
   const [override] = await db
     .select()
@@ -84,6 +91,12 @@ export async function resolveRateCents(args: {
     weight_room:
       defaults.find((d) => d.type === "weight_room")?.ratePer30MinCents ?? 700,
   };
+  // Facility group default lives on the weight_room rate_defaults row.
+  // NULL when unconfigured → the fallback chain drops through to the
+  // regular weight-room rate (never overcharge).
+  const groupWeightRoomDefaultCents =
+    defaults.find((d) => d.type === "weight_room")?.groupRatePer30MinCents ??
+    null;
   return computeRate({
     coachId: args.coachId,
     resourceType: args.resourceType,
@@ -93,10 +106,13 @@ export async function resolveRateCents(args: {
             coachId: override.coachId,
             resourceType: override.resourceType,
             ratePer30MinCents: override.ratePer30MinCents,
+            groupRatePer30MinCents: override.groupRatePer30MinCents,
           },
         ]
       : [],
     defaults: defaultsMap,
+    isGroupSession: args.isGroupSession ?? false,
+    groupWeightRoomDefaultCents,
   });
 }
 
@@ -207,9 +223,18 @@ export async function createSessionInternal(
   );
   if (block) throw new BlockedTimeError(resource.name, block.reason);
 
+  // GROUP-RATE (4th tier): the booking-level group flag is only meaningful
+  // for a weight-room slot. Any group flag on a non-weight-room resource is
+  // ignored (the row is stamped is_group_session=false and billed at its
+  // normal rate) — the byte-identical guarantee for every non-weight-room
+  // path.
+  const isGroupSessionForRow =
+    resource.type === "weight_room" && parsed.isGroupSession;
+
   const ratePer30MinCents = await resolveRateCents({
     coachId: parsed.coachId,
     resourceType: resource.type,
+    isGroupSession: isGroupSessionForRow,
   });
 
   let inserted;
@@ -223,6 +248,7 @@ export async function createSessionInternal(
         endAt: parsed.endAt,
         note: parsed.note,
         ratePer30MinCents,
+        isGroupSession: isGroupSessionForRow,
         createdBy: actor.id,
       })
       .returning();
@@ -286,11 +312,23 @@ export async function updateSessionInternal(
   );
   if (block) throw new BlockedTimeError(resource.name, block.reason);
 
+  // Group intent is PRESERVED from the existing row (editing the group flag
+  // itself is out of scope), gated on the FINAL resource still being
+  // weight-room. If the session moved off weight-room, the now-stale group
+  // flag is cleared. Always persisting this value is a no-op when the
+  // resource stayed weight-room (same value) and correctly clears it when it
+  // moved off.
+  const finalIsGroupSession =
+    resource.type === "weight_room" && existing.isGroupSession;
+
   // Re-stamp ratePer30MinCents only when one of its inputs changed.
   // Editing time/note leaves the historical rate alone — this honors the
   // snapshot guarantee: a coach renegotiating their rate doesn't
   // retroactively rewrite past sessions even if an admin later edits one
-  // of those sessions.
+  // of those sessions. When inputs DID change, the rate re-resolves with the
+  // final group status: a group weight-room session whose coach changes
+  // re-resolves the NEW coach's GROUP rate, while a session moved off
+  // weight-room re-bills at the new resource's regular rate (group cleared).
   const inputsChanged =
     finalCoachId !== existing.coachId ||
     finalResourceId !== existing.resourceId;
@@ -298,6 +336,7 @@ export async function updateSessionInternal(
     ? await resolveRateCents({
         coachId: finalCoachId,
         resourceType: resource.type,
+        isGroupSession: finalIsGroupSession,
       })
     : existing.ratePer30MinCents;
 
@@ -314,6 +353,7 @@ export async function updateSessionInternal(
         ...(parsed.endAt !== undefined && { endAt: parsed.endAt }),
         ...(parsed.note !== undefined && { note: parsed.note }),
         ratePer30MinCents: nextRate,
+        isGroupSession: finalIsGroupSession,
       })
       .where(eq(sessionsBilling.id, id))
       .returning();
@@ -458,19 +498,37 @@ export async function createSessionsBatchInternal(
     return rid;
   });
 
+  // GROUP-RATE (4th tier): the group flag is BOOKING-LEVEL — one constant
+  // toggle for the whole batch. It only affects weight-room rows; a
+  // weight-room resource in a group booking resolves the GROUP rate for its
+  // rows, every non-weight-room row is untouched.
+  const bookingIsGroupSession = parsed.isGroupSession;
+
   // For every DISTINCT effective resource: look it up (throws
   // ResourceNotFoundError per missing resource) and resolve ITS rate.
   // Cache both so each row bills at its own resource type's rate. THIS
   // IS THE CORE MONEY FIX.
+  //
+  // Rate-cache key correctness: the resolved rate is fully determined by
+  // (resource, groupFlag). Since the group flag is a batch-level constant,
+  // the resource id alone still keys the cache uniquely — a weight-room
+  // resource's cached rate is the GROUP rate exactly when this booking is a
+  // group booking, and the flag never varies within the batch. The
+  // per-resource `isGroupSessionForResource` below folds in the
+  // weight-room-only rule so a group booking of a non-weight-room resource
+  // still caches (and stamps) the regular rate.
   const resourceMap = new Map<
     string,
     { resource: typeof resources.$inferSelect; rate: number }
   >();
   for (const rid of new Set(slotResourceIds)) {
     const resource = await getResourceOrThrow(rid);
+    const isGroupSessionForResource =
+      resource.type === "weight_room" && bookingIsGroupSession;
     const rate = await resolveRateCents({
       coachId: parsed.coachId,
       resourceType: resource.type,
+      isGroupSession: isGroupSessionForResource,
     });
     resourceMap.set(rid, { resource, rate });
   }
@@ -530,15 +588,24 @@ export async function createSessionsBatchInternal(
     inserted = await db
       .insert(sessionsBilling)
       .values(
-        parsed.slots.map((s, i) => ({
-          coachId: parsed.coachId,
-          resourceId: slotResourceIds[i],
-          startAt: s.startAt,
-          endAt: s.endAt,
-          note: s.note ?? null,
-          ratePer30MinCents: resourceMap.get(slotResourceIds[i])!.rate,
-          createdBy: actor.id,
-        })),
+        parsed.slots.map((s, i) => {
+          const { resource } = resourceMap.get(slotResourceIds[i])!;
+          // Per-row group flag: TRUE only for a weight-room slot in a group
+          // booking. Non-weight-room rows are always false, regardless of the
+          // booking-level flag.
+          const isGroupSessionForRow =
+            resource.type === "weight_room" && bookingIsGroupSession;
+          return {
+            coachId: parsed.coachId,
+            resourceId: slotResourceIds[i],
+            startAt: s.startAt,
+            endAt: s.endAt,
+            note: s.note ?? null,
+            ratePer30MinCents: resourceMap.get(slotResourceIds[i])!.rate,
+            isGroupSession: isGroupSessionForRow,
+            createdBy: actor.id,
+          };
+        }),
       )
       .returning();
   } catch (err) {

@@ -210,6 +210,12 @@ export const verificationTokens = pgTable(
 export const rateDefaults = pgTable("rate_defaults", {
   type: resourceType("type").primaryKey(),
   ratePer30MinCents: integer("rate_per_30_min_cents").notNull(),
+  // GROUP-RATE: the 4th rate tier — a DISTINCT per-30-min cents rate for a
+  // GROUP weight-room session (a booking-level flag). NULLABLE and only
+  // meaningful on the `weight_room` row. NULL = no group rate configured →
+  // a group weight-room slot falls back to the REGULAR weight-room rate
+  // (never overcharge). Additive; every pre-existing row backfills to NULL.
+  groupRatePer30MinCents: integer("group_rate_per_30_min_cents"),
   updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
 });
 
@@ -260,6 +266,12 @@ export const coachRateOverrides = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     resourceType: resourceType("resource_type").notNull(),
     ratePer30MinCents: integer("rate_per_30_min_cents").notNull(),
+    // GROUP-RATE: a per-coach override of the group weight-room rate (the
+    // 4th tier). NULLABLE and only meaningful on the `weight_room` override
+    // row. NULL = this coach has no group-rate override → resolution falls
+    // through to the facility group default, then to the regular
+    // weight-room rate. Additive; every pre-existing row backfills to NULL.
+    groupRatePer30MinCents: integer("group_rate_per_30_min_cents"),
     updatedAt: timestamp("updated_at", { mode: "date" })
       .notNull()
       .defaultNow()
@@ -393,6 +405,13 @@ export const sessionsBilling = pgTable(
     // sessions. Reports + Excel + /admin/sessions read THIS, never
     // recompute from current overrides. Online sessions get 0.
     ratePer30MinCents: integer("rate_per_30_min_cents").notNull().default(0),
+    // GROUP-RATE: booking-level flag stamped once at insert. TRUE only for a
+    // weight-room slot booked as a GROUP session (the 4th rate tier); FALSE
+    // for every other slot (cage / bullpen / regular weight-room). Like
+    // ratePer30MinCents this is an immutable snapshot — it records what the
+    // slot WAS at creation and is never recomputed. NOT NULL DEFAULT false
+    // backfills every pre-existing row cleanly.
+    isGroupSession: boolean("is_group_session").notNull().default(false),
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id),

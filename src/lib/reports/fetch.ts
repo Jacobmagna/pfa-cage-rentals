@@ -58,6 +58,7 @@ export async function fetchReportData(
       endAt: sessionsBilling.endAt,
       note: sessionsBilling.note,
       ratePer30MinCents: sessionsBilling.ratePer30MinCents,
+      isGroupSession: sessionsBilling.isGroupSession,
     })
     .from(sessionsBilling)
     .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
@@ -121,6 +122,7 @@ export async function fetchReportData(
     endAt: r.endAt,
     note: r.note,
     ratePer30MinCents: r.ratePer30MinCents,
+    isGroupSession: r.isGroupSession,
   }));
 
   return aggregateReport(aggregateInputs, hourLogInputs);

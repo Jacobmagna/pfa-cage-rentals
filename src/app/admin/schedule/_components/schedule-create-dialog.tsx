@@ -468,6 +468,13 @@ function SessionTab({
   const [batchPending, startBatchTransition] = useTransition();
   const [batchError, setBatchError] = useState<string | null>(null);
 
+  // Booking-level "Group session" flag — weight-room only. Shown when the
+  // selected resource is a weight room; defaults false and submits false
+  // (via the hidden field + gated batch value) when it isn't.
+  const [isGroupSession, setIsGroupSession] = useState(false);
+  const isWeightRoom =
+    resources.find((r) => r.id === live.resourceId)?.type === "weight_room";
+
   const { rangeStart, rangeEnd, slotCount, divisibilityError } = useMemo(() => {
     if (!live.date || !live.startTime || !live.endTime) {
       return {
@@ -532,6 +539,7 @@ function SessionTab({
         await createSessionsBatch({
           coachId: live.coachId,
           resourceId: live.resourceId,
+          isGroupSession: isWeightRoom && isGroupSession,
           slots: slots.map((s) => ({
             startAt: s.startAt,
             endAt: s.endAt,
@@ -600,9 +608,17 @@ function SessionTab({
           name="resourceId"
           required
           value={live.resourceId}
-          onChange={(e) =>
-            setLive((p) => ({ ...p, resourceId: e.target.value }))
-          }
+          onChange={(e) => {
+            const nextResourceId = e.target.value;
+            setLive((p) => ({ ...p, resourceId: nextResourceId }));
+            // Clear the weight-room-only group flag when switching to a
+            // non-weight-room resource, so it doesn't silently resurrect
+            // (stale checked state) when switching back.
+            const nextIsWeightRoom =
+              resources.find((r) => r.id === nextResourceId)?.type ===
+              "weight_room";
+            if (!nextIsWeightRoom) setIsGroupSession(false);
+          }}
           className={selectStyles}
         >
           <option value="" disabled>
@@ -675,6 +691,33 @@ function SessionTab({
           each.
         </p>
       ) : null}
+
+      {/* Group session — weight-room only, booking-level. The hidden input
+          carries the gated value into the single-slot FormData submit (a bare
+          checkbox is absent from FormData when unchecked); the multi-slot
+          batch path reads state directly. When the resource isn't a weight
+          room, "false" is submitted. */}
+      {isWeightRoom ? (
+        <label className="flex items-start gap-2.5">
+          <input
+            type="checkbox"
+            checked={isGroupSession}
+            onChange={(e) => setIsGroupSession(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-line text-gold focus-visible:ring-2 focus-visible:ring-gold/40"
+          />
+          <span className="text-sm">
+            <span className="font-medium text-fg">Group session</span>
+            <span className="block text-[11px] text-fg-subtle leading-snug">
+              Bills at the group weight-room rate.
+            </span>
+          </span>
+        </label>
+      ) : null}
+      <input
+        type="hidden"
+        name="isGroupSession"
+        value={isWeightRoom && isGroupSession ? "true" : "false"}
+      />
 
       {!isMultiSlot ? (
         <Field label="Note" optional>

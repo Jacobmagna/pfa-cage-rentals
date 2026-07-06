@@ -40,6 +40,7 @@ import {
   type CreatePrefill,
 } from "./schedule-create-dialog";
 import { pfaHour, pfaMinute, pfaWallClockAt } from "@/lib/timezone";
+import { GroupMark } from "@/app/_components/group-pill";
 
 const FIRST_HOUR = 8;
 const LAST_HOUR = 22;
@@ -60,6 +61,9 @@ export type ScheduleSession = {
   startAt: Date;
   endAt: Date;
   note: string | null;
+  // Weight-room rental billed at the group rate — drives the compact Group
+  // mark on the bar + the read-only Group pill in the edit dialog.
+  isGroupSession: boolean;
 };
 
 export type ScheduleBlock = {
@@ -448,6 +452,7 @@ export function ScheduleGrid({
           startAt: dialog.session.startAt,
           endAt: dialog.session.endAt,
           note: dialog.session.note,
+          isGroupSession: dialog.session.isGroupSession,
         }
       : undefined;
 
@@ -785,7 +790,11 @@ function DraggableSession({
     });
 
   const accent = resource ? typeBorder(resource.type) : "";
-  const tooltip = [session.coachName, session.note]
+  const tooltip = [
+    session.coachName,
+    session.isGroupSession ? "Group" : null,
+    session.note,
+  ]
     .filter(Boolean)
     .join(" · ");
 
@@ -816,6 +825,7 @@ function DraggableSession({
       title={tooltip}
     >
       <span className="truncate font-medium">{session.coachName}</span>
+      {session.isGroupSession ? <GroupMark /> : null}
     </button>
   );
 }

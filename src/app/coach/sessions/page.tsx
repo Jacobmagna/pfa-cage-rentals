@@ -121,6 +121,7 @@ export default async function CoachSessionsPage({
         endAt: sessionsBilling.endAt,
         note: sessionsBilling.note,
         ratePer30MinCents: sessionsBilling.ratePer30MinCents,
+        isGroupSession: sessionsBilling.isGroupSession,
       })
       .from(sessionsBilling)
       .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
@@ -152,6 +153,7 @@ export default async function CoachSessionsPage({
     // snapshotted rate (never recomputed from current overrides).
     ratePer30MinCents: r.ratePer30MinCents,
     amountCents: totalFromSnapshot(r.startAt, r.endAt, r.ratePer30MinCents),
+    isGroupSession: r.isGroupSession,
     isPast: r.startAt <= now,
     removalPending: pendingRemoval.has(r.id),
   }));

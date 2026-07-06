@@ -100,6 +100,7 @@ export default async function CoachSchedulePage({
         resourceType: resources.type,
         startAt: sessionsBilling.startAt,
         endAt: sessionsBilling.endAt,
+        isGroupSession: sessionsBilling.isGroupSession,
       })
       .from(sessionsBilling)
       .innerJoin(resources, eq(sessionsBilling.resourceId, resources.id))
@@ -155,6 +156,7 @@ export default async function CoachSchedulePage({
         resourceType: s.resourceType,
         startAt: s.startAt,
         endAt: s.endAt,
+        isGroupSession: s.isGroupSession,
       },
     ];
   });

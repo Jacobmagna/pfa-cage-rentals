@@ -84,6 +84,18 @@ function addSummarySheet(
         width: 14,
         kind: "dollar",
       },
+      {
+        header: "Group WeightRoom Slots",
+        key: "groupWeightRoomSlots",
+        width: 22,
+        kind: "num",
+      },
+      {
+        header: "Group WeightRoom $",
+        key: "groupWeightRoomDollars",
+        width: 20,
+        kind: "dollar",
+      },
     );
   }
   // Program hours (coach pay, a payout) — neutral labels; Program $ is
@@ -123,6 +135,8 @@ function addSummarySheet(
       data.bullpenDollars = row.bullpenTotalCents / 100;
       data.weightRoomSlots = row.weightRoomSlots;
       data.weightRoomDollars = row.weightRoomTotalCents / 100;
+      data.groupWeightRoomSlots = row.groupWeightRoomSlots;
+      data.groupWeightRoomDollars = row.groupWeightRoomTotalCents / 100;
       data.cageOwed = row.totalCents / 100; // cage-side receivable subtotal
     }
     if (includeProgramHours) {
@@ -197,13 +211,21 @@ function addDetailSheet(workbook: ExcelJS.Workbook, report: ReportData) {
     // column makes the numeric Rate cell's unit unambiguous per row. This is
     // display-only — totals and the stored snapshot are untouched.
     const perHour = row.resourceType === "weight_room";
+    // Group weight-room sessions share the weight_room rate basis (per hr)
+    // but must be visually distinguishable in the detail sheet — tag the
+    // resource label so a scan of the Resource column separates them from
+    // regular weight-room rentals.
+    const resourceLabel =
+      row.resourceType === "weight_room" && row.isGroupSession
+        ? `${row.resourceName} (Group)`
+        : row.resourceName;
     sheet.addRow({
       date: row.date,
       day: row.dayOfWeek,
       start: row.startTime,
       end: row.endTime,
       duration: row.durationMinutes,
-      resource: row.resourceName,
+      resource: resourceLabel,
       coach: row.coachName,
       slots: row.slots,
       rate: perHour

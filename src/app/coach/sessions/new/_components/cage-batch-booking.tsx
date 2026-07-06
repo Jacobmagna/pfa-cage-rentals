@@ -69,6 +69,10 @@ export function CageBatchBooking({
   onCancel: () => void;
 }) {
   const [note, setNote] = useState("");
+  // Booking-level "Group session" flag. Only shown when the selection
+  // includes a weight-room slot; the server applies it only to weight-room
+  // rows. Defaults false.
+  const [isGroupSession, setIsGroupSession] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -110,6 +114,15 @@ export function CageBatchBooking({
   const resourceName = (id: string) =>
     resources.find((r) => r.id === id)?.name ?? "Unknown";
 
+  // Does the current selection include at least one weight-room slot? Only
+  // then does the group-session checkbox make sense (the server ignores the
+  // flag on cages/bullpens either way).
+  const selectionHasWeightRoom = rows.some(
+    (r) =>
+      resources.find((res) => res.id === r.resourceId)?.type ===
+      "weight_room",
+  );
+
   const handleSubmit = () => {
     setError(null);
     if (count === 0) return;
@@ -117,6 +130,7 @@ export function CageBatchBooking({
     startTransition(async () => {
       try {
         await logOwnSessionsBatch({
+          isGroupSession: selectionHasWeightRoom && isGroupSession,
           slots: rows.map((r) => ({
             resourceId: r.resourceId,
             startAt: r.startAt,
@@ -187,6 +201,28 @@ export function CageBatchBooking({
         >
           {error}
         </div>
+      ) : null}
+
+      {/* Group session — one booking-level toggle, shown only when the
+          selection includes a weight-room slot. Bills those weight-room
+          rows at the group rate; ignored for cages/bullpens. */}
+      {selectionHasWeightRoom ? (
+        <label className="flex items-start gap-2.5">
+          <input
+            type="checkbox"
+            checked={isGroupSession}
+            onChange={(e) => setIsGroupSession(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-line-strong text-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+          />
+          <span className="space-y-0.5">
+            <span className="block text-sm font-medium text-fg">
+              Group session
+            </span>
+            <span className="block text-[11px] text-fg-subtle">
+              Bills weight-room slots at the group rate.
+            </span>
+          </span>
+        </label>
       ) : null}
 
       {/* One shared note. */}

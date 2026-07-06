@@ -9,6 +9,7 @@ import {
 import type { ResourceOption } from "./types";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
+import { GroupPill } from "@/app/_components/group-pill";
 import { formatPfaDate, formatPfaTime } from "@/lib/timezone";
 
 // Edit dialog for a coach's existing session. Mirrors the admin
@@ -22,6 +23,8 @@ export type SessionInitial = {
   startAt: Date;
   endAt: Date;
   note: string | null;
+  // Display-only: true for a weight-room rental billed at the group rate.
+  isGroupSession: boolean;
 };
 
 const INITIAL_STATE: EditActionResult = { ok: true };
@@ -157,9 +160,12 @@ export function EditSessionDialog({
             <p className="text-xs uppercase tracking-[0.14em] text-fg-muted">
               Edit
             </p>
-            <h2 className="text-xl font-semibold tracking-tight mt-0.5">
-              Rental details
-            </h2>
+            <div className="flex items-center gap-2 mt-0.5">
+              <h2 className="text-xl font-semibold tracking-tight">
+                Rental details
+              </h2>
+              {initial?.isGroupSession ? <GroupPill /> : null}
+            </div>
           </div>
           <button
             type="button"

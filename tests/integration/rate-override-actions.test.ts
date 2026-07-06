@@ -15,6 +15,7 @@ import { db } from "@/db";
 import {
   auditLog,
   coachRateOverrides,
+  rateDefaults,
   sessionsBilling,
   users,
 } from "@/db/schema";
@@ -22,7 +23,10 @@ import {
   deleteRateOverrideInternal,
   upsertRateOverrideInternal,
 } from "@/lib/server/rate-override-actions";
-import { createSessionInternal } from "@/lib/server/session-actions";
+import {
+  createSessionInternal,
+  resolveRateCents,
+} from "@/lib/server/session-actions";
 import { RateOverrideNotFoundError } from "@/lib/errors";
 import {
   ensureFixtureUsers,
@@ -250,6 +254,188 @@ describe("upsertRateOverrideInternal", () => {
         ratePer30MinCents: 1500,
       }),
     ).rejects.toThrow();
+  });
+
+  // GROUP-RATE (4th tier): the optional per-coach group weight-room override
+  // persists into the new column and is READ BACK by resolveRateCents when a
+  // group weight-room session is resolved.
+  it("persists a groupRatePer30MinCents on a weight_room override and resolves it for a group session", async () => {
+    const coach = await createThrowawayCoach();
+
+    const row = await upsertRateOverrideInternal(fixtures.admin, {
+      coachId: coach.id,
+      resourceType: "weight_room",
+      ratePer30MinCents: 800,
+      groupRatePer30MinCents: 1600,
+    });
+    expect(row.groupRatePer30MinCents).toBe(1600);
+
+    const [persisted] = await db
+      .select()
+      .from(coachRateOverrides)
+      .where(
+        and(
+          eq(coachRateOverrides.coachId, coach.id),
+          eq(coachRateOverrides.resourceType, "weight_room"),
+        ),
+      );
+    expect(persisted.ratePer30MinCents).toBe(800);
+    expect(persisted.groupRatePer30MinCents).toBe(1600);
+
+    // Read back through resolution: a group weight-room session resolves the
+    // coach's group override...
+    const groupRate = await resolveRateCents({
+      coachId: coach.id,
+      resourceType: "weight_room",
+      isGroupSession: true,
+    });
+    expect(groupRate).toBe(1600);
+
+    // ...while a NON-group weight-room session resolves the regular override.
+    const regularRate = await resolveRateCents({
+      coachId: coach.id,
+      resourceType: "weight_room",
+      isGroupSession: false,
+    });
+    expect(regularRate).toBe(800);
+  });
+
+  it("rejects a groupRatePer30MinCents on a non-weight_room override", async () => {
+    const coach = await createThrowawayCoach();
+    await expect(
+      upsertRateOverrideInternal(fixtures.admin, {
+        coachId: coach.id,
+        resourceType: "cage",
+        ratePer30MinCents: 1700,
+        groupRatePer30MinCents: 1500,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("leaves an existing group override intact when a later upsert omits it", async () => {
+    const coach = await createThrowawayCoach();
+    await upsertRateOverrideInternal(fixtures.admin, {
+      coachId: coach.id,
+      resourceType: "weight_room",
+      ratePer30MinCents: 800,
+      groupRatePer30MinCents: 1600,
+    });
+
+    // Update only the regular rate; group rate omitted must NOT clobber.
+    const updated = await upsertRateOverrideInternal(fixtures.admin, {
+      coachId: coach.id,
+      resourceType: "weight_room",
+      ratePer30MinCents: 900,
+    });
+    expect(updated.ratePer30MinCents).toBe(900);
+    expect(updated.groupRatePer30MinCents).toBe(1600);
+  });
+
+  it("CLEARS an existing group override when a later upsert passes null, leaving the regular rate override intact", async () => {
+    const coach = await createThrowawayCoach();
+    await upsertRateOverrideInternal(fixtures.admin, {
+      coachId: coach.id,
+      resourceType: "weight_room",
+      ratePer30MinCents: 800,
+      groupRatePer30MinCents: 1600,
+    });
+
+    // The rate card's blank group input sends an explicit null → CLEAR the
+    // group override while preserving the regular weight-room rate override.
+    const cleared = await upsertRateOverrideInternal(fixtures.admin, {
+      coachId: coach.id,
+      resourceType: "weight_room",
+      ratePer30MinCents: 800,
+      groupRatePer30MinCents: null,
+    });
+    expect(cleared.ratePer30MinCents).toBe(800);
+    expect(cleared.groupRatePer30MinCents).toBeNull();
+
+    const [persisted] = await db
+      .select()
+      .from(coachRateOverrides)
+      .where(
+        and(
+          eq(coachRateOverrides.coachId, coach.id),
+          eq(coachRateOverrides.resourceType, "weight_room"),
+        ),
+      );
+    // Group column NULL (cleared)...
+    expect(persisted.groupRatePer30MinCents).toBeNull();
+    // ...and the regular override untouched (NOT deleted).
+    expect(persisted.ratePer30MinCents).toBe(800);
+
+    // With the coach group override cleared AND no facility group default,
+    // a group booking falls all the way back to the regular weight-room rate.
+    // Control the facility default explicitly so this doesn't depend on ambient
+    // rate_defaults state (which survives truncation).
+    const [wrDefault] = await db
+      .select()
+      .from(rateDefaults)
+      .where(eq(rateDefaults.type, "weight_room"));
+    const origGroupDefault = wrDefault?.groupRatePer30MinCents ?? null;
+    await db
+      .update(rateDefaults)
+      .set({ groupRatePer30MinCents: null })
+      .where(eq(rateDefaults.type, "weight_room"));
+    try {
+      const groupRate = await resolveRateCents({
+        coachId: coach.id,
+        resourceType: "weight_room",
+        isGroupSession: true,
+      });
+      expect(groupRate).toBe(800);
+    } finally {
+      await db
+        .update(rateDefaults)
+        .set({ groupRatePer30MinCents: origGroupDefault })
+        .where(eq(rateDefaults.type, "weight_room"));
+    }
+  });
+
+  it("PRESERVES an existing group override when a later upsert omits it (undefined)", async () => {
+    const coach = await createThrowawayCoach();
+    await upsertRateOverrideInternal(fixtures.admin, {
+      coachId: coach.id,
+      resourceType: "weight_room",
+      ratePer30MinCents: 800,
+      groupRatePer30MinCents: 1600,
+    });
+
+    // Field OMITTED entirely (undefined) → the protective preserve behavior
+    // still holds for callers that don't include the group field.
+    const updated = await upsertRateOverrideInternal(fixtures.admin, {
+      coachId: coach.id,
+      resourceType: "weight_room",
+      ratePer30MinCents: 950,
+    });
+    expect(updated.ratePer30MinCents).toBe(950);
+    expect(updated.groupRatePer30MinCents).toBe(1600);
+
+    const [persisted] = await db
+      .select()
+      .from(coachRateOverrides)
+      .where(
+        and(
+          eq(coachRateOverrides.coachId, coach.id),
+          eq(coachRateOverrides.resourceType, "weight_room"),
+        ),
+      );
+    expect(persisted.groupRatePer30MinCents).toBe(1600);
+  });
+
+  it("accepts null groupRatePer30MinCents on a non-weight_room type (a clear is valid for any type)", async () => {
+    const coach = await createThrowawayCoach();
+    // null is NOT a group value being set on a cage — it's a no-op clear, so
+    // the superRefine must NOT reject it. (A non-null value still would.)
+    const row = await upsertRateOverrideInternal(fixtures.admin, {
+      coachId: coach.id,
+      resourceType: "cage",
+      ratePer30MinCents: 1700,
+      groupRatePer30MinCents: null,
+    });
+    expect(row.ratePer30MinCents).toBe(1700);
+    expect(row.groupRatePer30MinCents).toBeNull();
   });
 });
 

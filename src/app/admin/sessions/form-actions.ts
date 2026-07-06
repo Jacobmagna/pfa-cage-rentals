@@ -75,6 +75,10 @@ function buildSessionInput(formData: FormData) {
     resourceId: formData.get("resourceId")?.toString() ?? "",
     startAt,
     endAt,
+    // Booking-level group-session flag (weight-room only; the server gates it
+    // on resource type). The Session tab submits "true"/"false" via a hidden
+    // field. Defaults false when absent (e.g. the edit path, which omits it).
+    isGroupSession: formData.get("isGroupSession")?.toString() === "true",
     // Send `null` (not undefined) for an empty note so the UPDATE path
     // actually clears the column. updateSessionInternal treats undefined
     // as "don't touch this column" and null as "set to NULL" — using

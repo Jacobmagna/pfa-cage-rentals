@@ -104,6 +104,12 @@ export function CageSlotBooking({
   // Raw text of the custom-minutes input (validated/clamped on blur+submit).
   const [customText, setCustomText] = useState("30");
 
+  // Booking-level "Group session" flag — only meaningful (and only shown)
+  // when the resource is a weight room. Defaults false; when the resource
+  // isn't a weight room the checkbox is hidden and false is submitted.
+  const isWeightRoom = resource.type === "weight_room";
+  const [isGroupSession, setIsGroupSession] = useState(false);
+
   // Single-note path (one rental).
   const [note, setNote] = useState("");
   // Split path: per-slot notes for the N 30-min rentals.
@@ -194,6 +200,7 @@ export function CageSlotBooking({
           );
           await logOwnSessionsBatch({
             resourceId: resource.id,
+            isGroupSession: isWeightRoom && isGroupSession,
             slots: slots.map((s) => ({
               startAt: s.startAt,
               endAt: s.endAt,
@@ -206,6 +213,7 @@ export function CageSlotBooking({
             startAt,
             endAt,
             note: note.trim() || null,
+            isGroupSession: isWeightRoom && isGroupSession,
           });
         }
         onBooked();
@@ -323,6 +331,27 @@ export function CageSlotBooking({
             <span className="block text-[11px] text-fg-subtle">
               {durationMin} min becomes {durationMin / 30} back-to-back 30-min
               rentals, each with its own note.
+            </span>
+          </span>
+        </label>
+      ) : null}
+
+      {/* Group session — weight-room only. Booking-level; bills at the
+          group weight-room rate. Hidden (and false) for cages/bullpens. */}
+      {isWeightRoom ? (
+        <label className="flex items-start gap-2.5">
+          <input
+            type="checkbox"
+            checked={isGroupSession}
+            onChange={(e) => setIsGroupSession(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-line-strong text-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+          />
+          <span className="space-y-0.5">
+            <span className="block text-sm font-medium text-fg">
+              Group session
+            </span>
+            <span className="block text-[11px] text-fg-subtle">
+              Bills at the group weight-room rate.
             </span>
           </span>
         </label>

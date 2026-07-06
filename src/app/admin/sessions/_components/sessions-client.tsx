@@ -7,6 +7,7 @@ import { SessionFormDialog, type SessionFormInitialValues } from "./session-form
 import { deleteSessionAction } from "../form-actions";
 import { PFA_TIMEZONE } from "@/lib/timezone";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
+import { GroupPill } from "@/app/_components/group-pill";
 
 // Top-level client island for the admin sessions page. Owns the
 // dialog open/close state (create vs edit), the row delete pending
@@ -30,6 +31,8 @@ export type SessionRow = {
   endAt: Date;
   note: string | null;
   ratePer30MinCents: number;
+  // Weight-room rental billed at the group rate — drives the "Group" pill.
+  isGroupSession: boolean;
 };
 
 export type CoachOption = {
@@ -106,6 +109,7 @@ export function SessionsClient({
           startAt: dialogState.row.startAt,
           endAt: dialogState.row.endAt,
           note: dialogState.row.note,
+          isGroupSession: dialogState.row.isGroupSession,
         }
       : undefined;
 
@@ -178,7 +182,10 @@ export function SessionsClient({
                       ) : null}
                     </td>
                     <td className="px-4 py-3 text-sm text-fg-muted">
-                      {row.resourceName}
+                      <span className="inline-flex items-center gap-1.5 flex-wrap">
+                        {row.resourceName}
+                        {row.isGroupSession ? <GroupPill /> : null}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-sm font-mono tnum tabular-nums text-right text-fg-muted whitespace-nowrap">
                       {formatDuration(row.startAt, row.endAt)}

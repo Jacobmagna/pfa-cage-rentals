@@ -21,6 +21,7 @@ import {
   type SessionInitial,
 } from "./edit-session-dialog";
 import { HistoryFilters } from "./history-filters";
+import { GroupPill } from "@/app/_components/group-pill";
 import type { ResourceOption } from "./types";
 import { buildHistoryQuery, type HistoryFilters as HistoryFilterSet } from "../filters.logic";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
@@ -43,6 +44,8 @@ export type HistoryRow = {
   // rate so they can't drift from a later override change.
   ratePer30MinCents: number;
   amountCents: number;
+  // Weight-room rental billed at the group rate — drives the "Group" pill.
+  isGroupSession: boolean;
   // 1b security: a PAST rental (startAt <= now) can't be deleted/edited-
   // billable by the coach — they request admin removal instead.
   isPast: boolean;
@@ -105,6 +108,7 @@ export function SessionsHistoryClient({
         startAt: editingRow.startAt,
         endAt: editingRow.endAt,
         note: editingRow.note,
+        isGroupSession: editingRow.isGroupSession,
       }
     : null;
 
@@ -167,6 +171,7 @@ export function SessionsHistoryClient({
                     <span className="text-sm text-fg-muted truncate">
                       {row.resourceName}
                     </span>
+                    {row.isGroupSession ? <GroupPill /> : null}
                   </div>
                   {row.note ? (
                     <p

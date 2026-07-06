@@ -63,6 +63,12 @@ export type RateDefaultsFormValues = {
   cageDollars: string;
   bullpenDollars: string;
   weightRoomDollars: string;
+  /**
+   * FACILITY-WIDE group weight-room rate as the admin typed it (dollars/HR).
+   * Blank = clear the group rate (fall back to the regular weight-room rate).
+   * Echoed back on error.
+   */
+  weightRoomGroupDollars: string;
 };
 
 export type RateDefaultsActionResult =
@@ -78,6 +84,8 @@ function snapshotRates(formData: FormData): RateDefaultsFormValues {
     cageDollars: formData.get("cageDollars")?.toString() ?? "",
     bullpenDollars: formData.get("bullpenDollars")?.toString() ?? "",
     weightRoomDollars: formData.get("weightRoomDollars")?.toString() ?? "",
+    weightRoomGroupDollars:
+      formData.get("weightRoomGroupDollars")?.toString() ?? "",
   };
 }
 
@@ -121,6 +129,16 @@ export async function updateRateDefaultsFormAction(
       weightRoomDollars: weightRoomHourlyToPer30MinDollars(
         values.weightRoomDollars,
       ),
+      // FACILITY-WIDE group weight-room rate. BLANK is passed through as an
+      // empty string so the internal action CLEARS the column to NULL (the
+      // facility rate must be explicitly clearable back to "use regular
+      // rate"). A provided value converts per HOUR → per-30-min dollars via
+      // the SAME helper as the regular weight-room rate, so displayed $ ==
+      // charged $.
+      weightRoomGroupDollars:
+        values.weightRoomGroupDollars.trim() === ""
+          ? ""
+          : weightRoomHourlyToPer30MinDollars(values.weightRoomGroupDollars),
     });
     return { ok: true, savedAt: Date.now() };
   } catch (err) {

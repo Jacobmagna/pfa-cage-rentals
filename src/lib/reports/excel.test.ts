@@ -25,6 +25,7 @@ function makeReport(): ReportData {
         slots: 2,
         resourceName: "Cage 1",
         resourceType: "cage",
+        isGroupSession: false,
         coachId: "c1",
         coachName: "Alice Coach",
         coachEmail: "alice@x.com",
@@ -42,6 +43,7 @@ function makeReport(): ReportData {
         slots: 2,
         resourceName: "Weight Room 1",
         resourceType: "weight_room",
+        isGroupSession: false,
         coachId: "c2",
         coachName: "Bob Coach",
         coachEmail: "bob@x.com",
@@ -59,6 +61,7 @@ function makeReport(): ReportData {
         slots: 2,
         resourceName: "Cage 2",
         resourceType: "cage",
+        isGroupSession: false,
         coachId: "c1",
         coachName: "Alice Coach",
         coachEmail: "alice@x.com",
@@ -78,6 +81,8 @@ function makeReport(): ReportData {
         bullpenTotalCents: 0,
         weightRoomSlots: 0,
         weightRoomTotalCents: 0,
+        groupWeightRoomSlots: 0,
+        groupWeightRoomTotalCents: 0,
         programHours: 0,
         programTotalCents: 0,
         totalCents: 3600,
@@ -92,6 +97,8 @@ function makeReport(): ReportData {
         bullpenTotalCents: 0,
         weightRoomSlots: 2,
         weightRoomTotalCents: 1400,
+        groupWeightRoomSlots: 0,
+        groupWeightRoomTotalCents: 0,
         programHours: 0,
         programTotalCents: 0,
         totalCents: 1400,
@@ -155,6 +162,8 @@ describe("buildReportWorkbook", () => {
         "Bullpen $",
         "WeightRoom Slots",
         "WeightRoom $",
+        "Group WeightRoom Slots",
+        "Group WeightRoom $",
         "Work Hours",
         "Work $",
         "Rental Owed $",
@@ -168,10 +177,10 @@ describe("buildReportWorkbook", () => {
       const row2 = sheet.getRow(2);
       expect(row2.getCell(1).value).toBe("Alice Coach");
       expect(row2.getCell(4).value).toBe(36); // cage $ = 3600 cents / 100
-      expect(row2.getCell(11).value).toBe(36); // Rental Owed $ (cage receivable, col 11)
+      expect(row2.getCell(13).value).toBe(36); // Rental Owed $ (cage receivable, col 13)
 
       expect(sheet.getColumn(4).numFmt).toBe('"$"#,##0.00');
-      expect(sheet.getColumn(11).numFmt).toBe('"$"#,##0.00');
+      expect(sheet.getColumn(13).numFmt).toBe('"$"#,##0.00');
     });
 
     it("appends a bold grand-total footer row", async () => {
@@ -182,10 +191,10 @@ describe("buildReportWorkbook", () => {
       const footer = sheet.getRow(4);
       expect(String(footer.getCell(1).value)).toContain("Grand total");
       expect(String(footer.getCell(1).value)).toContain("3 sessions");
-      // Cage-side grand sits under "Rental Owed $" (col 11), NOT merged with
-      // program pay. Work $ (col 10) holds the (here zero) program grand.
-      expect(footer.getCell(11).value).toBe(50); // cage grand: 5000 cents / 100
-      const programGrand = footer.getCell(10).value;
+      // Cage-side grand sits under "Rental Owed $" (col 13), NOT merged with
+      // program pay. Work $ (col 12) holds the (here zero) program grand.
+      expect(footer.getCell(13).value).toBe(50); // cage grand: 5000 cents / 100
+      const programGrand = footer.getCell(12).value;
       expect(programGrand === 0 || programGrand === null || programGrand === "").toBe(true);
       expect(footer.font?.bold).toBe(true);
     });
@@ -200,10 +209,10 @@ describe("buildReportWorkbook", () => {
       const wb = await loadWorkbook(buf);
       const sheet = wb.getWorksheet("Summary")!;
       const footer = sheet.getRow(4);
-      // Work $ grand under col 10, Rental Owed $ grand under col 11 — the
+      // Work $ grand under col 12, Rental Owed $ grand under col 13 — the
       // two opposite money directions are reported side by side, not added.
-      expect(footer.getCell(10).value).toBe(60); // program pay grand: 6000 / 100
-      expect(footer.getCell(11).value).toBe(50); // cage receivable grand: 5000 / 100
+      expect(footer.getCell(12).value).toBe(60); // program pay grand: 6000 / 100
+      expect(footer.getCell(13).value).toBe(50); // cage receivable grand: 5000 / 100
     });
 
     it("freezes the header row", async () => {
@@ -246,6 +255,8 @@ describe("buildReportWorkbook", () => {
         "Bullpen $",
         "WeightRoom Slots",
         "WeightRoom $",
+        "Group WeightRoom Slots",
+        "Group WeightRoom $",
         "Rental Owed $",
       ]);
       expect(headers).not.toContain("Work Hours");

@@ -22,6 +22,7 @@ import {
 } from "@/lib/schedule-grid-utils";
 import { assignLanes } from "@/lib/schedule-lanes";
 import { formatPfaTime12h, pfaHour } from "@/lib/timezone";
+import { GroupMark } from "@/app/_components/group-pill";
 
 // #15B drag-to-MOVE. The single DndContext lives in the editable wrapper
 // (editable-master-schedule.tsx). These data shapes are what each draggable
@@ -59,6 +60,8 @@ export type MasterSession = {
   coachName: string;
   startAt: Date;
   endAt: Date;
+  // Weight-room rental billed at the group rate — drives the compact Group mark.
+  isGroupSession: boolean;
 };
 
 export type MasterBlockedTime = {
@@ -584,7 +587,11 @@ function ResourceGrid({
         const timeLabel = `${formatPfaTime12h(s.startAt)}–${formatPfaTime12h(
           s.endAt,
         )}`;
-        const tooltip = [s.coachName, timeLabel]
+        const tooltip = [
+          s.coachName,
+          s.isGroupSession ? "Group" : null,
+          timeLabel,
+        ]
           .filter(Boolean)
           .join(" · ");
         const barClass = [
@@ -600,6 +607,7 @@ function ResourceGrid({
         const inner = (
           <>
             <span className="truncate font-medium">{s.coachName}</span>
+            {s.isGroupSession ? <GroupMark /> : null}
           </>
         );
         // #15B: drag enabled → draggable bar that ALSO opens the edit dialog

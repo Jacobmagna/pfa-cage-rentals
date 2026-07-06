@@ -31,6 +31,7 @@ function session(
     endAt,
     note: null,
     ratePer30MinCents: 2200,
+    isGroupSession: false,
     ...overrides,
   };
 }
@@ -105,6 +106,43 @@ describe("aggregateReport — summary roll-up", () => {
     expect(grandTotalCents).toBe(10200);
     // No program hours → program-pay grand total is zero.
     expect(programGrandTotalCents).toBe(0);
+  });
+
+  it("breaks group weight-room sessions into their own bucket, excluding them from regular weight room", () => {
+    const sessions: AggregateSessionInput[] = [
+      // Regular weight room: 2 × 700 = 1400
+      session({
+        sessionId: "wr-reg",
+        resourceType: "weight_room",
+        resourceName: "Weight Room 1",
+        ratePer30MinCents: 700,
+        isGroupSession: false,
+      }),
+      // Group weight room (snapshotted at the group rate): 2 × 1200 = 2400
+      session({
+        sessionId: "wr-grp",
+        resourceType: "weight_room",
+        resourceName: "Weight Room 1",
+        ratePer30MinCents: 1200,
+        isGroupSession: true,
+      }),
+      // A cage session to confirm cage totals are untouched by the split.
+      session({ sessionId: "c1", resourceType: "cage" }), // 2 × 2200 = 4400
+    ];
+    const { summary, grandTotalCents } = aggregateReport(sessions);
+    const row = summary[0];
+    // Regular weight room EXCLUDES the group session.
+    expect(row.weightRoomSlots).toBe(2);
+    expect(row.weightRoomTotalCents).toBe(1400);
+    // Group weight room is its own separate total.
+    expect(row.groupWeightRoomSlots).toBe(2);
+    expect(row.groupWeightRoomTotalCents).toBe(2400);
+    // Cage unchanged.
+    expect(row.cageSlots).toBe(2);
+    expect(row.cageTotalCents).toBe(4400);
+    // Rental-owed subtotal still includes the group session (4400 + 1400 + 2400).
+    expect(row.totalCents).toBe(8200);
+    expect(grandTotalCents).toBe(8200);
   });
 
   it("sorts summary by coach name and creates a row per coach", () => {

@@ -9,18 +9,48 @@ import { z } from "zod";
 
 const RESOURCE_TYPES = ["cage", "bullpen", "weight_room"] as const;
 
-export const upsertRateOverrideSchema = z.object({
-  coachId: z.string().min(1, "coachId is required"),
-  resourceType: z.enum(RESOURCE_TYPES),
-  // Stored in cents. Caller is responsible for the dollars → cents
-  // conversion at the form-action layer (one source of truth for
-  // currency formatting / rounding semantics — see form-actions.ts).
-  ratePer30MinCents: z
-    .number()
-    .int("Rate must be a whole number of cents")
-    .min(1, "Rate must be greater than $0")
-    .max(1_000_00, "Rate cannot exceed $1,000 per 30 minutes"),
-});
+export const upsertRateOverrideSchema = z
+  .object({
+    coachId: z.string().min(1, "coachId is required"),
+    resourceType: z.enum(RESOURCE_TYPES),
+    // Stored in cents. Caller is responsible for the dollars → cents
+    // conversion at the form-action layer (one source of truth for
+    // currency formatting / rounding semantics — see form-actions.ts).
+    ratePer30MinCents: z
+      .number()
+      .int("Rate must be a whole number of cents")
+      .min(1, "Rate must be greater than $0")
+      .max(1_000_00, "Rate cannot exceed $1,000 per 30 minutes"),
+    // GROUP-RATE (4th tier): OPTIONAL per-coach override of the group
+    // weight-room rate. Only accepted when resourceType === "weight_room"
+    // (a NON-null value is rejected otherwise by the superRefine below).
+    // Three-way semantics:
+    //   - OMITTED (undefined) = leave the group override untouched (the
+    //     internal preserves any existing value).
+    //   - null = explicitly CLEAR the group override → resolution falls back
+    //     to the facility group default, then the regular weight-room rate.
+    //   - a positive int = set the group override to that cents value.
+    groupRatePer30MinCents: z
+      .number()
+      .int("Group rate must be a whole number of cents")
+      .min(1, "Group rate must be greater than $0")
+      .max(1_000_00, "Group rate cannot exceed $1,000 per 30 minutes")
+      .nullish(),
+  })
+  .superRefine((val, ctx) => {
+    // Only a NON-null group value is type-restricted to weight_room. null (an
+    // explicit clear) and undefined (untouched) are valid for ANY type.
+    if (
+      val.groupRatePer30MinCents != null &&
+      val.resourceType !== "weight_room"
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["groupRatePer30MinCents"],
+        message: "A group rate is only valid for the weight_room resource type",
+      });
+    }
+  });
 
 export const deleteRateOverrideSchema = z.object({
   coachId: z.string().min(1, "coachId is required"),

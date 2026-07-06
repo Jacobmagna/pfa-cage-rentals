@@ -61,6 +61,19 @@ export async function upsertRateOverrideInternal(
     )
     .limit(1);
 
+  // GROUP-RATE (4th tier): three-way write for the optional group
+  // weight-room override column. The schema guarantees any NON-null value
+  // only appears when resourceType === "weight_room".
+  //   - undefined (OMITTED) → do NOT touch the column: on insert it defaults
+  //     to NULL, on update the existing group override is left intact.
+  //   - null (explicit CLEAR from the rate card's blank input) → WRITE NULL,
+  //     falling group bookings back to the regular weight-room rate.
+  //   - a number → WRITE the number.
+  // setGroupRate is true for BOTH null and a number (only undefined is
+  // skipped), so the spread below writes `groupRatePer30MinCents` verbatim —
+  // null clears, a number sets.
+  const setGroupRate = parsed.groupRatePer30MinCents !== undefined;
+
   // Drizzle's onConflictDoUpdate handles the upsert atomically.
   const [row] = await db
     .insert(coachRateOverrides)
@@ -68,13 +81,21 @@ export async function upsertRateOverrideInternal(
       coachId: parsed.coachId,
       resourceType: parsed.resourceType,
       ratePer30MinCents: parsed.ratePer30MinCents,
+      ...(setGroupRate && {
+        groupRatePer30MinCents: parsed.groupRatePer30MinCents,
+      }),
     })
     .onConflictDoUpdate({
       target: [
         coachRateOverrides.coachId,
         coachRateOverrides.resourceType,
       ],
-      set: { ratePer30MinCents: parsed.ratePer30MinCents },
+      set: {
+        ratePer30MinCents: parsed.ratePer30MinCents,
+        ...(setGroupRate && {
+          groupRatePer30MinCents: parsed.groupRatePer30MinCents,
+        }),
+      },
     })
     .returning();
 

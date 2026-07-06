@@ -309,6 +309,13 @@
       "when": 1783297648828,
       "tag": "0043_complete_rattler",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1783380634036,
+      "tag": "0044_old_jackal",
+      "breakpoints": true
     }
   ]
 }

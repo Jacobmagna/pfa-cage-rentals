@@ -98,6 +98,11 @@ export const users = pgTable("users", {
   // grids) WITHOUT admin rights. Meaningful only for role="coach"; admins
   // always have schedule access. NOT NULL default false backfills cleanly.
   scheduleAdmin: boolean("schedule_admin").notNull().default(false),
+  // Travel operator flag (travel slice). requireTravelAccess() keys off
+  // role === "admin" || travel_admin, so a travel-only operator gets travel
+  // access without altering the facility `role` enum. Additive + NOT NULL
+  // default false backfills cleanly and never affects any facility read.
+  travelAdmin: boolean("travel_admin").notNull().default(false),
   // Payment handles. Admin sees Zelle on /admin/coaches/[id] and
   // /admin/payments as a reconciliation hint. Coach-facing surfaces
   // never expose them. NULL = not set.
@@ -178,6 +183,18 @@ export const accounts = pgTable(
 );
 
 export const sessions = pgTable("sessions", {
+  sessionToken: text("session_token").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expires: timestamp("expires", { mode: "date" }).notNull(),
+});
+
+// Travel's OWN session table (separate Auth.js instance, distinct cookie) so
+// travel and facility sessions are fully independent at storage — neither auth
+// system can read the other's sessions. Mirrors the Auth.js `sessions` shape
+// exactly. Additive: no facility read/write touches this table.
+export const travelSessions = pgTable("travel_sessions", {
   sessionToken: text("session_token").primaryKey(),
   userId: text("user_id")
     .notNull()

@@ -31,6 +31,11 @@ const nextConfig: NextConfig = {
         "pfaengine.com",
         "www.pfacagerentals.com",
         "pfacagerentals.com",
+        // Additive: the travel slice served on the travel subdomain. Server
+        // actions invoked from travel.pfaengine.com are same-deployment but a
+        // different Origin, so without this they'd 403. No effect on facility
+        // hosts. (Travel routing lives in src/proxy.ts.)
+        "travel.pfaengine.com",
         "pfa-cage-rentals.vercel.app",
         ...(process.env.VERCEL_URL ? [process.env.VERCEL_URL] : []),
       ],

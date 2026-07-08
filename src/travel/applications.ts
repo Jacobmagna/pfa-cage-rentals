@@ -11,7 +11,7 @@
 //     validation (required names + a basic email shape). parentEmail is
 //     normalized (lowercased + trimmed) before insert.
 
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import * as Sentry from "@sentry/nextjs";
 import { db } from "@/db";
 import {
@@ -196,12 +196,23 @@ export async function declineApplication(
   await db
     .update(travelApplications)
     .set({ status: "declined", reviewNote: note, reviewedAt: new Date() })
-    .where(eq(travelApplications.id, applicationId));
+    .where(
+      and(
+        eq(travelApplications.id, applicationId),
+        eq(travelApplications.status, "pending"),
+      ),
+    );
 }
 
 export type AcceptResult =
   | { ok: true; onboardingSent: boolean }
   | { ok: false; reason: string };
+
+// Sentinel thrown INSIDE the accept transaction when the status-guarded flip
+// matches 0 rows (we lost the race / the app was decided between our pre-read
+// and the flip). Throwing rolls the txn back so nothing is created; we catch it
+// OUTSIDE the txn and map it to { ok:false, reason:"already_decided" }.
+class AcceptRaceError extends Error {}
 
 /**
  * Accept a PENDING application — the core operator action. Idempotent-guarded:
@@ -239,73 +250,97 @@ export async function acceptApplication(
   // An existing CLAIMED guardian (has passwordHash) already logs in → false.
   let needsOnboarding = true;
 
-  await db.transaction(async (tx) => {
-    // a. find-or-create guardian by normalized email.
-    const [existing] = await tx
-      .select({
-        id: travelGuardians.id,
-        passwordHash: travelGuardians.passwordHash,
-      })
-      .from(travelGuardians)
-      .where(eq(travelGuardians.email, email))
-      .limit(1);
+  try {
+    await db.transaction(async (tx) => {
+      // status-guarded flip FIRST: this is the concurrency gate. Only a
+      // `pending` row flips; if two Accepts race, exactly one matches here and
+      // the other gets 0 rows → we abort before creating anything.
+      const flipped = await tx
+        .update(travelApplications)
+        .set({ status: "accepted", reviewedAt: new Date() })
+        .where(
+          and(
+            eq(travelApplications.id, applicationId),
+            eq(travelApplications.status, "pending"),
+          ),
+        )
+        .returning({ id: travelApplications.id });
+      if (flipped.length === 0) {
+        // Lost the race / decided between our pre-read and here — throw to roll
+        // back so no guardian/athlete/roster rows are created. Caught below.
+        throw new AcceptRaceError();
+      }
 
-    let guardianId: string;
-    if (existing) {
-      guardianId = existing.id;
-      needsOnboarding = existing.passwordHash == null;
-    } else {
-      const [created] = await tx
-        .insert(travelGuardians)
-        .values({
-          firstName: application.parentFirstName,
-          lastName: application.parentLastName,
-          email,
-          phone: application.parentPhone,
-          passwordHash: null,
-          emailVerified: null,
-          isAccountOwner: true,
+      // a. find-or-create guardian by normalized email.
+      const [existing] = await tx
+        .select({
+          id: travelGuardians.id,
+          passwordHash: travelGuardians.passwordHash,
         })
-        .returning({ id: travelGuardians.id });
-      guardianId = created!.id;
-      needsOnboarding = true;
-    }
+        .from(travelGuardians)
+        .where(eq(travelGuardians.email, email))
+        .limit(1);
 
-    // b. create the athlete.
-    const [athlete] = await tx
-      .insert(travelAthletes)
-      .values({
-        firstName: application.athleteFirstName,
-        lastName: application.athleteLastName,
-        gradYear: application.athleteGradYear,
-        positions: application.athletePositions,
-      })
-      .returning({ id: travelAthletes.id });
-    const athleteId = athlete!.id;
+      let guardianId: string;
+      if (existing) {
+        guardianId = existing.id;
+        needsOnboarding = existing.passwordHash == null;
+      } else {
+        const [created] = await tx
+          .insert(travelGuardians)
+          .values({
+            firstName: application.parentFirstName,
+            lastName: application.parentLastName,
+            email,
+            phone: application.parentPhone,
+            passwordHash: null,
+            emailVerified: null,
+            isAccountOwner: true,
+          })
+          .returning({ id: travelGuardians.id });
+        guardianId = created!.id;
+        needsOnboarding = true;
+      }
 
-    // c. link guardian ↔ athlete (primary).
-    await tx.insert(travelGuardianAthletes).values({
-      guardianId,
-      athleteId,
-      relationship: null,
-      isPrimary: true,
+      // b. create the athlete.
+      const [athlete] = await tx
+        .insert(travelAthletes)
+        .values({
+          firstName: application.athleteFirstName,
+          lastName: application.athleteLastName,
+          gradYear: application.athleteGradYear,
+          positions: application.athletePositions,
+        })
+        .returning({ id: travelAthletes.id });
+      const athleteId = athlete!.id;
+
+      // c. link guardian ↔ athlete (primary).
+      await tx.insert(travelGuardianAthletes).values({
+        guardianId,
+        athleteId,
+        relationship: null,
+        isPrimary: true,
+      });
+
+      // d. roster the athlete on the applied-to team, if any.
+      //    onConflictDoNothing guards the composite PK (a re-add is harmless).
+      if (application.teamId) {
+        await tx
+          .insert(travelTeamAthletes)
+          .values({ teamId: application.teamId, athleteId, status: "active" })
+          .onConflictDoNothing();
+      }
+
+      // (status flip already done first, above.)
     });
-
-    // d. roster the athlete on the applied-to team, if any. onConflictDoNothing
-    //    guards the composite PK (a re-add is harmless).
-    if (application.teamId) {
-      await tx
-        .insert(travelTeamAthletes)
-        .values({ teamId: application.teamId, athleteId, status: "active" })
-        .onConflictDoNothing();
+  } catch (err) {
+    // A racing/duplicate Accept flipped 0 rows and rolled back → friendly
+    // already_decided. Any other error is a real DB failure and must propagate.
+    if (err instanceof AcceptRaceError) {
+      return { ok: false, reason: "already_decided" };
     }
-
-    // e. flip the application to accepted.
-    await tx
-      .update(travelApplications)
-      .set({ status: "accepted", reviewedAt: new Date() })
-      .where(eq(travelApplications.id, applicationId));
-  });
+    throw err;
+  }
 
   // Onboarding email — AFTER the commit, best-effort. A returning claimed parent
   // gets no claim link.

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireTravelAccess } from "@/travel/authz";
 
 // Guarded travel operator landing (PLACEHOLDER). requireTravelAccess() runs
@@ -19,6 +20,15 @@ export default async function TravelAdminPage() {
         You&apos;re signed in as {session.user.email} with travel operator
         access.
       </p>
+
+      <nav className="mt-4">
+        <Link
+          href="/travel/admin/applications"
+          className="inline-flex items-center rounded-md border border-line bg-surface h-10 px-4 text-sm font-semibold text-fg transition-colors hover:border-line-strong hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow/40"
+        >
+          Applications / Tryouts
+        </Link>
+      </nav>
     </div>
   );
 }

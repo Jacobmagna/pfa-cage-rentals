@@ -1,6 +1,9 @@
-// Travel auth guards for server components + server actions. Mirrors the
-// facility `src/lib/authz.ts` pattern, but reads the TRAVEL session (via the
-// travel NextAuth instance) and redirects to the travel sign-in page.
+// Travel auth guards for server components + server actions. A travel session
+// can belong to EITHER a facility admin / travel operator (an Auth.js adapter
+// session, user_id set — resolved via the travel NextAuth instance) OR a
+// travel-native GUARDIAN / parent (a guardian_id session minted by
+// src/travel/session.ts). These guards resolve a unified TravelViewer over both
+// subjects and gate each surface to the right kind.
 //
 // All guards use `redirect()` from next/navigation on failure. redirect()
 // throws internally, so guards never return on the failure path — the calling
@@ -9,6 +12,7 @@
 import { redirect } from "next/navigation";
 import type { Session } from "next-auth";
 import { auth } from "@/travel/auth";
+import { getTravelGuardianFromCookie } from "@/travel/session";
 
 // The travel session's user, viewed with the `travelAdmin` flag the travel
 // session callback stamps on. The facility `types/next-auth.d.ts` types
@@ -22,28 +26,81 @@ export type TravelAuthedSession = Session & {
   user: TravelSessionUser;
 };
 
+// A travel-native guardian (parent) subject, as resolved from the guardian
+// session cookie.
+export type TravelGuardian = {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  emailVerified: Date | null;
+};
+
+// A unified travel viewer: either an Auth.js user session (facility admin /
+// travel operator) or a travel-native guardian. Discriminated by `kind`.
+export type TravelViewer =
+  | { kind: "user"; session: TravelAuthedSession }
+  | { kind: "guardian"; guardian: TravelGuardian };
+
 /**
- * Resolves the current TRAVEL session and redirects to /travel/signin if
- * absent. Any authenticated travel user passes — for the future parent portal.
- * Returned session is typed as definitely-authed.
+ * Resolve the current travel viewer, or null if unauthenticated. Prefers the
+ * Auth.js user session (facility admin / OAuth, user_id) — if present it wins.
+ * Otherwise falls back to the guardian session cookie. Does NOT redirect.
  */
-export async function requireTravelSession(): Promise<TravelAuthedSession> {
+export async function getTravelViewer(): Promise<TravelViewer | null> {
   const session = await auth();
-  if (!session?.user?.id) redirect("/travel/signin");
-  return session as TravelAuthedSession;
+  if (session?.user?.id) {
+    return { kind: "user", session: session as TravelAuthedSession };
+  }
+
+  const guardian = await getTravelGuardianFromCookie();
+  if (guardian) {
+    return { kind: "guardian", guardian };
+  }
+
+  return null;
 }
 
 /**
- * Authorizes the travel operator surface: passes only when the user is a
- * facility admin (role === "admin") OR carries the travel operator flag
- * (travelAdmin === true). Anyone else is bounced back to /travel/signin.
- * Returns the session on success.
+ * Resolves the current TRAVEL viewer (either subject kind) and redirects to
+ * /travel/signin if absent. Use when a surface is open to any authed travel
+ * viewer regardless of kind.
+ */
+export async function requireTravelSession(): Promise<TravelViewer> {
+  const viewer = await getTravelViewer();
+  if (!viewer) redirect("/travel/signin");
+  return viewer;
+}
+
+/**
+ * Authorizes the travel OPERATOR surface: passes only when the viewer is a
+ * user session AND that user is a facility admin (role === "admin") OR carries
+ * the travel operator flag (travelAdmin === true). Anyone else (including a
+ * guardian) is bounced to /travel/signin. Returns the user session unchanged
+ * so existing operator pages (e.g. admin/page.tsx reading session.user.email)
+ * keep working.
  */
 export async function requireTravelAccess(): Promise<TravelAuthedSession> {
-  const session = await requireTravelSession();
-  const user = session.user;
-  if (user.role === "admin" || user.travelAdmin === true) {
-    return session;
+  const viewer = await getTravelViewer();
+  if (viewer?.kind === "user") {
+    const user = viewer.session.user;
+    if (user.role === "admin" || user.travelAdmin === true) {
+      return viewer.session;
+    }
+  }
+  redirect("/travel/signin");
+}
+
+/**
+ * Authorizes the travel PARENT portal: passes only when the viewer is a
+ * travel-native guardian. A facility admin is NOT a guardian — they use the
+ * operator surface, not the parent portal — so a user session is rejected here.
+ * Returns the guardian on success; otherwise redirects to /travel/signin.
+ */
+export async function requireTravelGuardian(): Promise<TravelGuardian> {
+  const viewer = await getTravelViewer();
+  if (viewer?.kind === "guardian") {
+    return viewer.guardian;
   }
   redirect("/travel/signin");
 }

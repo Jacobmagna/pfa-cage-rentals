@@ -27,9 +27,22 @@ import { decideSignIn } from "@/lib/auth-access";
 // Auth.js itself names the default cookie by environment. The prod/preview
 // name is always "__Secure-travel-authjs.session-token".
 const useSecureCookies = process.env.NODE_ENV === "production";
-const travelSessionCookieName = useSecureCookies
+export const travelSessionCookieName = useSecureCookies
   ? "__Secure-travel-authjs.session-token"
   : "travel-authjs.session-token";
+
+// The EXACT cookie options the Auth.js adapter sets on the travel session
+// cookie (see the `cookies.sessionToken.options` below). Exported so the
+// travel-native guardian session helper (src/travel/session.ts) can set an
+// IDENTICAL cookie — same name, same attributes — so a browser can hold either
+// an adapter (facility-admin) session or a guardian session under one cookie
+// without ambiguity. NO `domain` → host-only, scoped to travel.pfaengine.com.
+export const travelSessionCookieOptions = {
+  httpOnly: true,
+  sameSite: "lax" as const,
+  path: "/",
+  secure: useSecureCookies,
+};
 
 // Strict-typed view of the SAME physical `travel_sessions` table for the
 // Auth.js adapter, which only manages facility-admin/OAuth sessions (user_id
@@ -83,13 +96,9 @@ export const {
   cookies: {
     sessionToken: {
       name: travelSessionCookieName,
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        // NO `domain` → host-only, scoped to travel.pfaengine.com only.
-        secure: useSecureCookies,
-      },
+      // NO `domain` → host-only, scoped to travel.pfaengine.com only. The
+      // guardian session helper reuses this exact option set (exported above).
+      options: travelSessionCookieOptions,
     },
   },
   pages: {

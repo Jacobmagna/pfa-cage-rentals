@@ -330,6 +330,13 @@
       "when": 1783474061797,
       "tag": "0046_bored_fantastic_four",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1783474493116,
+      "tag": "0047_equal_killraven",
+      "breakpoints": true
     }
   ]
 }

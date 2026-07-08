@@ -10,6 +10,7 @@ import {
   pgEnum,
   index,
   uniqueIndex,
+  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { AdapterAccountType } from "next-auth/adapters";
@@ -194,13 +195,25 @@ export const sessions = pgTable("sessions", {
 // travel and facility sessions are fully independent at storage — neither auth
 // system can read the other's sessions. Mirrors the Auth.js `sessions` shape
 // exactly. Additive: no facility read/write touches this table.
-export const travelSessions = pgTable("travel_sessions", {
-  sessionToken: text("session_token").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  expires: timestamp("expires", { mode: "date" }).notNull(),
-});
+export const travelSessions = pgTable(
+  "travel_sessions",
+  {
+    sessionToken: text("session_token").primaryKey(),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    guardianId: text("guardian_id").references(() => travelGuardians.id, {
+      onDelete: "cascade",
+    }),
+    expires: timestamp("expires", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    check(
+      "travel_sessions_subject_ck",
+      sql`num_nonnulls(${table.userId}, ${table.guardianId}) = 1`,
+    ),
+  ],
+);
 
 export const verificationTokens = pgTable(
   "verification_tokens",
@@ -1544,4 +1557,18 @@ export const travelGuardianAthletes = pgTable(
     primaryKey({ columns: [table.guardianId, table.athleteId] }),
     index("travel_guardian_athletes_athlete_idx").on(table.athleteId),
   ],
+);
+
+// Travel-owned verification/reset tokens. Mirrors the Auth.js
+// `verificationTokens` shape but scoped to the travel-native parent
+// claim/email-verify/reset flow (built in a later task). Additive: no
+// facility read/write touches this table.
+export const travelVerificationTokens = pgTable(
+  "travel_verification_tokens",
+  {
+    identifier: text("identifier").notNull(),
+    token: text("token").notNull(),
+    expires: timestamp("expires", { mode: "date" }).notNull(),
+  },
+  (vt) => [primaryKey({ columns: [vt.identifier, vt.token] })],
 );

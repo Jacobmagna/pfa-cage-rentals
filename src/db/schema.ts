@@ -1608,3 +1608,174 @@ export const travelApplications = pgTable(
     index("travel_applications_parent_email_idx").on(table.parentEmail),
   ],
 );
+
+// ── Travel: registration & catalog (Block 3, migration 0049) ─────────────────
+// Season/team-dues registration. Ported from Northstar products/registrations/
+// enrollments/discounts/invoices, adapted to travel-native FKs + text enums.
+// All money is stored in integer cents, snapshotted at write time.
+
+export type TravelProductPriceTier = {
+  key: string;
+  label: string;
+  priceCents: number;
+};
+
+export const travelProducts = pgTable(
+  "travel_products",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    // text (not enum): program | travel | camp | clinic | tournament | uniform | membership | other
+    type: text("type").notNull(),
+    name: text("name").notNull(),
+    locationId: text("location_id").references(() => travelLocations.id, {
+      onDelete: "set null",
+    }),
+    seasonId: text("season_id").references(() => travelSeasons.id, {
+      onDelete: "set null",
+    }),
+    // travel-specific auto-roster linkage: when a product is a team/season
+    // registration, this ties it to the team so registering rosters the athlete.
+    teamId: text("team_id").references(() => travelTeams.id, {
+      onDelete: "set null",
+    }),
+    basePriceCents: integer("base_price_cents"),
+    priceTiers: jsonb("price_tiers").$type<TravelProductPriceTier[]>(),
+    description: text("description"),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("travel_products_season_idx").on(table.seasonId),
+    index("travel_products_team_idx").on(table.teamId),
+  ],
+);
+
+export const travelRegistrations = pgTable(
+  "travel_registrations",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    productId: text("product_id")
+      .notNull()
+      .references(() => travelProducts.id, { onDelete: "cascade" }),
+    athleteId: text("athlete_id").references(() => travelAthletes.id, {
+      onDelete: "set null",
+    }),
+    guardianId: text("guardian_id").references(() => travelGuardians.id, {
+      onDelete: "set null",
+    }),
+    // text: pending | active | cancelled | waitlisted
+    status: text("status").notNull().default("pending"),
+    // text: consumer | backoffice
+    source: text("source").notNull().default("consumer"),
+    formData: jsonb("form_data"),
+    submittedAt: timestamp("submitted_at", { mode: "date" })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("travel_registrations_product_idx").on(table.productId),
+    index("travel_registrations_athlete_idx").on(table.athleteId),
+    index("travel_registrations_guardian_idx").on(table.guardianId),
+  ],
+);
+
+export const travelEnrollments = pgTable(
+  "travel_enrollments",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    athleteId: text("athlete_id")
+      .notNull()
+      .references(() => travelAthletes.id, { onDelete: "cascade" }),
+    productId: text("product_id")
+      .notNull()
+      .references(() => travelProducts.id, { onDelete: "cascade" }),
+    registrationId: text("registration_id").references(
+      () => travelRegistrations.id,
+      { onDelete: "set null" },
+    ),
+    status: text("status"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("travel_enrollments_athlete_product_unique").on(
+      table.athleteId,
+      table.productId,
+    ),
+    index("travel_enrollments_product_idx").on(table.productId),
+  ],
+);
+
+export const travelDiscounts = pgTable("travel_discounts", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull(),
+  // text: pay_full | family_sibling | financial_aid | add_on | custom
+  type: text("type").notNull(),
+  // text: flat | percent
+  method: text("method").notNull(),
+  amountCents: integer("amount_cents"),
+  percent: integer("percent"),
+  appliesToProductId: text("applies_to_product_id").references(
+    () => travelProducts.id,
+    { onDelete: "set null" },
+  ),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+});
+
+export const travelInvoices = pgTable(
+  "travel_invoices",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    guardianId: text("guardian_id").references(() => travelGuardians.id, {
+      onDelete: "set null",
+    }),
+    athleteId: text("athlete_id").references(() => travelAthletes.id, {
+      onDelete: "set null",
+    }),
+    productId: text("product_id").references(() => travelProducts.id, {
+      onDelete: "set null",
+    }),
+    totalCents: integer("total_cents").notNull(),
+    balanceCents: integer("balance_cents").notNull(),
+    // text: pending | scheduled | partial | paid | refunded | void
+    status: text("status").notNull().default("pending"),
+    // text: consumer | backoffice
+    purchaseSource: text("purchase_source").notNull().default("consumer"),
+    dueDate: timestamp("due_date", { mode: "date" }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("travel_invoices_guardian_idx").on(table.guardianId),
+    index("travel_invoices_athlete_idx").on(table.athleteId),
+  ],
+);
+
+export const travelInvoiceLines = pgTable(
+  "travel_invoice_lines",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    invoiceId: text("invoice_id")
+      .notNull()
+      .references(() => travelInvoices.id, { onDelete: "cascade" }),
+    description: text("description"),
+    amountCents: integer("amount_cents").notNull(),
+    productId: text("product_id").references(() => travelProducts.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [index("travel_invoice_lines_invoice_idx").on(table.invoiceId)],
+);

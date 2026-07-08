@@ -1503,3 +1503,45 @@ export const travelTeamAthletes = pgTable(
     index("travel_team_athletes_athlete_idx").on(table.athleteId),
   ],
 );
+
+// Travel-native parent identity + login credential. Travel parents are NOT
+// rows in the shared facility `users` table (deliberate isolation) — so this
+// table carries its own login email (UNIQUE — the parent's login identifier)
+// and credential fields. There is intentionally NO user_id / FK to `users`.
+// passwordHash (scrypt-encoded) and emailVerified are null until the auth
+// flow populates them later.
+export const travelGuardians = pgTable("travel_guardians", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name").notNull(),
+  email: text("email").notNull().unique(),
+  phone: text("phone"),
+  passwordHash: text("password_hash"),
+  emailVerified: timestamp("email_verified", { mode: "date" }),
+  isAccountOwner: boolean("is_account_owner").notNull().default(true),
+  emailOptOut: boolean("email_opt_out").notNull().default(false),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+});
+
+// M:N guardian ↔ travel athlete. Composite PK enforces one link per
+// (guardian, athlete). Both FKs cascade on delete since a link row has no
+// meaning without its parents. relationship is free-text ("mother"/"father").
+export const travelGuardianAthletes = pgTable(
+  "travel_guardian_athletes",
+  {
+    guardianId: text("guardian_id")
+      .notNull()
+      .references(() => travelGuardians.id, { onDelete: "cascade" }),
+    athleteId: text("athlete_id")
+      .notNull()
+      .references(() => travelAthletes.id, { onDelete: "cascade" }),
+    relationship: text("relationship"),
+    isPrimary: boolean("is_primary").notNull().default(true),
+  },
+  (table) => [
+    primaryKey({ columns: [table.guardianId, table.athleteId] }),
+    index("travel_guardian_athletes_athlete_idx").on(table.athleteId),
+  ],
+);

@@ -11,7 +11,9 @@
 //     validation (required names + a basic email shape). parentEmail is
 //     normalized (lowercased + trimmed) before insert.
 
+import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import * as Sentry from "@sentry/nextjs";
 import { db } from "@/db";
 import {
@@ -208,19 +210,18 @@ export type AcceptResult =
   | { ok: true; onboardingSent: boolean }
   | { ok: false; reason: string };
 
-// Sentinel thrown INSIDE the accept transaction when the status-guarded flip
-// matches 0 rows (we lost the race / the app was decided between our pre-read
-// and the flip). Throwing rolls the txn back so nothing is created; we catch it
-// OUTSIDE the txn and map it to { ok:false, reason:"already_decided" }.
-class AcceptRaceError extends Error {}
-
 /**
  * Accept a PENDING application — the core operator action. Idempotent-guarded:
  * only a `pending` application is materialized (never double-creates records).
  *
- * In one transaction it: find-or-creates the guardian by normalized parentEmail,
- * creates the athlete, links guardian↔athlete (primary), rosters the athlete on
- * the applied-to team (if any), and flips the application to `accepted`.
+ * The db (`drizzle-orm/neon-http`) driver does NOT support interactive
+ * `db.transaction(async tx => …)` — it throws at runtime. So this does the
+ * concurrency gate as a single row-atomic guarded UPDATE (pending→accepted;
+ * exactly one racing Accept wins), THEN materializes the guardian/athlete/link/
+ * roster rows as one atomic `db.batch([...])`. Explicit ids (`randomUUID()`,
+ * matching the schema's `$defaultFn(() => crypto.randomUUID())` id column) are
+ * generated up front so later batch rows can reference earlier ones without
+ * relying on `.returning()` (which batch can't feed forward).
  *
  * AFTER the commit it sends an onboarding claim link — but ONLY when the
  * guardian is brand-new / unclaimed (no passwordHash). A returning parent who
@@ -245,102 +246,94 @@ export async function acceptApplication(
 
   const email = normalizeEmail(application.parentEmail);
 
-  // `needsOnboarding` = a claim link should be sent: true for a brand-new
-  // guardian, or an existing guardian that never set a password (unclaimed).
-  // An existing CLAIMED guardian (has passwordHash) already logs in → false.
-  let needsOnboarding = true;
+  // Race-safe status flip FIRST — the concurrency gate. This single guarded
+  // UPDATE is atomic at the row level: only a `pending` row flips, so if two
+  // Accepts race exactly one matches (returns a row) and the other gets 0 rows.
+  // We do this before creating anything, so losing the race creates nothing.
+  const flipped = await db
+    .update(travelApplications)
+    .set({ status: "accepted", reviewedAt: new Date() })
+    .where(
+      and(
+        eq(travelApplications.id, applicationId),
+        eq(travelApplications.status, "pending"),
+      ),
+    )
+    .returning({ id: travelApplications.id });
+  if (flipped.length === 0) return { ok: false, reason: "already_decided" };
 
-  try {
-    await db.transaction(async (tx) => {
-      // status-guarded flip FIRST: this is the concurrency gate. Only a
-      // `pending` row flips; if two Accepts race, exactly one matches here and
-      // the other gets 0 rows → we abort before creating anything.
-      const flipped = await tx
-        .update(travelApplications)
-        .set({ status: "accepted", reviewedAt: new Date() })
-        .where(
-          and(
-            eq(travelApplications.id, applicationId),
-            eq(travelApplications.status, "pending"),
-          ),
-        )
-        .returning({ id: travelApplications.id });
-      if (flipped.length === 0) {
-        // Lost the race / decided between our pre-read and here — throw to roll
-        // back so no guardian/athlete/roster rows are created. Caught below.
-        throw new AcceptRaceError();
-      }
+  // Find the guardian by normalized email (single read).
+  const [existing] = await db
+    .select({
+      id: travelGuardians.id,
+      passwordHash: travelGuardians.passwordHash,
+    })
+    .from(travelGuardians)
+    .where(eq(travelGuardians.email, email))
+    .limit(1);
 
-      // a. find-or-create guardian by normalized email.
-      const [existing] = await tx
-        .select({
-          id: travelGuardians.id,
-          passwordHash: travelGuardians.passwordHash,
-        })
-        .from(travelGuardians)
-        .where(eq(travelGuardians.email, email))
-        .limit(1);
-
-      let guardianId: string;
-      if (existing) {
-        guardianId = existing.id;
-        needsOnboarding = existing.passwordHash == null;
-      } else {
-        const [created] = await tx
-          .insert(travelGuardians)
-          .values({
-            firstName: application.parentFirstName,
-            lastName: application.parentLastName,
-            email,
-            phone: application.parentPhone,
-            passwordHash: null,
-            emailVerified: null,
-            isAccountOwner: true,
-          })
-          .returning({ id: travelGuardians.id });
-        guardianId = created!.id;
-        needsOnboarding = true;
-      }
-
-      // b. create the athlete.
-      const [athlete] = await tx
-        .insert(travelAthletes)
-        .values({
-          firstName: application.athleteFirstName,
-          lastName: application.athleteLastName,
-          gradYear: application.athleteGradYear,
-          positions: application.athletePositions,
-        })
-        .returning({ id: travelAthletes.id });
-      const athleteId = athlete!.id;
-
-      // c. link guardian ↔ athlete (primary).
-      await tx.insert(travelGuardianAthletes).values({
-        guardianId,
-        athleteId,
-        relationship: null,
-        isPrimary: true,
-      });
-
-      // d. roster the athlete on the applied-to team, if any.
-      //    onConflictDoNothing guards the composite PK (a re-add is harmless).
-      if (application.teamId) {
-        await tx
-          .insert(travelTeamAthletes)
-          .values({ teamId: application.teamId, athleteId, status: "active" })
-          .onConflictDoNothing();
-      }
-
-      // (status flip already done first, above.)
-    });
-  } catch (err) {
-    // A racing/duplicate Accept flipped 0 rows and rolled back → friendly
-    // already_decided. Any other error is a real DB failure and must propagate.
-    if (err instanceof AcceptRaceError) {
-      return { ok: false, reason: "already_decided" };
-    }
-    throw err;
+  // Decide ids + onboarding. `needsOnboarding` = a claim link should be sent:
+  // true for a brand-new guardian, or an existing guardian that never set a
+  // password (unclaimed). An existing CLAIMED guardian (has passwordHash)
+  // already logs in → false, and is NOT re-inserted.
+  let guardianId: string;
+  let needsOnboarding: boolean;
+  if (existing) {
+    guardianId = existing.id;
+    needsOnboarding = existing.passwordHash == null;
+  } else {
+    guardianId = randomUUID();
+    needsOnboarding = true;
   }
+  const athleteId = randomUUID();
+
+  // Materialize the records as ONE atomic db.batch (the neon-http-safe stand-in
+  // for an interactive txn). Explicit ids are passed so later rows reference
+  // earlier ones without `.returning()`. The athlete insert is always present,
+  // so it anchors the non-empty tuple; the (optional) roster is pushed after,
+  // and a NEW-guardian insert is prepended so it commits before its FK refs.
+  const ops: BatchItem<"pg">[] = [
+    db.insert(travelAthletes).values({
+      id: athleteId,
+      firstName: application.athleteFirstName,
+      lastName: application.athleteLastName,
+      gradYear: application.athleteGradYear,
+      positions: application.athletePositions,
+    }),
+    db.insert(travelGuardianAthletes).values({
+      guardianId,
+      athleteId,
+      relationship: null,
+      isPrimary: true,
+    }),
+  ];
+  // roster the athlete on the applied-to team, if any. onConflictDoNothing
+  // guards the composite PK (a re-add is harmless).
+  if (application.teamId) {
+    ops.push(
+      db
+        .insert(travelTeamAthletes)
+        .values({ teamId: application.teamId, athleteId, status: "active" })
+        .onConflictDoNothing(),
+    );
+  }
+  // A brand-new guardian is inserted (with the explicit id) FIRST so its row
+  // exists before the link/roster FKs reference it.
+  if (!existing) {
+    ops.unshift(
+      db.insert(travelGuardians).values({
+        id: guardianId,
+        firstName: application.parentFirstName,
+        lastName: application.parentLastName,
+        email,
+        phone: application.parentPhone,
+        passwordHash: null,
+        emailVerified: null,
+        isAccountOwner: true,
+      }),
+    );
+  }
+  await db.batch(ops as [(typeof ops)[number], ...(typeof ops)[number][]]);
 
   // Onboarding email — AFTER the commit, best-effort. A returning claimed parent
   // gets no claim link.

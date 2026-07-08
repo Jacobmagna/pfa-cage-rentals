@@ -1,43 +1,135 @@
 import type { Metadata } from "next";
 import { requireTravelGuardian } from "@/travel/authz";
+import { getTravelPortalData } from "@/travel/portal-data";
 import { signOutTravel } from "./actions";
 
 export const metadata: Metadata = {
   title: "Parent Portal — PFA Travel",
 };
 
-// Minimal guarded parent-portal STUB. `requireTravelGuardian()` redirects any
-// non-guardian viewer to /travel/signin, so the body below only renders for an
-// authenticated parent. The real portal is a later task — this is intentionally
-// minimal, but on-brand in the SHARPER TRAVEL SKIN: institutional/restrained,
-// `rounded-md` (tighter than the signin page's `rounded-lg`), crisp 1px
-// `border-line`, flat (no shadows), gold reserved for the primary action.
+// The REAL travel parent home. A signed-in guardian sees their athlete(s) and
+// each athlete's team(s). Read-only — athletes join via the accept flow in a
+// later block; billing/messages/store are later blocks too.
+//
+// requireTravelGuardian() redirects any non-guardian viewer to /travel/signin,
+// so the body only renders for an authenticated parent. Rendered inside the
+// travel layout (near-black masthead + gold rule already supplied) at the
+// layout's max-w-5xl width — no header re-added, not wrapped in a narrow card.
+//
+// Elevated travel skin (same as the auth screens): facility color tokens,
+// SHARP rounded-md, flat (no shadows), 1px border-line, gold as accent only,
+// credential/roster character (tracked-uppercase micro-labels), strong type.
 
 export default async function TravelPortal() {
   const guardian = await requireTravelGuardian();
+  const { athletes } = await getTravelPortalData(guardian.id);
 
   return (
-    <section className="flex flex-1 flex-col items-center justify-center py-8">
-      <div className="w-full max-w-md rounded-md border border-line bg-surface p-6">
-        <p className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
-          PFA Travel
-        </p>
-        <h1 className="mt-2 text-2xl font-bold tracking-tight text-fg">
-          PFA Travel — Parent Portal
+    <div className="flex flex-1 flex-col">
+      {/* Header row: welcome + a restrained secondary sign-out. */}
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-bold tracking-tight text-fg">
+          Welcome, {guardian.firstName}
         </h1>
-        <p className="mt-3 text-sm text-fg-muted">
-          Signed in as {guardian.firstName} {guardian.lastName} ({guardian.email})
-        </p>
-
-        <form action={signOutTravel} className="mt-6">
+        <form action={signOutTravel}>
           <button
             type="submit"
-            className="rounded-md border border-line bg-yellow px-4 h-10 text-sm font-semibold text-gold-ink transition-colors hover:bg-yellow/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow/40"
+            className="rounded-md border border-line bg-surface h-9 px-3 text-sm font-medium text-fg transition-colors hover:bg-page focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow/40"
           >
             Sign out
           </button>
         </form>
       </div>
-    </section>
+
+      {/* Section label: tracked-uppercase micro-label + a hairline rule. */}
+      <div className="mt-8">
+        <h2 className="text-[11px] uppercase tracking-[0.18em] font-semibold text-fg-subtle">
+          Your Athletes
+        </h2>
+        <div className="mt-2 h-px w-full bg-line" />
+      </div>
+
+      {athletes.length === 0 ? (
+        // Common first-load state: intentional, on-brand empty panel.
+        <div className="mt-6 rounded-md border border-line bg-surface-2 p-8 text-center">
+          <p className="text-base font-semibold text-fg">No athletes yet</p>
+          <p className="mx-auto mt-2 max-w-md text-sm text-fg-muted">
+            Your player will appear here once PFA accepts them onto a team.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-6 space-y-4">
+          {athletes.map((athlete) => {
+            // Present-only meta chips (grad year, jersey #, positions).
+            const meta: { label: string; value: string }[] = [];
+            if (athlete.gradYear != null) {
+              meta.push({ label: "Grad", value: String(athlete.gradYear) });
+            }
+            if (athlete.jerseyNo) {
+              meta.push({ label: "Jersey", value: `#${athlete.jerseyNo}` });
+            }
+            if (athlete.positions) {
+              meta.push({ label: "Positions", value: athlete.positions });
+            }
+
+            return (
+              <article
+                key={athlete.id}
+                className="rounded-md border border-line border-l-2 border-l-yellow bg-surface p-5"
+              >
+                <h3 className="font-semibold text-fg">
+                  {athlete.firstName} {athlete.lastName}
+                </h3>
+
+                {meta.length > 0 ? (
+                  <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1.5 text-sm text-fg-muted">
+                    {meta.map((m) => (
+                      <div key={m.label} className="flex items-baseline gap-1.5">
+                        <dt className="text-[10px] uppercase tracking-[0.14em] font-semibold text-fg-subtle">
+                          {m.label}
+                        </dt>
+                        <dd className="text-fg-muted">{m.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : null}
+
+                {athlete.teams.length === 0 ? (
+                  <p className="mt-4 text-sm text-fg-subtle">
+                    Not yet rostered
+                  </p>
+                ) : (
+                  <div className="mt-4 space-y-2">
+                    <p className="text-[10px] uppercase tracking-[0.14em] font-semibold text-fg-subtle">
+                      Teams
+                    </p>
+                    {athlete.teams.map((team) => (
+                      <div
+                        key={team.id}
+                        className="rounded-md border border-line bg-page px-3 py-2"
+                      >
+                        <p className="text-sm font-bold text-fg">{team.name}</p>
+                        {team.divisionName || team.locationName ? (
+                          <p className="mt-0.5 text-xs text-fg-muted">
+                            {[team.divisionName, team.locationName]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Understated hint at what's next — no links/buttons. */}
+      <p className="mt-10 text-xs text-fg-subtle">
+        Billing, messages &amp; team store are coming soon.
+      </p>
+    </div>
   );
 }

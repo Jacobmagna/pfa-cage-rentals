@@ -19,9 +19,12 @@
 // are single-row inserts/updates (no batch needed). Ids come from the schema's
 // $defaultFn(() => crypto.randomUUID()).
 
-import { asc, eq } from "drizzle-orm";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  travelAthletes,
+  travelGuardians,
+  travelInvoices,
   travelLocations,
   travelProducts,
   travelSeasons,
@@ -420,4 +423,131 @@ export async function setTravelProductActive(
     .where(eq(travelProducts.id, id));
 
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Block 3d-2 — operator REGISTRATION / DUES visibility (read-only).
+//
+// Each Block-3c registration created exactly ONE invoice carrying its
+// guardian + athlete + product + amount, so the invoice list doubles as the
+// registration list ("who registered and what they owe"). This is a READ-ONLY
+// surface — recording payments is Block 4. Money stays integer CENTS; the route
+// formats to USD for display only.
+// ---------------------------------------------------------------------------
+
+export type OperatorInvoice = {
+  id: string;
+  createdAt: Date;
+  guardianName: string | null;
+  guardianEmail: string | null;
+  athleteName: string | null;
+  productName: string | null;
+  teamName: string | null;
+  totalCents: number;
+  balanceCents: number;
+  status: string;
+};
+
+// The invoice status values (text) — for the tab filter + badge mapping.
+export const TRAVEL_INVOICE_STATUSES = [
+  "pending",
+  "scheduled",
+  "partial",
+  "paid",
+  "refunded",
+  "void",
+] as const;
+
+// Join first/last into a display name; a fully-null pair (set-null'd FK) → null
+// so the UI can render "—".
+function joinName(
+  first: string | null,
+  last: string | null,
+): string | null {
+  const name = [first, last].filter(Boolean).join(" ").trim();
+  return name.length > 0 ? name : null;
+}
+
+/**
+ * Invoices for the operator registration/dues list, each with resolved
+ * guardian / athlete / product / team display names via LEFT JOINs (a
+ * set-null'd FK still lists, name shown as null → "—" in the UI). Optional
+ * status filter: any value other than "all" narrows to that exact status.
+ * Ordered newest-first.
+ */
+export async function listTravelInvoicesForOperator(
+  status?: string,
+): Promise<OperatorInvoice[]> {
+  const base = db
+    .select({
+      id: travelInvoices.id,
+      createdAt: travelInvoices.createdAt,
+      guardianFirstName: travelGuardians.firstName,
+      guardianLastName: travelGuardians.lastName,
+      guardianEmail: travelGuardians.email,
+      athleteFirstName: travelAthletes.firstName,
+      athleteLastName: travelAthletes.lastName,
+      productName: travelProducts.name,
+      teamName: travelTeams.name,
+      totalCents: travelInvoices.totalCents,
+      balanceCents: travelInvoices.balanceCents,
+      status: travelInvoices.status,
+    })
+    .from(travelInvoices)
+    .leftJoin(
+      travelGuardians,
+      eq(travelGuardians.id, travelInvoices.guardianId),
+    )
+    .leftJoin(travelAthletes, eq(travelAthletes.id, travelInvoices.athleteId))
+    .leftJoin(travelProducts, eq(travelProducts.id, travelInvoices.productId))
+    .leftJoin(travelTeams, eq(travelTeams.id, travelProducts.teamId));
+
+  const filtered =
+    status && status !== "all"
+      ? base.where(eq(travelInvoices.status, status))
+      : base;
+
+  const rows = await filtered.orderBy(desc(travelInvoices.createdAt));
+
+  return rows.map((r) => ({
+    id: r.id,
+    createdAt: r.createdAt,
+    guardianName: joinName(r.guardianFirstName, r.guardianLastName),
+    guardianEmail: r.guardianEmail,
+    athleteName: joinName(r.athleteFirstName, r.athleteLastName),
+    productName: r.productName,
+    teamName: r.teamName,
+    totalCents: r.totalCents,
+    balanceCents: r.balanceCents,
+    status: r.status,
+  }));
+}
+
+export type TravelInvoiceStatusCounts = {
+  all: number;
+} & Record<string, number>;
+
+/**
+ * Per-status invoice counts (one cheap grouped query) plus an "all" total, so
+ * the operator tabs can show a count beside each status. Every known status
+ * appears (defaulted to 0) even when it has no rows.
+ */
+export async function getTravelInvoiceStatusCounts(): Promise<TravelInvoiceStatusCounts> {
+  const rows = await db
+    .select({
+      status: travelInvoices.status,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(travelInvoices)
+    .groupBy(travelInvoices.status);
+
+  const counts: TravelInvoiceStatusCounts = { all: 0 };
+  for (const s of TRAVEL_INVOICE_STATUSES) counts[s] = 0;
+
+  for (const r of rows) {
+    counts[r.status] = (counts[r.status] ?? 0) + r.count;
+    counts.all += r.count;
+  }
+
+  return counts;
 }

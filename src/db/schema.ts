@@ -1369,3 +1369,137 @@ export type NewSessionCancellation =
   typeof sessionCancellations.$inferInsert;
 export type SmsReminderLog = typeof smsReminderLog.$inferSelect;
 export type NewSmsReminderLog = typeof smsReminderLog.$inferInsert;
+
+// ===========================================================================
+// TRAVEL ROSTER TABLES (travel.pfaengine.com — Block 1)
+// ===========================================================================
+// Additive, travel-native tables ported (regenerated) from the Northstar
+// reference (Northstar migration 0037). All names are snake_case with a
+// `travel_` prefix so they never collide with the shared facility schema.
+// These tables are self-contained except for one reference-only FK into the
+// existing shared `users` table (travel_teams.head_manager_user_id) — the
+// `users` table itself is NOT modified. `bats`/`throws`/`positions` are plain
+// text columns (no new pgEnum types) to keep the migration pure CREATE-TABLE.
+
+// A travel season (e.g. "Summer 2026"). Dates are optional calendar dates
+// (no timezone); timezone is the season's operating tz, default LA.
+export const travelSeasons = pgTable("travel_seasons", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull(),
+  startDate: date("start_date", { mode: "string" }),
+  endDate: date("end_date", { mode: "string" }),
+  timezone: text("timezone").notNull().default("America/Los_Angeles"),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+});
+
+// A travel operating location. isHq marks the headquarters; code is an
+// optional short label; brand is an optional per-location label.
+export const travelLocations = pgTable("travel_locations", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  name: text("name").notNull(),
+  code: text("code"),
+  isHq: boolean("is_hq").notNull().default(false),
+  brand: text("brand"),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+});
+
+// A division within a travel season, optionally scoped to a location. Season
+// FK cascades (a division has no meaning without its season); location FK is
+// nullable and set-null on delete so removing a location keeps the division.
+export const travelDivisions = pgTable(
+  "travel_divisions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    seasonId: text("season_id")
+      .notNull()
+      .references(() => travelSeasons.id, { onDelete: "cascade" }),
+    locationId: text("location_id").references(() => travelLocations.id, {
+      onDelete: "set null",
+    }),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("travel_divisions_season_idx").on(table.seasonId),
+    index("travel_divisions_location_idx").on(table.locationId),
+  ],
+);
+
+// A travel team. divisionId / locationId are nullable (a team may exist
+// before being slotted into a division). cohort is a free-text age/class
+// group ("16u"). isPrivate defaults true. headManagerUserId points at a
+// managing facility user in the shared `users` table (reference only —
+// set-null so removing the user doesn't delete the team).
+export const travelTeams = pgTable(
+  "travel_teams",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    name: text("name").notNull(),
+    divisionId: text("division_id").references(() => travelDivisions.id, {
+      onDelete: "set null",
+    }),
+    locationId: text("location_id").references(() => travelLocations.id, {
+      onDelete: "set null",
+    }),
+    cohort: text("cohort"),
+    isPrivate: boolean("is_private").notNull().default(true),
+    headManagerUserId: text("head_manager_user_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("travel_teams_division_idx").on(table.divisionId),
+    index("travel_teams_location_idx").on(table.locationId),
+  ],
+);
+
+// Travel-native player records (distinct from the facility `athletes` table).
+// All descriptive fields are nullable. gradYear = graduation/class year.
+// positions is a comma-separated list for now ("SS,2B"). bats/throws are
+// plain text ("L"/"R"/"S") — no enum, to keep the migration pure CREATE.
+export const travelAthletes = pgTable("travel_athletes", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name").notNull(),
+  gradYear: integer("grad_year"),
+  currentSchool: text("current_school"),
+  ageGroup: text("age_group"),
+  bats: text("bats"),
+  throws: text("throws"),
+  jerseyNo: text("jersey_no"),
+  positions: text("positions"),
+  uniformSize: text("uniform_size"),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+});
+
+// Roster membership (M:N between travel teams and travel athletes). Composite
+// PK enforces one membership per (team, athlete). Both FKs cascade on delete
+// since a membership row has no meaning without its parents.
+export const travelTeamAthletes = pgTable(
+  "travel_team_athletes",
+  {
+    teamId: text("team_id")
+      .notNull()
+      .references(() => travelTeams.id, { onDelete: "cascade" }),
+    athleteId: text("athlete_id")
+      .notNull()
+      .references(() => travelAthletes.id, { onDelete: "cascade" }),
+    status: text("status"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.athleteId] }),
+    index("travel_team_athletes_athlete_idx").on(table.athleteId),
+  ],
+);

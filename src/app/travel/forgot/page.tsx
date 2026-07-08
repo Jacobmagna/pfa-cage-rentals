@@ -55,7 +55,7 @@ export default async function TravelForgot({
             <div className="space-y-1.5">
               <label
                 htmlFor="forgot-email"
-                className="block text-sm font-medium text-fg"
+                className="block text-[11px] uppercase tracking-wider font-semibold text-fg-muted"
               >
                 Email
               </label>

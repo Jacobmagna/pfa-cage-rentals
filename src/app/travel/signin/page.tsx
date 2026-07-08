@@ -78,7 +78,9 @@ export default async function TravelSignIn({
 
       {/* Parents: email + password. */}
       <div className={reset ? "mt-4" : undefined}>
-        <h2 className="text-sm font-semibold text-fg">Parents</h2>
+        <h2 className="text-[11px] uppercase tracking-wider font-semibold text-fg-subtle">
+          Parents
+        </h2>
 
         {parentError ? (
           <p
@@ -93,7 +95,7 @@ export default async function TravelSignIn({
           <div className="space-y-1.5">
             <label
               htmlFor="parent-email"
-              className="block text-sm font-medium text-fg"
+              className="block text-[11px] uppercase tracking-wider font-semibold text-fg-muted"
             >
               Email
             </label>
@@ -110,7 +112,7 @@ export default async function TravelSignIn({
           <div className="space-y-1.5">
             <label
               htmlFor="parent-password"
-              className="block text-sm font-medium text-fg"
+              className="block text-[11px] uppercase tracking-wider font-semibold text-fg-muted"
             >
               Password
             </label>
@@ -142,15 +144,16 @@ export default async function TravelSignIn({
         </p>
       </div>
 
-      {/* Divider between the two subjects. */}
-      <div className="my-6 flex items-center gap-3">
-        <span className="h-px flex-1 bg-line" />
-        <span className="text-xs text-fg-subtle">PFA staff</span>
-        <span className="h-px flex-1 bg-line" />
+      {/* Section split between the two audiences — a deliberate, official
+          break: a hairline rule with a tracked uppercase micro-label. */}
+      <div className="mt-6 border-t border-line pt-4">
+        <h2 className="text-[11px] uppercase tracking-wider font-semibold text-fg-subtle">
+          PFA staff
+        </h2>
       </div>
 
       {/* PFA staff: Google + magic-link. */}
-      <div className="space-y-3">
+      <div className="mt-4 space-y-3">
         {errorMessage ? (
           <p
             role="alert"

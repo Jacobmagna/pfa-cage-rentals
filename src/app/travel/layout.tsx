@@ -23,12 +23,31 @@ export default function TravelLayout({
 }>) {
   return (
     <div className="flex min-h-screen flex-1 flex-col bg-page text-fg">
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex h-14 w-full max-w-5xl items-center px-6">
-          <span className="text-base font-bold tracking-tight text-fg">
-            PFA Travel
-          </span>
+      {/* Brand masthead: confident near-black bar + a signature gold rule. */}
+      <header>
+        <div className="bg-[#0a0a0a]">
+          <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-6">
+            {/* Wordmark lockup: crest monogram + PFA TRAVEL. */}
+            <div className="flex items-center gap-3">
+              <span className="flex size-9 items-center justify-center rounded-md ring-1 ring-white/15">
+                <span className="text-gold text-[10px] font-bold tracking-widest">
+                  PFA
+                </span>
+              </span>
+              <span className="text-base font-bold tracking-tight">
+                <span className="text-white">PFA</span>{" "}
+                <span className="text-gold">TRAVEL</span>
+              </span>
+            </div>
+
+            {/* Credential label (desktop only). */}
+            <span className="hidden text-[10px] uppercase tracking-[0.2em] text-white/50 sm:inline">
+              Family &amp; Operator Portal
+            </span>
+          </div>
         </div>
+        {/* Signature 2px gold brand stroke. */}
+        <div className="h-0.5 bg-yellow" />
       </header>
 
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-6 py-10">

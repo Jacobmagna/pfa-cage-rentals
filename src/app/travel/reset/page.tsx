@@ -80,7 +80,7 @@ export default async function TravelReset({
         <div className="space-y-1.5">
           <label
             htmlFor="reset-password"
-            className="block text-sm font-medium text-fg"
+            className="block text-[11px] uppercase tracking-wider font-semibold text-fg-muted"
           >
             New password
           </label>
@@ -98,7 +98,7 @@ export default async function TravelReset({
         <div className="space-y-1.5">
           <label
             htmlFor="reset-confirm"
-            className="block text-sm font-medium text-fg"
+            className="block text-[11px] uppercase tracking-wider font-semibold text-fg-muted"
           >
             Confirm password
           </label>

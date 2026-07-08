@@ -80,7 +80,7 @@ export default async function TravelClaim({
         <div className="space-y-1.5">
           <label
             htmlFor="claim-email"
-            className="block text-sm font-medium text-fg"
+            className="block text-[11px] uppercase tracking-wider font-semibold text-fg-muted"
           >
             Email
           </label>
@@ -96,7 +96,7 @@ export default async function TravelClaim({
         <div className="space-y-1.5">
           <label
             htmlFor="claim-password"
-            className="block text-sm font-medium text-fg"
+            className="block text-[11px] uppercase tracking-wider font-semibold text-fg-muted"
           >
             New password
           </label>
@@ -114,7 +114,7 @@ export default async function TravelClaim({
         <div className="space-y-1.5">
           <label
             htmlFor="claim-confirm"
-            className="block text-sm font-medium text-fg"
+            className="block text-[11px] uppercase tracking-wider font-semibold text-fg-muted"
           >
             Confirm password
           </label>

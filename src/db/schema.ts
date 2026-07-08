@@ -1572,3 +1572,39 @@ export const travelVerificationTokens = pgTable(
   },
   (vt) => [primaryKey({ columns: [vt.identifier, vt.token] })],
 );
+
+// Public "Request to Join / Tryout" intake for the parent funnel. No account,
+// no payment at this stage — travel teams are selective, so an operator later
+// reviews and accepts/declines. teamId is nullable and SET NULL on delete so
+// the application survives if the target team/age-group is removed. status is
+// plain text (app-validated: pending | accepted | declined) — no enum, to keep
+// the migration pure CREATE. reviewNote/reviewedAt are populated on review.
+export const travelApplications = pgTable(
+  "travel_applications",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    teamId: text("team_id").references(() => travelTeams.id, {
+      onDelete: "set null",
+    }),
+    athleteFirstName: text("athlete_first_name").notNull(),
+    athleteLastName: text("athlete_last_name").notNull(),
+    athleteGradYear: integer("athlete_grad_year"),
+    athletePositions: text("athlete_positions"),
+    parentFirstName: text("parent_first_name").notNull(),
+    parentLastName: text("parent_last_name").notNull(),
+    parentEmail: text("parent_email").notNull(),
+    parentPhone: text("parent_phone"),
+    message: text("message"),
+    status: text("status").notNull().default("pending"),
+    reviewNote: text("review_note"),
+    reviewedAt: timestamp("reviewed_at", { mode: "date" }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("travel_applications_status_idx").on(table.status),
+    index("travel_applications_team_idx").on(table.teamId),
+    index("travel_applications_parent_email_idx").on(table.parentEmail),
+  ],
+);

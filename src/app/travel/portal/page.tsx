@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { requireTravelGuardian } from "@/travel/authz";
 import { getTravelPortalData } from "@/travel/portal-data";
 import { signOutTravel } from "./actions";
@@ -125,6 +126,24 @@ export default async function TravelPortal() {
           })}
         </div>
       )}
+
+      {/* Primary next action: register a rostered player for a season / program. */}
+      <Link
+        href="/travel/portal/register"
+        className="mt-8 flex items-center justify-between gap-4 rounded-md border border-line border-l-2 border-l-yellow bg-surface p-5 transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow/40"
+      >
+        <span>
+          <span className="block font-semibold text-fg">
+            Register for a season
+          </span>
+          <span className="mt-0.5 block text-sm text-fg-muted">
+            Sign a player up for a program and see the amount due.
+          </span>
+        </span>
+        <span className="text-gold" aria-hidden="true">
+          &rarr;
+        </span>
+      </Link>
 
       {/* Understated hint at what's next — no links/buttons. */}
       <p className="mt-10 text-xs text-fg-subtle">

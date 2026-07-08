@@ -5,8 +5,9 @@ import Google from "next-auth/providers/google";
 import Resend from "next-auth/providers/resend";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { and, eq, isNull, sql } from "drizzle-orm";
+import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { db } from "@/db";
-import { users, accounts, travelSessions, verificationTokens } from "@/db/schema";
+import { users, accounts, verificationTokens } from "@/db/schema";
 import { isAdminEmail } from "@/lib/admin-emails";
 import { decideSignIn } from "@/lib/auth-access";
 
@@ -30,6 +31,20 @@ const travelSessionCookieName = useSecureCookies
   ? "__Secure-travel-authjs.session-token"
   : "travel-authjs.session-token";
 
+// Strict-typed view of the SAME physical `travel_sessions` table for the
+// Auth.js adapter, which only manages facility-admin/OAuth sessions (user_id
+// always set) and requires userId NOT NULL. Travel-native guardian sessions
+// (null user_id) are minted by our own code against `travelSessions`, never
+// the adapter. Defined here (not in src/db/schema.ts) so drizzle-kit does not
+// see a duplicate `travel_sessions` table.
+const travelSessionsAdapterTable = pgTable("travel_sessions", {
+  sessionToken: text("session_token").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expires: timestamp("expires", { mode: "date" }).notNull(),
+});
+
 export const {
   handlers,
   auth: uncachedAuth,
@@ -40,7 +55,7 @@ export const {
     usersTable: users,
     accountsTable: accounts,
     // travel's OWN session table (additive) — NOT the facility `sessions`.
-    sessionsTable: travelSessions,
+    sessionsTable: travelSessionsAdapterTable,
     verificationTokensTable: verificationTokens,
   }),
   // basePath so the travel auth endpoints live under /travel/api/auth/* (the

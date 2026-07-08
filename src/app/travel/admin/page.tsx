@@ -21,12 +21,18 @@ export default async function TravelAdminPage() {
         access.
       </p>
 
-      <nav className="mt-4">
+      <nav className="mt-4 flex flex-wrap gap-3">
         <Link
           href="/travel/admin/applications"
           className="inline-flex items-center rounded-md border border-line bg-surface h-10 px-4 text-sm font-semibold text-fg transition-colors hover:border-line-strong hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow/40"
         >
           Applications / Tryouts
+        </Link>
+        <Link
+          href="/travel/admin/products"
+          className="inline-flex items-center rounded-md border border-line bg-surface h-10 px-4 text-sm font-semibold text-fg transition-colors hover:border-line-strong hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow/40"
+        >
+          Products
         </Link>
       </nav>
     </div>

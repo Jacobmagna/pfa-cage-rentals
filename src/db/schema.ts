@@ -1535,6 +1535,7 @@ export const travelGuardians = pgTable("travel_guardians", {
   emailVerified: timestamp("email_verified", { mode: "date" }),
   isAccountOwner: boolean("is_account_owner").notNull().default(true),
   emailOptOut: boolean("email_opt_out").notNull().default(false),
+  stripeCustomerId: text("stripe_customer_id"),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
 });
 
@@ -1641,6 +1642,7 @@ export const travelProducts = pgTable(
       onDelete: "set null",
     }),
     basePriceCents: integer("base_price_cents"),
+    depositCents: integer("deposit_cents"),
     priceTiers: jsonb("price_tiers").$type<TravelProductPriceTier[]>(),
     description: text("description"),
     active: boolean("active").notNull().default(true),
@@ -1779,3 +1781,179 @@ export const travelInvoiceLines = pgTable(
   },
   (table) => [index("travel_invoice_lines_invoice_idx").on(table.invoiceId)],
 );
+
+// ── Travel: Stripe billing rail (Block 4, migration 0050) ────────────────────
+// Ported from Northstar payments/payment_methods/payment_plans/installments/
+// scheduled_charges/refunds/stripe_events. SINGLE Stripe account (NO Connect).
+// Money = integer cents. Text status columns (no new DB enums). Stripe ids kept
+// for idempotency. EXCLUDES subscriptions/memberships (Block 7) + parties/ledger/
+// settlements (Block 5).
+
+export const travelPaymentMethods = pgTable(
+  "travel_payment_methods",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    guardianId: text("guardian_id")
+      .notNull()
+      .references(() => travelGuardians.id, { onDelete: "cascade" }),
+    stripePaymentMethodId: text("stripe_payment_method_id"),
+    // text: card | ach
+    kind: text("kind").notNull(),
+    brand: text("brand"),
+    last4: text("last4"),
+    expMonth: integer("exp_month"),
+    expYear: integer("exp_year"),
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("travel_payment_methods_guardian_idx").on(table.guardianId),
+    uniqueIndex("travel_payment_methods_stripe_pm_unique").on(
+      table.stripePaymentMethodId,
+    ),
+  ],
+);
+
+export const travelPayments = pgTable(
+  "travel_payments",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    invoiceId: text("invoice_id").references(() => travelInvoices.id, {
+      onDelete: "set null",
+    }),
+    guardianId: text("guardian_id").references(() => travelGuardians.id, {
+      onDelete: "set null",
+    }),
+    paymentMethodId: text("payment_method_id").references(
+      () => travelPaymentMethods.id,
+      { onDelete: "set null" },
+    ),
+    amountCents: integer("amount_cents").notNull(),
+    // text: card | ach | cash | check | other
+    channel: text("channel").notNull(),
+    // text: pending | succeeded | failed | refunded
+    status: text("status").notNull().default("pending"),
+    stripeChargeId: text("stripe_charge_id"),
+    stripePaymentIntentId: text("stripe_payment_intent_id"),
+    paidAt: timestamp("paid_at", { mode: "date" }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("travel_payments_invoice_idx").on(table.invoiceId),
+    index("travel_payments_guardian_idx").on(table.guardianId),
+    uniqueIndex("travel_payments_stripe_pi_unique").on(
+      table.stripePaymentIntentId,
+    ),
+  ],
+);
+
+export const travelPaymentPlans = pgTable(
+  "travel_payment_plans",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    invoiceId: text("invoice_id")
+      .notNull()
+      .references(() => travelInvoices.id, { onDelete: "cascade" }),
+    // text: upfront | installments
+    kind: text("kind").notNull(),
+    nInstallments: integer("n_installments"),
+    scheduleType: text("schedule_type"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [index("travel_payment_plans_invoice_idx").on(table.invoiceId)],
+);
+
+export const travelInstallments = pgTable(
+  "travel_installments",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    planId: text("plan_id")
+      .notNull()
+      .references(() => travelPaymentPlans.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    dueDate: timestamp("due_date", { mode: "date" }),
+    amountCents: integer("amount_cents").notNull(),
+    paidAmountCents: integer("paid_amount_cents").notNull().default(0),
+    paidDate: timestamp("paid_date", { mode: "date" }),
+    // text: scheduled | paid | overdue | partial
+    status: text("status").notNull().default("scheduled"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("travel_installments_plan_idx").on(table.planId),
+    uniqueIndex("travel_installments_plan_seq_unique").on(
+      table.planId,
+      table.seq,
+    ),
+  ],
+);
+
+export const travelScheduledCharges = pgTable(
+  "travel_scheduled_charges",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    invoiceId: text("invoice_id")
+      .notNull()
+      .references(() => travelInvoices.id, { onDelete: "cascade" }),
+    paymentMethodId: text("payment_method_id").references(
+      () => travelPaymentMethods.id,
+      { onDelete: "set null" },
+    ),
+    runOn: timestamp("run_on", { mode: "date" }).notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    // text: scheduled | charged | failed | cancelled
+    status: text("status").notNull().default("scheduled"),
+    stripeRef: text("stripe_ref"),
+    claimedAt: timestamp("claimed_at", { mode: "date" }),
+    installmentId: text("installment_id").references(
+      () => travelInstallments.id,
+      { onDelete: "set null" },
+    ),
+    failureReason: text("failure_reason"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("travel_scheduled_charges_invoice_idx").on(table.invoiceId),
+    index("travel_scheduled_charges_run_on_idx").on(table.runOn),
+    uniqueIndex("travel_scheduled_charges_installment_unique").on(
+      table.installmentId,
+    ),
+  ],
+);
+
+export const travelRefunds = pgTable(
+  "travel_refunds",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    paymentId: text("payment_id")
+      .notNull()
+      .references(() => travelPayments.id, { onDelete: "cascade" }),
+    amountCents: integer("amount_cents").notNull(),
+    reason: text("reason"),
+    stripeRefundId: text("stripe_refund_id"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [index("travel_refunds_payment_idx").on(table.paymentId)],
+);
+
+// Webhook idempotency ledger. id = the Stripe event id (evt_...) — NO defaultFn.
+export const travelStripeEvents = pgTable("travel_stripe_events", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  processedAt: timestamp("processed_at", { mode: "date" })
+    .notNull()
+    .defaultNow(),
+});

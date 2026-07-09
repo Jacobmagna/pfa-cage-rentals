@@ -15,13 +15,15 @@
 // fans out into flat (athlete × team) rows; we fold them back into the
 // deduped athlete tree in code. Athletes are ordered by last then first name.
 
-import { asc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
   travelAthletes,
   travelDivisions,
   travelGuardianAthletes,
+  travelInvoices,
   travelLocations,
+  travelProducts,
   travelTeamAthletes,
   travelTeams,
 } from "@/db/schema";
@@ -127,4 +129,70 @@ export async function getTravelPortalData(
   }
 
   return { athletes: [...byAthlete.values()] };
+}
+
+// ---------------------------------------------------------------------------
+// Block 4c — the guardian billing read. Given a signed-in travel guardian id,
+// returns that guardian's OWN invoices (what they owe) for the checkout page.
+// Read-only.
+//
+// SECURITY — IDOR boundary: scoped to travelInvoices.guardianId === guardianId,
+// so a guardian can only ever see their own dues. LEFT JOINs the product (name)
+// and athlete (name) for display; a null-product/athlete invoice still appears.
+// Newest first. `isPayable` is precomputed so the page can decide the Pay button
+// without re-deriving the status rule (kept in lockstep with payments.ts's
+// FINAL_STATUSES + balance > 0 check).
+// ---------------------------------------------------------------------------
+
+// Invoice statuses that take no new online payment (mirrors payments.ts).
+const BILLING_FINAL_STATUSES = new Set(["paid", "void", "refunded"]);
+
+export type PortalInvoice = {
+  id: string;
+  productName: string | null;
+  athleteName: string | null;
+  totalCents: number;
+  balanceCents: number;
+  status: string;
+  createdAt: Date;
+  isPayable: boolean;
+};
+
+export async function listTravelInvoicesForGuardian(
+  guardianId: string,
+): Promise<PortalInvoice[]> {
+  const rows = await db
+    .select({
+      id: travelInvoices.id,
+      productName: travelProducts.name,
+      athleteFirstName: travelAthletes.firstName,
+      athleteLastName: travelAthletes.lastName,
+      totalCents: travelInvoices.totalCents,
+      balanceCents: travelInvoices.balanceCents,
+      status: travelInvoices.status,
+      createdAt: travelInvoices.createdAt,
+    })
+    .from(travelInvoices)
+    .leftJoin(travelProducts, eq(travelProducts.id, travelInvoices.productId))
+    .leftJoin(travelAthletes, eq(travelAthletes.id, travelInvoices.athleteId))
+    .where(eq(travelInvoices.guardianId, guardianId))
+    .orderBy(desc(travelInvoices.createdAt));
+
+  return rows.map((row) => {
+    const athleteName =
+      row.athleteFirstName || row.athleteLastName
+        ? `${row.athleteFirstName ?? ""} ${row.athleteLastName ?? ""}`.trim()
+        : null;
+    return {
+      id: row.id,
+      productName: row.productName,
+      athleteName,
+      totalCents: row.totalCents,
+      balanceCents: row.balanceCents,
+      status: row.status,
+      createdAt: row.createdAt,
+      isPayable:
+        !BILLING_FINAL_STATUSES.has(row.status) && row.balanceCents > 0,
+    };
+  });
 }

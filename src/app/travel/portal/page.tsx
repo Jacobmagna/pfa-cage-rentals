@@ -145,9 +145,27 @@ export default async function TravelPortal() {
         </span>
       </Link>
 
+      {/* See dues and pay the deposit — Stripe hosted checkout. */}
+      <Link
+        href="/travel/portal/billing"
+        className="mt-4 flex items-center justify-between gap-4 rounded-md border border-line border-l-2 border-l-yellow bg-surface p-5 transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow/40"
+      >
+        <span>
+          <span className="block font-semibold text-fg">
+            Billing / Pay dues
+          </span>
+          <span className="mt-0.5 block text-sm text-fg-muted">
+            See what you owe and pay your deposit to lock the spot.
+          </span>
+        </span>
+        <span className="text-gold" aria-hidden="true">
+          &rarr;
+        </span>
+      </Link>
+
       {/* Understated hint at what's next — no links/buttons. */}
       <p className="mt-10 text-xs text-fg-subtle">
-        Billing, messages &amp; team store are coming soon.
+        Messages &amp; team store are coming soon.
       </p>
     </div>
   );

@@ -30,6 +30,7 @@ import { db } from "@/db";
 import {
   travelGuardians,
   travelInvoices,
+  travelPaymentMethods,
   travelPayments,
   travelProducts,
   travelRefunds,
@@ -38,7 +39,10 @@ import {
 import {
   createPaymentCheckoutSession,
   createRefund,
+  createSetupCheckoutSession,
   createStripeCustomer,
+  retrieveStripePaymentMethod,
+  retrieveStripeSetupIntent,
   stripeConfig,
   StripeError,
 } from "@/travel/stripe";
@@ -233,6 +237,217 @@ export async function startDepositCheckout(params: {
     if (err instanceof StripeError) return { ok: false, error: "stripe_error" };
     throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// startAddCard — begin the card-on-file vault flow for the caller-guardian:
+// ensure their Stripe Customer, then create a mode=setup Checkout Session and
+// return its hosted url. NOTHING is charged; the saved card lands via the
+// setup_intent.succeeded webhook (vaultPaymentMethodFromSetupIntent). Block 4b-2.
+// ---------------------------------------------------------------------------
+
+export type StartAddCardResult =
+  | { ok: true; url: string }
+  | { ok: false; error: "not_configured" | "no_guardian" | "stripe_error" };
+
+/**
+ * Begin the add-a-card-on-file flow for the caller-guardian:
+ *   1. DORMANT-SAFE: bail if Stripe is unconfigured.
+ *   2. Ensure the guardian's Stripe Customer (no_guardian / not_configured map
+ *      straight through).
+ *   3. Create a mode=setup Checkout Session (metadata { guardianId } → rides onto
+ *      the SetupIntent the webhook reads back) and return its hosted url. No card
+ *      is charged; the vault row is written by the setup_intent.succeeded webhook.
+ */
+export async function startAddCard(params: {
+  guardianId: string;
+  successUrl: string;
+  cancelUrl: string;
+}): Promise<StartAddCardResult> {
+  if (stripeConfig() === null) return { ok: false, error: "not_configured" };
+
+  const ensured = await ensureStripeCustomerForTravelGuardian(params.guardianId);
+  if (!ensured.ok) {
+    return {
+      ok: false,
+      error: ensured.error === "no_guardian" ? "no_guardian" : "not_configured",
+    };
+  }
+
+  try {
+    const session = await createSetupCheckoutSession({
+      customerId: ensured.customerId,
+      successUrl: params.successUrl,
+      cancelUrl: params.cancelUrl,
+      metadata: { guardianId: params.guardianId },
+    });
+    return { ok: true, url: session.url };
+  } catch (err) {
+    if (err instanceof StripeError) return { ok: false, error: "stripe_error" };
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// vaultPaymentMethodFromSetupIntent — the webhook's card-on-file recorder. Runs
+// only from the signature-verified webhook (setup_intent.succeeded). Mirrors
+// applyGatewayPaymentFromIntent's idempotency contract: event-id fast-path dedup,
+// .onConflictDoNothing() inserts on the UNIQUE pm id, and the travelStripeEvents
+// dedup marker written in the SAME db.batch as the vault row. Block 4b-2.
+// ---------------------------------------------------------------------------
+
+/**
+ * A minimal shape of the Stripe setup_intent object as it arrives on a
+ * setup_intent.succeeded event (only the fields we read). `payment_method` and
+ * `customer` may each be a bare id string OR an expanded object — we accept both.
+ */
+export type SetupIntentObject = {
+  id?: unknown;
+  payment_method?: unknown;
+  customer?: unknown;
+  metadata?: Record<string, unknown> | null;
+};
+
+/** Read a Stripe ref that may be a bare id string OR an expanded { id } object. */
+function readSetupIntentRefId(ref: unknown): string | null {
+  if (typeof ref === "string") return ref;
+  if (
+    ref &&
+    typeof ref === "object" &&
+    typeof (ref as { id?: unknown }).id === "string"
+  ) {
+    return (ref as { id: string }).id;
+  }
+  return null;
+}
+
+/**
+ * Vault the saved card for a VERIFIED setup_intent.succeeded event.
+ *
+ * Idempotent under at-least-once delivery:
+ *   - fast-path no-op if a travelStripeEvents row for this event id already
+ *     exists (a re-delivery we've already handled),
+ *   - the vault INSERT is .onConflictDoNothing() on the UNIQUE
+ *     stripePaymentMethodId (a re-delivered SetupIntent can't double-vault), AND
+ *   - the travelStripeEvents dedup marker is written in the SAME db.batch as the
+ *     vault row, so the event is marked processed ONLY as part of a SUCCESSFUL
+ *     vault.
+ *
+ * THIN-PAYLOAD FALLBACK: if the event payload lacks the payment_method id or our
+ * guardianId, we retrieveStripeSetupIntent() to fill them. Still missing after
+ * that (not ours / unresolvable but NOT a money loss) → record the event marker
+ * only + return.
+ *
+ * THROWS (TravelWebhookError) if the retrieveStripePaymentMethod read fails — a
+ * transient Stripe read shouldn't silently drop a vault, so the route 500s and
+ * Stripe RETRIES.
+ */
+export async function vaultPaymentMethodFromSetupIntent(params: {
+  eventId: string;
+  eventType: string;
+  setupIntent: SetupIntentObject;
+}): Promise<void> {
+  const si = params.setupIntent ?? {};
+  const siId = typeof si.id === "string" ? si.id : null;
+
+  let pmId = readSetupIntentRefId(si.payment_method);
+
+  const metadata: Record<string, string> = {};
+  for (const [k, v] of Object.entries(si.metadata ?? {})) {
+    if (typeof v === "string") metadata[k] = v;
+  }
+  let guardianId: string | null = metadata.guardianId ?? null;
+
+  // Record the processed-event marker (idempotent). Used on every no-op path.
+  const recordEventOnly = () =>
+    db
+      .insert(travelStripeEvents)
+      .values({ id: params.eventId, type: params.eventType })
+      .onConflictDoNothing();
+
+  // (1) EVENT-ID dedup fast-path.
+  const [seenEvent] = await db
+    .select({ id: travelStripeEvents.id })
+    .from(travelStripeEvents)
+    .where(eq(travelStripeEvents.id, params.eventId))
+    .limit(1);
+  if (seenEvent) return;
+
+  // (2) THIN PAYLOAD — the event object omitted the pm id or our guardianId.
+  // Refetch the SetupIntent to fill them (only if we have an id to fetch by).
+  if ((!pmId || !guardianId) && siId) {
+    const fetched = await retrieveStripeSetupIntent(siId);
+    if (!pmId) pmId = fetched.paymentMethodId;
+    if (!guardianId) guardianId = fetched.metadata.guardianId ?? null;
+  }
+
+  // (3) UNRESOLVABLE — no id to fetch by, or still missing pm/guardian after the
+  // fallback. Not ours / can't vault, but NOT a money loss → record + no-op.
+  if (!siId || !pmId || !guardianId) {
+    await recordEventOnly();
+    return;
+  }
+
+  // (4) Read the card's display fields. A transient Stripe read failure here must
+  // SURFACE (throw → route 500 → Stripe retries), not silently drop the vault.
+  let card: {
+    id: string;
+    kind: string;
+    brand: string | null;
+    last4: string | null;
+    expMonth: number | null;
+    expYear: number | null;
+  };
+  try {
+    card = await retrieveStripePaymentMethod(pmId);
+  } catch (err) {
+    if (err instanceof StripeError) {
+      throw new TravelWebhookError(
+        `setup_intent.succeeded ${siId}: failed to retrieve payment method ${pmId}`,
+      );
+    }
+    throw err;
+  }
+
+  // (5) isDefault: this card is the default ONLY if the guardian has no saved
+  // payment method yet (first card on file wins the default).
+  const existingMethods = await db
+    .select({ id: travelPaymentMethods.id })
+    .from(travelPaymentMethods)
+    .where(eq(travelPaymentMethods.guardianId, guardianId))
+    .limit(1);
+  const isDefault = existingMethods.length === 0;
+
+  const paymentMethodRowId = crypto.randomUUID();
+
+  // (6) ONE atomic db.batch: vault insert (idempotent on the UNIQUE pm id) + the
+  // event dedup marker — both commit together.
+  const statements: BatchItem<"pg">[] = [
+    db
+      .insert(travelPaymentMethods)
+      .values({
+        id: paymentMethodRowId,
+        guardianId,
+        stripePaymentMethodId: pmId,
+        kind: card.kind,
+        brand: card.brand,
+        last4: card.last4,
+        expMonth: card.expMonth,
+        expYear: card.expYear,
+        isDefault,
+      })
+      .onConflictDoNothing({
+        target: travelPaymentMethods.stripePaymentMethodId,
+      }),
+    db
+      .insert(travelStripeEvents)
+      .values({ id: params.eventId, type: params.eventType })
+      .onConflictDoNothing(),
+  ];
+
+  await db.batch(
+    statements as [(typeof statements)[number], ...typeof statements],
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -306,6 +306,160 @@ export async function createPaymentCheckoutSession(params: {
 }
 
 // ---------------------------------------------------------------------------
+// Card-on-file (SetupIntent) vault — Block 4b-2. Save a card for future off-
+// session charges. SINGLE account (no Stripe-Account header). Saving a card
+// moves NO money, so these helpers do NOT call assertChargeAllowed() — only
+// actual charges (createPaymentCheckoutSession / createRefund) pass the live
+// gate. The off-session charging half lands in a later task.
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a hosted Checkout Session in `mode=setup` for the given Customer — the
+ * card-on-file vault flow. Collects & saves a CARD (no charge) so it can be used
+ * for future off-session charges. NO line items / amount (nothing is captured).
+ *
+ * Each metadata entry is attached to the SetupIntent (the object the webhook
+ * reads back) via `setup_intent_data[metadata][<k>]` — so our guardianId rides
+ * through to the SetupIntent that setup_intent.succeeded delivers.
+ *
+ * NOTE: no assertChargeAllowed() here — saving a card moves NO money, so this
+ * path is not gated by the pre-live live-charge switch.
+ *
+ * Returns the session `id` + the hosted `url` to redirect the browser to; THROWS
+ * StripeError if Stripe returns no id/url.
+ */
+export async function createSetupCheckoutSession(params: {
+  customerId: string;
+  successUrl: string;
+  cancelUrl: string;
+  metadata: Record<string, string>;
+}): Promise<{ id: string; url: string }> {
+  const body: Record<string, string | number | boolean | null | undefined> = {
+    mode: "setup",
+    customer: params.customerId,
+    success_url: params.successUrl,
+    cancel_url: params.cancelUrl,
+    // FORCE CARD-ONLY collection.
+    "payment_method_types[0]": "card",
+  };
+  // Metadata on the SetupIntent (the object setup_intent.succeeded reads).
+  for (const [k, v] of Object.entries(params.metadata)) {
+    body[`setup_intent_data[metadata][${k}]`] = v;
+  }
+  const json = (await stripeRequest("/checkout/sessions", {
+    method: "POST",
+    body,
+  })) as { id?: unknown; url?: unknown };
+  if (typeof json.id !== "string" || typeof json.url !== "string") {
+    throw new StripeError(
+      null,
+      null,
+      null,
+      "Stripe /checkout/sessions (setup) returned no id/url",
+    );
+  }
+  return { id: json.id, url: json.url };
+}
+
+/**
+ * Retrieve a saved PaymentMethod for its display fields. `type` maps to our
+ * `kind` (e.g. "card"); the card sub-object's brand/last4/exp_month/exp_year are
+ * all read defensively (any may be absent → null). THROWS StripeError if Stripe
+ * returns no id.
+ */
+export async function retrieveStripePaymentMethod(
+  paymentMethodId: string,
+): Promise<{
+  id: string;
+  kind: string;
+  brand: string | null;
+  last4: string | null;
+  expMonth: number | null;
+  expYear: number | null;
+}> {
+  const json = (await stripeRequest(`/payment_methods/${paymentMethodId}`, {
+    method: "GET",
+  })) as {
+    id?: unknown;
+    type?: unknown;
+    card?: {
+      brand?: unknown;
+      last4?: unknown;
+      exp_month?: unknown;
+      exp_year?: unknown;
+    } | null;
+  };
+  if (typeof json.id !== "string") {
+    throw new StripeError(
+      null,
+      null,
+      null,
+      "Stripe /payment_methods returned no id",
+    );
+  }
+  const card = json.card ?? null;
+  return {
+    id: json.id,
+    kind: typeof json.type === "string" ? json.type : "card",
+    brand: typeof card?.brand === "string" ? card.brand : null,
+    last4: typeof card?.last4 === "string" ? card.last4 : null,
+    expMonth: typeof card?.exp_month === "number" ? card.exp_month : null,
+    expYear: typeof card?.exp_year === "number" ? card.exp_year : null,
+  };
+}
+
+/**
+ * Retrieve a SetupIntent — the FALLBACK when a webhook payload is thin (missing
+ * the payment_method id or our guardianId metadata). `payment_method` and
+ * `customer` may EACH be a bare id string OR an expanded object `{ id }` — we
+ * accept both (prefer the string form, else read `.id`). Metadata values are
+ * coerced to strings. THROWS StripeError if Stripe returns no id.
+ */
+export async function retrieveStripeSetupIntent(
+  setupIntentId: string,
+): Promise<{
+  id: string;
+  paymentMethodId: string | null;
+  customerId: string | null;
+  metadata: Record<string, string>;
+}> {
+  const json = (await stripeRequest(`/setup_intents/${setupIntentId}`, {
+    method: "GET",
+  })) as {
+    id?: unknown;
+    payment_method?: unknown;
+    customer?: unknown;
+    metadata?: Record<string, unknown> | null;
+  };
+  if (typeof json.id !== "string") {
+    throw new StripeError(
+      null,
+      null,
+      null,
+      "Stripe /setup_intents returned no id",
+    );
+  }
+  // Accept a bare id string OR an expanded { id } object for each ref.
+  const readRefId = (ref: unknown): string | null => {
+    if (typeof ref === "string") return ref;
+    if (ref && typeof ref === "object" && typeof (ref as { id?: unknown }).id === "string") {
+      return (ref as { id: string }).id;
+    }
+    return null;
+  };
+  const metadata: Record<string, string> = {};
+  for (const [k, v] of Object.entries(json.metadata ?? {})) {
+    metadata[k] = String(v);
+  }
+  return {
+    id: json.id,
+    paymentMethodId: readRefId(json.payment_method),
+    customerId: readRefId(json.customer),
+    metadata,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Refunds (single account — no Stripe-Account header).
 // ---------------------------------------------------------------------------
 

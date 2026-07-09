@@ -31,7 +31,9 @@ import { travelStripeEvents } from "@/db/schema";
 import { verifyStripeWebhook } from "@/travel/stripe";
 import {
   applyGatewayPaymentFromIntent,
+  vaultPaymentMethodFromSetupIntent,
   type PaymentIntentObject,
+  type SetupIntentObject,
 } from "@/travel/payments";
 
 export const dynamic = "force-dynamic";
@@ -124,10 +126,33 @@ export async function POST(req: Request) {
     }
   }
 
+  // (4b) HANDLED type — the card-on-file vault. Runs the idempotent applier,
+  // which records the event in the SAME atomic batch as its side effect.
+  if (eventType === "setup_intent.succeeded") {
+    try {
+      const setupIntent = (event.data?.object ?? {}) as SetupIntentObject;
+      await vaultPaymentMethodFromSetupIntent({
+        eventId,
+        eventType,
+        setupIntent,
+      });
+      return NextResponse.json({ ok: true });
+    } catch (err) {
+      // (5) RECORD-AFTER-SUCCESS: the applier failed → do NOT record the event;
+      // return 500 so Stripe RETRIES this event.
+      Sentry.captureException(err, {
+        tags: { webhook: "travel-stripe", eventType },
+      });
+      return NextResponse.json(
+        { ok: false, error: "handler_failed" },
+        { status: 500 },
+      );
+    }
+  }
+
   // (6) UNHANDLED-but-subscribed types (charge.refunded — the refund row is
-  // already written by refundPayment; setup_intent.succeeded lands in 4b-2) and
-  // any unknown type — record the event id + 200 no-op. A failure to record is
-  // transient → 500 so Stripe retries.
+  // already written by refundPayment) and any unknown type — record the event id
+  // + 200 no-op. A failure to record is transient → 500 so Stripe retries.
   try {
     await db
       .insert(travelStripeEvents)

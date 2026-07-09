@@ -362,6 +362,104 @@ export async function createSetupCheckoutSession(params: {
 }
 
 /**
+ * Charge a saved card OFF-SESSION (no customer present) — Block 4b-2-b. Confirms
+ * a PaymentIntent immediately against a vaulted PaymentMethod on the SINGLE
+ * platform account (no Stripe-Account header / no Connect). This MOVES money, so
+ * `assertChargeAllowed()` runs FIRST — before any network I/O — exactly like
+ * createPaymentCheckoutSession, so a real card can never be charged before a
+ * deliberate go-live.
+ *
+ * Each metadata entry rides onto the PI via `metadata[<k>]` — so our invoiceId /
+ * installmentId / scheduledChargeId reach the payment_intent.succeeded webhook.
+ * The `idempotencyKey` is passed through the Idempotency-Key header so a retried
+ * charge (e.g. a cron re-run) can NEVER double-capture.
+ *
+ * Returns { id, status, latestChargeId } — `latest_charge` is read as a STRING
+ * (id form) only, else null. THROWS StripeError if Stripe returns no string id.
+ *
+ * We do NOT catch card errors here: an off-session decline surfaces as a thrown
+ * StripeError (stripeType:"card_error", codes like "authentication_required" /
+ * "card_declined"), so the caller (a later cron task) can mark the scheduled
+ * charge failed instead of silently swallowing the failure.
+ */
+export async function createOffSessionPaymentIntent(
+  params: {
+    customerId: string;
+    paymentMethodId: string;
+    amountCents: number;
+    metadata: Record<string, string>;
+  },
+  idempotencyKey: string,
+): Promise<{ id: string; status: string; latestChargeId: string | null }> {
+  // Live-gate: refuse a live charge unless STRIPE_LIVE_OK is set. FIRST statement.
+  assertChargeAllowed();
+  const body: Record<string, string | number | boolean | null | undefined> = {
+    amount: params.amountCents,
+    currency: "usd",
+    customer: params.customerId,
+    payment_method: params.paymentMethodId,
+    off_session: true,
+    confirm: true,
+    // FORCE CARD-ONLY.
+    "payment_method_types[0]": "card",
+  };
+  for (const [k, v] of Object.entries(params.metadata)) {
+    body[`metadata[${k}]`] = v;
+  }
+  const json = (await stripeRequest("/payment_intents", {
+    method: "POST",
+    body,
+    idempotencyKey,
+  })) as { id?: unknown; status?: unknown; latest_charge?: unknown };
+  if (typeof json.id !== "string") {
+    throw new StripeError(
+      null,
+      null,
+      null,
+      "Stripe /payment_intents (off_session) returned no id",
+    );
+  }
+  return {
+    id: json.id,
+    status: typeof json.status === "string" ? json.status : "unknown",
+    latestChargeId:
+      typeof json.latest_charge === "string" ? json.latest_charge : null,
+  };
+}
+
+/**
+ * List a Customer's saved CARD PaymentMethods (up to 10) for display/selection.
+ * A READ — no money moves, so NO live-gate. Maps `data[]` → { id, brand, last4 }
+ * (card.brand / card.last4 read defensively). Returns [] when none are saved.
+ */
+export async function listCustomerCards(
+  customerId: string,
+): Promise<Array<{ id: string; brand: string | null; last4: string | null }>> {
+  const json = (await stripeRequest(
+    `/payment_methods?customer=${encodeURIComponent(customerId)}&type=card&limit=10`,
+    { method: "GET" },
+  )) as {
+    data?: Array<{
+      id?: unknown;
+      card?: { brand?: unknown; last4?: unknown } | null;
+    }> | null;
+  };
+  const data = Array.isArray(json.data) ? json.data : [];
+  const out: Array<{ id: string; brand: string | null; last4: string | null }> =
+    [];
+  for (const pm of data) {
+    if (!pm || typeof pm.id !== "string") continue;
+    const card = pm.card ?? null;
+    out.push({
+      id: pm.id,
+      brand: typeof card?.brand === "string" ? card.brand : null,
+      last4: typeof card?.last4 === "string" ? card.last4 : null,
+    });
+  }
+  return out;
+}
+
+/**
  * Retrieve a saved PaymentMethod for its display fields. `type` maps to our
  * `kind` (e.g. "card"); the card sub-object's brand/last4/exp_month/exp_year are
  * all read defensively (any may be absent → null). THROWS StripeError if Stripe

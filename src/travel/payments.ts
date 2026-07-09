@@ -29,11 +29,13 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { db } from "@/db";
 import {
   travelGuardians,
+  travelInstallments,
   travelInvoices,
   travelPaymentMethods,
   travelPayments,
   travelProducts,
   travelRefunds,
+  travelScheduledCharges,
   travelStripeEvents,
 } from "@/db/schema";
 import {
@@ -49,6 +51,13 @@ import {
 
 // Invoice statuses that take no new online payment / can't be refunded onto.
 const FINAL_STATUSES = new Set(["paid", "void", "refunded"]);
+
+// The metadata `kind`s that represent a money capture the applier must record +
+// apply to the invoice balance. "deposit" is the original Block-4b-1 kind;
+// "remainder"/"installment" are the cadence-independent autopay kinds (4b-2-b).
+// All three take the SAME core payment+balance path; only the OPTIONAL linkage
+// updates (installment / scheduled_charge) below differ.
+const MONEY_KINDS = new Set(["deposit", "remainder", "installment"]);
 
 // ---------------------------------------------------------------------------
 // Pure money helpers (integer cents; loud throws on caller bugs before a write).
@@ -67,6 +76,28 @@ function nextInvoiceStatus(
   if (balanceAfterCents === 0) return "paid";
   if (balanceAfterCents >= totalCents) return "pending";
   return "partial";
+}
+
+/**
+ * post-payment installment status from the paid-so-far vs the installment amount.
+ * `paid` once fully covered, `partial` while 0 < paid < amount, else `scheduled`.
+ * Loud-throw on negative inputs (a caller bug) — mirrors nextInvoiceStatus.
+ */
+export function nextInstallmentStatus(
+  paidAfterCents: number,
+  amountCents: number,
+): "scheduled" | "partial" | "paid" {
+  if (paidAfterCents < 0) {
+    throw new Error(
+      `nextInstallmentStatus: paidAfterCents ${paidAfterCents} < 0`,
+    );
+  }
+  if (amountCents < 0) {
+    throw new Error(`nextInstallmentStatus: amountCents ${amountCents} < 0`);
+  }
+  if (paidAfterCents >= amountCents) return "paid";
+  if (paidAfterCents > 0) return "partial";
+  return "scheduled";
 }
 
 /** The most that can still be refunded: captured − already-refunded (≥ 0). */
@@ -504,6 +535,10 @@ export async function applyGatewayPaymentFromIntent(params: {
   const invoiceId = metadata.invoiceId;
   const guardianId = metadata.guardianId ?? null;
   const kind = metadata.kind;
+  // OPTIONAL autopay linkages (4b-2-b). A plain deposit PI has NEITHER → the
+  // extra linkage updates below are skipped, so its behavior is byte-identical.
+  const installmentId = metadata.installmentId ?? null;
+  const scheduledChargeId = metadata.scheduledChargeId ?? null;
 
   // amount_received (preferred) or amount; latest charge id (string form only).
   const amountReceivedCents =
@@ -530,9 +565,11 @@ export async function applyGatewayPaymentFromIntent(params: {
     .limit(1);
   if (seenEvent) return;
 
-  // (2) NOT OURS — a succeeded PI we didn't originate (no deposit metadata /
-  // invoice / id). Record the event + no-op (we touch no invoice).
-  if (kind !== "deposit" || !invoiceId || !piId) {
+  // (2) NOT OURS — a succeeded PI we didn't originate (no money-kind metadata /
+  // invoice / id). Record the event + no-op (we touch no invoice). Broadened
+  // from deposit-only to any MONEY_KIND (deposit/remainder/installment): all
+  // three take the SAME core payment+balance write. NEVER narrowed.
+  if (!kind || !MONEY_KINDS.has(kind) || !invoiceId || !piId) {
     await recordEventOnly();
     return;
   }
@@ -566,6 +603,24 @@ export async function applyGatewayPaymentFromIntent(params: {
     throw new TravelWebhookError(
       `payment_intent.succeeded for invoice ${invoiceId} which does not exist`,
     );
+  }
+
+  // (4b) OPTIONAL installment linkage read (autopay). Done here, alongside the
+  // invoice read, so the conditional UPDATE can join the ONE db.batch below. A
+  // MISSING row is NOT a money loss (we still record the payment + reduce the
+  // balance) → skip the linkage silently, never throw.
+  let installment: { amountCents: number; paidAmountCents: number } | null =
+    null;
+  if (installmentId) {
+    const [row] = await db
+      .select({
+        amountCents: travelInstallments.amountCents,
+        paidAmountCents: travelInstallments.paidAmountCents,
+      })
+      .from(travelInstallments)
+      .where(eq(travelInstallments.id, installmentId))
+      .limit(1);
+    installment = row ?? null;
   }
 
   // (5) Already-final invoice — don't double-apply onto a settled invoice.
@@ -617,6 +672,40 @@ export async function applyGatewayPaymentFromIntent(params: {
       .values({ id: params.eventId, type: params.eventType })
       .onConflictDoNothing(),
   ];
+
+  // (8b) OPTIONAL autopay linkage updates — appended to the SAME statements so
+  // they commit atomically with the payment+balance write. A plain deposit PI
+  // (no installmentId/scheduledChargeId) appends NOTHING → identical behavior.
+  if (installmentId && installment) {
+    // Present-and-found only: a MISSING installment was skipped in (4b) so its
+    // captured payment is still recorded — money-safe, no throw.
+    const newPaid = Math.min(
+      installment.amountCents,
+      installment.paidAmountCents + appliedCents,
+    );
+    const instStatus = nextInstallmentStatus(newPaid, installment.amountCents);
+    statements.push(
+      db
+        .update(travelInstallments)
+        .set({
+          paidAmountCents: newPaid,
+          status: instStatus,
+          // Stamp paidDate ONLY on full payoff; leave null while partial.
+          paidDate: instStatus === "paid" ? now : null,
+        })
+        .where(eq(travelInstallments.id, installmentId)),
+    );
+  }
+  if (scheduledChargeId) {
+    // Unconditional update-by-id: a missing id updates 0 rows (no throw), so
+    // this is money-safe without a pre-read.
+    statements.push(
+      db
+        .update(travelScheduledCharges)
+        .set({ status: "charged", stripeRef: piId })
+        .where(eq(travelScheduledCharges.id, scheduledChargeId)),
+    );
+  }
 
   await db.batch(
     statements as [(typeof statements)[number], ...typeof statements],

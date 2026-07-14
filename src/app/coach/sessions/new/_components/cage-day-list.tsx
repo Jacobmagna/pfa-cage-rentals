@@ -4,10 +4,11 @@
 //
 // PRESENTATIONAL ONLY — props in, render out. No data fetching, no server
 // imports. The parent (cage-calendar.tsx) owns all state (selected /
-// selection / revealed / multiSelect) and builds the `slots` array for the
+// selection / multiSelect) and builds the `slots` array for the
 // currently-selected resource, then routes taps back through its existing
 // `handleSlotClick`. Keeping this props-only lets it be previewed with mock
-// data and keeps the parent the single source of truth.
+// data and keeps the parent the single source of truth. Busy rows show their
+// occupant (coach first name / block reason) up-front — no tap-to-reveal.
 
 import { Check, Plus } from "lucide-react";
 import type { SlotState } from "@/lib/coach-calendar";
@@ -17,11 +18,12 @@ export type CageDaySlot = {
   /** 12-hour time range, e.g. "4:00 – 4:30 PM". */
   timeLabel: string;
   state: SlotState;
-  /** First name (taken) / block reason (blocked) / null otherwise. */
+  /** First name (taken) / block reason (blocked) / null otherwise. Shown
+      up-front on busy rows so the coach sees who/what holds the slot without
+      tapping. */
   occupantLabel: string | null;
   isSelected: boolean;
   isBatchSelected: boolean;
-  isRevealed: boolean;
 };
 
 export function CageDayList({
@@ -54,14 +56,8 @@ function CageDayRow({
   slot: CageDaySlot;
   onClick: () => void;
 }) {
-  const {
-    timeLabel,
-    state,
-    occupantLabel,
-    isSelected,
-    isBatchSelected,
-    isRevealed,
-  } = slot;
+  const { timeLabel, state, occupantLabel, isSelected, isBatchSelected } =
+    slot;
 
   const tone =
     isBatchSelected
@@ -80,8 +76,13 @@ function CageDayRow({
         ? `Selected — ${timeLabel}. Tap to deselect.`
         : `Book ${timeLabel}`;
     if (state === "own") return `Your booking at ${timeLabel}`;
-    if (state === "blocked") return `${timeLabel} — blocked`;
-    return `${timeLabel} — taken`;
+    if (state === "blocked")
+      return occupantLabel
+        ? `${timeLabel} — blocked: ${occupantLabel}`
+        : `${timeLabel} — blocked`;
+    return occupantLabel
+      ? `${timeLabel} — taken by ${occupantLabel}`
+      : `${timeLabel} — taken`;
   })();
 
   return (
@@ -97,34 +98,34 @@ function CageDayRow({
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gold/60",
       ].join(" ")}
     >
-      <span className="text-sm font-medium tabular-nums text-fg">
+      <span className="shrink-0 text-sm font-medium tabular-nums text-fg">
         {timeLabel}
       </span>
 
-      <span className="flex shrink-0 items-center gap-2">
+      <span className="flex min-w-0 items-center justify-end gap-2">
         {state === "free" ? (
           isBatchSelected ? (
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-gold-strong">
+            <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-gold-strong">
               <Check aria-hidden className="h-4 w-4" />
               Selected
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-fg-muted">
+            <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-fg-muted">
               <Plus aria-hidden className="h-4 w-4" />
               Book
             </span>
           )
         ) : state === "own" ? (
-          <span className="text-xs font-semibold text-gold-strong">
+          <span className="shrink-0 text-xs font-semibold text-gold-strong">
             Your booking
           </span>
-        ) : state === "blocked" ? (
-          <span className="text-xs font-medium text-fg-muted">
-            {isRevealed && occupantLabel ? `Blocked: ${occupantLabel}` : "Blocked"}
-          </span>
         ) : (
-          <span className="text-xs font-medium text-fg-muted">
-            {isRevealed && occupantLabel ? occupantLabel : "Taken"}
+          // taken / blocked: show who/what holds the slot up-front (coach
+          // first name, or the block reason like "Program: <name>") so it's
+          // legible at a glance without tapping. Long program names wrap
+          // rather than clip.
+          <span className="min-w-0 break-words text-right text-xs font-medium text-fg-muted">
+            {occupantLabel ?? (state === "blocked" ? "Blocked" : "Taken")}
           </span>
         )}
       </span>

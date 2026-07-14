@@ -266,9 +266,6 @@ export function CageCalendar({
           isBatchSelected:
             multiSelect &&
             selection.has(`${dateStr}|${mobileResource.id}|${slotIdx}`),
-          isRevealed:
-            revealed?.resourceId === mobileResource.id &&
-            revealed.slotIndex === slotIdx,
         };
       })
     : [];
@@ -665,9 +662,13 @@ export function CageCalendar({
         <p className="text-fg-subtle">
           {multiSelect
             ? "Tap open slots across any cages and days — your selection stays as you switch days — then book them all together."
-            : "Tap an open slot to book it. Tap a red slot to see who has it."}{" "}
+            : "Tap an open slot to book it."}{" "}
+          {/* Desktop grid still reveals the occupant on tap (a 30-min cell
+              can't fit a long program name); the mobile list shows it
+              inline, so the hint differs by view. */}
           <span className="hidden md:inline">
-            Rotate your phone or scroll sideways to see the full day.
+            Tap a red slot to see who has it. Rotate your phone or scroll
+            sideways to see the full day.
           </span>
           <span className="md:hidden">
             Pick a resource above, then tap a slot to book it.

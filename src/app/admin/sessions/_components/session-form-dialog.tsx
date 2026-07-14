@@ -9,9 +9,11 @@ import {
   useTransition,
   type FormEvent,
 } from "react";
-import { X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Trash2, X } from "lucide-react";
 import {
   createSessionFormAction,
+  deleteSessionAction,
   updateSessionFormAction,
   type ActionResult,
 } from "../form-actions";
@@ -74,6 +76,7 @@ export function SessionFormDialog({
   initial?: SessionFormInitialValues;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const router = useRouter();
   const action =
     mode === "edit" ? updateSessionFormAction : createSessionFormAction;
   const [state, formAction, pending] = useActionState(action, INITIAL_STATE);
@@ -81,6 +84,33 @@ export function SessionFormDialog({
   // Batch-create path state (create mode + N>1 only).
   const [batchPending, startBatchTransition] = useTransition();
   const [batchError, setBatchError] = useState<string | null>(null);
+
+  // Delete path state (edit mode only). Two-step inline confirm — kept inline
+  // (not a nested overlay) because this is a native <dialog> in the top layer,
+  // where a separate fixed-overlay confirm would render behind it.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deletePending, startDeleteTransition] = useTransition();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleDelete = () => {
+    if (!initial) return;
+    setDeleteError(null);
+    startDeleteTransition(async () => {
+      try {
+        await deleteSessionAction(initial.id);
+        setConfirmingDelete(false);
+        onClose();
+      } catch {
+        // Already gone / concurrent delete. Re-sync the grid behind the
+        // dialog so the copy ("Refreshing…") is truthful, and keep the
+        // dialog open with the message.
+        setDeleteError(
+          "Couldn't delete this rental — it may have already been removed. Refreshing…",
+        );
+        router.refresh();
+      }
+    });
+  };
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -158,6 +188,8 @@ export function SessionFormDialog({
       endTime: defaults.endTime,
     });
     setBatchError(null);
+    setConfirmingDelete(false);
+    setDeleteError(null);
   }
 
   // Multi-slot state (create mode only).
@@ -453,25 +485,80 @@ export function SessionFormDialog({
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 pt-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-line-strong bg-surface text-fg-muted hover:text-fg hover:-translate-y-px shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] h-9 px-4 text-sm font-medium transition"
+        {deleteError ? (
+          <div
+            role="alert"
+            className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
           >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={
-              pending ||
-              batchPending ||
-              (isMultiSlot && (slotCount === 0 || divisibilityError))
-            }
-            className="rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
-          >
-            {submitLabel}
-          </button>
+            {deleteError}
+          </div>
+        ) : null}
+
+        <div className="flex items-center justify-between gap-3 pt-2">
+          {/* Left: delete (edit mode only), a two-step inline confirm so a
+              destructive action never sits flush against Save. */}
+          {mode === "edit" && initial ? (
+            confirmingDelete ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium text-danger">
+                  Delete?
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setConfirmingDelete(false)}
+                  disabled={deletePending}
+                  className="rounded-lg border border-line-strong bg-surface text-fg-muted hover:text-fg h-9 px-3 text-sm font-medium shadow-[var(--shadow-sm)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition"
+                >
+                  Keep
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  disabled={deletePending}
+                  className="rounded-lg bg-danger text-page hover:opacity-90 h-9 px-3 text-sm font-medium shadow-[var(--shadow-sm)] disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition"
+                >
+                  {deletePending ? "Deleting…" : "Delete rental"}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteError(null);
+                  setConfirmingDelete(true);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-danger/40 bg-danger/5 text-danger hover:bg-danger/10 h-9 px-3 text-sm font-medium shadow-[var(--shadow-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete rental
+              </button>
+            )
+          ) : (
+            <span />
+          )}
+
+          {/* Right: cancel + save. */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-line-strong bg-surface text-fg-muted hover:text-fg hover:-translate-y-px shadow-[var(--shadow-sm)] hover:shadow-[var(--shadow-md)] h-9 px-4 text-sm font-medium transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={
+                pending ||
+                batchPending ||
+                deletePending ||
+                (isMultiSlot && (slotCount === 0 || divisibilityError))
+              }
+              className="rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+            >
+              {submitLabel}
+            </button>
+          </div>
         </div>
       </form>
     </dialog>

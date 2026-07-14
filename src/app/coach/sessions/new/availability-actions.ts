@@ -23,6 +23,7 @@ import {
   users,
 } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
+import { pendingRemovalSessionIds } from "@/lib/server/session-removal-actions";
 import { parsePfaInput, pfaDayEnd, pfaDayStart } from "@/lib/timezone";
 
 export type AvailabilitySession = {
@@ -32,6 +33,17 @@ export type AvailabilitySession = {
   coachId: string;
   startAt: string; // ISO
   endAt: string;
+  // Started (startAt <= now, server clock) → a coach can't delete it directly,
+  // only request admin removal. Computed server-side (mirrors the My-rentals
+  // list); the delete/removal actions re-check, so open-popup staleness is
+  // harmless.
+  isPast: boolean;
+  // The following two are populated ONLY for the VIEWING coach's own
+  // rentals (null / false for anyone else's booking) — they drive the
+  // coach's "your booking" delete/removal popup and must never leak another
+  // coach's note or removal state.
+  note: string | null;
+  removalPending: boolean;
 };
 
 export type AvailabilityBlock = {
@@ -66,7 +78,8 @@ function firstName(full: string | null, email: string): string {
 export async function getDayAvailability(
   date: string,
 ): Promise<DayAvailability> {
-  await requireSession();
+  const session = await requireSession();
+  const viewerId = session.user.id;
 
   const parsed = parsePfaInput(date, "00:00");
   if (Number.isNaN(parsed.getTime())) {
@@ -75,7 +88,7 @@ export async function getDayAvailability(
   const dayStart = pfaDayStart(parsed);
   const dayEnd = pfaDayEnd(parsed);
 
-  const [sessionRows, blockRows] = await Promise.all([
+  const [sessionRows, blockRows, pendingRemoval] = await Promise.all([
     db
       .select({
         id: sessionsBilling.id,
@@ -83,6 +96,7 @@ export async function getDayAvailability(
         coachId: sessionsBilling.coachId,
         coachName: users.name,
         coachEmail: users.email,
+        note: sessionsBilling.note,
         startAt: sessionsBilling.startAt,
         endAt: sessionsBilling.endAt,
       })
@@ -120,18 +134,29 @@ export async function getDayAvailability(
         ),
       )
       .orderBy(asc(blockedTimes.startAt)),
+    // Which of the VIEWER'S rentals have an open removal request — so their
+    // own past-slot popup shows "Removal requested" instead of the button.
+    pendingRemovalSessionIds(viewerId),
   ]);
 
+  const now = new Date();
   return {
     date,
-    sessions: sessionRows.map((r) => ({
-      id: r.id,
-      resourceId: r.resourceId,
-      coachId: r.coachId,
-      coachFirstName: firstName(r.coachName, r.coachEmail),
-      startAt: r.startAt.toISOString(),
-      endAt: r.endAt.toISOString(),
-    })),
+    sessions: sessionRows.map((r) => {
+      const isOwn = r.coachId === viewerId;
+      return {
+        id: r.id,
+        resourceId: r.resourceId,
+        coachId: r.coachId,
+        coachFirstName: firstName(r.coachName, r.coachEmail),
+        isPast: r.startAt <= now,
+        // Own-only: never expose another coach's note or removal state.
+        note: isOwn ? r.note : null,
+        removalPending: isOwn ? pendingRemoval.has(r.id) : false,
+        startAt: r.startAt.toISOString(),
+        endAt: r.endAt.toISOString(),
+      };
+    }),
     blocks: blockRows.map((b) => ({
       id: b.id,
       resourceId: b.resourceId,

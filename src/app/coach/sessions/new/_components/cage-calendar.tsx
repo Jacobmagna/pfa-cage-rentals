@@ -50,6 +50,10 @@ import {
 import { CageSlotBooking } from "./cage-slot-booking";
 import { CageBatchBooking } from "./cage-batch-booking";
 import { CageDayList, type CageDaySlot } from "./cage-day-list";
+import {
+  OwnBookingDetail,
+  type OwnBookingInfo,
+} from "./own-booking-detail";
 import { Modal } from "@/app/_components/modal";
 
 // Local copies of the schedule-grid type-stripe helper — duplicated per
@@ -113,8 +117,11 @@ export function CageCalendar({
 
   // Selected GREEN slot → booking panel. `null` = no panel open.
   const [selected, setSelected] = useState<SelectedSlot | null>(null);
-  // Tapped non-green slot → small inline reveal of occupant label.
+  // Tapped RED (taken/blocked) slot → small inline reveal of occupant label.
   const [revealed, setRevealed] = useState<SelectedSlot | null>(null);
+  // Tapped GOLD (own) slot → the read-only "your booking" popup with the
+  // delete / request-removal action.
+  const [ownDetail, setOwnDetail] = useState<OwnBookingInfo | null>(null);
   const [confirmation, setConfirmation] = useState<string | null>(null);
 
   // ── Batch multi-select (cross-cage + cross-day) ──────────────────
@@ -172,8 +179,28 @@ export function CageCalendar({
   const resetTransient = () => {
     setSelected(null);
     setRevealed(null);
+    setOwnDetail(null);
     setConfirmation(null);
     setFormOpen(false);
+  };
+
+  // Build the "your booking" popup payload for the coach's OWN slot. Reads
+  // the same occupant computeSlotState already produced (sessionId + own-only
+  // note/removalPending + the session's true start/end), so it works from
+  // either the desktop grid or the mobile list.
+  const openOwnDetail = (resourceId: string, slotIndex: number) => {
+    const { occupant } = slotStateFor(resourceId, slotIndex);
+    if (occupant?.kind !== "session" || !occupant.isOwn) return;
+    const resource = resources.find((r) => r.id === resourceId);
+    setOwnDetail({
+      sessionId: occupant.sessionId,
+      resourceName: resource?.name ?? "",
+      startAt: new Date(occupant.startMs),
+      endAt: new Date(occupant.endMs),
+      note: occupant.note,
+      removalPending: occupant.removalPending,
+      isPast: occupant.isPast,
+    });
   };
 
   const goPrevDay = () => {
@@ -204,6 +231,10 @@ export function CageCalendar({
       endMs: new Date(s.endAt).getTime(),
       coachFirstName: s.coachFirstName,
       isOwn: s.coachId === coachId,
+      sessionId: s.id,
+      note: s.note,
+      removalPending: s.removalPending,
+      isPast: s.isPast,
     });
   }
   for (const b of data?.blocks ?? []) {
@@ -362,7 +393,14 @@ export function CageCalendar({
     state: SlotState,
   ) => {
     setConfirmation(null);
-    // Batch mode: green slots build the multi-selection; red/gold still
+    // A GOLD (own) slot opens the "your booking" popup (delete / request
+    // removal) in EITHER mode — the coach can always manage their own rental.
+    if (state === "own") {
+      setRevealed(null);
+      openOwnDetail(resourceId, slotIndex);
+      return;
+    }
+    // Batch mode: green slots build the multi-selection; red slots still
     // reveal their occupant label (no selection).
     if (multiSelect) {
       if (state === "free") {
@@ -382,7 +420,7 @@ export function CageCalendar({
       setSelected({ resourceId, slotIndex });
       return;
     }
-    // own / taken / blocked → reveal label only, no booking.
+    // taken / blocked → reveal label only, no booking.
     setSelected(null);
     setRevealed((prev) =>
       prev && prev.resourceId === resourceId && prev.slotIndex === slotIndex
@@ -707,6 +745,15 @@ export function CageCalendar({
           />
         ) : null}
       </Modal>
+
+      {/* Coach "your booking" popup — delete a future rental or request
+          removal of a started one. Refetches the day on any change. */}
+      <OwnBookingDetail
+        key={ownDetail?.sessionId ?? "closed"}
+        info={ownDetail}
+        onClose={() => setOwnDetail(null)}
+        onChanged={() => refresh(dateStr)}
+      />
     </div>
   );
 }
@@ -769,10 +816,12 @@ function SlotCell({
     return `${resourceName} at ${time12} — blocked`;
   })();
 
-  // For the coach's OWN slot, reveal a friendly "Your booking" line with
-  // their name + the slot time (read-only — no other detail). For a
-  // foreign session, reveal ONLY the booking coach's first name. For a
-  // block, reveal ONLY the reason.
+  // Reveal label for a tapped RED slot: a foreign session reveals ONLY the
+  // booking coach's first name; a block reveals ONLY the reason.
+  // NOTE: the `state === "own"` arm is retained for completeness but is now
+  // UNREACHABLE — an own (gold) slot opens the OwnBookingDetail popup instead
+  // of the inline reveal (handleSlotClick never sets `revealed` for own), so
+  // this reveal <span> only ever shows for taken/blocked.
   const occupantLabel =
     state === "own"
       ? `Your booking — ${ownName}, ${time12}`

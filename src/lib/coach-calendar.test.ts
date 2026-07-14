@@ -19,13 +19,24 @@ const slotEnd = (i: number) => BASE + (i + 1) * SLOT_MS;
 function session(
   startSlot: number,
   endSlotExclusive: number,
-  opts: { coachFirstName?: string; isOwn?: boolean } = {},
+  opts: {
+    coachFirstName?: string;
+    isOwn?: boolean;
+    sessionId?: string;
+    note?: string | null;
+    removalPending?: boolean;
+    isPast?: boolean;
+  } = {},
 ): SlotSession {
   return {
     startMs: slotStart(startSlot),
     endMs: slotStart(endSlotExclusive),
     coachFirstName: opts.coachFirstName ?? "Mike",
     isOwn: opts.isOwn ?? false,
+    sessionId: opts.sessionId ?? "sess-default",
+    note: opts.note ?? null,
+    removalPending: opts.removalPending ?? false,
+    isPast: opts.isPast ?? false,
   };
 }
 
@@ -64,17 +75,44 @@ describe("computeSlotState", () => {
   it("returns own for the coach's own session", () => {
     const r = stateAt(4, [session(4, 6, { coachFirstName: "Sam", isOwn: true })], []);
     expect(r.state).toBe("own");
-    expect(r.occupant).toEqual({
+    expect(r.occupant).toMatchObject({
       kind: "session",
       coachFirstName: "Sam",
       isOwn: true,
     });
   });
 
+  it("carries the session id + own-only note/removalPending on the own occupant (drives the delete/removal popup)", () => {
+    const r = stateAt(
+      4,
+      [
+        session(4, 6, {
+          isOwn: true,
+          sessionId: "sess-42",
+          note: "bring L-screen",
+          removalPending: true,
+          isPast: true,
+        }),
+      ],
+      [],
+    );
+    expect(r.occupant).toEqual({
+      kind: "session",
+      coachFirstName: "Mike",
+      isOwn: true,
+      sessionId: "sess-42",
+      note: "bring L-screen",
+      removalPending: true,
+      isPast: true,
+      startMs: slotStart(4),
+      endMs: slotStart(6),
+    });
+  });
+
   it("returns taken for another coach's session, revealing only first name", () => {
     const r = stateAt(4, [session(4, 6, { coachFirstName: "Mike" })], []);
     expect(r.state).toBe("taken");
-    expect(r.occupant).toEqual({
+    expect(r.occupant).toMatchObject({
       kind: "session",
       coachFirstName: "Mike",
       isOwn: false,
@@ -115,7 +153,7 @@ describe("computeSlotState", () => {
       [],
     );
     expect(r.state).toBe("taken");
-    expect(r.occupant).toEqual({
+    expect(r.occupant).toMatchObject({
       kind: "session",
       coachFirstName: "Mike",
       isOwn: false,

@@ -15,7 +15,22 @@
 export type SlotState = "free" | "own" | "taken" | "blocked";
 
 export type SlotOccupant =
-  | { kind: "session"; coachFirstName: string; isOwn: boolean }
+  | {
+      kind: "session";
+      coachFirstName: string;
+      isOwn: boolean;
+      // Identity + the fields the coach's own-booking popup needs. `note` /
+      // `removalPending` are meaningful only when isOwn (the server nulls
+      // them for other coaches' bookings). startMs/endMs are the SESSION's
+      // own range (may span several slots), used to label + to pick
+      // delete-vs-request-removal.
+      sessionId: string;
+      note: string | null;
+      removalPending: boolean;
+      isPast: boolean;
+      startMs: number;
+      endMs: number;
+    }
   | { kind: "block"; reason: string }
   | null;
 
@@ -25,6 +40,12 @@ export type SlotSession = {
   endMs: number;
   coachFirstName: string;
   isOwn: boolean;
+  sessionId: string;
+  // Server-computed: startAt <= now (drives delete-vs-request-removal).
+  isPast: boolean;
+  // Own-only (null for other coaches' bookings — enforced server-side).
+  note: string | null;
+  removalPending: boolean;
 };
 
 // A blocked_time on this resource, reduced to ms range + reason.
@@ -88,14 +109,34 @@ export function computeSlotState(args: {
     }
     return {
       state: "taken",
-      occupant: { kind: "session", coachFirstName: s.coachFirstName, isOwn: false },
+      occupant: {
+        kind: "session",
+        coachFirstName: s.coachFirstName,
+        isOwn: false,
+        sessionId: s.sessionId,
+        note: s.note,
+        removalPending: s.removalPending,
+        isPast: s.isPast,
+        startMs: s.startMs,
+        endMs: s.endMs,
+      },
     };
   }
 
   if (own) {
     return {
       state: "own",
-      occupant: { kind: "session", coachFirstName: own.coachFirstName, isOwn: true },
+      occupant: {
+        kind: "session",
+        coachFirstName: own.coachFirstName,
+        isOwn: true,
+        sessionId: own.sessionId,
+        note: own.note,
+        removalPending: own.removalPending,
+        isPast: own.isPast,
+        startMs: own.startMs,
+        endMs: own.endMs,
+      },
     };
   }
 

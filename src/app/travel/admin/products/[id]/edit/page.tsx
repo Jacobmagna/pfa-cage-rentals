@@ -84,6 +84,7 @@ export default async function EditTravelProductPage({
             description: product.description,
             basePriceCents: product.basePriceCents,
             priceTiers: product.priceTiers,
+            depositCents: product.depositCents,
             monthlyInstallmentCents: product.monthlyInstallmentCents,
             active: product.active,
           }}

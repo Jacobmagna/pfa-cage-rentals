@@ -67,6 +67,7 @@ export function ProductForm({
     description: string | null;
     basePriceCents: number | null;
     priceTiers: TravelProductPriceTier[] | null;
+    depositCents: number | null;
     monthlyInstallmentCents: number | null;
     active: boolean;
   };
@@ -357,6 +358,32 @@ export function ProductForm({
           </div>
         )}
       </fieldset>
+
+      {/* Deposit amount (optional) — the up-front amount the deposit checkout
+          charges first. Same dollars→cents boundary as the price fields (server
+          action parses). Leave blank → the deposit flow charges the full balance. */}
+      <div className="space-y-1.5 border-t border-line pt-4">
+        <label htmlFor="depositDollars" className={LABEL}>
+          Deposit amount (optional)
+        </label>
+        <div className="relative">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-fg-subtle">
+            $
+          </span>
+          <input
+            id="depositDollars"
+            name="depositDollars"
+            inputMode="decimal"
+            defaultValue={centsToDollarString(initial?.depositCents)}
+            placeholder="500.00"
+            className={`${INPUT} pl-7`}
+          />
+        </div>
+        <p className="text-xs text-fg-subtle">
+          The up-front amount charged first when a parent pays the deposit. Leave
+          blank to charge the full balance up front.
+        </p>
+      </div>
 
       {/* Monthly payment amount (optional) — the fixed installment auto-charged
           to the card on file until the season balance is paid off. Same

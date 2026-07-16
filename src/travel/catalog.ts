@@ -26,7 +26,9 @@ import {
   travelGuardians,
   travelInvoices,
   travelLocations,
+  travelPayments,
   travelProducts,
+  travelRefunds,
   travelSeasons,
   travelTeams,
 } from "@/db/schema";
@@ -138,6 +140,7 @@ export type TravelProductRow = {
   active: boolean;
   basePriceCents: number | null;
   priceTiers: TravelProductPriceTier[] | null;
+  depositCents: number | null;
   monthlyInstallmentCents: number | null;
   description: string | null;
   seasonId: string | null;
@@ -159,6 +162,7 @@ export async function getTravelProduct(
       active: travelProducts.active,
       basePriceCents: travelProducts.basePriceCents,
       priceTiers: travelProducts.priceTiers,
+      depositCents: travelProducts.depositCents,
       monthlyInstallmentCents: travelProducts.monthlyInstallmentCents,
       description: travelProducts.description,
       seasonId: travelProducts.seasonId,
@@ -177,6 +181,7 @@ export async function getTravelProduct(
     active: row.active,
     basePriceCents: row.basePriceCents,
     priceTiers: row.priceTiers ?? null,
+    depositCents: row.depositCents,
     monthlyInstallmentCents: row.monthlyInstallmentCents,
     description: row.description,
     seasonId: row.seasonId,
@@ -240,6 +245,11 @@ export type ProductInput = {
   basePriceCents?: number;
   // Present only for priceMode === "tiered" (non-empty; each priceCents integer).
   priceTiers?: TravelProductPriceTier[];
+  // Block 4d (additive, OPTIONAL): the up-front deposit amount in integer cents
+  // (what the deposit-checkout charges first). Absent/blank → no deposit set
+  // (the deposit flow then falls back to the full balance). Same nullable style
+  // as monthlyInstallmentCents; a non-non-negative-int value normalizes to null.
+  depositCents?: number | null;
   // Block 4b-2-b-2 (additive, OPTIONAL): the fixed monthly installment amount in
   // integer cents. Absent/blank → no monthly plan can be minted. Same nullable
   // style as depositCents; a non-non-negative-int value normalizes to null.
@@ -375,6 +385,7 @@ export async function createTravelProduct(
     teamId: input.teamId,
     basePriceCents: valid.price.basePriceCents,
     priceTiers: valid.price.priceTiers,
+    depositCents: normalizeOptionalCents(input.depositCents),
     monthlyInstallmentCents: normalizeOptionalCents(input.monthlyInstallmentCents),
     description: input.description,
     active: input.active,
@@ -406,6 +417,7 @@ export async function updateTravelProduct(
       teamId: input.teamId,
       basePriceCents: valid.price.basePriceCents,
       priceTiers: valid.price.priceTiers,
+      depositCents: normalizeOptionalCents(input.depositCents),
       monthlyInstallmentCents: normalizeOptionalCents(
         input.monthlyInstallmentCents,
       ),
@@ -569,4 +581,90 @@ export async function getTravelInvoiceStatusCounts(): Promise<TravelInvoiceStatu
   }
 
   return counts;
+}
+
+// ---------------------------------------------------------------------------
+// Block 4d — operator PAYMENTS + REFUNDS visibility (read-only). The write side
+// (issuing a refund) is the already-built + tested refundPayment engine, wired
+// by src/app/travel/admin/payments/actions.ts. This read is the list the
+// operator refund surface renders. Money stays integer CENTS; the route formats
+// to USD for display only. READ-ONLY (no batch / no transaction — neon-http).
+// ---------------------------------------------------------------------------
+
+export type OperatorPayment = {
+  id: string;
+  guardianName: string | null;
+  guardianEmail: string | null;
+  productName: string | null;
+  amountCents: number;
+  channel: string;
+  status: string;
+  paidAt: Date | null;
+  stripeChargeId: string | null;
+  // SUM of every travelRefunds row against this payment (0 when none).
+  refundedCents: number;
+  // Still-refundable remainder: (amount − refunded) for a succeeded payment,
+  // else 0 (a pending/failed/already-fully-refunded payment can't be refunded).
+  refundableCents: number;
+};
+
+/**
+ * Payments for the operator payments/refunds list, each with resolved
+ * guardian (payment→guardian) + product (payment→invoice→product) display
+ * fields via LEFT JOINs, plus the aggregated refunded-so-far total via a scalar
+ * subquery over travelRefunds. refundableCents is derived per the succeeded-only
+ * rule. Newest-first (paidAt then createdAt). Default limit 100. Read-only.
+ */
+export async function listTravelPaymentsForOperator(opts?: {
+  limit?: number;
+}): Promise<OperatorPayment[]> {
+  const limit = opts?.limit ?? 100;
+
+  const rows = await db
+    .select({
+      id: travelPayments.id,
+      guardianFirstName: travelGuardians.firstName,
+      guardianLastName: travelGuardians.lastName,
+      guardianEmail: travelGuardians.email,
+      productName: travelProducts.name,
+      amountCents: travelPayments.amountCents,
+      channel: travelPayments.channel,
+      status: travelPayments.status,
+      paidAt: travelPayments.paidAt,
+      stripeChargeId: travelPayments.stripeChargeId,
+      // Aggregate the immutable refund rows for THIS payment (0 when none).
+      refundedCents: sql<number>`coalesce((select sum(${travelRefunds.amountCents}) from ${travelRefunds} where ${travelRefunds.paymentId} = ${travelPayments.id}), 0)::int`,
+    })
+    .from(travelPayments)
+    .leftJoin(
+      travelGuardians,
+      eq(travelGuardians.id, travelPayments.guardianId),
+    )
+    .leftJoin(travelInvoices, eq(travelInvoices.id, travelPayments.invoiceId))
+    .leftJoin(travelProducts, eq(travelProducts.id, travelInvoices.productId))
+    .orderBy(desc(travelPayments.paidAt), desc(travelPayments.createdAt))
+    .limit(limit);
+
+  return rows.map((r) => {
+    const refundedCents = r.refundedCents ?? 0;
+    // Only a succeeded payment is refundable; clamp at 0 so a fully-refunded
+    // (status still 'succeeded' on a partial history) row never goes negative.
+    const refundableCents =
+      r.status === "succeeded"
+        ? Math.max(0, r.amountCents - refundedCents)
+        : 0;
+    return {
+      id: r.id,
+      guardianName: joinName(r.guardianFirstName, r.guardianLastName),
+      guardianEmail: r.guardianEmail,
+      productName: r.productName,
+      amountCents: r.amountCents,
+      channel: r.channel,
+      status: r.status,
+      paidAt: r.paidAt,
+      stripeChargeId: r.stripeChargeId,
+      refundedCents,
+      refundableCents,
+    };
+  });
 }

@@ -83,6 +83,10 @@ export async function updateProductAction(formData: FormData): Promise<void> {
     priceMode: price.mode,
     basePriceCents: price.mode === "flat" ? price.basePriceCents : undefined,
     priceTiers: price.mode === "tiered" ? price.priceTiers : undefined,
+    // Optional deposit amount (dollars → cents; blank/invalid → null).
+    depositCents: dollarsToCents(
+      formData.get("depositDollars")?.toString() ?? null,
+    ),
     // Optional monthly installment amount (dollars → cents; blank/invalid → null).
     monthlyInstallmentCents: dollarsToCents(
       formData.get("monthlyAmountDollars")?.toString() ?? null,

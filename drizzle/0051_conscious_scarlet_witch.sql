@@ -1,0 +1,1 @@
+ALTER TABLE "travel_products" ADD COLUMN "monthly_installment_cents" integer;

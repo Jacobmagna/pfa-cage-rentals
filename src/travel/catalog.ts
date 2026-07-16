@@ -138,6 +138,7 @@ export type TravelProductRow = {
   active: boolean;
   basePriceCents: number | null;
   priceTiers: TravelProductPriceTier[] | null;
+  monthlyInstallmentCents: number | null;
   description: string | null;
   seasonId: string | null;
   locationId: string | null;
@@ -158,6 +159,7 @@ export async function getTravelProduct(
       active: travelProducts.active,
       basePriceCents: travelProducts.basePriceCents,
       priceTiers: travelProducts.priceTiers,
+      monthlyInstallmentCents: travelProducts.monthlyInstallmentCents,
       description: travelProducts.description,
       seasonId: travelProducts.seasonId,
       locationId: travelProducts.locationId,
@@ -175,6 +177,7 @@ export async function getTravelProduct(
     active: row.active,
     basePriceCents: row.basePriceCents,
     priceTiers: row.priceTiers ?? null,
+    monthlyInstallmentCents: row.monthlyInstallmentCents,
     description: row.description,
     seasonId: row.seasonId,
     locationId: row.locationId,
@@ -237,6 +240,10 @@ export type ProductInput = {
   basePriceCents?: number;
   // Present only for priceMode === "tiered" (non-empty; each priceCents integer).
   priceTiers?: TravelProductPriceTier[];
+  // Block 4b-2-b-2 (additive, OPTIONAL): the fixed monthly installment amount in
+  // integer cents. Absent/blank → no monthly plan can be minted. Same nullable
+  // style as depositCents; a non-non-negative-int value normalizes to null.
+  monthlyInstallmentCents?: number | null;
   active: boolean;
 };
 
@@ -248,6 +255,14 @@ type ValidatedPrice =
 
 function isNonNegativeInt(n: unknown): n is number {
   return typeof n === "number" && Number.isInteger(n) && n >= 0;
+}
+
+// Normalize an OPTIONAL cents field (monthly installment): a non-negative integer
+// passes through; anything else (null/undefined/negative/non-integer) → null.
+// The operator's monthly amount is optional, so an absent/invalid value simply
+// means "no monthly plan available" rather than a hard validation failure.
+function normalizeOptionalCents(n: number | null | undefined): number | null {
+  return isNonNegativeInt(n) ? n : null;
 }
 
 // Validate + normalize the price source per the flat-XOR-tiered rule. Returns
@@ -360,6 +375,7 @@ export async function createTravelProduct(
     teamId: input.teamId,
     basePriceCents: valid.price.basePriceCents,
     priceTiers: valid.price.priceTiers,
+    monthlyInstallmentCents: normalizeOptionalCents(input.monthlyInstallmentCents),
     description: input.description,
     active: input.active,
   });
@@ -390,6 +406,9 @@ export async function updateTravelProduct(
       teamId: input.teamId,
       basePriceCents: valid.price.basePriceCents,
       priceTiers: valid.price.priceTiers,
+      monthlyInstallmentCents: normalizeOptionalCents(
+        input.monthlyInstallmentCents,
+      ),
       description: input.description,
       active: input.active,
     })

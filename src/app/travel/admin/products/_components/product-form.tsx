@@ -67,6 +67,7 @@ export function ProductForm({
     description: string | null;
     basePriceCents: number | null;
     priceTiers: TravelProductPriceTier[] | null;
+    monthlyInstallmentCents: number | null;
     active: boolean;
   };
   errorMessage?: string | null;
@@ -356,6 +357,33 @@ export function ProductForm({
           </div>
         )}
       </fieldset>
+
+      {/* Monthly payment amount (optional) — the fixed installment auto-charged
+          to the card on file until the season balance is paid off. Same
+          dollars→cents boundary as the price fields (server action parses). */}
+      <div className="space-y-1.5 border-t border-line pt-4">
+        <label htmlFor="monthlyAmountDollars" className={LABEL}>
+          Monthly payment amount (optional)
+        </label>
+        <div className="relative">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-fg-subtle">
+            $
+          </span>
+          <input
+            id="monthlyAmountDollars"
+            name="monthlyAmountDollars"
+            inputMode="decimal"
+            defaultValue={centsToDollarString(initial?.monthlyInstallmentCents)}
+            placeholder="250.00"
+            className={`${INPUT} pl-7`}
+          />
+        </div>
+        <p className="text-xs text-fg-subtle">
+          After the deposit, the remaining balance is auto-charged in fixed
+          monthly installments of this amount (the last one is the remainder).
+          Leave blank if this product has no monthly plan.
+        </p>
+      </div>
 
       {/* Active */}
       <div className="flex items-center gap-2 border-t border-line pt-4">

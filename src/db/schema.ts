@@ -1643,6 +1643,11 @@ export const travelProducts = pgTable(
     }),
     basePriceCents: integer("base_price_cents"),
     depositCents: integer("deposit_cents"),
+    // Block 4b-2-b-2 (additive): the operator-set FIXED monthly installment
+    // amount (integer cents) auto-charged to the card on file until the season
+    // balance is paid off. Nullable + same style as depositCents; a product with
+    // no monthly amount simply can't mint a monthly plan.
+    monthlyInstallmentCents: integer("monthly_installment_cents"),
     priceTiers: jsonb("price_tiers").$type<TravelProductPriceTier[]>(),
     description: text("description"),
     active: boolean("active").notNull().default(true),

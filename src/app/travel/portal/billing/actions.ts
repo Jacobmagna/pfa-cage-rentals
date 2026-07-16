@@ -3,9 +3,13 @@
 import { headers } from "next/headers";
 import { redirect, unstable_rethrow } from "next/navigation";
 import * as Sentry from "@sentry/nextjs";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { travelInvoices } from "@/db/schema";
 import { checkMagicLinkRateLimit } from "@/lib/ratelimit";
 import { requireTravelGuardian } from "@/travel/authz";
 import { startDepositCheckout } from "@/travel/payments";
+import { createMonthlyPlanForInvoice } from "@/travel/plans";
 
 // Block 4c — the parent checkout server action. A signed-in travel GUARDIAN pays
 // the deposit on ONE of their OWN invoices by starting a Stripe Hosted Checkout
@@ -91,4 +95,67 @@ export async function payDeposit(formData: FormData): Promise<void> {
 
   // Success: send the parent to Stripe's hosted checkout page.
   redirect(result.url);
+}
+
+// ---------------------------------------------------------------------------
+// enrollInMonthlyPlan (Block 4b-2-b-2) — a signed-in travel GUARDIAN enrolls ONE
+// of their OWN invoices into the fixed-monthly autopay plan. This only MINTS the
+// plan (installments + due scheduled_charges); the cron charges later. NO new
+// styled UI here — Block 4b-2-c adds the button + card list + banners. This wires
+// the existing createMonthlyPlanForInvoice engine, mirroring payDeposit's shape.
+//
+// IDOR: the invoice ownership is verified HERE (travelInvoices.guardianId ===
+// guardian.id) BEFORE calling the engine — we do not rely on the engine alone,
+// which is system-trusted and takes a bare invoiceId.
+// ---------------------------------------------------------------------------
+
+export async function enrollInMonthlyPlan(formData: FormData): Promise<void> {
+  // Guardian-only (redirects internally for a non-guardian / no session).
+  const guardian = await requireTravelGuardian();
+
+  // Rate-limit on (guardianId, IP) BEFORE any DB/engine work — same shared cap.
+  const ip = await getClientIp();
+  const decision = await checkMagicLinkRateLimit(guardian.id, ip);
+  if (!decision.allowed) {
+    redirect("/travel/portal/billing?error=rate");
+  }
+
+  const invoiceId = formData.get("invoiceId")?.toString().trim();
+  if (!invoiceId) {
+    redirect("/travel/portal/billing?error=not_found");
+  }
+
+  try {
+    // IDOR gate: the invoice MUST belong to the caller-guardian. A non-owned /
+    // missing id is indistinguishable → not_found (no existence leak).
+    const [owned] = await db
+      .select({ id: travelInvoices.id })
+      .from(travelInvoices)
+      .where(
+        and(
+          eq(travelInvoices.id, invoiceId),
+          eq(travelInvoices.guardianId, guardian.id),
+        ),
+      )
+      .limit(1);
+    if (!owned) {
+      redirect("/travel/portal/billing?error=not_found");
+    }
+
+    const result = await createMonthlyPlanForInvoice({ invoiceId });
+    if (!result.ok) {
+      // Each engine error code is a valid ?error= banner code (rendered by 4b-2-c).
+      redirect(`/travel/portal/billing?error=${result.error}`);
+    }
+  } catch (err) {
+    // The redirects above throw NEXT_REDIRECT — let framework errors propagate.
+    unstable_rethrow(err);
+    Sentry.captureException(err, {
+      tags: { area: "travel-billing-enroll-monthly" },
+      extra: { guardianId: guardian.id, invoiceId },
+    });
+    redirect("/travel/portal/billing?error=1");
+  }
+
+  redirect("/travel/portal/billing?planned=1");
 }

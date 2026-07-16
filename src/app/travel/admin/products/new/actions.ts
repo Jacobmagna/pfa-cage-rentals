@@ -91,6 +91,10 @@ export async function createProductAction(formData: FormData): Promise<void> {
     priceMode: price.mode,
     basePriceCents: price.mode === "flat" ? price.basePriceCents : undefined,
     priceTiers: price.mode === "tiered" ? price.priceTiers : undefined,
+    // Optional monthly installment amount (dollars → cents; blank/invalid → null).
+    monthlyInstallmentCents: dollarsToCents(
+      formData.get("monthlyAmountDollars")?.toString() ?? null,
+    ),
     // Unchecked checkbox → absent from FormData → inactive.
     active: formData.get("active")?.toString() === "on",
   };

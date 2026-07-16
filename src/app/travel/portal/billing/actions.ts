@@ -8,7 +8,11 @@ import { db } from "@/db";
 import { travelInvoices } from "@/db/schema";
 import { checkMagicLinkRateLimit } from "@/lib/ratelimit";
 import { requireTravelGuardian } from "@/travel/authz";
-import { startDepositCheckout } from "@/travel/payments";
+import {
+  startAddCard,
+  startBalanceCheckout,
+  startDepositCheckout,
+} from "@/travel/payments";
 import { createMonthlyPlanForInvoice } from "@/travel/plans";
 
 // Block 4c — the parent checkout server action. A signed-in travel GUARDIAN pays
@@ -158,4 +162,97 @@ export async function enrollInMonthlyPlan(formData: FormData): Promise<void> {
   }
 
   redirect("/travel/portal/billing?planned=1");
+}
+
+// ---------------------------------------------------------------------------
+// startCardSetup (Block 4b-2-c) — a signed-in travel GUARDIAN adds a card on file
+// by starting a Stripe Hosted SETUP session (Block-4b-2 startAddCard) and being
+// redirected to Stripe. NOTHING is charged; the saved card lands via the
+// setup_intent.succeeded webhook. Mirrors payDeposit's shape (guard → rate-limit →
+// engine → redirect), no invoiceId (card-on-file is guardian-scoped, not per-invoice).
+// ---------------------------------------------------------------------------
+
+export async function startCardSetup(): Promise<void> {
+  const guardian = await requireTravelGuardian();
+
+  const ip = await getClientIp();
+  const decision = await checkMagicLinkRateLimit(guardian.id, ip);
+  if (!decision.allowed) {
+    redirect("/travel/portal/billing?error=rate");
+  }
+
+  const origin = await getRequestOrigin();
+  const successUrl = `${origin}/travel/portal/billing?card=1`;
+  const cancelUrl = `${origin}/travel/portal/billing?canceled=1`;
+
+  let result: Awaited<ReturnType<typeof startAddCard>>;
+  try {
+    result = await startAddCard({
+      guardianId: guardian.id,
+      successUrl,
+      cancelUrl,
+    });
+  } catch (err) {
+    unstable_rethrow(err);
+    Sentry.captureException(err, {
+      tags: { area: "travel-billing-add-card" },
+      extra: { guardianId: guardian.id },
+    });
+    redirect("/travel/portal/billing?error=stripe_error");
+  }
+
+  if (!result.ok) {
+    redirect(`/travel/portal/billing?error=${result.error}`);
+  }
+
+  redirect(result.url);
+}
+
+// ---------------------------------------------------------------------------
+// payInFull (Block 4b-2-c) — a signed-in travel GUARDIAN pays the FULL remaining
+// balance on ONE of their OWN invoices via Stripe Hosted Checkout (Block-4b-2-c
+// startBalanceCheckout). Byte-for-byte payDeposit's shape; only the engine call
+// (full balance, kind:"remainder") differs.
+// ---------------------------------------------------------------------------
+
+export async function payInFull(formData: FormData): Promise<void> {
+  const guardian = await requireTravelGuardian();
+
+  const ip = await getClientIp();
+  const decision = await checkMagicLinkRateLimit(guardian.id, ip);
+  if (!decision.allowed) {
+    redirect("/travel/portal/billing?error=rate");
+  }
+
+  const invoiceId = formData.get("invoiceId")?.toString().trim();
+  if (!invoiceId) {
+    redirect("/travel/portal/billing?error=not_found");
+  }
+
+  const origin = await getRequestOrigin();
+  const successUrl = `${origin}/travel/portal/billing?paid=1&invoice=${invoiceId}`;
+  const cancelUrl = `${origin}/travel/portal/billing?canceled=1`;
+
+  let result: Awaited<ReturnType<typeof startBalanceCheckout>>;
+  try {
+    result = await startBalanceCheckout({
+      guardianId: guardian.id,
+      invoiceId,
+      successUrl,
+      cancelUrl,
+    });
+  } catch (err) {
+    unstable_rethrow(err);
+    Sentry.captureException(err, {
+      tags: { area: "travel-billing-pay-in-full" },
+      extra: { guardianId: guardian.id, invoiceId },
+    });
+    redirect("/travel/portal/billing?error=stripe_error");
+  }
+
+  if (!result.ok) {
+    redirect(`/travel/portal/billing?error=${result.error}`);
+  }
+
+  redirect(result.url);
 }

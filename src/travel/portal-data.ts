@@ -15,14 +15,17 @@
 // fans out into flat (athlete × team) rows; we fold them back into the
 // deduped athlete tree in code. Athletes are ordered by last then first name.
 
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
   travelAthletes,
   travelDivisions,
   travelGuardianAthletes,
+  travelInstallments,
   travelInvoices,
   travelLocations,
+  travelPaymentMethods,
+  travelPaymentPlans,
   travelProducts,
   travelTeamAthletes,
   travelTeams,
@@ -156,6 +159,11 @@ export type PortalInvoice = {
   status: string;
   createdAt: Date;
   isPayable: boolean;
+  // Block 4b-2-c: the product's operator-set fixed monthly amount (null when the
+  // product can't mint a monthly plan) + whether a plan already exists for this
+  // invoice — so the page knows which autopay controls to show.
+  monthlyInstallmentCents: number | null;
+  hasPlan: boolean;
 };
 
 export async function listTravelInvoicesForGuardian(
@@ -171,12 +179,25 @@ export async function listTravelInvoicesForGuardian(
       balanceCents: travelInvoices.balanceCents,
       status: travelInvoices.status,
       createdAt: travelInvoices.createdAt,
+      monthlyInstallmentCents: travelProducts.monthlyInstallmentCents,
     })
     .from(travelInvoices)
     .leftJoin(travelProducts, eq(travelProducts.id, travelInvoices.productId))
     .leftJoin(travelAthletes, eq(travelAthletes.id, travelInvoices.athleteId))
     .where(eq(travelInvoices.guardianId, guardianId))
     .orderBy(desc(travelInvoices.createdAt));
+
+  // Which of THESE invoices already have a plan — one scoped read over just the
+  // fetched invoice ids (empty-set guard so inArray isn't handed []).
+  const invoiceIds = rows.map((r) => r.id);
+  const plannedInvoiceIds = new Set<string>();
+  if (invoiceIds.length > 0) {
+    const planned = await db
+      .select({ invoiceId: travelPaymentPlans.invoiceId })
+      .from(travelPaymentPlans)
+      .where(inArray(travelPaymentPlans.invoiceId, invoiceIds));
+    for (const p of planned) plannedInvoiceIds.add(p.invoiceId);
+  }
 
   return rows.map((row) => {
     const athleteName =
@@ -193,6 +214,95 @@ export async function listTravelInvoicesForGuardian(
       createdAt: row.createdAt,
       isPayable:
         !BILLING_FINAL_STATUSES.has(row.status) && row.balanceCents > 0,
+      monthlyInstallmentCents: row.monthlyInstallmentCents,
+      hasPlan: plannedInvoiceIds.has(row.id),
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Block 4b-2-c — saved-card + installment-schedule reads for the parent billing
+// surface. Read-only, both IDOR-scoped to the caller-guardian.
+// ---------------------------------------------------------------------------
+
+export type PortalPaymentMethod = {
+  id: string;
+  brand: string | null;
+  last4: string | null;
+  expMonth: number | null;
+  expYear: number | null;
+  isDefault: boolean;
+};
+
+/**
+ * The caller-guardian's saved cards-on-file, default first then oldest first.
+ * IDOR: scoped to travelPaymentMethods.guardianId === guardianId.
+ */
+export async function listTravelPaymentMethodsForGuardian(
+  guardianId: string,
+): Promise<PortalPaymentMethod[]> {
+  const rows = await db
+    .select({
+      id: travelPaymentMethods.id,
+      brand: travelPaymentMethods.brand,
+      last4: travelPaymentMethods.last4,
+      expMonth: travelPaymentMethods.expMonth,
+      expYear: travelPaymentMethods.expYear,
+      isDefault: travelPaymentMethods.isDefault,
+    })
+    .from(travelPaymentMethods)
+    .where(eq(travelPaymentMethods.guardianId, guardianId))
+    .orderBy(
+      desc(travelPaymentMethods.isDefault),
+      asc(travelPaymentMethods.createdAt),
+    );
+
+  return rows;
+}
+
+export type PortalInstallment = {
+  seq: number;
+  dueDate: Date | null;
+  amountCents: number;
+  status: string;
+  paidAmountCents: number;
+};
+
+/**
+ * The installment schedule for ONE of the caller-guardian's OWN invoices, ordered
+ * by seq. Joins plan → installments and SCOPES the invoice to guardianId (IDOR),
+ * so a non-owned invoice yields no rows. Returns null when the invoice isn't owned
+ * or has no plan yet; otherwise the ordered installment list.
+ */
+export async function getTravelInvoiceScheduleForGuardian(
+  guardianId: string,
+  invoiceId: string,
+): Promise<PortalInstallment[] | null> {
+  const rows = await db
+    .select({
+      seq: travelInstallments.seq,
+      dueDate: travelInstallments.dueDate,
+      amountCents: travelInstallments.amountCents,
+      status: travelInstallments.status,
+      paidAmountCents: travelInstallments.paidAmountCents,
+    })
+    .from(travelInstallments)
+    .innerJoin(
+      travelPaymentPlans,
+      eq(travelPaymentPlans.id, travelInstallments.planId),
+    )
+    .innerJoin(
+      travelInvoices,
+      eq(travelInvoices.id, travelPaymentPlans.invoiceId),
+    )
+    .where(
+      and(
+        eq(travelPaymentPlans.invoiceId, invoiceId),
+        eq(travelInvoices.guardianId, guardianId),
+      ),
+    )
+    .orderBy(asc(travelInstallments.seq));
+
+  if (rows.length === 0) return null;
+  return rows;
 }

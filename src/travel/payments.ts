@@ -271,6 +271,89 @@ export async function startDepositCheckout(params: {
 }
 
 // ---------------------------------------------------------------------------
+// startBalanceCheckout (Block 4b-2-c) — pay the FULL remaining balance of ONE of
+// the caller-guardian's own invoices in a single Stripe Hosted Checkout. Same
+// shape/guards as startDepositCheckout, but the charged amount is the entire
+// balanceCents (no deposit clamp) and the PI metadata kind is "remainder" (the
+// webhook applier already records + applies that kind). CAPTURES NOTHING here.
+// ---------------------------------------------------------------------------
+
+/**
+ * Begin the pay-in-full flow for ONE of the caller-guardian's own invoices:
+ *   1. DORMANT-SAFE: bail if Stripe is unconfigured.
+ *   2. IDOR: load the invoice scoped to travelInvoices.guardianId === guardianId;
+ *      a non-owned/missing id → not_found (no existence leak).
+ *   3. Reject already-final invoices and zero/negative balances → not_payable.
+ *   4. amount = the FULL balanceCents (no deposit clamp).
+ *   5. Ensure the Stripe Customer, then create a mode=payment Checkout Session
+ *      (metadata { invoiceId, guardianId, kind:"remainder" }) and return its url.
+ *      The invoice balance is NOT touched here — it moves via the webhook.
+ */
+export async function startBalanceCheckout(params: {
+  guardianId: string;
+  invoiceId: string;
+  successUrl: string;
+  cancelUrl: string;
+}): Promise<StartDepositCheckoutResult> {
+  if (stripeConfig() === null) return { ok: false, error: "not_configured" };
+
+  const [invoice] = await db
+    .select({
+      id: travelInvoices.id,
+      guardianId: travelInvoices.guardianId,
+      balanceCents: travelInvoices.balanceCents,
+      status: travelInvoices.status,
+      productName: travelProducts.name,
+    })
+    .from(travelInvoices)
+    .leftJoin(travelProducts, eq(travelProducts.id, travelInvoices.productId))
+    .where(
+      and(
+        eq(travelInvoices.id, params.invoiceId),
+        eq(travelInvoices.guardianId, params.guardianId),
+      ),
+    )
+    .limit(1);
+
+  if (!invoice) return { ok: false, error: "not_found" };
+
+  if (FINAL_STATUSES.has(invoice.status) || invoice.balanceCents <= 0) {
+    return { ok: false, error: "not_payable" };
+  }
+
+  // The full remaining balance — no deposit clamp.
+  const amountCents = invoice.balanceCents;
+
+  const ensured = await ensureStripeCustomerForTravelGuardian(params.guardianId);
+  if (!ensured.ok) {
+    return {
+      ok: false,
+      error: ensured.error === "no_guardian" ? "no_guardian" : "not_configured",
+    };
+  }
+
+  const label = `Balance — ${invoice.productName ?? "PFA Travel dues"}`;
+  try {
+    const session = await createPaymentCheckoutSession({
+      customerId: ensured.customerId,
+      amountCents,
+      productName: label,
+      successUrl: params.successUrl,
+      cancelUrl: params.cancelUrl,
+      metadata: {
+        invoiceId: invoice.id,
+        guardianId: params.guardianId,
+        kind: "remainder",
+      },
+    });
+    return { ok: true, url: session.url };
+  } catch (err) {
+    if (err instanceof StripeError) return { ok: false, error: "stripe_error" };
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // startAddCard — begin the card-on-file vault flow for the caller-guardian:
 // ensure their Stripe Customer, then create a mode=setup Checkout Session and
 // return its hosted url. NOTHING is charged; the saved card lands via the

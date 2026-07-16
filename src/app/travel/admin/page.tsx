@@ -46,6 +46,12 @@ export default async function TravelAdminPage() {
         >
           Payments &amp; Refunds
         </Link>
+        <Link
+          href="/travel/admin/finances"
+          className="inline-flex items-center rounded-md border border-line bg-surface h-10 px-4 text-sm font-semibold text-fg transition-colors hover:border-line-strong hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow/40"
+        >
+          Finances
+        </Link>
       </nav>
     </div>
   );

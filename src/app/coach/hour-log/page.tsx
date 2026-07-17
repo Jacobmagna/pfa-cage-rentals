@@ -92,6 +92,14 @@ export default async function CoachHourLogPage() {
       .orderBy(asc(programScheduleBlocks.endAt)),
     // The coach's own hour-logs in the same span, used to drop any block
     // they've already logged (overlap + same program via isLogScheduled).
+    // NB: bound the LOWER edge on endAt (mirroring the candidate-block filter
+    // above, which uses `endAt >= windowStart`). A shift that STARTED just
+    // before the 14-day cutoff but ENDS after it is still a candidate block,
+    // so its matching log must also be fetched — keying this on startAt would
+    // drop that log and make the (already-logged) block reappear on the
+    // confirm list every morning of its 14th day. endAt >= startAt always, so
+    // this is a strict superset of the old window: it only ever adds matching
+    // logs, never hides a block a coach genuinely still owes.
     db
       .select({
         programId: hourLogs.programId,
@@ -102,7 +110,7 @@ export default async function CoachHourLogPage() {
       .where(
         and(
           eq(hourLogs.coachId, coachId),
-          gte(hourLogs.startAt, windowStart),
+          gte(hourLogs.endAt, windowStart),
           lte(hourLogs.startAt, now),
         ),
       ),

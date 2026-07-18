@@ -3,6 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { auth } from "@/auth";
+import { ClearErrorParam } from "./_components/clear-error-param";
 import { DiamondMark } from "./_components/diamond-mark";
 import { GoogleSignInButton } from "./_components/google-signin-button";
 import { requestMagicLink } from "./actions";
@@ -136,9 +137,14 @@ export default async function Home({
               className="w-full rounded-lg border border-white/15 bg-white/5 px-3 h-10 text-sm text-white placeholder:text-white/40 transition-colors focus:outline-none focus:border-white/30 focus:ring-2 focus:ring-yellow/40"
             />
             {errorMessage ? (
-              <p role="alert" className="text-xs text-danger leading-relaxed">
-                {errorMessage}
-              </p>
+              <>
+                <p role="alert" className="text-xs text-danger leading-relaxed">
+                  {errorMessage}
+                </p>
+                {/* Drop the ?error= param once shown so a one-time failure
+                    can't haunt this URL on every later reload/back/bookmark. */}
+                <ClearErrorParam />
+              </>
             ) : null}
             <button
               type="submit"

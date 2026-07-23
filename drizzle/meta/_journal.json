@@ -309,6 +309,13 @@
       "when": 1783297648828,
       "tag": "0043_complete_rattler",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1784844029276,
+      "tag": "0052_round_fabian_cortez",
+      "breakpoints": true
     }
   ]
 }

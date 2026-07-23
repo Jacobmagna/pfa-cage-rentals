@@ -334,6 +334,91 @@ describe("DESIGN-1 per-program pay mode", () => {
     return row;
   }
 
+  // Migration 0052 — PROGRAM-level per-session pay, with NO coach override
+  // involved. This is the path that fixes "HS Summer Travel - Game": a flat
+  // fee per game logged. Before 0052 the only per-session setting lived on
+  // the (coach, program) override, so a per-game fee had to be faked with an
+  // hourly rate and was then paid by game LENGTH — a 3.5h game billed 3.5x.
+  async function createPerSessionProgram(
+    defaultPerSessionRateCents: number,
+    defaultRatePer30MinCents: number | null = null,
+  ): Promise<{ id: string; name: string }> {
+    const name = `HourLog PerSession Program ${uniqueSuffix()}`;
+    const [row] = await db
+      .insert(programs)
+      .values({
+        name,
+        active: true,
+        payMode: "per_session",
+        defaultPerSessionRateCents,
+        defaultRatePer30MinCents,
+      })
+      .returning({ id: programs.id, name: programs.name });
+    return row;
+  }
+
+  it("pays a program-level per-session rate as a FLAT fee, whatever the duration", async () => {
+    const coach = fixtures.coach;
+    // $100 a game. The stale hourly default must NOT leak onto the row.
+    const program = await createPerSessionProgram(10_000, 2500);
+
+    const short = await logCleanHour({
+      programId: program.id,
+      coachId: coach.id,
+      coach,
+      startHour: 9,
+      endHour: 11, // 2 hours
+    });
+    const long = await logCleanHour({
+      programId: program.id,
+      coachId: coach.id,
+      coach,
+      startHour: 13,
+      endHour: 17, // 4 hours — twice as long
+    });
+
+    const shortRow = await readLog(short.id);
+    const longRow = await readLog(long.id);
+
+    // The flat amount is snapshotted; no hourly basis is stamped.
+    expect(shortRow.perSessionRateCents).toBe(10_000);
+    expect(shortRow.ratePer30MinCents).toBeNull();
+    expect(longRow.perSessionRateCents).toBe(10_000);
+    expect(longRow.ratePer30MinCents).toBeNull();
+
+    // The whole point: a 2-hour game and a 4-hour game pay exactly the same.
+    expect(workPayForLog(shortRow)).toBe(10_000);
+    expect(workPayForLog(longRow)).toBe(10_000);
+  });
+
+  it("a coach's hourly override still beats a per-session program", async () => {
+    // The operational trap: flipping a program to per-session does NOT reach
+    // coaches who hold an hourly override on it.
+    const coach = fixtures.coach;
+    const program = await createPerSessionProgram(10_000);
+    await upsertProgramRateOverrideInternal(fixtures.admin, {
+      coachId: coach.id,
+      programId: program.id,
+      // $30/hr — deliberately chosen so 2 hours ($60) can't be confused with
+      // the program's $100 flat fee.
+      payMode: "hourly",
+      ratePer30MinCents: 1500,
+    });
+
+    const log = await logCleanHour({
+      programId: program.id,
+      coachId: coach.id,
+      coach,
+      startHour: 9,
+      endHour: 11, // 2 hours
+    });
+    const row = await readLog(log.id);
+
+    expect(row.perSessionRateCents).toBeNull();
+    expect(row.ratePer30MinCents).toBe(1500);
+    expect(workPayForLog(row)).toBe(6000); // 2h x $30 — not the $100 flat fee
+  });
+
   it("stamps independent snapshots when the same coach logs against an hourly program and a per_session program", async () => {
     const coach = fixtures.coach;
     // Both programs carry the same default rate so we can prove the

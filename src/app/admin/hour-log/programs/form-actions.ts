@@ -16,6 +16,8 @@ import { ProgramNameTakenError, ProgramNotFoundError } from "@/lib/errors";
 export type ProgramFormValues = {
   name: string;
   rateDollars: string;
+  payMode: "hourly" | "per_session";
+  perSessionDollars: string;
 };
 
 /**
@@ -44,6 +46,30 @@ function optionalDollarsToCents(input: string): number | null {
   return Math.round((asFloat * 100) / 2);
 }
 
+/**
+ * Parses an OPTIONAL per-SESSION dollar string into integer cents.
+ *
+ * Deliberately NOT halved — unlike the hourly field above, this amount is a
+ * flat fee for one logged session, so $100 stores as 10000 cents. Getting
+ * this wrong in either direction is exactly the class of bug this feature
+ * exists to fix (a per-game fee entered as an hourly rate paid by duration).
+ */
+function optionalSessionDollarsToCents(input: string): number | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.replace(/^\$/, "").trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) {
+    throw new Error(
+      "Per-session amount must be a positive dollar amount (e.g. 100 or 100.50)",
+    );
+  }
+  const asFloat = Number(cleaned);
+  if (!Number.isFinite(asFloat) || asFloat < 0) {
+    throw new Error("Per-session amount must be a positive dollar amount");
+  }
+  return Math.round(asFloat * 100);
+}
+
 export type CreateProgramResult =
   | { ok: true; createdAt: number }
   | {
@@ -64,6 +90,11 @@ function snapshotProgram(formData: FormData): ProgramFormValues {
   return {
     name: formData.get("name")?.toString() ?? "",
     rateDollars: formData.get("rateDollars")?.toString() ?? "",
+    payMode:
+      formData.get("payMode")?.toString() === "per_session"
+        ? "per_session"
+        : "hourly",
+    perSessionDollars: formData.get("perSessionDollars")?.toString() ?? "",
   };
 }
 
@@ -73,6 +104,8 @@ function snapshotProgram(formData: FormData): ProgramFormValues {
 function buildProgramInput(formData: FormData): {
   name: string;
   defaultRatePer30MinCents: number | null;
+  payMode: "hourly" | "per_session";
+  defaultPerSessionRateCents: number | null;
 } {
   const name = formData.get("name")?.toString().trim() ?? "";
   // Optional pay rate (dollars → cents; empty → null). Always present on
@@ -80,7 +113,24 @@ function buildProgramInput(formData: FormData): {
   const defaultRatePer30MinCents = optionalDollarsToCents(
     formData.get("rateDollars")?.toString() ?? "",
   );
-  return { name, defaultRatePer30MinCents };
+  const payMode =
+    formData.get("payMode")?.toString() === "per_session"
+      ? ("per_session" as const)
+      : ("hourly" as const);
+  const defaultPerSessionRateCents = optionalSessionDollarsToCents(
+    formData.get("perSessionDollars")?.toString() ?? "",
+  );
+  // Both amounts are always sent so switching modes CLEARS the amount that no
+  // longer applies — otherwise a program flipped hourly→per-session→hourly
+  // would keep a stale flat fee that silently wins in workPayForLog.
+  return {
+    name,
+    defaultRatePer30MinCents:
+      payMode === "per_session" ? null : defaultRatePer30MinCents,
+    payMode,
+    defaultPerSessionRateCents:
+      payMode === "per_session" ? defaultPerSessionRateCents : null,
+  };
 }
 
 function zodMessage(err: ZodError): string {

@@ -70,6 +70,20 @@ export async function requestMagicLink(formData: FormData): Promise<void> {
       tags: { area: "magic-link-send" },
       extra: { email },
     });
+    // captureException only QUEUES the event; Sentry's transport ships it
+    // asynchronously. redirect() throws immediately, ending the request, and
+    // a serverless function can be frozen the instant its work completes —
+    // so the event was being dropped before it left the box. That is why this
+    // instrumentation logged ZERO `area:magic-link-send` events in 14 days
+    // even though a real coach (Ryan Merriwether, 2026-07-18) definitively
+    // hit this path. Flush first so the report actually goes out.
+    //
+    // Bounded at 2s and .catch()-guarded: this is the LOGIN path, so a slow
+    // or failing Sentry transport must never escalate a handled send failure
+    // back into the raw 500 we fixed on 2026-07-02. flush() resolves as soon
+    // as the queue drains (typically ms) — 2000 is a ceiling, not a delay,
+    // and it is only ever paid on an already-failing request.
+    await Sentry.flush(2000).catch(() => {});
     redirect("/?error=send-failed");
   }
 }

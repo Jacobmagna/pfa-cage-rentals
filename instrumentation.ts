@@ -26,6 +26,24 @@ export async function register() {
   // release X" alerts.
   const release = process.env.VERCEL_GIT_COMMIT_SHA ?? "development";
 
+  // Report ONLY from deployed builds. A DSN alone used to be the gate, so a
+  // local `next dev` run (which reads the same DSN from .env.local) shipped
+  // its errors into the SAME Sentry project as production — a QA harness on
+  // a laptop could page us with a "high priority issue" about synthetic seed
+  // rows in the dev database (2026-07-23, HourLogNotFoundError from
+  // scripts/qa/verify-held-details.ts). False alarms train us to ignore the
+  // alerts we actually depend on, so localhost is now silent.
+  //
+  // Gate on NODE_ENV, NOT VERCEL/VERCEL_ENV: NODE_ENV is always "production"
+  // in a Vercel build (prod AND preview) and needs no dashboard toggle, so it
+  // cannot silently disable real monitoring the way a missing system env var
+  // could. Same predicate tracesSampleRate already uses below. Trade-off: a
+  // local production build (`next build && next start`) still reports — our
+  // QA harnesses run `next dev`, so the noise source is covered.
+  const reportingEnabled =
+    !!process.env.NEXT_PUBLIC_SENTRY_DSN &&
+    process.env.NODE_ENV === "production";
+
   if (process.env.NEXT_RUNTIME === "nodejs") {
     Sentry.init({
       dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
@@ -38,7 +56,7 @@ export async function register() {
       // Defense-in-depth: redact likely PII (emails/phones/birthdays) from the
       // event before send. Never throws / never drops events. See sentry-scrub.
       beforeSend: scrubPii,
-      enabled: !!process.env.NEXT_PUBLIC_SENTRY_DSN,
+      enabled: reportingEnabled,
     });
   }
 
@@ -51,7 +69,7 @@ export async function register() {
       sendDefaultPii: false,
       // See node init above — same PII scrubber for the edge runtime.
       beforeSend: scrubPii,
-      enabled: !!process.env.NEXT_PUBLIC_SENTRY_DSN,
+      enabled: reportingEnabled,
     });
   }
 }

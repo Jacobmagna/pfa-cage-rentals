@@ -22,8 +22,14 @@ Sentry.init({
   // Defense-in-depth: redact likely PII from the event before send. Never
   // throws / never drops events. See sentry-scrub.
   beforeSend: scrubPii,
-  // No-op when DSN missing (local dev without Sentry credentials).
-  enabled: !!process.env.NEXT_PUBLIC_SENTRY_DSN,
+  // Report ONLY from deployed builds — mirrors instrumentation.ts (server);
+  // see the long note there for why localhost is silenced and why the gate is
+  // NODE_ENV rather than a Vercel system env var. Next.js inlines NODE_ENV
+  // into the client bundle at build time, so this is "production" for both
+  // prod and preview deploys and "development" under `next dev`.
+  enabled:
+    !!process.env.NEXT_PUBLIC_SENTRY_DSN &&
+    process.env.NODE_ENV === "production",
 });
 
 // Required by Next.js — capture client-side router transitions for tracing.

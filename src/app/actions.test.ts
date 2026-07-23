@@ -38,8 +38,13 @@ vi.mock("@/auth", () => ({
 // assert where we sent the user. unstable_rethrow re-throws control-flow
 // errors (our RedirectError) and is a no-op for everything else — matching
 // next/navigation's real behavior closely enough for this contract.
+// Ordered log of the Sentry/redirect interleaving, so a test can prove the
+// flush is AWAITED rather than fired-and-forgotten. Reset in beforeEach.
+const callOrder: string[] = [];
+
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => {
+    callOrder.push("redirect");
     throw new RedirectError(url);
   },
   unstable_rethrow: (err: unknown) => {
@@ -48,8 +53,22 @@ vi.mock("next/navigation", () => ({
 }));
 
 const captureExceptionMock = vi.fn();
+// flush() must exist on the mock: the send-failure path awaits it before
+// redirecting. Default drains over a real tick so ordering is observable.
+let flushTimeout: number | undefined;
+const flushMock = vi.fn(async (timeout?: number) => {
+  flushTimeout = timeout;
+  callOrder.push("flush:start");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  callOrder.push("flush:end");
+  return true;
+});
 vi.mock("@sentry/nextjs", () => ({
-  captureException: (...args: unknown[]) => captureExceptionMock(...args),
+  captureException: (...args: unknown[]) => {
+    callOrder.push("capture");
+    return captureExceptionMock(...args);
+  },
+  flush: (timeout?: number) => flushMock(timeout),
 }));
 
 // Boundaries that would otherwise pull in a live DB / rate-limit backend.
@@ -75,6 +94,8 @@ function formDataWithEmail(email: string): FormData {
 beforeEach(() => {
   signInMock.mockReset();
   captureExceptionMock.mockReset();
+  flushMock.mockClear();
+  callOrder.length = 0;
 });
 
 describe("requestMagicLink — send-failure handling", () => {
@@ -116,5 +137,54 @@ describe("requestMagicLink — send-failure handling", () => {
       tags: { area: "magic-link-send" },
       extra: { email: "coach@example.com" },
     });
+  });
+
+  // Regression guard for the silent-drop bug: captureException only QUEUES the
+  // event, and redirect() ends the request immediately, so without an AWAITED
+  // flush a serverless freeze kills the report before it ships. This asserts
+  // ordering, not just that flush was called.
+  it("awaits the Sentry flush BEFORE redirecting, so the report is not dropped", async () => {
+    signInMock.mockImplementation(() => {
+      throw new Error("Resend 429: daily limit reached");
+    });
+
+    const { requestMagicLink } = await import("./actions");
+
+    await expect(
+      requestMagicLink(formDataWithEmail("coach@example.com")),
+    ).rejects.toMatchObject({
+      digest: expect.stringContaining("NEXT_REDIRECT;replace;/?error=send-failed;"),
+    });
+
+    // flush must fully DRAIN before the redirect fires.
+    expect(callOrder).toEqual([
+      "capture",
+      "flush:start",
+      "flush:end",
+      "redirect",
+    ]);
+    // Bounded so a hung transport can't stall the login path forever.
+    expect(flushTimeout).toBe(2000);
+  });
+
+  // The login path must degrade gracefully no matter what Sentry does: a
+  // rejected/failed flush must still land the user on the friendly banner,
+  // never re-raise into the raw 500 fixed on 2026-07-02.
+  it("still redirects gracefully when the Sentry flush itself fails", async () => {
+    signInMock.mockImplementation(() => {
+      throw new Error("Resend 429: daily limit reached");
+    });
+    flushMock.mockImplementationOnce(async () => {
+      throw new Error("sentry transport unreachable");
+    });
+
+    const { requestMagicLink } = await import("./actions");
+
+    await expect(
+      requestMagicLink(formDataWithEmail("coach@example.com")),
+    ).rejects.toMatchObject({
+      digest: expect.stringContaining("NEXT_REDIRECT;replace;/?error=send-failed;"),
+    });
+    expect(callOrder).toEqual(["capture", "redirect"]);
   });
 });

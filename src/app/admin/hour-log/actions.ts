@@ -22,6 +22,7 @@ import {
   acceptNeedsReviewLogInternal,
   approveHeldHourLogInternal,
   deleteHourInternal,
+  getHeldLogDetailInternal,
   rejectHeldHourLogInternal,
   rejectNeedsReviewLogInternal,
   resolveHourLogInternal,
@@ -77,18 +78,34 @@ export async function resolveNoShow(blockId: string, coachId: string) {
 
 // 1b security B — APPROVE a held manual log: flips it to posted (payable +
 // counted) and stamps it reviewed so it also leaves the needs-review queue.
-// Revalidates every surface that now counts it, the held queue itself, and
-// the coach's history (chip flips from "Pending approval" to scheduled/unsch).
-export async function approveHeldHourLog(id: string) {
+// Optionally CORRECTS the log's start/end times in the same action — `edit`
+// is parsed via acceptTimeEditSchema (end > start, ≤16h) and pay recomputes
+// downstream from the new duration × the snapshotted rate. Revalidates every
+// surface that now counts it, the held queue itself, the schedule overlay
+// (times may have shifted), and the coach's history (chip flips from "Pending
+// approval" to scheduled/unsch).
+export async function approveHeldHourLog(
+  id: string,
+  edit?: { startAt: string; endAt: string },
+) {
   const session = await requireRole("admin");
-  const result = await approveHeldHourLogInternal(session.user, id);
+  const parsed = edit ? acceptTimeEditSchema.parse(edit) : undefined;
+  const result = await approveHeldHourLogInternal(session.user, id, parsed);
   revalidatePath("/admin/hour-log");
   revalidatePath("/admin/hour-log/held");
+  revalidatePath("/admin/hour-log/schedule");
   revalidatePath("/admin/payments");
   revalidatePath("/admin");
   revalidatePath("/admin/records/accountability");
   revalidatePath("/coach/hour-log");
   return result;
+}
+
+// 1b security B — read-only detail for the admin held-log "Details +
+// edit-then-approve" view. No revalidate (read-only).
+export async function getHeldLogDetail(id: string) {
+  await requireRole("admin");
+  return getHeldLogDetailInternal(id);
 }
 
 // 1b security B — REJECT a held manual log: deletes the row (coach must

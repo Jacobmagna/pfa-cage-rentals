@@ -9,12 +9,13 @@
 // removal-request row actions.
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { Check, X } from "lucide-react";
+import { Check, FileText, X } from "lucide-react";
 import {
   approveHeldHourLog,
   rejectHeldHourLog,
 } from "@/app/admin/hour-log/actions";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
+import { HeldDetailsDialog } from "./held-details-dialog";
 
 export function HeldRowActions({
   id,
@@ -25,6 +26,7 @@ export function HeldRowActions({
   coachLabel: string;
   whenLabel: string;
 }) {
+  const [showDetails, setShowDetails] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [confirmReject, setConfirmReject] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -38,6 +40,15 @@ export function HeldRowActions({
 
   return (
     <div className="flex items-center justify-end gap-2">
+      <button
+        type="button"
+        onClick={() => setShowDetails(true)}
+        disabled={isPending}
+        className="inline-flex items-center gap-1 rounded-lg border border-line-strong bg-surface px-2.5 h-8 text-xs font-medium text-fg-muted hover:text-fg hover:bg-surface-2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+      >
+        <FileText className="h-3.5 w-3.5" />
+        Details
+      </button>
       <button
         type="button"
         onClick={() => setConfirmApprove(true)}
@@ -56,6 +67,18 @@ export function HeldRowActions({
         <X className="h-3.5 w-3.5" />
         Reject
       </button>
+
+      <HeldDetailsDialog
+        open={showDetails}
+        onClose={() => setShowDetails(false)}
+        logId={id}
+        coachLabel={coachLabel}
+        whenLabel={whenLabel}
+        onReject={() => {
+          setShowDetails(false);
+          setConfirmReject(true);
+        }}
+      />
 
       <ConfirmDialog
         open={confirmApprove}

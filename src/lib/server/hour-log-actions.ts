@@ -31,6 +31,7 @@ import {
   users,
 } from "@/db/schema";
 import { type AuthedSession } from "@/lib/authz";
+import { workPayForLog } from "@/lib/billing";
 import {
   DuplicateHourLogError,
   HeldHourLogNotFoundError,
@@ -46,6 +47,7 @@ import {
 } from "@/lib/schemas/hour-log";
 import {
   classifyManualLog,
+  matchLogToBlock,
   type ReconBlock,
 } from "@/lib/server/reconciliation";
 import { formatPfaTime12h } from "@/lib/timezone";
@@ -429,6 +431,7 @@ export async function resolveHourLogInternal(
 export async function approveHeldHourLogInternal(
   actor: AuthedSession["user"],
   id: string,
+  edit?: { startAt: Date; endAt: Date },
 ) {
   const [existing] = await db
     .select()
@@ -439,11 +442,29 @@ export async function approveHeldHourLogInternal(
     throw new HeldHourLogNotFoundError(id);
   }
 
-  const [updated] = await db
-    .update(hourLogs)
-    .set({ status: "posted", reviewedAt: new Date(), reviewedBy: actor.id })
-    .where(eq(hourLogs.id, id))
-    .returning();
+  let updated;
+  try {
+    [updated] = await db
+      .update(hourLogs)
+      .set({
+        status: "posted",
+        reviewedAt: new Date(),
+        reviewedBy: actor.id,
+        ...(edit ? { startAt: edit.startAt, endAt: edit.endAt } : {}),
+      })
+      // Guard the WRITE on status='held' too (not just the SELECT above):
+      // neon-http can't transact, so another tab resolving this row between
+      // our SELECT and UPDATE would otherwise slip through. If it already
+      // moved, the update matches 0 rows and we treat it as already-resolved.
+      .where(and(eq(hourLogs.id, id), eq(hourLogs.status, "held")))
+      .returning();
+  } catch (err) {
+    if (edit && isHourLogDuplicateViolation(err)) {
+      throw new DuplicateHourLogError();
+    }
+    throw err;
+  }
+  if (!updated) throw new HeldHourLogNotFoundError(id);
 
   await safeLogAudit(db, {
     actorUserId: actor.id,
@@ -614,6 +635,160 @@ export async function rejectNeedsReviewLogInternal(
     },
   });
   return updated;
+}
+
+// 1b security B — read-only detail for the admin held-log "Details +
+// edit-then-approve" view. Returns the full held log (coach + program names),
+// the scheduled block it maps to (via matchLogToBlock — the ONE source of
+// truth for "which block did this log belong to"), and the logged-vs-scheduled
+// pay figures. Both pay figures use the log's OWN snapshot rate, so the only
+// variable between them is duration. No actor — a pure read, gated at the
+// public wrapper. Throws HourLogNotFoundError if the row is missing.
+export type HeldLogDetail = {
+  log: {
+    id: string;
+    coachId: string;
+    coachName: string | null;
+    programId: string;
+    programName: string;
+    startAt: Date;
+    endAt: Date;
+    note: string | null;
+    heldReason: string | null;
+    ratePer30MinCents: number | null;
+    perSessionRateCents: number | null;
+  };
+  block: {
+    id: string;
+    startAt: Date;
+    endAt: Date;
+    coachNames: string[];
+  } | null;
+  loggedPayCents: number;
+  scheduledPayCents: number | null;
+};
+
+export async function getHeldLogDetailInternal(
+  id: string,
+): Promise<HeldLogDetail> {
+  const [log] = await db
+    .select({
+      id: hourLogs.id,
+      coachId: hourLogs.coachId,
+      coachName: users.name,
+      programId: hourLogs.programId,
+      programName: programs.name,
+      startAt: hourLogs.startAt,
+      endAt: hourLogs.endAt,
+      note: hourLogs.note,
+      heldReason: hourLogs.heldReason,
+      ratePer30MinCents: hourLogs.ratePer30MinCents,
+      perSessionRateCents: hourLogs.perSessionRateCents,
+      status: hourLogs.status,
+    })
+    .from(hourLogs)
+    .innerJoin(users, eq(hourLogs.coachId, users.id))
+    .innerJoin(programs, eq(hourLogs.programId, programs.id))
+    .where(eq(hourLogs.id, id))
+    .limit(1);
+  if (!log) throw new HourLogNotFoundError(id);
+
+  // Find the matched scheduled block — same block-fetch approach as
+  // logHourInternal: the coach's own blocks that overlap the log window
+  // (half-open; same lt/gte). matchLogToBlock's in-set checks only read
+  // `.coaches`, so the scheduled-coach fields just need to exist.
+  const blockRows = await db
+    .select({
+      id: programScheduleBlocks.id,
+      programId: programScheduleBlocks.programId,
+      startAt: programScheduleBlocks.startAt,
+      endAt: programScheduleBlocks.endAt,
+    })
+    .from(programScheduleBlocks)
+    .innerJoin(
+      programScheduleBlockCoaches,
+      eq(programScheduleBlockCoaches.blockId, programScheduleBlocks.id),
+    )
+    .where(
+      and(
+        eq(programScheduleBlockCoaches.coachId, log.coachId),
+        lt(programScheduleBlocks.startAt, log.endAt),
+        gte(programScheduleBlocks.endAt, log.startAt),
+      ),
+    );
+  const blocks: ReconBlock[] = blockRows.map((b) => ({
+    id: b.id,
+    programId: b.programId,
+    scheduledCoachId: log.coachId,
+    scheduledCoachName: log.coachName,
+    coaches: [{ coachId: log.coachId, coachName: log.coachName ?? "" }],
+    startAt: b.startAt,
+    endAt: b.endAt,
+  }));
+
+  const match = matchLogToBlock(
+    {
+      coachId: log.coachId,
+      programId: log.programId,
+      startAt: log.startAt,
+      endAt: log.endAt,
+    },
+    blocks,
+  );
+
+  // For a matched block, fetch its FULL scheduled-coach set for display (the
+  // block may be shared). The matched block's program always == the log's
+  // program (matchLogToBlock filters by programId), so no program lookup.
+  let block: HeldLogDetail["block"] = null;
+  if (match) {
+    const coachRows = await db
+      .select({ coachName: users.name })
+      .from(programScheduleBlockCoaches)
+      .innerJoin(users, eq(programScheduleBlockCoaches.coachId, users.id))
+      .where(eq(programScheduleBlockCoaches.blockId, match.id));
+    block = {
+      id: match.id,
+      startAt: match.startAt,
+      endAt: match.endAt,
+      coachNames: coachRows.map((c) => c.coachName ?? ""),
+    };
+  }
+
+  // Pay figures off the log's OWN snapshot rate for both — the only
+  // difference is the duration (logged window vs the scheduled block).
+  const loggedPayCents = workPayForLog({
+    perSessionRateCents: log.perSessionRateCents,
+    startAt: log.startAt,
+    endAt: log.endAt,
+    ratePer30MinCents: log.ratePer30MinCents,
+  });
+  const scheduledPayCents = match
+    ? workPayForLog({
+        perSessionRateCents: log.perSessionRateCents,
+        startAt: match.startAt,
+        endAt: match.endAt,
+        ratePer30MinCents: log.ratePer30MinCents,
+      })
+    : null;
+
+  return {
+    log: {
+      id: log.id,
+      coachId: log.coachId,
+      coachName: log.coachName,
+      programId: log.programId,
+      programName: log.programName,
+      startAt: log.startAt,
+      endAt: log.endAt,
+      note: log.note,
+      heldReason: log.heldReason,
+      ratePer30MinCents: log.ratePer30MinCents,
+      perSessionRateCents: log.perSessionRateCents,
+    },
+    block,
+    loggedPayCents,
+    scheduledPayCents,
+  };
 }
 
 // 1b security B — the admin held-approval queue, newest-first by createdAt.

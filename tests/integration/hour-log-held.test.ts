@@ -35,11 +35,13 @@ import {
 import {
   approveHeldHourLogInternal,
   countHeldHourLogs,
+  getHeldLogDetailInternal,
   loadHeldHourLogs,
   logHourInternal,
   rejectHeldHourLogInternal,
 } from "@/lib/server/hour-log-actions";
 import {
+  DuplicateHourLogError,
   HeldHourLogNotFoundError,
   HeldLogReviewRequiredError,
 } from "@/lib/errors";
@@ -101,11 +103,13 @@ function uniqueSuffix(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-async function createProgram(): Promise<{ id: string; name: string }> {
+async function createProgram(
+  defaultRatePer30MinCents?: number,
+): Promise<{ id: string; name: string }> {
   const name = `HourLog Held Test Program ${uniqueSuffix()}`;
   const [row] = await db
     .insert(programs)
-    .values({ name, active: true })
+    .values({ name, active: true, defaultRatePer30MinCents })
     .returning({ id: programs.id, name: programs.name });
   createdProgramIds.push(row.id);
   return row;
@@ -300,5 +304,134 @@ describe("logHourInternal held-then-approve gate", () => {
     const count = await countHeldHourLogs();
     expect(count).toBe(heldRows.length);
     expect(count).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// Held-log "Details + edit-then-approve" feature: the optional time edit on
+// approve, and getHeldLogDetail's compare payload.
+describe("approveHeldHourLogInternal with an edit", () => {
+  it("posts the held row at the ADMIN-EDITED start/end (not the coach's logged times)", async () => {
+    const program = await createProgram();
+    const held = await logHourInternal(fixtures.coach, {
+      programId: program.id,
+      startAt: tomorrowAt(10),
+      endAt: tomorrowAt(11),
+      note: "off-schedule",
+      acknowledgeHold: true,
+    });
+    expect(held.status).toBe("held");
+
+    // Admin corrects the window to 10:15–10:45 and approves in one step.
+    const newStart = tomorrowAt(10, 15);
+    const newEnd = tomorrowAt(10, 45);
+    const approved = await approveHeldHourLogInternal(fixtures.admin, held.id, {
+      startAt: newStart,
+      endAt: newEnd,
+    });
+    expect(approved.status).toBe("posted");
+
+    const [row] = await db
+      .select()
+      .from(hourLogs)
+      .where(eq(hourLogs.id, held.id));
+    expect(row.status).toBe("posted");
+    expect(row.reviewedAt).not.toBeNull();
+    expect(row.startAt.getTime()).toBe(newStart.getTime());
+    expect(row.endAt.getTime()).toBe(newEnd.getTime());
+  });
+
+  it("throws DuplicateHourLogError when the edit collides with an existing (coach, program, start, end) log", async () => {
+    const program = await createProgram();
+    // An existing posted log the coach cleanly worked (10–11, matches a block).
+    const start = tomorrowAt(10);
+    const end = tomorrowAt(11);
+    await createScheduledBlock({
+      programId: program.id,
+      coachId: fixtures.coach.id,
+      startAt: start,
+      endAt: end,
+    });
+    await logHourInternal(fixtures.coach, {
+      programId: program.id,
+      startAt: start,
+      endAt: end,
+      note: "already posted",
+      source: "schedule-confirm",
+    });
+
+    // A separate HELD log elsewhere; approving it onto the exact same window
+    // duplicates the (coach, program, start, end) unique key.
+    const held = await logHourInternal(fixtures.coach, {
+      programId: program.id,
+      startAt: tomorrowAt(14),
+      endAt: tomorrowAt(15),
+      note: "held elsewhere",
+      acknowledgeHold: true,
+    });
+
+    await expect(
+      approveHeldHourLogInternal(fixtures.admin, held.id, {
+        startAt: start,
+        endAt: end,
+      }),
+    ).rejects.toBeInstanceOf(DuplicateHourLogError);
+
+    // The held row is untouched (still held) — the collision aborted the write.
+    const [row] = await db
+      .select()
+      .from(hourLogs)
+      .where(eq(hourLogs.id, held.id));
+    expect(row.status).toBe("held");
+  });
+});
+
+describe("getHeldLogDetailInternal", () => {
+  it("unscheduled → block is null, no scheduled pay, logged pay from the snapshot rate", async () => {
+    // $30/hr = 1500¢ per 30-min slot → a 1h log pays 3000¢.
+    const program = await createProgram(1500);
+    const held = await logHourInternal(fixtures.coach, {
+      programId: program.id,
+      startAt: tomorrowAt(10),
+      endAt: tomorrowAt(11),
+      note: "off-schedule",
+      acknowledgeHold: true,
+    });
+    expect(held.heldReason).toBe("unscheduled");
+
+    const detail = await getHeldLogDetailInternal(held.id);
+    expect(detail.block).toBeNull();
+    expect(detail.scheduledPayCents).toBeNull();
+    expect(detail.loggedPayCents).toBe(3000);
+    expect(detail.log.heldReason).toBe("unscheduled");
+    expect(detail.log.programName).toBe(program.name);
+  });
+
+  it("over_logged → matched block + BOTH pay figures (scheduled shorter than logged)", async () => {
+    const program = await createProgram(1500); // $30/hr
+    const blockStart = tomorrowAt(10);
+    const blockEnd = tomorrowAt(11); // scheduled 1h → 3000¢
+    await createScheduledBlock({
+      programId: program.id,
+      coachId: fixtures.coach.id,
+      startAt: blockStart,
+      endAt: blockEnd,
+    });
+    // Coach logs 10–12 (2h) → over-logged by 1h (> the 30-min margin).
+    const held = await logHourInternal(fixtures.coach, {
+      programId: program.id,
+      startAt: blockStart,
+      endAt: tomorrowAt(12),
+      note: "ran long",
+      acknowledgeHold: true,
+    });
+    expect(held.heldReason).toBe("over_logged");
+
+    const detail = await getHeldLogDetailInternal(held.id);
+    expect(detail.block).not.toBeNull();
+    expect(detail.block?.startAt.getTime()).toBe(blockStart.getTime());
+    expect(detail.block?.endAt.getTime()).toBe(blockEnd.getTime());
+    expect(detail.block?.coachNames).toContain(fixtures.coach.name);
+    expect(detail.scheduledPayCents).toBe(3000); // 1h
+    expect(detail.loggedPayCents).toBe(6000); // 2h
   });
 });

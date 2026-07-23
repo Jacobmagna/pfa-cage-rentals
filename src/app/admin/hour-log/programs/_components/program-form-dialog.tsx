@@ -12,6 +12,10 @@ export type ProgramEditInitialValues = {
   id: string;
   name: string;
   defaultRatePer30MinCents: number | null;
+  // 0052 — how this program pays. "hourly" for every program created before
+  // the migration (the column default).
+  payMode: "hourly" | "per_session";
+  defaultPerSessionRateCents: number | null;
 };
 
 // Native <dialog> edit form for a single program (name + optional pay
@@ -79,9 +83,20 @@ export function ProgramFormDialog({
           initial.defaultRatePer30MinCents !== null
             ? ((initial.defaultRatePer30MinCents * 2) / 100).toFixed(2)
             : "",
+        payMode: initial.payMode,
+        // Per-session is a FLAT amount — not halved, unlike the hourly rate.
+        perSessionDollars:
+          initial.defaultPerSessionRateCents != null
+            ? (initial.defaultPerSessionRateCents / 100).toFixed(2)
+            : "",
       };
     }
-    return { name: "", rateDollars: "" };
+    return {
+      name: "",
+      rateDollars: "",
+      payMode: "hourly" as const,
+      perSessionDollars: "",
+    };
   }, [initial, state]);
 
   return (

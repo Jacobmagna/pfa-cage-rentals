@@ -17,6 +17,10 @@ export type ProgramRow = {
   name: string;
   active: boolean;
   defaultRatePer30MinCents: number | null;
+  // 0052 — pay mode + the flat per-session amount, so the edit dialog can
+  // prefill the right field and the table can label how a program pays.
+  payMode: "hourly" | "per_session";
+  defaultPerSessionRateCents: number | null;
 };
 
 // Top-level client island for the programs page. Owns the edit-dialog
@@ -60,6 +64,8 @@ export function ProgramsClient({ programs }: { programs: ProgramRow[] }) {
         id: editRow.id,
         name: editRow.name,
         defaultRatePer30MinCents: editRow.defaultRatePer30MinCents,
+        payMode: editRow.payMode,
+        defaultPerSessionRateCents: editRow.defaultPerSessionRateCents,
       }
     : undefined;
 

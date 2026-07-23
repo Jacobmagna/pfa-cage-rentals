@@ -31,6 +31,8 @@ export default async function ProgramsPage() {
     name: p.name,
     active: p.active,
     defaultRatePer30MinCents: p.defaultRatePer30MinCents,
+    payMode: p.payMode,
+    defaultPerSessionRateCents: p.defaultPerSessionRateCents,
   }));
 
   const activeCount = rows.filter((r) => r.active).length;

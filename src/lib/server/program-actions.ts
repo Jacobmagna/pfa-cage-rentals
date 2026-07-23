@@ -69,6 +69,10 @@ export async function createProgramInternal(
         name: parsed.name,
         active: parsed.active ?? true,
         defaultRatePer30MinCents: parsed.defaultRatePer30MinCents ?? null,
+        // 0052 — absent → "hourly" (the column default), so callers that
+        // don't know about pay mode create exactly the program they used to.
+        payMode: parsed.payMode ?? "hourly",
+        defaultPerSessionRateCents: parsed.defaultPerSessionRateCents ?? null,
       })
       .returning();
   } catch (err) {
@@ -111,6 +115,8 @@ export async function updateProgramInternal(
     name?: string;
     active?: boolean;
     defaultRatePer30MinCents?: number | null;
+    payMode?: "hourly" | "per_session";
+    defaultPerSessionRateCents?: number | null;
   } = {};
   if (parsed.name !== undefined) patch.name = parsed.name;
   if (parsed.active !== undefined) patch.active = parsed.active;
@@ -118,6 +124,10 @@ export async function updateProgramInternal(
   // present-but-null from absent via the key check (same as cap).
   if ("defaultRatePer30MinCents" in parsed) {
     patch.defaultRatePer30MinCents = parsed.defaultRatePer30MinCents ?? null;
+  }
+  if (parsed.payMode !== undefined) patch.payMode = parsed.payMode;
+  if ("defaultPerSessionRateCents" in parsed) {
+    patch.defaultPerSessionRateCents = parsed.defaultPerSessionRateCents ?? null;
   }
 
   let updated;

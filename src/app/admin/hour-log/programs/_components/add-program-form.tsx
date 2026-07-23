@@ -23,7 +23,14 @@ export function AddProgramForm() {
 
   const defaults = useMemo(() => {
     if (!state.ok) return state.values;
-    return { name: "", cap: "", capPeriod: "", limit: false, rateDollars: "" };
+    // New programs default to time-based pay — same as every program that
+    // existed before the per-session mode was added.
+    return {
+      name: "",
+      rateDollars: "",
+      payMode: "hourly" as const,
+      perSessionDollars: "",
+    };
   }, [state]);
 
   const showSuccess = state.ok && state.createdAt > 0;

@@ -61,6 +61,21 @@ import { safeLogAudit } from "./audit-helpers";
 // is the inferred SELECT shape of the override row (null = no override).
 type ProgramRateOverrideRow = typeof programRateOverrides.$inferSelect;
 
+// The pay-relevant slice of a `programs` row. Taking the three fields (not
+// just the hourly default, as before migration 0052) is what lets a PROGRAM
+// carry a per-session rate instead of only a per-(coach, program) override.
+// Callers pass the whole slice so the two resolvers can never disagree about
+// which mode the program is in.
+export type ProgramPayConfig = Pick<
+  typeof programs.$inferSelect,
+  "payMode" | "defaultRatePer30MinCents" | "defaultPerSessionRateCents"
+>;
+
+/** A usable money amount: a positive whole number of cents. */
+function isPositiveCents(v: number | null | undefined): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v > 0;
+}
+
 // Resolves the per-30-min cents HOURLY pay rate to stamp on a new
 // hour_logs row, from the already-fetched (coach, program) override row.
 // When the override is on "hourly" mode with a rate set, that rate wins;
@@ -71,7 +86,7 @@ type ProgramRateOverrideRow = typeof programRateOverrides.$inferSelect;
 // (below) is what the read path uses for those logs.
 export function resolveRateCentsForProgram(
   override: ProgramRateOverrideRow | undefined | null,
-  programDefaultCents: number | null,
+  program: ProgramPayConfig | null,
 ): number | null {
   if (
     override &&
@@ -80,7 +95,19 @@ export function resolveRateCentsForProgram(
   ) {
     return override.ratePer30MinCents;
   }
-  return programDefaultCents;
+  // A per_session PROGRAM has no hourly basis of its own — the flat amount
+  // stamped by resolvePerSessionRateCents is the whole pay. Returning the
+  // program's (possibly stale) hourly default here would leave a misleading
+  // snapshot on the row.
+  //
+  // NOTE this branch is unreachable for every program that existed before
+  // migration 0052: they all backfill to payMode="hourly", so the line below
+  // is the ONLY one that runs for them — behavior is byte-identical until an
+  // admin deliberately flips a program to per-session.
+  if (program?.payMode === "per_session") {
+    return null;
+  }
+  return program?.defaultRatePer30MinCents ?? null;
 }
 
 // DESIGN-1 — resolves the per-session pay snapshot (cents) to stamp on a new
@@ -93,15 +120,33 @@ export function resolveRateCentsForProgram(
 // rule: changing a coach's per-program mode never re-rates existing logs.
 export function resolvePerSessionRateCents(
   override: ProgramRateOverrideRow | undefined | null,
+  program: ProgramPayConfig | null,
 ): number | null {
+  // A (coach, program) override WINS OUTRIGHT — including an HOURLY one,
+  // which returns null here on purpose so that coach is paid hourly even on
+  // a per-session program. Coach-specific always beats the program default,
+  // consistent with how every other rate in this system resolves.
+  // ⚠️ Operational consequence: flipping a program to per-session does NOT
+  // reach coaches who hold an hourly override on it — those overrides must be
+  // deleted, or they keep being paid by the clock. The Work tab warns about
+  // this; see the per-session banner in program-form-dialog.
+  if (override) {
+    if (
+      override.payMode === "per_session" &&
+      isPositiveCents(override.perSessionRateCents)
+    ) {
+      return override.perSessionRateCents;
+    }
+    return null;
+  }
+  // No override → the PROGRAM's pay mode decides. This is the branch that
+  // fixes "HS Summer Travel - Game": a flat fee per game logged, regardless
+  // of how many hours the game ran.
   if (
-    override &&
-    override.payMode === "per_session" &&
-    typeof override.perSessionRateCents === "number" &&
-    Number.isInteger(override.perSessionRateCents) &&
-    override.perSessionRateCents > 0
+    program?.payMode === "per_session" &&
+    isPositiveCents(program.defaultPerSessionRateCents)
   ) {
-    return override.perSessionRateCents;
+    return program.defaultPerSessionRateCents;
   }
   return null;
 }
@@ -138,10 +183,7 @@ export async function logHourInternal(
   // Stamp the resolved HOURLY pay rate as a snapshot (cents per 30-min
   // slot), mirroring sessions_billing. May be null when neither the
   // override nor the program sets a rate → $0 pay; reads treat null as 0.
-  const ratePer30MinCents = resolveRateCentsForProgram(
-    override,
-    program.defaultRatePer30MinCents,
-  );
+  const ratePer30MinCents = resolveRateCentsForProgram(override, program);
 
   // DESIGN-1 — per-session pay snapshot. Non-null only when this
   // (coach, program) override is on the "per_session" pay mode with a
@@ -149,7 +191,7 @@ export async function logHourInternal(
   // snapshot above applies). Snapshotted alongside the hourly rate so a
   // later mode change never re-rates this log. Applies to ALL insert paths
   // (coach self-log, schedule-confirm auto-confirm, held).
-  const perSessionRateCents = resolvePerSessionRateCents(override);
+  const perSessionRateCents = resolvePerSessionRateCents(override, program);
 
   // 1b security B — held-then-approve gate. Runs for EVERY source. The
   // `source` flag (client-supplied) must NOT be able to bypass this check:

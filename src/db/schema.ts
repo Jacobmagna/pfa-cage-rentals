@@ -790,6 +790,25 @@ export const programs = pgTable("programs", {
   // resource-type defaults in rate_defaults, but lives on the program
   // row since program pay is per-program, not per-resource-type.
   defaultRatePer30MinCents: integer("default_rate_per_30_min_cents"),
+  // PER-SESSION PROGRAM PAY: mirrors the (coach, program) override trio
+  // (pay_mode / rate_per_30_min_cents / per_session_rate_cents) at the
+  // PROGRAM level. Before this, per-session pay existed ONLY as a per-coach
+  // override, so a program like "HS Summer Travel - Game" — which pays a flat
+  // fee PER GAME — had to be faked with an hourly rate. That silently paid by
+  // game LENGTH: $100/hr on a 3.5h game paid $350, not the intended $100.
+  //
+  // "hourly" (the default, so every pre-existing program keeps today's exact
+  // behavior) → defaultRatePer30MinCents applies. "per_session" →
+  // defaultPerSessionRateCents applies as a FLAT amount per logged session,
+  // independent of duration. Reuses the coach_pay_mode enum — no enum ALTER.
+  //
+  // A (coach, program) override still WINS over this, same as it always has:
+  // program pay mode is the default for coaches with no override of their own.
+  payMode: coachPayMode("pay_mode").notNull().default("hourly"),
+  // Flat per-session pay in cents; meaningful only when payMode = "per_session".
+  // Nullable — a per_session program with no amount set resolves to $0 pay
+  // (same "never guess a rate" posture as defaultRatePer30MinCents).
+  defaultPerSessionRateCents: integer("default_per_session_rate_cents"),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "date" })
     .notNull()

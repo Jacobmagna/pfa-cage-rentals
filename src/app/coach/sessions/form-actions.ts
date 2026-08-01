@@ -117,8 +117,13 @@ export async function updateOwnSessionFormAction(
 // Plain server action for delete (no useActionState — confirm() in
 // the client component is the UX). revalidate triggers the page to
 // re-fetch the list after the row is gone.
-export async function deleteOwnSessionAction(id: string): Promise<void> {
-  await deleteOwnSession(id);
+export async function deleteOwnSessionAction(
+  id: string,
+  // Coach cancel-reasons: forwarded straight to deleteOwnSession — a
+  // during/after cancel carries the reason payload, a before-cancel omits it.
+  input?: { reason?: string | null; reasonOther?: string | null },
+): Promise<void> {
+  await deleteOwnSession(id, input);
   revalidatePath("/coach/sessions");
 }
 

@@ -4,23 +4,23 @@
 // the booking calendar (works identically on the mobile list + desktop grid).
 //
 // Read-only detail (resource / when / note) plus ONE context-aware action:
-//   • future rental  → Delete rental (hard delete, confirmed)
-//   • started rental → Request removal (admin-approved; it's money owed)
-//   • pending request → a "Removal requested" chip (no action)
+//   • future rental  → Delete rental (hard delete, confirmed, no reason)
+//   • started/past rental → Cancel rental (opens the reason dialog; a reason
+//     is REQUIRED for accountability)
 //
-// The server enforces all of this (deleteOwnSession rejects a started rental
-// with PastRentalImmutableError; requestOwnSessionRemoval rejects a future
-// one) — the UI just shows the right affordance and degrades gracefully if
-// the boundary is crossed while the popup is open.
+// Coaches now self-serve BOTH cases (the admin-approved removal flow is
+// retired). The server enforces the reason rule; the UI just shows the right
+// affordance and degrades gracefully if the boundary is crossed while the
+// popup is open.
 
 import { useEffect, useState, useTransition } from "react";
-import { Clock3, Trash2, X } from "lucide-react";
+import { Ban, Trash2, X } from "lucide-react";
 import { deleteOwnSessionAction } from "../../form-actions";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 import {
-  RequestRemovalDialog,
-  type RemovableSession,
-} from "../../_components/request-removal-dialog";
+  CancelWithReasonDialog,
+  type CancellableSession,
+} from "../../_components/cancel-with-reason-dialog";
 import { PFA_TIMEZONE } from "@/lib/timezone";
 
 export type OwnBookingInfo = {
@@ -48,7 +48,7 @@ export function OwnBookingDetail({
   onChanged: () => void;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [requestingRemoval, setRequestingRemoval] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [isDeleting, startDelete] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -63,13 +63,13 @@ export function OwnBookingDetail({
     if (!open) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (confirmingDelete || requestingRemoval || isDeleting) return;
+      if (confirmingDelete || cancelling || isDeleting) return;
       e.preventDefault();
       onClose();
     };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [open, confirmingDelete, requestingRemoval, isDeleting, onClose]);
+  }, [open, confirmingDelete, cancelling, isDeleting, onClose]);
 
   if (!info) return null;
 
@@ -96,11 +96,11 @@ export function OwnBookingDetail({
   };
 
   const backdropClose = () => {
-    if (confirmingDelete || requestingRemoval || isDeleting) return;
+    if (confirmingDelete || cancelling || isDeleting) return;
     onClose();
   };
 
-  const removable: RemovableSession = {
+  const cancellable: CancellableSession = {
     id: info.sessionId,
     resourceName: info.resourceName,
     startAt: info.startAt,
@@ -172,22 +172,14 @@ export function OwnBookingDetail({
 
           {/* Action footer — one context-aware control */}
           <div className="px-5 py-4 border-t border-line flex items-center justify-between gap-2">
-            {info.removalPending ? (
-              <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-surface-2 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-fg-muted"
-                title="An admin will review this removal request"
-              >
-                <Clock3 className="h-3.5 w-3.5" />
-                Removal requested
-              </span>
-            ) : isPast ? (
+            {isPast ? (
               <button
                 type="button"
-                onClick={() => setRequestingRemoval(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-surface text-fg-muted hover:text-danger hover:border-danger/40 h-9 px-3 text-sm font-medium shadow-[var(--shadow-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition"
+                onClick={() => setCancelling(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-danger/40 bg-danger/5 text-danger hover:bg-danger/10 h-9 px-3 text-sm font-medium shadow-[var(--shadow-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition"
               >
-                <Clock3 className="h-4 w-4" />
-                Request removal
+                <Ban className="h-4 w-4" />
+                Cancel rental
               </button>
             ) : (
               <button
@@ -227,10 +219,10 @@ export function OwnBookingDetail({
         isPending={isDeleting}
       />
 
-      {/* Removal request (started rentals). */}
-      <RequestRemovalDialog
-        session={requestingRemoval ? removable : null}
-        onClose={() => setRequestingRemoval(false)}
+      {/* Cancel with reason (started/past rentals). */}
+      <CancelWithReasonDialog
+        session={cancelling ? cancellable : null}
+        onClose={() => setCancelling(false)}
         onSubmitted={() => {
           onChanged();
           onClose();

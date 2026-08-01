@@ -52,6 +52,73 @@ export function isConcerning(cat: CancelCategory): boolean {
   return cat === "last_minute" || cat === "mid_session";
 }
 
+/**
+ * Coach cancel-reasons: a reason is REQUIRED only for a during/after cancel
+ * (the rental is underway or already over). Any "before" bucket (advance /
+ * short_notice / last_minute — the rental is still in the future) stays a
+ * one-tap delete with no reason.
+ */
+export function cancelRequiresReason(cat: CancelCategory): boolean {
+  return cat === "mid_session" || cat === "after_end";
+}
+
+// The snapshot fields a session_cancellations row copies off the (about-to-be
+// hard-deleted) sessions_billing row. Structural so this pure module needs no
+// schema import.
+export type CancellationSnapshotSource = {
+  id: string;
+  coachId: string;
+  resourceId: string;
+  startAt: Date;
+  endAt: Date;
+  ratePer30MinCents: number | null;
+  note: string | null;
+};
+
+export type CancellationRowValues = {
+  sessionId: string;
+  coachId: string;
+  resourceId: string;
+  startAt: Date;
+  endAt: Date;
+  ratePer30MinCents: number | null;
+  note: string | null;
+  cancelledAt: Date;
+  cancelledBy: string;
+  leadTimeMins: number;
+  cancelReason: string | null;
+  cancelReasonOther: string | null;
+};
+
+/**
+ * Build the session_cancellations insert values from the deleted rental, the
+ * actor, and the resolved cancel-reason payload. Pure (no DB) so the recorded
+ * reason is unit-testable. `cancelReasonOther` is kept only when the reason is
+ * 'other'; a missing/before-cancel reason resolves to null.
+ */
+export function buildCancellationRow(
+  existing: CancellationSnapshotSource,
+  cancelledBy: string,
+  cancelledAt: Date,
+  cancel?: { reason?: string | null; reasonOther?: string | null } | null,
+): CancellationRowValues {
+  const reason = cancel?.reason ?? null;
+  return {
+    sessionId: existing.id,
+    coachId: existing.coachId,
+    resourceId: existing.resourceId,
+    startAt: existing.startAt,
+    endAt: existing.endAt,
+    ratePer30MinCents: existing.ratePer30MinCents,
+    note: existing.note,
+    cancelledAt,
+    cancelledBy,
+    leadTimeMins: leadTimeMinutes(existing.startAt, cancelledAt),
+    cancelReason: reason,
+    cancelReasonOther: reason === "other" ? cancel?.reasonOther ?? null : null,
+  };
+}
+
 export type CoachCancelRow = {
   coachId: string;
   coachName: string | null;

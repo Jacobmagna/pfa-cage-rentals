@@ -10,6 +10,7 @@
 // constraint is the canonical truth.
 
 import { z } from "zod";
+import { CancelReasonRequiredError } from "@/lib/errors";
 
 const sessionShape = {
   coachId: z.string().min(1, "coachId is required"),
@@ -149,3 +150,80 @@ export const resolveRemovalSchema = z.object({
 
 export type RequestRemovalInput = z.infer<typeof requestRemovalSchema>;
 export type ResolveRemovalInput = z.infer<typeof resolveRemovalSchema>;
+
+// Coach cancel-reason (accountability, not billing). The 6 reason keys in
+// display order — a plain TEXT column + Zod enum (NOT a pg-enum) so the key
+// set can grow without a lock-heavy enum ALTER. `CANCEL_REASONS` drives the
+// UI dropdown order; `CANCEL_REASON_LABELS` maps each key to its human label
+// (for `other`, the UI shows the free-text `reasonOther` instead).
+export const CANCEL_REASONS = [
+  "no_show",
+  "athlete_cancelled",
+  "rescheduled",
+  "booking_mistake",
+  "coach_unavailable",
+  "other",
+] as const;
+
+export const CANCEL_REASON_LABELS: Record<
+  (typeof CANCEL_REASONS)[number],
+  string
+> = {
+  no_show: "No show",
+  athlete_cancelled: "Athlete cancelled",
+  rescheduled: "Rescheduled",
+  booking_mistake: "Booking mistake",
+  coach_unavailable: "Coach unavailable",
+  other: "Other",
+};
+
+export const cancelReasonSchema = z.enum(CANCEL_REASONS);
+
+// The reason payload a coach cancel carries. Both fields are nullish so a
+// before-cancel (no reason) and a during/after-cancel both parse; the
+// superRefine enforces the ONE cross-field rule: reason='other' REQUIRES a
+// non-empty trimmed `reasonOther`. Whether a reason is required AT ALL
+// (during/after vs before) is a timing decision made by the caller — see
+// `resolveCancelReason` — not by this schema.
+export const cancelWithReasonSchema = z
+  .object({
+    reason: cancelReasonSchema.nullable().optional(),
+    reasonOther: z.string().trim().max(500).nullable().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.reason === "other" && !val.reasonOther) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Please describe the reason.",
+        path: ["reasonOther"],
+      });
+    }
+  });
+
+export type CancelReason = z.infer<typeof cancelReasonSchema>;
+export type CancelWithReasonInput = z.infer<typeof cancelWithReasonSchema>;
+
+// Resolve the reason to PERSIST from the timing bucket + raw client input.
+// `requiresReason` is true only for during/after cancels (the caller derives
+// it from categorizeCancellation). When false (a before-cancel or an admin
+// delete) the reason is ignored and both fields resolve to null. When true, a
+// valid reason is MANDATORY: the input is parsed against cancelWithReasonSchema
+// (which enforces other-requires-text), then a present reason is required.
+// `reasonOther` is kept only for reason='other'. Pure + deterministic so the
+// timing rule is unit-testable without a DB.
+export function resolveCancelReason(
+  requiresReason: boolean,
+  input?: { reason?: string | null; reasonOther?: string | null } | null,
+): { reason: string | null; reasonOther: string | null } {
+  if (!requiresReason) {
+    return { reason: null, reasonOther: null };
+  }
+  const parsed = cancelWithReasonSchema.parse(input ?? {});
+  if (!parsed.reason) {
+    throw new CancelReasonRequiredError();
+  }
+  return {
+    reason: parsed.reason,
+    reasonOther: parsed.reason === "other" ? parsed.reasonOther ?? null : null,
+  };
+}

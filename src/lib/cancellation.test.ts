@@ -2,10 +2,13 @@ import { describe, it, expect } from "vitest";
 import {
   LAST_MINUTE_MINUTES,
   SHORT_NOTICE_MINUTES,
+  buildCancellationRow,
+  cancelRequiresReason,
   categorizeCancellation,
   isConcerning,
   leadTimeMinutes,
   summarizeByCoach,
+  type CancellationSnapshotSource,
   type CoachCancelRow,
 } from "./cancellation";
 
@@ -210,5 +213,66 @@ describe("summarizeByCoach", () => {
     ];
     const out = summarizeByCoach(rows);
     expect(out.map((s) => s.coachId)).toEqual(["c-high", "c-mid", "c-low"]);
+  });
+});
+
+describe("cancelRequiresReason", () => {
+  it("requires a reason for during (mid_session) and after (after_end)", () => {
+    expect(cancelRequiresReason("mid_session")).toBe(true);
+    expect(cancelRequiresReason("after_end")).toBe(true);
+  });
+  it("does NOT require a reason for any before bucket", () => {
+    expect(cancelRequiresReason("advance")).toBe(false);
+    expect(cancelRequiresReason("short_notice")).toBe(false);
+    expect(cancelRequiresReason("last_minute")).toBe(false);
+  });
+});
+
+describe("buildCancellationRow", () => {
+  const source: CancellationSnapshotSource = {
+    id: "sess-1",
+    coachId: "coach-1",
+    resourceId: "cage-1",
+    startAt: START,
+    endAt: END,
+    ratePer30MinCents: 2200,
+    note: "n",
+  };
+  const at = new Date(START.getTime() + 5 * 60000); // 5 min into the rental
+
+  it("persists a plain reason with null reasonOther", () => {
+    const row = buildCancellationRow(source, "coach-1", at, {
+      reason: "no_show",
+      reasonOther: null,
+    });
+    expect(row.cancelReason).toBe("no_show");
+    expect(row.cancelReasonOther).toBeNull();
+    // still snapshots the rest of the row + derives lead time.
+    expect(row.sessionId).toBe("sess-1");
+    expect(row.cancelledBy).toBe("coach-1");
+    expect(row.leadTimeMins).toBe(-5);
+  });
+
+  it("keeps reasonOther only when reason is 'other'", () => {
+    const row = buildCancellationRow(source, "coach-1", at, {
+      reason: "other",
+      reasonOther: "flooded cage",
+    });
+    expect(row.cancelReason).toBe("other");
+    expect(row.cancelReasonOther).toBe("flooded cage");
+  });
+
+  it("drops a stray reasonOther when reason is not 'other'", () => {
+    const row = buildCancellationRow(source, "coach-1", at, {
+      reason: "rescheduled",
+      reasonOther: "should be ignored",
+    });
+    expect(row.cancelReasonOther).toBeNull();
+  });
+
+  it("records null reason for an admin delete / before-cancel (no payload)", () => {
+    const row = buildCancellationRow(source, "admin-1", at);
+    expect(row.cancelReason).toBeNull();
+    expect(row.cancelReasonOther).toBeNull();
   });
 });

@@ -26,7 +26,12 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { sessionsBilling } from "@/db/schema";
 import { requireSession, requireSessionOwnership } from "@/lib/authz";
+import {
+  cancelRequiresReason,
+  categorizeCancellation,
+} from "@/lib/cancellation";
 import { PastRentalImmutableError, SessionNotFoundError } from "@/lib/errors";
+import { resolveCancelReason } from "@/lib/schemas/session";
 import {
   createSessionInternal,
   createSessionsBatchInternal,
@@ -144,13 +149,20 @@ function coerceDate(v: unknown): Date | undefined {
   return undefined;
 }
 
-export async function deleteOwnSession(id: string) {
+export async function deleteOwnSession(
+  id: string,
+  // Coach cancel-reasons: a during/after cancel MUST carry a valid reason;
+  // a before-cancel ignores it. Optional so a before-cancel stays a one-tap
+  // delete with no payload.
+  input?: { reason?: string | null; reasonOther?: string | null },
+) {
   const session = await requireSession();
   const [existing] = await db
     .select({
       id: sessionsBilling.id,
       coachId: sessionsBilling.coachId,
       startAt: sessionsBilling.startAt,
+      endAt: sessionsBilling.endAt,
     })
     .from(sessionsBilling)
     .where(eq(sessionsBilling.id, id))
@@ -158,14 +170,17 @@ export async function deleteOwnSession(id: string) {
   if (!existing) throw new SessionNotFoundError(id);
   requireSessionOwnership(existing, session.user);
 
-  // 1b security: a coach can't hard-delete a PAST rental (a charge they
-  // owe PFA) — they must file an admin-approved removal request instead.
-  // Future rentals: unchanged. Admins bypass (they use the /admin path).
-  if (session.user.role === "coach" && existing.startAt <= new Date()) {
-    throw new PastRentalImmutableError(id);
-  }
+  // Coach cancel-reasons: coaches can now cancel ANY time (the old
+  // past-rental guard is retired). Derive the timing bucket with the same
+  // categorizeCancellation the UI uses; a during/after cancel (mid_session /
+  // after_end) requires a valid reason, a before-cancel resolves to null.
+  const now = new Date();
+  const requiresReason = cancelRequiresReason(
+    categorizeCancellation(existing.startAt, existing.endAt, now),
+  );
+  const cancel = resolveCancelReason(requiresReason, input);
 
-  const result = await deleteSessionInternal(session.user, id);
+  const result = await deleteSessionInternal(session.user, id, cancel);
   revalidateCoachSurfaces();
   return result;
 }

@@ -467,6 +467,15 @@ export const sessionCancellations = pgTable(
     // round((startAt - cancelledAt) / 60000); positive = before start,
     // may be negative (cancelled at/after start).
     leadTimeMins: integer("lead_time_mins").notNull(),
+    // Coach-supplied cancellation reason (accountability/pattern only — no
+    // billing logic). One of the 6 keys: no_show / athlete_cancelled /
+    // rescheduled / booking_mistake / coach_unavailable / other. NULL for
+    // before-cancels (future rentals, one-tap delete) and admin deletes.
+    // Additive + nullable (TEXT, not a pg-enum) so the key set can grow
+    // without a lock-heavy enum ALTER — validity is enforced in Zod.
+    cancelReason: text("cancel_reason"),
+    // Free-text detail, set ONLY when cancelReason = 'other' (NULL otherwise).
+    cancelReasonOther: text("cancel_reason_other"),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   },
   (table) => [

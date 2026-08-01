@@ -43,7 +43,7 @@ import {
 import { logAudit } from "@/lib/audit";
 import type { AuthedSession } from "@/lib/authz";
 import { computeRate, type ResourceType } from "@/lib/billing";
-import { leadTimeMinutes } from "@/lib/cancellation";
+import { buildCancellationRow } from "@/lib/cancellation";
 import {
   BlockedTimeError,
   ResourceNotFoundError,
@@ -391,6 +391,10 @@ export async function updateSessionInternal(
 export async function deleteSessionInternal(
   actor: AuthedSession["user"],
   id: string,
+  // Coach cancel-reasons: the resolved reason payload to persist on the
+  // session_cancellations row. Optional so the admin delete path and any
+  // before-cancel omit it (both record NULL reason).
+  cancel?: { reason?: string | null; reasonOther?: string | null },
 ) {
   const [existing] = await db
     .select()
@@ -412,7 +416,7 @@ export async function deleteSessionInternal(
   // break the user's delete, which has already committed above. This is
   // the SINGLE delete point, so it covers both the coach self-delete and
   // the admin delete path.
-  await safeRecordCancellation(actor, existing);
+  await safeRecordCancellation(actor, existing, cancel);
 }
 
 // Best-effort insert of a session_cancellations row after a rental is
@@ -423,23 +427,17 @@ export async function deleteSessionInternal(
 async function safeRecordCancellation(
   actor: AuthedSession["user"],
   existing: typeof sessionsBilling.$inferSelect,
+  cancel?: { reason?: string | null; reasonOther?: string | null },
 ): Promise<void> {
   try {
     const now = new Date();
+    // Coach cancel-reasons: the reason/reasonOther are threaded straight into
+    // the row (null when the caller omitted them — admin deletes + before-
+    // cancels). buildCancellationRow is pure so the persisted values are
+    // unit-tested independently of the DB.
     await db
       .insert(sessionCancellations)
-      .values({
-        sessionId: existing.id,
-        coachId: existing.coachId,
-        resourceId: existing.resourceId,
-        startAt: existing.startAt,
-        endAt: existing.endAt,
-        ratePer30MinCents: existing.ratePer30MinCents,
-        note: existing.note,
-        cancelledAt: now,
-        cancelledBy: actor.id,
-        leadTimeMins: leadTimeMinutes(existing.startAt, now),
-      })
+      .values(buildCancellationRow(existing, actor.id, now, cancel))
       .onConflictDoNothing({ target: sessionCancellations.sessionId });
   } catch (recordErr) {
     Sentry.captureException(recordErr, {

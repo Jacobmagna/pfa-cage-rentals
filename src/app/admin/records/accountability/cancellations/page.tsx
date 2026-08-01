@@ -117,7 +117,8 @@ export default async function CancellationsPage() {
                       <th className="px-4 py-3 text-left">Coach</th>
                       <th className="px-4 py-3 text-right">Total</th>
                       <th className="px-4 py-3 text-right">Last-minute</th>
-                      <th className="px-4 py-3 text-right">Mid-session</th>
+                      <th className="px-4 py-3 text-right">During</th>
+                      <th className="px-4 py-3 text-right">After</th>
                       <th className="px-4 py-3 text-right">Late-rate</th>
                     </tr>
                   </thead>
@@ -153,6 +154,9 @@ export default async function CancellationsPage() {
                         >
                           {c.midSession}
                         </td>
+                        <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-muted">
+                          {c.afterEnd}
+                        </td>
                         <td
                           className={`px-4 py-3 text-right font-mono tnum tabular-nums ${
                             c.lateRatePct >= 50 ? "text-danger font-semibold" : "text-fg"
@@ -178,7 +182,7 @@ export default async function CancellationsPage() {
               Recent
             </h2>
             <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
-              <table className="w-full min-w-[820px] text-sm">
+              <table className="w-full min-w-[940px] text-sm">
                 <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
                   <tr>
                     <th className="px-4 py-3 text-left">Coach</th>
@@ -187,6 +191,7 @@ export default async function CancellationsPage() {
                     <th className="px-4 py-3 text-left">Cancelled</th>
                     <th className="px-4 py-3 text-left">Lead time</th>
                     <th className="px-4 py-3 text-left">Category</th>
+                    <th className="px-4 py-3 text-left">Reason</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
@@ -232,6 +237,9 @@ export default async function CancellationsPage() {
                           >
                             {badge.label}
                           </span>
+                        </td>
+                        <td className="px-4 py-3 text-fg-muted">
+                          {r.reasonLabel ?? "—"}
                         </td>
                       </tr>
                     );

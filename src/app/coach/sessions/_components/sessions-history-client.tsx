@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import {
+  Ban,
   ChevronLeft,
   ChevronRight,
-  Clock3,
   Pencil,
   Plus,
   Trash2,
@@ -22,7 +22,7 @@ import { GroupPill } from "@/app/_components/group-pill";
 import type { ResourceOption } from "./types";
 import { buildHistoryQuery, type HistoryFilters as HistoryFilterSet } from "../filters.logic";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
-import { RequestRemovalDialog } from "./request-removal-dialog";
+import { CancelWithReasonDialog } from "./cancel-with-reason-dialog";
 
 // Renders the history list, owns the edit-dialog open/close + the
 // row delete pending state. Pagination links are server-side and
@@ -72,7 +72,7 @@ export function SessionsHistoryClient({
   const [confirmRow, setConfirmRow] = useState<HistoryRow | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, startTransition] = useTransition();
-  const [removalRow, setRemovalRow] = useState<HistoryRow | null>(null);
+  const [cancelRow, setCancelRow] = useState<HistoryRow | null>(null);
 
   const onDelete = (row: HistoryRow) => {
     setDeleteError(null);
@@ -206,25 +206,15 @@ export function SessionsHistoryClient({
                     <Pencil className="h-4 w-4" />
                   </button>
                   {row.isPast ? (
-                    row.removalPending ? (
-                      <span
-                        className="inline-flex items-center gap-1 rounded-full border border-line-strong bg-surface-2 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-fg-muted"
-                        title="An admin will review this removal request"
-                      >
-                        <Clock3 className="h-3 w-3" />
-                        Removal requested
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setRemovalRow(row)}
-                        className="inline-flex items-center justify-center h-9 w-9 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
-                        aria-label="Request removal"
-                        title="Request removal"
-                      >
-                        <Clock3 className="h-4 w-4" />
-                      </button>
-                    )
+                    <button
+                      type="button"
+                      onClick={() => setCancelRow(row)}
+                      className="inline-flex items-center justify-center h-9 w-9 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-danger hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40 transition-colors"
+                      aria-label="Cancel rental"
+                      title="Cancel rental"
+                    >
+                      <Ban className="h-4 w-4" />
+                    </button>
                   ) : (
                     <button
                       type="button"
@@ -307,18 +297,18 @@ export function SessionsHistoryClient({
         isPending={isDeleting}
       />
 
-      <RequestRemovalDialog
+      <CancelWithReasonDialog
         session={
-          removalRow
+          cancelRow
             ? {
-                id: removalRow.id,
-                resourceName: removalRow.resourceName,
-                startAt: removalRow.startAt,
-                endAt: removalRow.endAt,
+                id: cancelRow.id,
+                resourceName: cancelRow.resourceName,
+                startAt: cancelRow.startAt,
+                endAt: cancelRow.endAt,
               }
             : null
         }
-        onClose={() => setRemovalRow(null)}
+        onClose={() => setCancelRow(null)}
       />
     </>
   );

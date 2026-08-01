@@ -14,6 +14,7 @@ import {
   type CancelCategory,
   type CoachCancelSummary,
 } from "@/lib/cancellation";
+import { CANCEL_REASON_LABELS } from "@/lib/schemas/session";
 
 export type RecentCancellation = {
   id: string;
@@ -29,7 +30,25 @@ export type RecentCancellation = {
   // true when an admin (not the rental owner) removed the rental.
   byAdmin: boolean;
   actorName: string | null;
+  // Raw stored reason key (one of CANCEL_REASONS) + free-text for 'other'.
+  // Null for before-cancels, admin deletes, and pre-feature rows.
+  cancelReason: string | null;
+  cancelReasonOther: string | null;
+  // Derived human label for display: the reason's label, or the Other
+  // free-text when reason='other'; null when there is no reason.
+  reasonLabel: string | null;
 };
+
+// Map a stored reason (key + optional other-text) to its display string.
+// 'other' shows the free-text; a known key shows its label; null/unknown → null.
+function deriveReasonLabel(
+  reason: string | null,
+  reasonOther: string | null,
+): string | null {
+  if (!reason) return null;
+  if (reason === "other") return reasonOther ?? null;
+  return CANCEL_REASON_LABELS[reason as keyof typeof CANCEL_REASON_LABELS] ?? null;
+}
 
 export type CancellationsDashboard = {
   rollup: CoachCancelSummary[];
@@ -62,6 +81,8 @@ export async function loadCancellationsDashboard(opts?: {
       cancelledAt: sessionCancellations.cancelledAt,
       cancelledBy: sessionCancellations.cancelledBy,
       leadTimeMins: sessionCancellations.leadTimeMins,
+      cancelReason: sessionCancellations.cancelReason,
+      cancelReasonOther: sessionCancellations.cancelReasonOther,
       actorName: actor.name,
     })
     .from(sessionCancellations)
@@ -86,6 +107,9 @@ export async function loadCancellationsDashboard(opts?: {
       category,
       byAdmin: r.cancelledBy !== r.coachId,
       actorName: r.actorName,
+      cancelReason: r.cancelReason,
+      cancelReasonOther: r.cancelReasonOther,
+      reasonLabel: deriveReasonLabel(r.cancelReason, r.cancelReasonOther),
     };
   });
 

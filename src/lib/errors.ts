@@ -454,6 +454,18 @@ export class RemovalRequestNotFoundError extends Error {
   }
 }
 
+// Coach cancel-reasons: a during/after cancel (mid_session / after_end) was
+// submitted without a valid reason. A reason is mandatory for during/after
+// cancels (accountability); a before-cancel needs none. Thrown before the
+// delete so the coach UI can force a selection.
+export class CancelReasonRequiredError extends Error {
+  readonly code = "CANCEL_REASON_REQUIRED" as const;
+  constructor() {
+    super("A reason is required to cancel a session that is underway or over.");
+    this.name = "CancelReasonRequiredError";
+  }
+}
+
 export class BlockConflictsWithSessionError extends Error {
   readonly code = "BLOCK_CONFLICTS_WITH_SESSION" as const;
   constructor(

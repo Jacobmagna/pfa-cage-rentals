@@ -24,10 +24,7 @@ export type RawFilterInput = {
   to?: string | string[];
   coachIds?: string | string[];
   resourceTypes?: string | string[];
-  /** Hidden marker: present means the scope checkboxes were submitted. */
-  scopeApplied?: string | string[];
-  includeCage?: string | string[];
-  includeProgram?: string | string[];
+  programId?: string | string[];
 };
 
 export type NormalizedFilters = {
@@ -41,18 +38,18 @@ export type NormalizedFilters = {
   toDateExclusive: Date;
   /** Empty array means "no coach filter" — include everyone. */
   coachIds: string[];
-  /** Empty array means "no resource type filter" — include all three. */
+  /**
+   * Empty array means "no resource type filter" — include all three.
+   * Applies to the CAGE side only: work hours are not resource bookings,
+   * so narrowing this must never affect them (reports-tabs SPEC §4).
+   */
   resourceTypes: ResourceType[];
   /**
-   * Scope: whether to include cage/bullpen/weight-room session billing
-   * (money the coach owes PFA). Default true on a fresh load.
+   * undefined means "no program filter" — include all programs. The mirror
+   * image of `resourceTypes`: applies to the WORK side only, because a cage
+   * rental has no program (SPEC §4).
    */
-  includeCageSessions: boolean;
-  /**
-   * Scope: whether to include program hours (coach pay). Default true on
-   * a fresh load. Still gated separately by resource-type narrowing.
-   */
-  includeProgramHours: boolean;
+  programId?: string;
 };
 
 const VALID_RESOURCE_TYPES = new Set<ResourceType>([
@@ -82,22 +79,15 @@ export function normalizeFilters(input: RawFilterInput): NormalizedFilters {
   const resourceTypes = toArray(input.resourceTypes).filter(
     (t): t is ResourceType => VALID_RESOURCE_TYPES.has(t as ResourceType),
   );
+  // Trimmed, so a whitespace-only value means "no filter" — matching how
+  // the work-log side has always read this key.
+  const programIdRaw = pickFirst(input.programId)?.trim();
+  const programId = programIdRaw ? programIdRaw : undefined;
 
   const fromDate = parsePfaInput(from, "00:00");
   // `to` is inclusive — exclusive upper bound is PFA midnight of the
   // following day.
   const toDateExclusive = pfaDayEnd(parsePfaInput(to, "00:00"));
-
-  // Scope checkboxes. A GET form submits nothing for unchecked boxes,
-  // which is indistinguishable from a fresh load. The hidden
-  // `scopeApplied` marker disambiguates: when present, an absent
-  // checkbox means "explicitly off"; when absent (fresh load), both
-  // categories default on.
-  const scopeApplied = present(input.scopeApplied);
-  const includeCageSessions = scopeApplied ? present(input.includeCage) : true;
-  const includeProgramHours = scopeApplied
-    ? present(input.includeProgram)
-    : true;
 
   return {
     from,
@@ -106,19 +96,8 @@ export function normalizeFilters(input: RawFilterInput): NormalizedFilters {
     toDateExclusive,
     coachIds,
     resourceTypes,
-    includeCageSessions,
-    includeProgramHours,
+    programId,
   };
-}
-
-/**
- * A query param "counts as present" when it was submitted with a
- * non-empty value. Mirrors HTML checkbox semantics: a checked box with
- * `value="1"` submits `"1"`; an unchecked box submits nothing.
- */
-function present(v: string | string[] | undefined): boolean {
-  if (v === undefined) return false;
-  return Array.isArray(v) ? v.length > 0 : v !== "";
 }
 
 export function filtersFromURLSearchParams(
@@ -129,15 +108,19 @@ export function filtersFromURLSearchParams(
     to: sp.get("to") ?? undefined,
     coachIds: sp.getAll("coachIds"),
     resourceTypes: sp.getAll("resourceTypes"),
-    scopeApplied: sp.get("scopeApplied") ?? undefined,
-    includeCage: sp.get("includeCage") ?? undefined,
-    includeProgram: sp.get("includeProgram") ?? undefined,
+    programId: sp.get("programId") ?? undefined,
   });
 }
 
 /**
- * Builds the canonical URL query string for a filter set — used by
- * the page to construct the download link with identical filters.
+ * Builds the canonical URL query string for a filter set — used by the
+ * page to construct the download link with identical filters, and by the
+ * tab nav as the base for each tab's href.
+ *
+ * Deliberately carries NO `tab`: the workbook always contains every
+ * category regardless of the tab on screen (reports-tabs SPEC §5), so the
+ * download link must not be able to inherit one. The tab nav appends its
+ * own `tab` after calling this.
  */
 export function filtersToQueryString(filters: NormalizedFilters): string {
   const sp = new URLSearchParams();
@@ -145,11 +128,7 @@ export function filtersToQueryString(filters: NormalizedFilters): string {
   sp.set("to", filters.to);
   for (const id of filters.coachIds) sp.append("coachIds", id);
   for (const t of filters.resourceTypes) sp.append("resourceTypes", t);
-  // Always emit the scope marker so the round-trip is unambiguous, then
-  // each included category only when on (mirroring checkbox submit).
-  sp.set("scopeApplied", "1");
-  if (filters.includeCageSessions) sp.set("includeCage", "1");
-  if (filters.includeProgramHours) sp.set("includeProgram", "1");
+  if (filters.programId) sp.set("programId", filters.programId);
   return sp.toString();
 }
 

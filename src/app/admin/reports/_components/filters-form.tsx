@@ -8,24 +8,35 @@
 // only three. "No selection" semantics: an empty MultiSelect or
 // fully-checked resource-type set both serialize to "no filter" →
 // the URL omits the param → the page treats it as "all".
+//
+// The old "Scope" checkboxes (Cage rental sessions / Work hours) are
+// GONE — the sub-tabs replaced them (reports-tabs SPEC §4). That deletion
+// is the fix for SPEC §1(b): the "Work hours" box was silently overridden
+// whenever the resource-type filter narrowed, so it could be ticked and
+// still show nothing. With tabs there is no scope box left to override.
 
 import { Search } from "lucide-react";
 import { MultiSelect } from "@/app/_components/multi-select";
 import { DateInput } from "@/app/_components/date-input";
+import type { ReportTab } from "@/lib/reports/tabs";
 
 type FilterValues = {
   from: string;
   to: string;
   coachIds: string[]; // empty means "all coaches"
   resourceTypes: ("cage" | "bullpen" | "weight_room")[]; // empty means "all"
-  includeCageSessions: boolean; // scope: cage rental sessions (default on)
-  includeProgramHours: boolean; // scope: program hours (default on)
+  programId: string; // "" means "all programs"
 };
 
 type CoachOption = {
   id: string;
   name: string | null;
   email: string;
+};
+
+type ProgramOption = {
+  id: string;
+  name: string;
 };
 
 const ALL_RESOURCE_TYPES = ["cage", "bullpen", "weight_room"] as const;
@@ -37,10 +48,15 @@ const RESOURCE_LABEL: Record<(typeof ALL_RESOURCE_TYPES)[number], string> = {
 
 export function FiltersForm({
   coaches,
+  programs,
   values,
+  activeTab,
 }: {
   coaches: CoachOption[];
+  programs: ProgramOption[];
   values: FilterValues;
+  /** Carried through the submit so applying filters stays on this tab. */
+  activeTab: ReportTab;
 }) {
   const isTypeChecked = (t: (typeof ALL_RESOURCE_TYPES)[number]) =>
     values.resourceTypes.length === 0 || values.resourceTypes.includes(t);
@@ -56,9 +72,10 @@ export function FiltersForm({
       action="/admin/reports"
       className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] p-5 mb-6"
     >
-      {/* Hidden marker so the GET submit can tell "scope unchecked" from
-          "fresh load" — see normalizeFilters. Always present. */}
-      <input type="hidden" name="scopeApplied" value="1" />
+      {/* A GET submit rebuilds the query string from the form's fields
+          alone, so without this the tab would reset to Cage every time
+          the admin pressed Apply. */}
+      <input type="hidden" name="tab" value={activeTab} />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
         <Field label="From">
           <DateInput
@@ -92,9 +109,14 @@ export function FiltersForm({
           )}
         </Field>
 
+        {/* The two type filters are mirror images and each applies to ONE
+            tab (SPEC §4). Both stay visible on every tab rather than
+            appearing and disappearing — a filter bar that changes shape
+            under you is its own kind of confusing — so each one says which
+            tab it acts on. */}
         <Field
           label="Resource types"
-          hint="Leave all unchecked for everything."
+          hint="Cage rentals tab only. Leave all unchecked for everything."
         >
           <div className="flex flex-wrap gap-3 h-10 items-center">
             {ALL_RESOURCE_TYPES.map((t) => (
@@ -109,24 +131,26 @@ export function FiltersForm({
           </div>
         </Field>
 
-        <Field
-          label="Scope"
-          hint="Both on by default. Off categories are dropped from the report and the Excel."
-        >
-          <div className="flex flex-wrap gap-3 h-10 items-center">
-            <CheckboxChip
-              name="includeCage"
-              value="1"
-              label="Cage rental sessions"
-              defaultChecked={values.includeCageSessions}
-            />
-            <CheckboxChip
-              name="includeProgram"
-              value="1"
-              label="Work hours"
-              defaultChecked={values.includeProgramHours}
-            />
-          </div>
+        <Field label="Program" hint="Work hours tab only.">
+          {programs.length === 0 ? (
+            <p className="h-10 inline-flex items-center text-xs text-fg-subtle">
+              No programs yet.
+            </p>
+          ) : (
+            <select
+              name="programId"
+              defaultValue={values.programId}
+              aria-label="Filter by program"
+              className={inputStyles}
+            >
+              <option value="">All programs</option>
+              {programs.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          )}
         </Field>
       </div>
 

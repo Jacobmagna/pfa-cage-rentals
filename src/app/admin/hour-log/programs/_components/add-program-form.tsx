@@ -6,7 +6,11 @@ import {
   createProgramFormAction,
   type CreateProgramResult,
 } from "../form-actions";
-import { ProgramFields } from "./program-fields";
+import {
+  ProgramFields,
+  useProgramPayFields,
+  type ProgramFieldDefaults,
+} from "./program-fields";
 
 const INITIAL_STATE: CreateProgramResult = { ok: true, createdAt: 0 };
 
@@ -69,7 +73,10 @@ export function AddProgramForm() {
       ) : null}
 
       <form action={formAction} key={formKey} className="space-y-4">
-        <ProgramFields defaults={defaults} />
+        {/* Inside the keyed <form>, so a successful create (or an echoed-back
+            error) remounts this child and re-seeds the pay state from
+            `defaults` — the reset the `formKey` nonce exists to produce. */}
+        <CreateProgramFields defaults={defaults} />
         <div className="flex justify-end">
           <button
             type="submit"
@@ -82,4 +89,16 @@ export function AddProgramForm() {
       </form>
     </section>
   );
+}
+
+/**
+ * Owns the create form's pay state — ONE object read by both amount inputs
+ * (see program-fields.tsx on why they are controlled and always mounted).
+ * Create mode has no inline preview, so nothing else consumes it; the hook
+ * still lives out here rather than inside `ProgramFields` so both surfaces
+ * hold the state the same way.
+ */
+function CreateProgramFields({ defaults }: { defaults: ProgramFieldDefaults }) {
+  const fields = useProgramPayFields(defaults);
+  return <ProgramFields defaults={defaults} fields={fields} />;
 }

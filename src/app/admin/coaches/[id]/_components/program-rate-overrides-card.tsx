@@ -20,15 +20,30 @@
 // deleteProgramRateOverride action; revalidatePath in the action refreshes
 // the parent page so the row re-renders without an override.
 
-import { useActionState, useState, useTransition } from "react";
+import { useActionState, useCallback, useState, useTransition } from "react";
 import { Check, Trash2 } from "lucide-react";
-import { deleteProgramRateOverride } from "../actions";
+import {
+  deleteProgramRateOverride,
+  getProgramRateOverrideHistory,
+  previewProgramRateOverrideReprice,
+} from "../actions";
 import {
   upsertProgramRateOverrideFormAction,
   type ProgramRateOverrideActionResult,
 } from "../form-actions";
 import { formatPfaDateMedium } from "@/lib/timezone";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
+import {
+  RateEffectiveDateFields,
+  useRateEffectiveDate,
+  type RunRatePreview,
+} from "@/app/_components/rate-effective-date";
+import { RateHistoryMenu } from "@/app/_components/rate-history-menu";
+import {
+  tryFlatDollarsToCents,
+  tryHourlyDollarsToCentsPer30Min,
+} from "@/lib/rate-input";
+import { buildRepriceAppliedMessage } from "@/lib/rate-reprice-copy";
 
 const INITIAL_STATE: ProgramRateOverrideActionResult = { ok: true };
 
@@ -51,10 +66,18 @@ export type ProgramRateOverrideRow = {
 
 export function ProgramRateOverridesCard({
   coachId,
+  coachName,
   rows,
   readOnly = false,
 }: {
   coachId: string;
+  /**
+   * The coach's display name. Used in the accessible name of every retro
+   * control and in the copy the re-price preview writes — "hours already
+   * logged for Alex Milone on Elite Hitting" leaves no room for Mark to
+   * wonder whose pay he is about to move.
+   */
+  coachName: string;
   rows: ProgramRateOverrideRow[];
   /** QA-2: archived coaches render this card read-only (no save/remove). */
   readOnly?: boolean;
@@ -65,10 +88,11 @@ export function ProgramRateOverridesCard({
         <h3 className="text-base font-semibold text-fg">Work rates</h3>
         <p className="mt-1 text-xs text-fg-muted leading-relaxed">
           Override the standard pay rate for this coach per work type. Pick
-          how each is paid — hourly or a flat per-session amount. Changes
-          apply to{" "}
-          <span className="text-fg">future hours only</span> — past logged
-          hours stay at the rate they were stamped with.
+          how each is paid — hourly or a flat per-session amount. A change
+          applies to{" "}
+          <span className="text-fg">hours logged from now on</span> — unless
+          you open &ldquo;When this rate starts&rdquo; and apply it back to a
+          past date, which re-prices hours this coach already logged.
         </p>
       </header>
       {rows.length === 0 ? (
@@ -81,6 +105,7 @@ export function ProgramRateOverridesCard({
             <Row
               key={row.programId}
               coachId={coachId}
+              coachName={coachName}
               row={row}
               readOnly={readOnly}
             />
@@ -94,10 +119,13 @@ export function ProgramRateOverridesCard({
 function Row({
   coachId,
   row,
+  coachName,
   readOnly,
 }: {
   coachId: string;
   row: ProgramRateOverrideRow;
+  /** For the accessible names + every sentence the retro control writes. */
+  coachName: string;
   readOnly: boolean;
 }) {
   const [state, action, pending] = useActionState(
@@ -145,6 +173,63 @@ function Row({
   // these useState calls so a successful save re-seeds from refreshed props.
   const [hourlyVal, setHourlyVal] = useState(seededHourly);
   const [flatVal, setFlatVal] = useState(seededFlat);
+
+  // ── SPEC rate-effective-dating §7 — the retro control for THIS row ──────
+  //
+  // Subject reads as "Alex Milone on Elite Hitting" everywhere: this card
+  // renders one row per active program, so a control that only said "this
+  // rate" would be ambiguous the moment two rows are open at once.
+  const subject = `${coachName} on ${row.programName}`;
+
+  /**
+   * SPEC §7 / Phase D1 — preview the rate that is TYPED, not the one on the
+   * row. `previewProgramRateOverrideReprice` is read-only and admin-gated,
+   * and works even when this coach has NO override row yet, which is the
+   * first-time case the inline preview most needs to answer for.
+   *
+   * The dollars → cents conversion is @/lib/rate-input, the same module the
+   * form action uses on save. HOURLY halves (typed per hour, stored per 30
+   * min); PER-SESSION does not (a flat fee). Previewing one and saving the
+   * other is the bug class from migration 0052.
+   */
+  const runPreview: RunRatePreview = useCallback(
+    async (effectiveFrom) => {
+      const perSession = mode === "per_session";
+      const perSessionRateCents = perSession
+        ? tryFlatDollarsToCents(flatVal)
+        : null;
+      const ratePer30MinCents = perSession
+        ? null
+        : tryHourlyDollarsToCentsPer30Min(hourlyVal);
+      // Nothing valid typed yet → no preview rather than a preview of $0.
+      if (perSession ? perSessionRateCents == null : ratePer30MinCents == null) {
+        return null;
+      }
+      return previewProgramRateOverrideReprice({
+        scope: { kind: "override", coachId, programId: row.programId },
+        effectiveFrom,
+        candidateRate: {
+          kind: "override",
+          payMode: mode,
+          ratePer30MinCents,
+          perSessionRateCents,
+        },
+      });
+    },
+    [coachId, row.programId, mode, hourlyVal, flatVal],
+  );
+
+  const effectiveDate = useRateEffectiveDate({
+    name: "effectiveFrom",
+    subject,
+    disabled: readOnly,
+    runPreview,
+    candidateKey: `${mode}|${hourlyVal}|${flatVal}`,
+    serverDecreasePreview: !state.ok ? (state.decreasePreview ?? null) : null,
+    initialDateValue: !state.ok ? (state.values.effectiveFrom ?? "") : "",
+  });
+
+  const applied = state.ok && state.reprice ? state.reprice : null;
 
   // Re-key the form when the override changes (server re-fetched) or on a
   // validation error. Re-keying remounts the form so the controlled mode +
@@ -317,15 +402,37 @@ function Row({
             {removeError}
           </p>
         ) : null}
+
+        {/* SPEC §7 — collapsed to a chip by default so this stays a rate row,
+            not a form. The §6 preview and the 🔴 decrease hard stop render
+            INLINE inside it. */}
+        <RateEffectiveDateFields state={effectiveDate} />
+
+        {applied ? (
+          <p
+            role="status"
+            className="mt-1.5 rounded-md border border-line bg-surface-2 px-2.5 py-1.5 text-[11px] leading-relaxed text-fg-muted"
+          >
+            {buildRepriceAppliedMessage(applied)}
+          </p>
+        ) : null}
       </div>
 
       {/* QA-2: hide Save/Remove for an archived coach — inputs are disabled
-          and the server guards reject writes anyway. */}
-      {readOnly ? null : (
-        <div className="flex items-center gap-2 sm:justify-self-end">
+          and the server guards reject writes anyway. The rate HISTORY stays
+          visible either way: it is read-only, and an archived coach's past
+          rates are exactly what someone opens this page to check. */}
+      <div className="flex items-center gap-2 sm:justify-self-end">
+        <RateHistoryMenu
+          subject={subject}
+          load={() => getProgramRateOverrideHistory(coachId, row.programId)}
+        />
+        {readOnly ? null : (
+          <>
           <button
             type="submit"
-            disabled={pending || removing}
+            disabled={pending || removing || effectiveDate.blocked}
+            aria-label={`Save work rate for ${subject}`}
             className="inline-flex items-center justify-center gap-1 rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-3 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
           >
             <Check className="h-3.5 w-3.5" />
@@ -343,8 +450,9 @@ function Row({
               <Trash2 className="h-4 w-4" />
             </button>
           ) : null}
-        </div>
-      )}
+          </>
+        )}
+      </div>
 
       <ConfirmDialog
         open={confirmOpen}

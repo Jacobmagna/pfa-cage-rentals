@@ -12,6 +12,13 @@
 // build its message. Don't pre-format the message in the error
 // — the UI may want different framings (banner vs toast vs
 // confirmation modal). Keep the data structured.
+//
+// The ONE import in this file is TYPE-ONLY and therefore erased at build time
+// (`isolatedModules` guarantees it), so this module keeps its
+// zero-runtime-dependency property and stays safe to import from client
+// components. See RateRepriceDecreaseNotConfirmedError at the bottom.
+
+import type { RateRepricePreview } from "@/lib/server/rate-reprice";
 
 export class SessionOverlapError extends Error {
   readonly code = "SESSION_OVERLAP" as const;
@@ -488,5 +495,31 @@ export class SmsPhoneRequiredError extends Error {
   constructor() {
     super("A valid phone number is required to receive reminder texts");
     this.name = "SmsPhoneRequiredError";
+  }
+}
+
+// 🔴 SPEC rate-effective-dating §6 — the retroactive re-price would LOWER
+// someone's already-logged pay, and the caller did not pass
+// `confirmDecrease: true`.
+//
+// This is the SERVER's gate, not the UI's. The app has no payout ledger —
+// Mark pays coaches outside the system — so a decrease can retroactively
+// "un-pay" money that has already changed hands. The Phase-D dialog will warn,
+// but the warning is not the control: the save action recomputes the diff
+// itself and refuses here before any hour_logs row is written.
+//
+// `preview` is the diff the action actually computed (never one supplied by
+// the caller). `preview.decreases.byCoach` is the "who loses what" list the
+// §6 warning copy names.
+export class RateRepriceDecreaseNotConfirmedError extends Error {
+  readonly code = "RATE_REPRICE_DECREASE_NOT_CONFIRMED" as const;
+  constructor(public readonly preview: RateRepricePreview) {
+    super(
+      `This would LOWER pay on ${preview.decreases.logCount} already-logged ` +
+        `${preview.decreases.logCount === 1 ? "entry" : "entries"} by ` +
+        `$${(Math.abs(preview.decreases.totalDeltaCents) / 100).toFixed(2)}. ` +
+        "Re-submit with confirmDecrease to apply it.",
+    );
+    this.name = "RateRepriceDecreaseNotConfirmedError";
   }
 }

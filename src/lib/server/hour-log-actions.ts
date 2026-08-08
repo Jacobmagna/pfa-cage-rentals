@@ -151,6 +151,52 @@ export function resolvePerSessionRateCents(
   return null;
 }
 
+/**
+ * SPEC rate-effective-dating §5 — PROVENANCE of the rate snapshot stamped on a
+ * new hour_logs row. Answers "where did that number come from?", nothing more.
+ *
+ * ⚠️ INFORMATIONAL ONLY. Nothing in this function may ever influence WHICH
+ * rate is stamped, and no pay calculation may ever read the column it feeds
+ * (`hourLogs.rateSourceKind`). The money still comes exclusively from the two
+ * snapshots resolved above. This exists so the Phase-B retro re-price engine
+ * can tell, without inferring, which logs were paid from a program default and
+ * are therefore in scope for a program-level retro (§5).
+ *
+ * Derived by asking the SAME two resolvers, with the SAME already-fetched
+ * override + program rows, which one produced the non-null value — so the
+ * provenance can never disagree with the rate that was actually stamped:
+ *
+ *  - "override"        the (coach, program) override supplied the rate
+ *  - "program_default" the program's default supplied it
+ *  - "none"            neither did (the $0-loud case)
+ */
+export function resolveRateSourceKind(
+  override: ProgramRateOverrideRow | undefined | null,
+  program: ProgramPayConfig | null,
+): "override" | "program_default" | "none" {
+  // Per-session takes precedence: when a flat amount is stamped, it IS the
+  // pay for the log (billing.ts reads it ahead of the hourly snapshot).
+  // resolvePerSessionRateCents returns non-null from exactly two places — the
+  // override's own per_session amount, or, when there is NO override row at
+  // all, the program's per_session default.
+  if (resolvePerSessionRateCents(override, program) != null) {
+    return override ? "override" : "program_default";
+  }
+  // Otherwise the hourly snapshot is the pay. resolveRateCentsForProgram
+  // returns the override's rate under exactly this condition; every other
+  // non-null result there came from program.defaultRatePer30MinCents.
+  if (resolveRateCentsForProgram(override, program) != null) {
+    return override &&
+      override.payMode === "hourly" &&
+      override.ratePer30MinCents != null
+      ? "override"
+      : "program_default";
+  }
+  // Neither snapshot resolved → the log is worth $0 and nothing supplied a
+  // rate. Recorded loudly rather than left ambiguous.
+  return "none";
+}
+
 export async function logHourInternal(
   actor: AuthedSession["user"],
   input: unknown,
@@ -192,6 +238,12 @@ export async function logHourInternal(
   // later mode change never re-rates this log. Applies to ALL insert paths
   // (coach self-log, schedule-confirm auto-confirm, held).
   const perSessionRateCents = resolvePerSessionRateCents(override, program);
+
+  // SPEC rate-effective-dating §5 — record WHERE the rate above came from.
+  // Same `override` + `program` rows the two resolvers just used, so the
+  // provenance and the rate can never disagree. Purely informational: it does
+  // not change what gets stamped, and no pay math reads it.
+  const rateSourceKindValue = resolveRateSourceKind(override, program);
 
   // 1b security B — held-then-approve gate. Runs for EVERY source. The
   // `source` flag (client-supplied) must NOT be able to bypass this check:
@@ -275,6 +327,7 @@ export async function logHourInternal(
       note: parsed.note ?? null,
       ratePer30MinCents,
       perSessionRateCents,
+      rateSourceKind: rateSourceKindValue,
       createdBy: actor.id,
       // A clean/auto-confirm log omits status → relies on the "posted"
       // default. Only the held branch stamps status + heldReason.

@@ -6,6 +6,7 @@
 // and matches how the H3 UI works (one input per resource type).
 
 import { z } from "zod";
+import { effectiveFromSchema } from "./effective-from";
 
 const RESOURCE_TYPES = ["cage", "bullpen", "weight_room"] as const;
 
@@ -91,6 +92,13 @@ export const upsertProgramRateOverrideSchema = z
       .max(1_000_000, "Per-session amount can't exceed $10,000")
       .nullable()
       .optional(),
+    // SPEC rate-effective-dating §3 / §7 — OPTIONAL retro instruction, not a
+    // resolution rule. Absent or null = "going forward only", which is
+    // byte-identical to the behavior before effective dating existed. A date
+    // in the past tells the Phase-C save action to re-price the already-logged
+    // hours this coach filed on this program from that date forward (§6).
+    // Capped at today: no future dating (decision §10.1).
+    effectiveFrom: effectiveFromSchema,
   })
   .superRefine((val, ctx) => {
     if (val.payMode === "hourly" && val.ratePer30MinCents == null) {

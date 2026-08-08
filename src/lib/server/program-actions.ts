@@ -117,6 +117,7 @@ export async function updateProgramInternal(
     defaultRatePer30MinCents?: number | null;
     payMode?: "hourly" | "per_session";
     defaultPerSessionRateCents?: number | null;
+    defaultRateEffectiveFrom?: Date | null;
   } = {};
   if (parsed.name !== undefined) patch.name = parsed.name;
   if (parsed.active !== undefined) patch.active = parsed.active;
@@ -128,6 +129,16 @@ export async function updateProgramInternal(
   if (parsed.payMode !== undefined) patch.payMode = parsed.payMode;
   if ("defaultPerSessionRateCents" in parsed) {
     patch.defaultPerSessionRateCents = parsed.defaultPerSessionRateCents ?? null;
+  }
+  // SPEC rate-effective-dating §3. Key-presence, not `!== undefined`, for the
+  // same reason as the two rate columns above: a partial edit that never
+  // mentions the effective date (renaming the program, toggling active) must
+  // NOT clobber the stored one, while an explicit null must clear it. Nothing
+  // in the resolvers reads this column (§4) — it records when the CURRENT
+  // default became effective, for the retro instruction and the Phase-D
+  // rate-history menu (§7).
+  if ("defaultRateEffectiveFrom" in parsed) {
+    patch.defaultRateEffectiveFrom = parsed.defaultRateEffectiveFrom ?? null;
   }
 
   let updated;

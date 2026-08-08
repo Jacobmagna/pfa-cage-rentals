@@ -9,7 +9,21 @@
 // confirm() — no useActionState needed.
 
 import { ZodError } from "zod";
-import { upsertProgramRateOverride, upsertRateOverride } from "./actions";
+import {
+  upsertProgramRateOverrideWithReprice,
+  upsertRateOverride,
+} from "./actions";
+import { RateRepriceDecreaseNotConfirmedError } from "@/lib/errors";
+import {
+  dollarsToCents,
+  hourlyDollarsToCentsPer30Min,
+} from "@/lib/rate-input";
+import {
+  parseConfirmDecrease,
+  parseEffectiveFromInput,
+} from "@/lib/rate-effective-gate";
+import { DECREASE_REFUSED_MESSAGE } from "@/lib/rate-reprice-copy";
+import type { RateRepricePreview } from "@/lib/server/rate-reprice";
 
 export type RateOverrideFormValues = {
   coachId: string;
@@ -40,30 +54,11 @@ function snapshot(formData: FormData): RateOverrideFormValues {
   };
 }
 
-/**
- * Parses a user-typed dollar string into cents. Accepts "22", "22.0",
- * "22.50". Rejects negatives, non-numbers, and >2-decimal precision.
- * The 2-decimal-precision rule matches Stripe / Plaid convention and
- * sidesteps float drift in the .005-rounding zone.
- */
-function dollarsToCents(input: string): number {
-  const trimmed = input.trim();
-  if (!trimmed) throw new Error("Rate is required");
-  // Allow optional leading $ for paste-from-spreadsheet convenience.
-  const cleaned = trimmed.replace(/^\$/, "").trim();
-  if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) {
-    throw new Error(
-      "Rate must be a positive dollar amount (e.g. 22 or 22.50)",
-    );
-  }
-  const asFloat = Number(cleaned);
-  if (!Number.isFinite(asFloat) || asFloat <= 0) {
-    throw new Error("Rate must be greater than $0");
-  }
-  // Multiply BEFORE rounding to dodge float-drift edge cases at
-  // exactly half-cent boundaries.
-  return Math.round(asFloat * 100);
-}
+// `dollarsToCents` and `hourlyDollarsToCentsPer30Min` used to be defined here.
+// Phase D2 moved them to @/lib/rate-input, unchanged, because the CLIENT now
+// runs the same conversion to build the candidate rate for the inline preview
+// — and two implementations of "dollars → cents" on a payroll surface is
+// exactly how a preview ends up quoting a number the save doesn't write.
 
 function translate(
   err: unknown,
@@ -147,39 +142,37 @@ export type ProgramRateOverrideFormValues = {
   rateDollars: string;
   /** Flat per-session amount as typed (dollars). Echoed back on error. */
   perSessionDollars: string;
+  /**
+   * SPEC rate-effective-dating §7 — "YYYY-MM-DD" the admin picked, or "" for
+   * the default "going forward only". Echoed back so a remount after a failed
+   * submit restores the choice instead of silently dropping it.
+   */
+  effectiveFrom: string;
 };
 
 export type ProgramRateOverrideActionResult =
-  | { ok: true }
+  | {
+      ok: true;
+      /**
+       * SPEC §6 — what the retro ACTUALLY did, recomputed and applied
+       * server-side. Absent on a "going forward only" save, which stays
+       * byte-identical to the behavior before effective dating.
+       */
+      reprice?: RateRepricePreview | null;
+    }
   | {
       ok: false;
       error: { code: string; message: string };
       values: ProgramRateOverrideFormValues;
+      /**
+       * 🔴 Present ONLY for RateRepriceDecreaseNotConfirmedError: the diff the
+       * SERVER computed when it refused. The UI re-renders the named-coach
+       * warning from this so the refusal lands on a usable screen rather than
+       * an error boundary — and so a race (client preview saw no decrease,
+       * server did) is still gated by an explicit second confirmation.
+       */
+      decreasePreview?: RateRepricePreview;
     };
-
-/**
- * PROGRAM (work) override rates are ENTERED per HOUR but STORED per
- * 30 min. Same validation as the cage dollarsToCents parser, but the
- * entered dollars are halved to the per-30-min storage unit:
- * cents = round(dollarsPerHour * 100 / 2). Cage rates keep using
- * dollarsToCents (per 30 min) — only programs switched to hourly entry.
- */
-function hourlyDollarsToCentsPer30Min(input: string): number {
-  const trimmed = input.trim();
-  if (!trimmed) throw new Error("Rate is required");
-  const cleaned = trimmed.replace(/^\$/, "").trim();
-  if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) {
-    throw new Error(
-      "Rate must be a positive dollar amount (e.g. 44 or 44.50)",
-    );
-  }
-  const asFloat = Number(cleaned);
-  if (!Number.isFinite(asFloat) || asFloat <= 0) {
-    throw new Error("Rate must be greater than $0");
-  }
-  // Entered per HOUR → stored per 30 min (half).
-  return Math.round((asFloat * 100) / 2);
-}
 
 function snapshotProgram(
   formData: FormData,
@@ -193,13 +186,28 @@ function snapshotProgram(
     payMode,
     rateDollars: formData.get("rateDollars")?.toString() ?? "",
     perSessionDollars: formData.get("perSessionDollars")?.toString() ?? "",
+    effectiveFrom: formData.get("effectiveFrom")?.toString() ?? "",
   };
 }
+
 
 function translateProgram(
   err: unknown,
   values: ProgramRateOverrideFormValues,
 ): ProgramRateOverrideActionResult {
+  // 🔴 SPEC §6 — the server refused a retro that would LOWER already-logged
+  // pay. NOT an unexpected failure: it is the guard doing its job, and it
+  // carries the diff it computed. Surfaced as a normal result (never rethrown)
+  // so the row renders the named-coach warning inline instead of white-
+  // screening a payroll page into the Next.js error boundary.
+  if (err instanceof RateRepriceDecreaseNotConfirmedError) {
+    return {
+      ok: false,
+      error: { code: err.code, message: DECREASE_REFUSED_MESSAGE },
+      values,
+      decreasePreview: err.preview,
+    };
+  }
   if (err instanceof ZodError) {
     const first = err.issues[0];
     return {
@@ -239,14 +247,31 @@ export async function upsertProgramRateOverrideFormAction(
     } else {
       ratePer30MinCents = hourlyDollarsToCentsPer30Min(values.rateDollars);
     }
-    await upsertProgramRateOverride({
+    // SPEC §7 — the retro instruction rides on the SAME payload as the rate.
+    // Absent/"" is "going forward only": the Phase-C action then does exactly
+    // what the old one did (upsert, return) with no preview query, no engine
+    // call and no extra write.
+    const effectiveFrom = parseEffectiveFromInput(values.effectiveFrom);
+    // Only ever true when the admin ticked the required checkbox in the
+    // decrease warning — an unticked checkbox is simply not in the payload.
+    const confirmDecrease = parseConfirmDecrease(
+      formData.get("confirmDecrease"),
+    );
+
+    const result = await upsertProgramRateOverrideWithReprice({
       coachId: values.coachId,
       programId: values.programId,
       payMode: values.payMode,
       ratePer30MinCents,
       perSessionRateCents,
+      effectiveFrom,
+      confirmDecrease,
     });
-    return { ok: true };
+    return {
+      ok: true,
+      reprice:
+        result.reprice.status === "applied" ? result.reprice.preview : null,
+    };
   } catch (err) {
     return translateProgram(err, values);
   }

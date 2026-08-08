@@ -27,6 +27,10 @@ import {
   deleteProgramRateOverrideInternal,
   upsertProgramRateOverrideInternal,
 } from "@/lib/server/program-rate-override-actions";
+import { upsertProgramRateOverrideWithRepriceInternal } from "@/lib/server/rate-effective-dating-actions";
+import { previewRateReprice } from "@/lib/server/rate-reprice";
+import { readProgramRateOverrideHistory } from "@/lib/server/rate-history";
+import { revalidateWorkPaySurfaces } from "@/lib/server/pay-surface-revalidation";
 import {
   archiveCoachInternal,
   deleteCoachInternal,
@@ -109,6 +113,92 @@ export async function upsertProgramRateOverride(input: unknown) {
   const result = await upsertProgramRateOverrideInternal(session.user, input);
   revalidateOverrideSurfaces(result.coachId);
   return result;
+}
+
+// ── SPEC rate-effective-dating Phase C — RETROACTIVE RE-PRICE ───────────
+//
+// Both actions below are gated by plain requireRole("admin") — SPEC decision
+// §10.2, no new permission concept. The safety is the preview plus the
+// server-side decrease guard, not the role gate.
+
+/**
+ * READ-ONLY. The §6 "preview before commit" diff for giving THIS coach's
+ * override on THIS program a past effective date: how many logs move, by how
+ * much, and (for a program-scoped preview) which coaches the rule cannot
+ * reach. Writes nothing — the engine's preview path is three SELECTs and a
+ * pure function — so there is no revalidation and no archived-coach write
+ * guard here.
+ *
+ * SPEC §7 (Phase D1) — the payload may carry an optional `candidateRate`
+ * (`{ kind: "override", payMode, ratePer30MinCents, perSessionRateCents }`):
+ * the rate the admin has TYPED but not yet saved. With it, the engine
+ * substitutes that hypothetical override row for the persisted one and the
+ * preview answers "what WOULD this rate do" — which is what makes an inline
+ * preview before Save is armed honest, instead of quoting the old rate and
+ * then writing a different number. Without it, this answers "what would
+ * re-pricing to this date do with the rate already on the row", exactly as
+ * before. It works for a coach with NO override row yet, which is the
+ * first-time case the dialog most needs.
+ *
+ * The candidate is validated with the same rules as a real rate, so a rate
+ * that could never be saved cannot be previewed. `applyRateReprice` still
+ * refuses a candidate outright (type + runtime), so nothing here can turn a
+ * hypothetical into a write.
+ */
+export async function previewProgramRateOverrideReprice(input: unknown) {
+  await requireRole("admin");
+  // Passed through whole: previewRateReprice parses it with
+  // rateRepricePreviewInputSchema, which is the only schema that carries
+  // `candidateRate`. Read-only — no revalidation, no archived-coach guard.
+  return previewRateReprice(input);
+}
+
+/**
+ * Save a per-coach program rate override AND, if an effective date in the
+ * past was supplied, re-price that coach's already-logged hours on that
+ * program from that date forward.
+ *
+ * With no effective date this is `upsertProgramRateOverride` above, exactly —
+ * same internal, same revalidation, no engine call.
+ *
+ * 🔴 Throws RateRepriceDecreaseNotConfirmedError (with the computed preview
+ * attached) if the re-price would LOWER anyone's already-logged pay and the
+ * payload did not carry `confirmDecrease: true`. The diff behind that refusal
+ * is recomputed on the server; a preview supplied by the caller is never read.
+ */
+export async function upsertProgramRateOverrideWithReprice(input: unknown) {
+  const session = await requireRole("admin");
+  const coachId = coachIdFromInput(input);
+  if (coachId) await assertCoachNotArchived(coachId);
+  const result = await upsertProgramRateOverrideWithRepriceInternal(
+    session.user,
+    input,
+  );
+  // Rate surfaces (the card that was just edited + the coaches list).
+  revalidateOverrideSurfaces(result.override.coachId);
+  // Pay surfaces. Unconditional even on the not_requested path: cheap, and it
+  // keeps "did we remember to bust the cache" from depending on a branch.
+  revalidateWorkPaySurfaces();
+  return result;
+}
+
+/**
+ * READ-ONLY. SPEC §7 — the rate history behind the 3-dot menu beside this
+ * coach's rate on this program: every change newest-first, sourced from the
+ * `effective_from` column plus the existing audit trail.
+ *
+ * Admin-gated like everything else on this surface, and gated HERE rather than
+ * in the component, because the component is a client component: it is handed
+ * this function and can never reach a database of its own. No archived-coach
+ * guard — reading an archived coach's own history is exactly what the
+ * read-only render of this page is for.
+ */
+export async function getProgramRateOverrideHistory(
+  coachId: string,
+  programId: string,
+) {
+  await requireRole("admin");
+  return readProgramRateOverrideHistory(coachId, programId);
 }
 
 // Explicit args (matches deleteRateOverride convention). The internal

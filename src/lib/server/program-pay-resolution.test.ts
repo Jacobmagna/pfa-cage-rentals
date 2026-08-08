@@ -26,6 +26,7 @@ vi.mock("@/db", () => ({ db: {} }));
 import {
   resolvePerSessionRateCents,
   resolveRateCentsForProgram,
+  resolveRateSourceKind,
   type ProgramPayConfig,
 } from "./hour-log-actions";
 import { workPayForLog } from "@/lib/billing";
@@ -36,6 +37,7 @@ function override(o: {
   payMode: "hourly" | "per_session";
   ratePer30MinCents?: number | null;
   perSessionRateCents?: number | null;
+  effectiveFrom?: Date | null;
 }): Override {
   return {
     coachId: "coach-1",
@@ -43,6 +45,9 @@ function override(o: {
     payMode: o.payMode,
     ratePer30MinCents: o.ratePer30MinCents ?? null,
     perSessionRateCents: o.perSessionRateCents ?? null,
+    // SPEC rate-effective-dating §4: additive column, NOT consulted by the
+    // resolvers. Null here = "always been this rate" = today's behavior.
+    effectiveFrom: o.effectiveFrom ?? null,
     updatedAt: new Date("2026-07-23T00:00:00Z"),
   };
 }
@@ -176,5 +181,152 @@ describe("precedence: a coach override always beats the program default", () => 
   it("an hourly override with no rate set falls through to the program", () => {
     const o = override({ payMode: "hourly", ratePer30MinCents: null });
     expect(resolveRateCentsForProgram(o, HOURLY_PROGRAM)).toBe(1500);
+  });
+});
+
+// SPEC rate-effective-dating §5 — provenance of the stamped snapshot. This is
+// INFORMATIONAL ONLY: no pay calculation may ever read it. What these tests
+// protect is the one property that makes it trustworthy — the recorded
+// provenance must always name the input that ACTUALLY produced the rate on
+// the row, across the same branch space the resolvers are tested over.
+describe("rateSourceKind provenance (informational, never money)", () => {
+  const NO_RATES: ProgramPayConfig = {
+    payMode: "hourly",
+    defaultRatePer30MinCents: null,
+    defaultPerSessionRateCents: null,
+  };
+  const PER_SESSION_UNSET: ProgramPayConfig = {
+    payMode: "per_session",
+    defaultRatePer30MinCents: 2500, // stale leftover — never used
+    defaultPerSessionRateCents: null,
+  };
+
+  describe('"program_default" — the program supplied the rate', () => {
+    it("no override, hourly program with a default", () => {
+      expect(resolveRateSourceKind(null, HOURLY_PROGRAM)).toBe(
+        "program_default",
+      );
+      // undefined (the shape a missing Drizzle row actually destructures to)
+      // must behave identically to null.
+      expect(resolveRateSourceKind(undefined, HOURLY_PROGRAM)).toBe(
+        "program_default",
+      );
+    });
+
+    it("no override, per-session program with a flat amount", () => {
+      expect(resolveRateSourceKind(null, PER_SESSION_PROGRAM)).toBe(
+        "program_default",
+      );
+    });
+
+    it("an hourly override with NO rate set — the program is what paid", () => {
+      // The override row exists but supplied nothing; the rate on the row came
+      // from the program, so a program-level retro legitimately owns this log.
+      const o = override({ payMode: "hourly", ratePer30MinCents: null });
+      expect(resolveRateSourceKind(o, HOURLY_PROGRAM)).toBe("program_default");
+    });
+  });
+
+  describe('"override" — the (coach, program) override supplied the rate', () => {
+    it("hourly override with a rate", () => {
+      const o = override({ payMode: "hourly", ratePer30MinCents: 2000 });
+      expect(resolveRateSourceKind(o, HOURLY_PROGRAM)).toBe("override");
+    });
+
+    it("per-session override with a flat amount", () => {
+      const o = override({ payMode: "per_session", perSessionRateCents: 7500 });
+      expect(resolveRateSourceKind(o, HOURLY_PROGRAM)).toBe("override");
+    });
+
+    it("hourly override on a PER-SESSION program — the coach stays on the clock", () => {
+      const o = override({ payMode: "hourly", ratePer30MinCents: 2500 });
+      expect(resolveRateSourceKind(o, PER_SESSION_PROGRAM)).toBe("override");
+    });
+
+    it("per-session override beats the program's own per-session amount", () => {
+      const o = override({
+        payMode: "per_session",
+        perSessionRateCents: 12_500,
+      });
+      expect(resolveRateSourceKind(o, PER_SESSION_PROGRAM)).toBe("override");
+    });
+  });
+
+  describe('"none" — nothing supplied a rate ($0-loud)', () => {
+    it("no override and a program with no rate at all", () => {
+      expect(resolveRateSourceKind(null, NO_RATES)).toBe("none");
+    });
+
+    it("no override and a per-session program with no amount set", () => {
+      expect(resolveRateSourceKind(null, PER_SESSION_UNSET)).toBe("none");
+    });
+
+    it("a per-session override with an INVALID amount, on a per-session program", () => {
+      // The override yields null (invalid amount) and does not reach past
+      // itself; the per-session program has no hourly basis. Nobody paid.
+      const o = override({ payMode: "per_session", perSessionRateCents: 0 });
+      expect(resolveRateSourceKind(o, PER_SESSION_PROGRAM)).toBe("none");
+    });
+
+    it("a null program (no pay config at all)", () => {
+      expect(resolveRateSourceKind(null, null)).toBe("none");
+    });
+  });
+
+  it("NEVER disagrees with the rate that was actually stamped", () => {
+    // The invariant the column lives or dies by. Sweep the whole
+    // (override x program) space and assert: "none" iff both snapshots are
+    // null, and otherwise the named source is the one holding that exact
+    // number.
+    const overrides: Override[] = [
+      null,
+      undefined,
+      override({ payMode: "hourly", ratePer30MinCents: 2000 }),
+      override({ payMode: "hourly", ratePer30MinCents: null }),
+      override({ payMode: "per_session", perSessionRateCents: 7500 }),
+      override({ payMode: "per_session", perSessionRateCents: 0 }),
+    ];
+    const programs: (ProgramPayConfig | null)[] = [
+      HOURLY_PROGRAM,
+      PER_SESSION_PROGRAM,
+      NO_RATES,
+      PER_SESSION_UNSET,
+      null,
+    ];
+
+    for (const o of overrides) {
+      for (const p of programs) {
+        const hourly = resolveRateCentsForProgram(o, p);
+        const flat = resolvePerSessionRateCents(o, p);
+        const kind = resolveRateSourceKind(o, p);
+        const where = `override=${JSON.stringify(o)} program=${JSON.stringify(p)}`;
+
+        if (hourly === null && flat === null) {
+          expect(kind, where).toBe("none");
+          continue;
+        }
+        expect(kind, where).not.toBe("none");
+
+        // The stamped number, and who is holding it.
+        const stamped = flat ?? hourly;
+        const fromOverride =
+          flat !== null
+            ? o?.perSessionRateCents === stamped
+            : o?.ratePer30MinCents === stamped;
+        const fromProgram =
+          flat !== null
+            ? p?.defaultPerSessionRateCents === stamped
+            : p?.defaultRatePer30MinCents === stamped;
+
+        if (kind === "override") {
+          expect(fromOverride, where).toBe(true);
+        } else {
+          expect(fromProgram, where).toBe(true);
+          // A program default can only be the source when the override did
+          // not supply that value itself.
+          expect(fromOverride, where).toBe(false);
+        }
+      }
+    }
   });
 });

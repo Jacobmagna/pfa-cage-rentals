@@ -6,10 +6,10 @@
 //
 // JOINs are inner — a row can't exist without a coach + program FK
 // target. Filtered by the date range (startAt within [fromDate,
-// toDateExclusive)) plus the optional single coach / program. Ordered
+// toDateExclusive)) plus the optional coach set / program. Ordered
 // by coach name then start so the table reads grouped-by-coach.
 
-import { and, asc, eq, gt, gte, inArray, lt } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, lt, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import {
   hourLogs,
@@ -37,12 +37,35 @@ import type { NormalizedHourLogFilters } from "./hour-log-filters";
 export type HourLogFetchRow = HourLogWorkbookRow & {
   status: "posted" | "held" | "rejected";
   decisionReason: string | null;
+  /**
+   * The immutable pay snapshots stamped on the log at write time
+   * (`hour-log-actions.ts`). Added for the Reports "Work hours" tab, which
+   * needs per-row pay — this fetch previously carried HOURS ONLY, so
+   * `buildHourLogWorkbook` and the admin Work Log table have no money in
+   * them at all.
+   *
+   * NEVER compute pay from these directly. Feed them to `workPayForLog`
+   * (`@/lib/billing`), the single read-side entry point that branches
+   * per-session vs hourly — the same function `aggregate.ts` and the
+   * "Owed to coaches" card already call. Two implementations of this
+   * figure is the drift the reports-tabs SPEC §2 warns about.
+   *
+   * Both are NULLABLE: a pre-rate log carries neither and pays $0.
+   */
+  ratePer30MinCents: number | null;
+  perSessionRateCents: number | null;
 };
 
-export async function fetchHourLogRows(
+/**
+ * The WHERE conditions for the hour-log row query. Exported so a unit
+ * test can assert the emitted SQL directly — in particular that an EMPTY
+ * `coachIds` emits NO coach predicate at all (an `IN ()` would be invalid
+ * SQL, and some drivers silently match nothing).
+ */
+export function hourLogRowConditions(
   filters: NormalizedHourLogFilters,
-): Promise<HourLogFetchRow[]> {
-  const conditions = [
+): SQL[] {
+  const conditions: SQL[] = [
     // 1b security B: exclude held (awaiting-approval) logs from the admin
     // Work Log table + workbook — they're not real logs until approved.
     // Rejected logs ARE included so the admin table can SHOW them with a
@@ -53,12 +76,22 @@ export async function fetchHourLogRows(
     gte(hourLogs.startAt, filters.fromDate),
     lt(hourLogs.startAt, filters.toDateExclusive),
   ];
-  if (filters.coachId) {
-    conditions.push(eq(hourLogs.coachId, filters.coachId));
+  // Empty set = "all coaches": push nothing, so the query carries no
+  // coach predicate. One id behaves identically to the previous
+  // `eq(coachId, x)` — `IN ($1)` selects the same rows in the same order.
+  if (filters.coachIds.length > 0) {
+    conditions.push(inArray(hourLogs.coachId, filters.coachIds));
   }
   if (filters.programId) {
     conditions.push(eq(hourLogs.programId, filters.programId));
   }
+  return conditions;
+}
+
+export async function fetchHourLogRows(
+  filters: NormalizedHourLogFilters,
+): Promise<HourLogFetchRow[]> {
+  const conditions = hourLogRowConditions(filters);
 
   const rows = await db
     .select({
@@ -75,6 +108,8 @@ export async function fetchHourLogRows(
       reviewedBy: hourLogs.reviewedBy,
       status: hourLogs.status,
       decisionReason: hourLogs.decisionReason,
+      ratePer30MinCents: hourLogs.ratePer30MinCents,
+      perSessionRateCents: hourLogs.perSessionRateCents,
     })
     .from(hourLogs)
     .innerJoin(users, eq(hourLogs.coachId, users.id))

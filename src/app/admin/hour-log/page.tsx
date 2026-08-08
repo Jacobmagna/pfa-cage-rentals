@@ -21,7 +21,7 @@ import {
 import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
 import { countHeldHourLogs } from "@/lib/server/hour-log-actions";
 import { programMinutes, workPayForLog } from "@/lib/billing";
-import { formatDollars } from "@/lib/format-money";
+import { formatDollarsExact } from "@/lib/format-money";
 import { pfaDayEnd, pfaDayStart, pfaMonthEnd, pfaMonthStart } from "@/lib/timezone";
 import { fetchNeedsReviewItems } from "@/lib/server/needs-review";
 import { StatCard } from "@/app/_components/stat-card";
@@ -45,6 +45,9 @@ import { HoursClient } from "./_components/hours-client";
 type RawSearchParams = Promise<{
   from?: string | string[];
   to?: string | string[];
+  /** Canonical multi-coach key. */
+  coachIds?: string | string[];
+  /** Legacy single-coach key — still honored (see hour-log-filters.ts). */
   coachId?: string | string[];
   programId?: string | string[];
 }>;
@@ -161,7 +164,7 @@ export default async function AdminHourLogPage({
   // "All coaches" default while rows are actually filtered.
   const archivedCoachOptions = await resolveArchivedCoachOptions(
     coachOptions,
-    filters.coachId ? [filters.coachId] : [],
+    filters.coachIds,
   );
   const coachFilterOptions = [...coachOptions, ...archivedCoachOptions];
 
@@ -234,7 +237,10 @@ export default async function AdminHourLogPage({
         <StatCard
           icon={<Wallet className="h-4 w-4" />}
           label="Owed to coaches — work"
-          value={formatDollars(owedProgramCents)}
+          // EXACT cents: this is a payroll amount, and rounding it to the
+          // dollar left this card disagreeing with every preview and
+          // workbook quoting the same figure (reports-tabs SPEC §10).
+          value={formatDollarsExact(owedProgramCents)}
           sub="PFA owes coaches for work hours"
           accent
         />
@@ -252,7 +258,10 @@ export default async function AdminHourLogPage({
         values={{
           from: filters.from,
           to: filters.to,
-          coachId: filters.coachId ?? "",
+          // The Work Log filter bar is still a single <select> in this
+          // phase; the filter model is what widened. Show the first
+          // selected coach (there is only ever one from this form).
+          coachId: filters.coachIds[0] ?? "",
           programId: filters.programId ?? "",
         }}
         isFiltered={filters.isFiltered}

@@ -372,7 +372,8 @@ export async function fetchNeedsReviewItems(
     to: "2024-01-01",
     fromDate: reviewFloor,
     toDateExclusive: reviewCeiling,
-    coachId: undefined,
+    // Empty = no coach predicate: the review backlog spans every coach.
+    coachIds: [],
     programId: undefined,
     isFiltered: true,
   };

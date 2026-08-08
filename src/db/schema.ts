@@ -288,6 +288,22 @@ export const coachRateOverrides = pgTable(
 // snapshotted onto each log at write time.
 export const coachPayMode = pgEnum("coach_pay_mode", ["hourly", "per_session"]);
 
+// SPEC rate-effective-dating §3/§5 — PROVENANCE of the pay-rate snapshot
+// stamped on an hour_logs row: did the rate come from the (coach, program)
+// override, from the program's default, or from neither (the $0 case)?
+//
+// ⚠️ INFORMATIONAL ONLY. This column is NEVER read by a pay calculation —
+// the money still comes exclusively from the ratePer30MinCents /
+// perSessionRateCents snapshots on the row. It exists so the retro
+// re-price engine (Phase B) can tell, without inferring, which logs were
+// paid from a program default and are therefore in scope for a
+// program-level retro. A NEW enum type — no existing enum is altered.
+export const rateSourceKind = pgEnum("rate_source_kind", [
+  "override",
+  "program_default",
+  "none",
+]);
+
 // Per-(coach, program) pay-rate override for logged program hours.
 // Mirrors coach_rate_overrides but keyed on (coach, program) instead of
 // (coach, resource_type). DESIGN-1: this row now also carries the
@@ -317,6 +333,13 @@ export const programRateOverrides = pgTable(
     ratePer30MinCents: integer("rate_per_30_min_cents"),
     // Flat per-session pay in cents; non-null only when payMode = "per_session".
     perSessionRateCents: integer("per_session_rate_cents"),
+    // SPEC rate-effective-dating §3 — the date this override's rate was made
+    // effective FROM. Additive + NULLABLE with no default and no backfill:
+    // NULL reads as "has always been this rate", which is exactly today's
+    // behavior. It is a RE-PRICING INSTRUCTION, not a resolution rule — §4 is
+    // explicit that the resolvers do not consult it. Past + present only; no
+    // future-dating (decision §10.1).
+    effectiveFrom: timestamp("effective_from", { mode: "date" }),
     updatedAt: timestamp("updated_at", { mode: "date" })
       .notNull()
       .defaultNow()
@@ -818,6 +841,16 @@ export const programs = pgTable("programs", {
   // Nullable — a per_session program with no amount set resolves to $0 pay
   // (same "never guess a rate" posture as defaultRatePer30MinCents).
   defaultPerSessionRateCents: integer("default_per_session_rate_cents"),
+  // SPEC rate-effective-dating §3 — the date this PROGRAM's default rate was
+  // made effective FROM. Same semantics as the (coach, program) override's
+  // effective_from above: additive, NULLABLE, no default, no backfill; NULL =
+  // "always been this rate" = today's behavior. Not consulted by the
+  // resolvers (§4) — it only scopes which already-logged rows a retro
+  // re-price re-stamps, and per §5 it can never reach a coach who holds their
+  // own override on this program.
+  defaultRateEffectiveFrom: timestamp("default_rate_effective_from", {
+    mode: "date",
+  }),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "date" })
     .notNull()
@@ -970,6 +1003,17 @@ export const hourLogs = pgTable(
     // coach), the per-30-min hourly snapshot above applies. Preserves the
     // existing immutable-snapshot billing rule — reads use this, never recompute.
     perSessionRateCents: integer("per_session_rate_cents"),
+    // SPEC rate-effective-dating §5 — PROVENANCE of the two rate snapshots
+    // above: "override" (the (coach, program) override supplied the rate),
+    // "program_default" (the program's default did), or "none" (neither did →
+    // the $0-loud case). Derived at insert time from the SAME already-fetched
+    // override + program rows the resolvers use, so it can never disagree
+    // with the rate that was actually stamped.
+    //
+    // ⚠️ INFORMATIONAL ONLY — never read by a pay calculation. Additive +
+    // NULLABLE with no default and no backfill: every pre-existing row stays
+    // NULL, meaning "provenance unrecorded, infer it" (§5).
+    rateSourceKind: rateSourceKind("rate_source_kind"),
     // Admin "Resolve" marker for unscheduled logs (mark reviewed/acknowledged).
     // The log STAYS (real worked time/pay); a non-null reviewedAt drops it off
     // the needs-review queue. Additive + nullable, no backfill — existing rows

@@ -11,6 +11,7 @@
 // what stops a program being flipped to per-session and silently paying $0.
 
 import { z } from "zod";
+import { effectiveFromSchema } from "./effective-from";
 
 export const programPayModeSchema = z.enum(["hourly", "per_session"]);
 
@@ -69,6 +70,17 @@ export const updateProgramSchema = z
     defaultRatePer30MinCents: z.number().int().min(0).max(1_000_00).nullish(),
     payMode: programPayModeSchema.optional(),
     defaultPerSessionRateCents: perSessionCents,
+    // SPEC rate-effective-dating §3 / §7 — OPTIONAL retro instruction on the
+    // PROGRAM DEFAULT. Absent or null = "going forward only" (today's exact
+    // behavior). A past date tells the Phase-C save action to re-price the
+    // already-logged hours on this program from that date forward — which,
+    // per SPEC §5, structurally cannot reach a coach who holds their own
+    // override. Capped at today: no future dating (decision §10.1).
+    //
+    // Deliberately NOT on createProgramSchema: a program that was created one
+    // statement ago has no logged hours, so a retro window on it could only
+    // ever be a lie in the rate history.
+    defaultRateEffectiveFrom: effectiveFromSchema,
   })
   .superRefine(requireAmountWhenPerSession);
 

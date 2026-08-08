@@ -73,6 +73,14 @@ export async function upsertProgramRateOverrideInternal(
       payMode: parsed.payMode,
       ratePer30MinCents: parsed.ratePer30MinCents ?? null,
       perSessionRateCents: parsed.perSessionRateCents ?? null,
+      // SPEC rate-effective-dating §3 — provenance for the rate that is being
+      // written RIGHT NOW. Absent/null stores null ("going forward only"),
+      // which is what every pre-effective-dating caller sends and is also the
+      // correct clear: any date already on the row described the PREVIOUS
+      // rate. Nothing in the resolvers reads this column (§4, resolution
+      // UNCHANGED) — it exists for the retro instruction and the Phase-D
+      // rate-history menu (§7).
+      effectiveFrom: parsed.effectiveFrom ?? null,
     })
     .onConflictDoUpdate({
       target: [
@@ -83,6 +91,7 @@ export async function upsertProgramRateOverrideInternal(
         payMode: parsed.payMode,
         ratePer30MinCents: parsed.ratePer30MinCents ?? null,
         perSessionRateCents: parsed.perSessionRateCents ?? null,
+        effectiveFrom: parsed.effectiveFrom ?? null,
       },
     })
     .returning();

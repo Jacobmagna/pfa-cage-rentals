@@ -386,6 +386,10 @@ export default async function AdminCoachDetailPage({
 
       <ProgramRateOverridesCard
         coachId={coach.id}
+        // Falls back to the email so the retro control's copy names SOMEONE
+        // rather than saying "this coach" — the engine's own preview resolves
+        // names the same way (name → email → id).
+        coachName={coach.name ?? coach.email}
         rows={programRateRows}
         readOnly={isArchived}
       />

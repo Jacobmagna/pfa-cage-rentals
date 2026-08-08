@@ -10,65 +10,50 @@
 // to key the form's remount → fresh, empty fields for the next program.
 
 import { ZodError } from "zod";
-import { createProgram, deactivateProgram, updateProgram } from "./actions";
-import { ProgramNameTakenError, ProgramNotFoundError } from "@/lib/errors";
+import {
+  createProgram,
+  deactivateProgram,
+  updateProgram,
+  updateProgramWithReprice,
+} from "./actions";
+import {
+  ProgramNameTakenError,
+  ProgramNotFoundError,
+  RateRepriceDecreaseNotConfirmedError,
+} from "@/lib/errors";
+import {
+  optionalHourlyDollarsToCentsPer30Min,
+  optionalSessionDollarsToCents,
+} from "@/lib/rate-input";
+import {
+  parseConfirmDecrease,
+  parseEffectiveFromInput,
+} from "@/lib/rate-effective-gate";
+import { DECREASE_REFUSED_MESSAGE } from "@/lib/rate-reprice-copy";
+import type { RateRepricePreview } from "@/lib/server/rate-reprice";
 
 export type ProgramFormValues = {
   name: string;
   rateDollars: string;
   payMode: "hourly" | "per_session";
   perSessionDollars: string;
+  /**
+   * SPEC rate-effective-dating §7 — "YYYY-MM-DD" the admin picked for the
+   * program DEFAULT rate, or "" for "going forward only". EDIT ONLY: a
+   * program created one statement ago has no logged hours, so a retro window
+   * on it could only ever be a lie (which is why updateProgramSchema carries
+   * `defaultRateEffectiveFrom` and createProgramSchema deliberately does not).
+   */
+  effectiveFrom: string;
 };
 
-/**
- * Parses an OPTIONAL user-typed PER-HOUR dollar string into integer
- * cents PER 30 MIN (the storage unit). Empty/blank → null (no rate set).
- * Accepts "44", "44.0", "44.50", optional leading $, max 2-decimal
- * precision. The entered dollars are PER HOUR, so we halve them to get
- * the per-30-min rate: cents = round(dollarsPerHour * 100 / 2). Multiply
- * before dividing/rounding to dodge half-cent float drift. Rejects
- * negatives and non-numbers so Zod's int/min/max cap fires a clean error.
- */
-function optionalDollarsToCents(input: string): number | null {
-  const trimmed = input.trim();
-  if (!trimmed) return null;
-  const cleaned = trimmed.replace(/^\$/, "").trim();
-  if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) {
-    throw new Error(
-      "Pay rate must be a positive dollar amount (e.g. 44 or 44.50)",
-    );
-  }
-  const asFloat = Number(cleaned);
-  if (!Number.isFinite(asFloat) || asFloat < 0) {
-    throw new Error("Pay rate must be a positive dollar amount");
-  }
-  // Entered per HOUR → stored per 30 min (half).
-  return Math.round((asFloat * 100) / 2);
-}
-
-/**
- * Parses an OPTIONAL per-SESSION dollar string into integer cents.
- *
- * Deliberately NOT halved — unlike the hourly field above, this amount is a
- * flat fee for one logged session, so $100 stores as 10000 cents. Getting
- * this wrong in either direction is exactly the class of bug this feature
- * exists to fix (a per-game fee entered as an hourly rate paid by duration).
- */
-function optionalSessionDollarsToCents(input: string): number | null {
-  const trimmed = input.trim();
-  if (!trimmed) return null;
-  const cleaned = trimmed.replace(/^\$/, "").trim();
-  if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) {
-    throw new Error(
-      "Per-session amount must be a positive dollar amount (e.g. 100 or 100.50)",
-    );
-  }
-  const asFloat = Number(cleaned);
-  if (!Number.isFinite(asFloat) || asFloat < 0) {
-    throw new Error("Per-session amount must be a positive dollar amount");
-  }
-  return Math.round(asFloat * 100);
-}
+// The two dollar parsers used to live here. Phase D2 moved them to
+// @/lib/rate-input, unchanged, because the CLIENT now runs the same
+// conversion to build the candidate rate for the inline preview (SPEC §7) —
+// and two implementations of "dollars → cents" on a payroll surface is
+// exactly how a preview ends up quoting a number the save doesn't write.
+// `optionalHourlyDollarsToCentsPer30Min` HALVES (typed per hour, stored per
+// 30 min); `optionalSessionDollarsToCents` does NOT (a flat per-session fee).
 
 export type CreateProgramResult =
   | { ok: true; createdAt: number }
@@ -79,11 +64,25 @@ export type CreateProgramResult =
     };
 
 export type EditProgramResult =
-  | { ok: true }
+  | {
+      ok: true;
+      /**
+       * SPEC §6 — what the retro ACTUALLY did, recomputed and applied
+       * server-side. Absent on a "going forward only" save.
+       */
+      reprice?: RateRepricePreview | null;
+    }
   | {
       ok: false;
       error: { code: string; message: string };
       values: ProgramFormValues;
+      /**
+       * 🔴 Present ONLY for RateRepriceDecreaseNotConfirmedError — the diff
+       * the SERVER computed when it refused. Rendered inline as the
+       * named-coach warning, so the refusal is a usable screen and not an
+       * error boundary over a payroll page.
+       */
+      decreasePreview?: RateRepricePreview;
     };
 
 function snapshotProgram(formData: FormData): ProgramFormValues {
@@ -95,8 +94,10 @@ function snapshotProgram(formData: FormData): ProgramFormValues {
         ? "per_session"
         : "hourly",
     perSessionDollars: formData.get("perSessionDollars")?.toString() ?? "",
+    effectiveFrom: formData.get("defaultRateEffectiveFrom")?.toString() ?? "",
   };
 }
+
 
 // Maps FormData → the createProgramSchema / updateProgramSchema shape:
 // name + an optional pay rate. The program-level session cap was removed
@@ -110,7 +111,7 @@ function buildProgramInput(formData: FormData): {
   const name = formData.get("name")?.toString().trim() ?? "";
   // Optional pay rate (dollars → cents; empty → null). Always present on
   // both create + update so update can clear it back to null.
-  const defaultRatePer30MinCents = optionalDollarsToCents(
+  const defaultRatePer30MinCents = optionalHourlyDollarsToCentsPer30Min(
     formData.get("rateDollars")?.toString() ?? "",
   );
   const payMode =
@@ -196,8 +197,10 @@ export async function updateProgramFormAction(
     };
   }
   let input;
+  let effectiveFrom: Date | null;
   try {
     input = buildProgramInput(formData);
+    effectiveFrom = parseEffectiveFromInput(values.effectiveFrom);
   } catch (err) {
     return {
       ok: false,
@@ -209,9 +212,37 @@ export async function updateProgramFormAction(
     };
   }
   try {
-    await updateProgram(id, input);
-    return { ok: true };
+    // SPEC §7 — the retro instruction rides on the SAME payload as the rate.
+    // With `defaultRateEffectiveFrom` null this is `updateProgram` exactly:
+    // same internal, no preview query, no engine call, no extra write.
+    // Only ever true when the admin ticked the required checkbox in the
+    // decrease warning — an unticked checkbox is not in the payload at all.
+    const confirmDecrease = parseConfirmDecrease(
+      formData.get("confirmDecrease"),
+    );
+    const result = await updateProgramWithReprice(id, {
+      ...input,
+      defaultRateEffectiveFrom: effectiveFrom,
+      confirmDecrease,
+    });
+    return {
+      ok: true,
+      reprice:
+        result.reprice.status === "applied" ? result.reprice.preview : null,
+    };
   } catch (err) {
+    // 🔴 SPEC §6 — the server refused a retro that would LOWER already-logged
+    // pay. Surfaced as a normal result (never rethrown) so the dialog renders
+    // the named-coach warning inline instead of white-screening into the
+    // Next.js error boundary.
+    if (err instanceof RateRepriceDecreaseNotConfirmedError) {
+      return {
+        ok: false,
+        error: { code: err.code, message: DECREASE_REFUSED_MESSAGE },
+        values,
+        decreasePreview: err.preview,
+      };
+    }
     if (
       err instanceof ProgramNameTakenError ||
       err instanceof ProgramNotFoundError

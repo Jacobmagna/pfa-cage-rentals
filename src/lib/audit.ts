@@ -50,6 +50,24 @@ export type LogAuditInput = {
   action: "create" | "update" | "delete";
   before?: Record<string, unknown> | null;
   after?: Record<string, unknown> | null;
+  /**
+   * How an `update`'s diff is stored. Ignored for create/delete, which have
+   * only one snapshot each.
+   *
+   *  - "shallow" (default) — changed keys only. The right call for row edits:
+   *    it keeps `audit_log.diff` readable and the full row is reconstructible
+   *    by walking the log.
+   *  - "full" — both snapshots verbatim.
+   *
+   * "full" exists for the retro re-price (src/lib/server/rate-reprice.ts),
+   * whose `before`/`after` are not a row but a hand-built REPORT of one
+   * (coach, program) group. A shallow diff silently deleted keys that happened
+   * to be identical on both sides — most damagingly `totalPayCents` on a
+   * NET-ZERO group, which is exactly the group a reader most wants the total
+   * for. Per-log data survived, so reversibility was never at risk; the group
+   * total simply vanished from the rows that needed it.
+   */
+  diffMode?: "shallow" | "full";
 };
 
 /**
@@ -122,9 +140,38 @@ function buildDiff(input: LogAuditInput): unknown {
         // the partial trail rather than silently dropping.
         return { before: input.before ?? null, after: input.after ?? null };
       }
+      // Opt-out: a hand-built report, not a row — store it whole. See the
+      // `diffMode` doc on LogAuditInput.
+      if (input.diffMode === "full") {
+        return { before: input.before, after: input.after };
+      }
       return shallowDiff(input.before, input.after);
     }
   }
+}
+
+/**
+ * The exact `audit_log` row `logAudit` would insert for this input —
+ * `buildDiff` included. Split out so a caller that needs the audit write to
+ * be ATOMIC with its mutation can put the insert INTO its own `db.batch()`
+ * (a Neon batch is one transaction) instead of firing it afterwards as a
+ * separate, swallowable statement.
+ *
+ * The retro re-price engine (src/lib/server/rate-reprice.ts) is the reason
+ * this exists: its `before` payload is the only record able to reconstruct
+ * the prior per-log pay rates, so money moving without it is not an
+ * acceptable failure mode. Both writers MUST go through here — a
+ * hand-rolled row shape would make `audit_log.diff` inconsistent depending
+ * on which code path wrote it.
+ */
+export function buildAuditRowValues(input: LogAuditInput) {
+  return {
+    actorUserId: input.actorUserId,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    action: input.action,
+    diff: buildDiff(input),
+  };
 }
 
 /**
@@ -136,11 +183,5 @@ export async function logAudit(
   database: Database,
   input: LogAuditInput,
 ): Promise<void> {
-  await database.insert(auditLog).values({
-    actorUserId: input.actorUserId,
-    entityType: input.entityType,
-    entityId: input.entityId,
-    action: input.action,
-    diff: buildDiff(input),
-  });
+  await database.insert(auditLog).values(buildAuditRowValues(input));
 }

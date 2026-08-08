@@ -1,36 +1,45 @@
-// Server-rendered preview tables for /admin/reports. Two stacked
-// tables — Summary (one row per coach) above Detail (one row per
-// session). Mirrors the Excel workbook shape so what Dad sees in
-// the browser matches the file he downloads (E2).
+// The CAGE RENTALS tab of /admin/reports (reports-tabs SPEC §3, tab 1).
+// Two stacked tables — Summary (one row per coach) above Detail (one row
+// per session). Money direction: the coach OWES PFA.
+//
+// Cage-side figures only. Work hours have their own tab and are not
+// rendered here; the two directions are never mixed on one screen (§7).
+// The `includeCageSessions` / `includeProgramHours` props are gone with
+// the scope checkboxes that fed them.
 //
 // Server component, no client state. Filter changes happen via the
 // form's GET submit; this just re-renders against the new data.
 
 import type { ResourceType } from "@/lib/billing";
-import type { DetailRow, SummaryRow } from "@/lib/reports/aggregate";
+import {
+  hasCageActivity,
+  type DetailRow,
+  type SummaryRow,
+} from "@/lib/reports/aggregate";
 
 export function ReportPreview({
   detail,
   summary,
   grandTotalCents,
-  programGrandTotalCents,
-  includeCageSessions,
-  includeProgramHours,
 }: {
   detail: DetailRow[];
   summary: SummaryRow[];
   grandTotalCents: number;
-  programGrandTotalCents: number;
-  includeCageSessions: boolean;
-  includeProgramHours: boolean;
 }) {
-  if (detail.length === 0 && summary.length === 0) {
+  // `summary` spans BOTH money directions — work-only coaches are in
+  // there for the Work tab. Listing one here would render an all-dashes
+  // row ending in "$0.00 Rental owed", which reads as a debt of zero
+  // rather than an absence of rentals. See hasCageActivity.
+  const cageSummary = summary.filter(hasCageActivity);
+
+  if (detail.length === 0 && cageSummary.length === 0) {
     return (
       <div className="rounded-lg border border-line/60 bg-surface/40 p-10 text-center">
-        <p className="text-sm font-medium text-fg">No sessions match</p>
+        <p className="text-sm font-medium text-fg">No cage rentals match</p>
         <p className="mt-1.5 text-sm text-fg-muted max-w-md mx-auto">
-          Try widening the date range or unchecking some filters. Coaches
-          with zero sessions in the range are not listed.
+          Try widening the date range or clearing the coach and resource
+          filters. Coaches with no rentals in the range are not listed —
+          check the Work hours tab for coaching time.
         </p>
       </div>
     );
@@ -41,13 +50,10 @@ export function ReportPreview({
       <section>
         <SectionHeader
           eyebrow="Summary"
-          title={`${summary.length} ${summary.length === 1 ? "coach" : "coaches"}`}
+          title={`${cageSummary.length} ${cageSummary.length === 1 ? "coach" : "coaches"}`}
           rightSlot={
             <GrandTotal
               cageCents={grandTotalCents}
-              programCents={programGrandTotalCents}
-              includeCageSessions={includeCageSessions}
-              includeProgramHours={includeProgramHours}
               sessionCount={detail.length}
             />
           }
@@ -57,24 +63,15 @@ export function ReportPreview({
             <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
               <tr>
                 <th scope="col" className="px-4 py-3 text-left font-semibold">Coach</th>
-                {includeCageSessions ? (
-                  <>
-                    <th scope="col" className="px-4 py-3 text-right font-semibold">Cage</th>
-                    <th scope="col" className="px-4 py-3 text-right font-semibold">Bullpen</th>
-                    <th scope="col" className="px-4 py-3 text-right font-semibold">Weight Room</th>
-                    <th scope="col" className="px-4 py-3 text-right font-semibold">Group Weight Room</th>
-                  </>
-                ) : null}
-                {includeProgramHours ? (
-                  <th scope="col" className="px-4 py-3 text-right font-semibold">Work hours</th>
-                ) : null}
-                {includeCageSessions ? (
-                  <th scope="col" className="px-4 py-3 text-right font-semibold">Rental owed</th>
-                ) : null}
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Cage</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Bullpen</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Weight Room</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Group Weight Room</th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">Rental owed</th>
               </tr>
             </thead>
             <tbody>
-              {summary.map((row) => (
+              {cageSummary.map((row) => (
                 <tr key={row.coachId} className="border-t border-line hover:bg-surface-2 transition-colors">
                   <td className="px-4 py-3 text-fg">
                     {row.coachName}
@@ -84,37 +81,25 @@ export function ReportPreview({
                       </span>
                     ) : null}
                   </td>
-                  {includeCageSessions ? (
-                    <>
-                      <SlotsAndCashCell
-                        slots={row.cageSlots}
-                        cents={row.cageTotalCents}
-                      />
-                      <SlotsAndCashCell
-                        slots={row.bullpenSlots}
-                        cents={row.bullpenTotalCents}
-                      />
-                      <SlotsAndCashCell
-                        slots={row.weightRoomSlots}
-                        cents={row.weightRoomTotalCents}
-                      />
-                      <SlotsAndCashCell
-                        slots={row.groupWeightRoomSlots}
-                        cents={row.groupWeightRoomTotalCents}
-                      />
-                    </>
-                  ) : null}
-                  {includeProgramHours ? (
-                    <HoursAndCashCell
-                      hours={row.programHours}
-                      cents={row.programTotalCents}
-                    />
-                  ) : null}
-                  {includeCageSessions ? (
-                    <td className="px-4 py-3 text-right font-mono tnum tabular-nums font-semibold text-fg">
-                      {formatCents(row.totalCents)}
-                    </td>
-                  ) : null}
+                  <SlotsAndCashCell
+                    slots={row.cageSlots}
+                    cents={row.cageTotalCents}
+                  />
+                  <SlotsAndCashCell
+                    slots={row.bullpenSlots}
+                    cents={row.bullpenTotalCents}
+                  />
+                  <SlotsAndCashCell
+                    slots={row.weightRoomSlots}
+                    cents={row.weightRoomTotalCents}
+                  />
+                  <SlotsAndCashCell
+                    slots={row.groupWeightRoomSlots}
+                    cents={row.groupWeightRoomTotalCents}
+                  />
+                  <td className="px-4 py-3 text-right font-mono tnum tabular-nums font-semibold text-fg">
+                    {formatCents(row.totalCents)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -211,48 +196,29 @@ function SectionHeader({
   );
 }
 
-// Two clearly-labeled grand totals, NEVER summed: the cage receivable
-// (coach owes PFA) and the program payout (PFA owes coach) point in opposite
-// money directions. Each shows only when its scope is on.
+// The cage receivable — money the coach OWES PFA. The work payout points
+// the OPPOSITE way and lives on its own tab; the two are never summed and
+// never share a total (SPEC §7).
 function GrandTotal({
   cageCents,
-  programCents,
-  includeCageSessions,
-  includeProgramHours,
   sessionCount,
 }: {
   cageCents: number;
-  programCents: number;
-  includeCageSessions: boolean;
-  includeProgramHours: boolean;
   sessionCount: number;
 }) {
   return (
     <div className="flex items-start justify-end gap-6 text-right">
-      {includeCageSessions ? (
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
-            Rental owed
-          </p>
-          <p className="text-xl font-semibold font-mono tnum tabular-nums text-fg">
-            {formatCents(cageCents)}
-          </p>
-          <p className="text-[11px] text-fg-subtle">
-            across {sessionCount} {sessionCount === 1 ? "session" : "sessions"}
-          </p>
-        </div>
-      ) : null}
-      {includeProgramHours ? (
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
-            Work pay
-          </p>
-          <p className="text-xl font-semibold font-mono tnum tabular-nums text-fg">
-            {formatCents(programCents)}
-          </p>
-          <p className="text-[11px] text-fg-subtle">PFA owes coaches</p>
-        </div>
-      ) : null}
+      <div>
+        <p className="text-[10px] uppercase tracking-[0.18em] text-fg-subtle">
+          Rental owed
+        </p>
+        <p className="text-xl font-semibold font-mono tnum tabular-nums text-fg">
+          {formatCents(cageCents)}
+        </p>
+        <p className="text-[11px] text-fg-subtle">
+          across {sessionCount} {sessionCount === 1 ? "session" : "sessions"}
+        </p>
+      </div>
     </div>
   );
 }
@@ -289,37 +255,6 @@ function SlotsAndCashCell({
       </span>
     </td>
   );
-}
-
-// Program/work cell: exact fractional HOURS (not 30-min slots) over the
-// dollars. Program pay bills per-hour × exact duration, so a 45-min block
-// shows "0.75 hr". 1 decimal, trailing ".0" stripped ("2 hr", "1.5 hr").
-function HoursAndCashCell({
-  hours,
-  cents,
-}: {
-  hours: number;
-  cents: number;
-}) {
-  if (hours === 0 && cents === 0) {
-    return (
-      <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-subtle">
-        —
-      </td>
-    );
-  }
-  return (
-    <td className="px-4 py-3 text-right font-mono tnum tabular-nums leading-tight">
-      <span className="block text-fg">{formatHours(hours)} hr</span>
-      <span className="block text-[11px] text-fg-subtle">
-        {formatCents(cents)}
-      </span>
-    </td>
-  );
-}
-
-function formatHours(hours: number): string {
-  return hours.toFixed(2).replace(/\.?0+$/, "");
 }
 
 // Per-row rate cell with an EXPLICIT unit suffix, so the mixed-resource

@@ -39,13 +39,7 @@ export async function fetchReportData(
   // row. No override fetch — overrides are only consulted at session
   // CREATION time (in src/lib/server/session-actions.ts), never on
   // the read path.
-  //
-  // Scope gate: when the "Cage rental sessions" box is off, skip the
-  // session query entirely (cleaner than a false WHERE) — the aggregate
-  // keeps cage/program separate so empty inputs leave those fields 0.
-  const sessionRows = !filters.includeCageSessions
-    ? []
-    : await db
+  const sessionRows = await db
     .select({
       sessionId: sessionsBilling.id,
       coachId: sessionsBilling.coachId,
@@ -66,14 +60,16 @@ export async function fetchReportData(
     .where(and(...conditions))
     .orderBy(asc(sessionsBilling.startAt));
 
-  // Program hours: same date window as sessions, plus the coach filter
-  // when one is set. Program hours aren't a resource type, so a
-  // resource-type filter (cage/bullpen/weight_room) naturally excludes
-  // them — only fetch when the view spans all resource types. AND that
-  // existing coupling with the new "Program hours" scope box.
-  const effectiveIncludeProgram =
-    filters.includeProgramHours &&
-    (filters.resourceTypes.length === 0 || filters.resourceTypes.length === 3);
+  // Work hours: same date window as sessions, plus the coach filter when
+  // one is set. ALWAYS fetched.
+  //
+  // This used to be gated on `includeProgramHours && (resourceTypes is
+  // empty or all three)` — the bug in reports-tabs SPEC §1(b). Work logs
+  // are not resource bookings, so narrowing the resource-type filter to
+  // (say) Cages silently dropped every work hour from the report even
+  // with the "Work hours" box ticked. Both halves of that predicate are
+  // gone: the scope checkboxes no longer exist (the tabs replaced them),
+  // and resource types apply to the cage side ONLY (SPEC §4).
   const hourLogConditions = [
     // 1b security B: held (awaiting-approval) logs are not yet payable.
     eq(hourLogs.status, "posted"),
@@ -83,22 +79,29 @@ export async function fetchReportData(
   if (filters.coachIds.length > 0) {
     hourLogConditions.push(inArray(hourLogs.coachId, filters.coachIds));
   }
-  const hourLogRows = effectiveIncludeProgram
-    ? await db
-        .select({
-          coachId: hourLogs.coachId,
-          coachName: users.name,
-          coachEmail: users.email,
-          startAt: hourLogs.startAt,
-          endAt: hourLogs.endAt,
-          ratePer30MinCents: hourLogs.ratePer30MinCents,
-          perSessionRateCents: hourLogs.perSessionRateCents,
-        })
-        .from(hourLogs)
-        .innerJoin(users, eq(hourLogs.coachId, users.id))
-        .where(and(...hourLogConditions))
-        .orderBy(asc(hourLogs.startAt))
-    : [];
+  // The program filter is the mirror of resourceTypes: work-side only, and
+  // deliberately NOT applied to the session query above (a cage rental has
+  // no program). It is applied HERE as well as on the Work tab's own fetch
+  // so the two agree under every filter — otherwise a program-narrowed
+  // screen would quote one work total while the workbook's Summary sheet
+  // quoted another.
+  if (filters.programId) {
+    hourLogConditions.push(eq(hourLogs.programId, filters.programId));
+  }
+  const hourLogRows = await db
+    .select({
+      coachId: hourLogs.coachId,
+      coachName: users.name,
+      coachEmail: users.email,
+      startAt: hourLogs.startAt,
+      endAt: hourLogs.endAt,
+      ratePer30MinCents: hourLogs.ratePer30MinCents,
+      perSessionRateCents: hourLogs.perSessionRateCents,
+    })
+    .from(hourLogs)
+    .innerJoin(users, eq(hourLogs.coachId, users.id))
+    .where(and(...hourLogConditions))
+    .orderBy(asc(hourLogs.startAt));
 
   const hourLogInputs: AggregateHourLogInput[] = hourLogRows.map((r) => ({
     coachId: r.coachId,

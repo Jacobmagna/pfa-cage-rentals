@@ -18,6 +18,12 @@ import {
 
 function revalidatePaymentSurfaces(coachId?: string) {
   revalidatePath("/admin/payments");
+  // The Reports "Payments" tab renders the audit timeline for these same
+  // payments and can EDIT them through this very action (reports-tabs
+  // SPEC §3). Without this, an edit made from that tab would append its
+  // audit event and then re-render the page from cache — showing the old
+  // values and no new event, i.e. looking like the save silently failed.
+  revalidatePath("/admin/reports");
   if (coachId) revalidatePath(`/admin/coaches/${coachId}`);
 }
 

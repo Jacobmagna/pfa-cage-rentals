@@ -4,12 +4,22 @@
 // Same filter contract as the page (shared via lib/reports/filters.ts)
 // so what Dad sees in the browser preview matches the workbook he
 // downloads — no surprises.
+//
+// Note there is deliberately no `tab` here. The page has sub-tabs, but a
+// download always contains every category (reports-tabs SPEC §5) — a
+// workbook must never be silently narrowed by whichever tab happened to
+// be open when the button was clicked.
 
 import { fetchReportData } from "@/lib/reports/fetch";
 import {
   filtersFromURLSearchParams,
 } from "@/lib/reports/filters";
 import { buildReportWorkbook } from "@/lib/reports/excel";
+import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
+import { hourLogFiltersFromReportFilters } from "@/lib/reports/hour-log-filters";
+import { buildWorkReport } from "@/lib/reports/work-report";
+import { buildPaymentTimeline } from "@/lib/reports/payments-timeline";
+import { fetchPaymentTimelineRows } from "@/lib/reports/payments-timeline-fetch";
 import { requireRole } from "@/lib/authz";
 
 export async function GET(request: Request) {
@@ -17,16 +27,33 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const filters = filtersFromURLSearchParams(url.searchParams);
-  const report = await fetchReportData(filters);
+
+  // The SAME three fetches the page runs, from the SAME normalized
+  // filters — that shared contract is what makes the preview and the
+  // workbook agree row for row. Run them together; they're independent.
+  const [report, workRows, paymentRows] = await Promise.all([
+    fetchReportData(filters),
+    fetchHourLogRowsWithScheduleNotes(
+      hourLogFiltersFromReportFilters(filters),
+    ),
+    fetchPaymentTimelineRows({
+      fromDate: filters.fromDate,
+      toDateExclusive: filters.toDateExclusive,
+      coachIds: filters.coachIds,
+    }),
+  ]);
 
   const buffer = await buildReportWorkbook(
-    report,
+    {
+      report,
+      work: buildWorkReport(workRows),
+      payments: buildPaymentTimeline(paymentRows.rows),
+      paymentsTruncated: paymentRows.truncated,
+    },
     {
       from: filters.from,
       to: filters.to,
     },
-    filters.includeCageSessions,
-    filters.includeProgramHours,
   );
 
   const filename = `pfa-billing-${filters.from}_to_${filters.to}.xlsx`;

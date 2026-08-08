@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateReport,
+  hasCageActivity,
   type AggregateHourLogInput,
   type AggregateSessionInput,
 } from "./aggregate";
@@ -291,5 +292,55 @@ describe("aggregateReport — program hours", () => {
     expect(summary[0].programHours).toBe(1.5);
     expect(summary[0].programTotalCents).toBe(5000);
     expect(programGrandTotalCents).toBe(5000);
+  });
+});
+
+// Which summary rows belong on the CAGE tab. `summary` intentionally
+// mixes both money directions, so the cage view has to exclude work-only
+// coaches — otherwise they render as an all-dashes row ending in
+// "$0.00 Rental owed", i.e. an invented zero on a money screen.
+describe("hasCageActivity", () => {
+  it("is false for a coach with ONLY work hours", () => {
+    const { summary } = aggregateReport(
+      [],
+      [hourLog({ ratePer30MinCents: 3000 })],
+    );
+    expect(summary).toHaveLength(1);
+    expect(summary[0].programTotalCents).toBeGreaterThan(0);
+    expect(hasCageActivity(summary[0])).toBe(false);
+  });
+
+  it("is true for a coach with a cage session", () => {
+    const { summary } = aggregateReport([session({ resourceType: "cage" })]);
+    expect(hasCageActivity(summary[0])).toBe(true);
+  });
+
+  it("is true for bullpen, weight room and group weight room", () => {
+    for (const s of [
+      session({ resourceType: "bullpen" }),
+      session({ resourceType: "weight_room" }),
+      session({ resourceType: "weight_room", isGroupSession: true }),
+    ]) {
+      const { summary } = aggregateReport([s]);
+      expect(hasCageActivity(summary[0])).toBe(true);
+    }
+  });
+
+  it("is TRUE for a rental booked at a $0 rate — slots are activity", () => {
+    // A zero-rate booking is a real rental that happens to bill nothing.
+    // Testing cents alone would hide it from the report entirely.
+    const { summary } = aggregateReport([session({ ratePer30MinCents: 0 })]);
+    expect(summary[0].totalCents).toBe(0);
+    expect(summary[0].cageSlots).toBeGreaterThan(0);
+    expect(hasCageActivity(summary[0])).toBe(true);
+  });
+
+  it("keeps a coach who has BOTH rentals and work hours", () => {
+    const { summary } = aggregateReport(
+      [session({ resourceType: "cage" })],
+      [hourLog({ ratePer30MinCents: 3000 })],
+    );
+    expect(summary).toHaveLength(1);
+    expect(hasCageActivity(summary[0])).toBe(true);
   });
 });

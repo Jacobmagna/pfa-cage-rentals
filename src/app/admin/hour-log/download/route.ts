@@ -1,4 +1,6 @@
-// GET /admin/hour-log/download?from=&to=&coachId=&programId=
+// GET /admin/hour-log/download?from=&to=&coachIds=&programId=
+// `coachIds` is repeatable; the legacy single `coachId` key is still
+// accepted so previously-shared download links keep working.
 // Builds the hour-log Excel workbook and returns it as a download.
 //
 // Same filter contract as the page (shared via

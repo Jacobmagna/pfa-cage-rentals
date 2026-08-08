@@ -125,6 +125,30 @@ export type SummaryRow = {
   totalCents: number;
 };
 
+/**
+ * True when this coach has any CAGE-SIDE activity in range (cage,
+ * bullpen, weight room, or group weight room).
+ *
+ * `summary` deliberately mixes both money directions — a coach who only
+ * logged work hours still gets a row, because the work tab needs it. The
+ * cage tab must therefore filter, or a work-only coach renders as a line
+ * of dashes ending in "$0.00 Rental owed", which reads as "this coach
+ * owes nothing" rather than "this coach rented nothing". Inventing a zero
+ * on a money screen is the failure mode SPEC §7 exists to prevent.
+ *
+ * Tests SLOTS as well as cents: a booking at a $0 rate is real activity
+ * and must still be listed.
+ */
+export function hasCageActivity(row: SummaryRow): boolean {
+  return (
+    row.cageSlots > 0 ||
+    row.bullpenSlots > 0 ||
+    row.weightRoomSlots > 0 ||
+    row.groupWeightRoomSlots > 0 ||
+    row.totalCents !== 0
+  );
+}
+
 export type ReportData = {
   detail: DetailRow[];
   summary: SummaryRow[];

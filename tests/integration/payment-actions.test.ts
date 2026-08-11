@@ -24,6 +24,7 @@ import {
   PaymentAlreadyConfirmedError,
   PaymentNotFoundError,
 } from "@/lib/errors";
+import { formatPfaDate, parsePfaInput } from "@/lib/timezone";
 import {
   ensureFixtureUsers,
   truncateMutables,
@@ -322,6 +323,166 @@ describe("updatePaymentInternal", () => {
     await expect(
       updatePaymentInternal(fixtures.admin, created.id, { amountCents: 9999 }),
     ).rejects.toBeInstanceOf(PaymentNotFoundError);
+  });
+});
+
+// payment-statement SPEC §4 + §12.1 — `coversThrough` is the PERIOD the money
+// settles, as opposed to `paidAt`, which is when it arrived. Alex Milone owed
+// $660 for July and Zelled it on Aug 7; both dates are real and they differ.
+//
+// 🔴 The clearing case is the one this block exists for. `updatePaymentSchema`
+// is `createPaymentSchema.partial()`, where OMITTED = leave unchanged — so only
+// an EXPLICIT `null` can put the column back to "no period stated". A blank
+// coverage input that arrives as `undefined` instead means Mark can set a
+// coverage date and never remove it, which is exactly the bug the group
+// weight-room work shipped ("blank was a silent no-op"). Both halves are
+// asserted against the row read back from the DB, not the returned object.
+describe("coversThrough (the period a payment settles)", () => {
+  // PFA-midnight of the named day — the SAME convention `paidAt` is stored in
+  // (buildInput calls parsePfaInput(dateStr, "00:00") for both). Using the
+  // helper rather than a hand-written UTC instant is the point: two date
+  // columns on one row disagreeing about wall-clock is how a month-boundary
+  // off-by-one gets in (SPEC §12.6).
+  const julyEnd = parsePfaInput("2026-07-31", "00:00");
+  // 60 days out — comfortably inside the 1-year typo guard, and derived from
+  // "now" so it stays a FUTURE date as the calendar moves past any literal.
+  const futurePrepayment = parsePfaInput(
+    formatPfaDate(new Date(Date.now() + 60 * 24 * 60 * 60 * 1000)),
+    "00:00",
+  );
+
+  async function readRow(id: string) {
+    const [row] = await db
+      .select()
+      .from(coachPayments)
+      .where(eq(coachPayments.id, id));
+    return row;
+  }
+
+  it("stores the coverage date on create", async () => {
+    const coach = await createThrowawayCoach();
+    const created = await createPaymentInternal(fixtures.admin, {
+      ...baseCreateInput(coach.id),
+      coversThrough: julyEnd,
+    });
+
+    const row = await readRow(created.id);
+    expect(row.coversThrough).toBeInstanceOf(Date);
+    expect(row.coversThrough!.getTime()).toBe(julyEnd.getTime());
+  });
+
+  it("clears the coverage date when the blank input sends explicit null", async () => {
+    const coach = await createThrowawayCoach();
+    const created = await createPaymentInternal(fixtures.admin, {
+      ...baseCreateInput(coach.id),
+      coversThrough: julyEnd,
+    });
+    expect((await readRow(created.id)).coversThrough).toBeInstanceOf(Date);
+
+    await updatePaymentInternal(fixtures.admin, created.id, {
+      ...baseCreateInput(coach.id),
+      coversThrough: null,
+    });
+
+    expect((await readRow(created.id)).coversThrough).toBeNull();
+  });
+
+  it("leaves the coverage date alone when the edit doesn't change it", async () => {
+    const coach = await createThrowawayCoach();
+    const created = await createPaymentInternal(fixtures.admin, {
+      ...baseCreateInput(coach.id),
+      coversThrough: julyEnd,
+    });
+
+    // What the dialog actually submits when Mark edits only the amount:
+    // buildInput returns a COMPLETE object, so the untouched coverage input
+    // comes back as the same date.
+    await updatePaymentInternal(fixtures.admin, created.id, {
+      ...baseCreateInput(coach.id),
+      amountCents: 66000,
+      coversThrough: julyEnd,
+    });
+    let row = await readRow(created.id);
+    expect(row.amountCents).toBe(66000);
+    expect(row.coversThrough!.getTime()).toBe(julyEnd.getTime());
+
+    // And the `.partial()` contract itself: a caller that OMITS the field
+    // (non-form callers, e.g. a future coach self-report edit) must not
+    // silently blank it either.
+    await updatePaymentInternal(fixtures.admin, created.id, {
+      amountCents: 70000,
+    });
+    row = await readRow(created.id);
+    expect(row.coversThrough!.getTime()).toBe(julyEnd.getTime());
+  });
+
+  it("leaves coversThrough NULL when no coverage date is given", async () => {
+    const coach = await createThrowawayCoach();
+    const created = await createPaymentInternal(
+      fixtures.admin,
+      baseCreateInput(coach.id),
+    );
+    // Never inferred from paidAt — untagged money is counted in NO period
+    // (SPEC §7), because guessing would file July's money under August.
+    expect((await readRow(created.id)).coversThrough).toBeNull();
+  });
+
+  // Typo guards (SPEC §4). Future dates are otherwise ALLOWED — a prepayment
+  // covering through next month is real. These live on the FIELD so `.partial()`
+  // carries them onto update too; that's what the update halves prove.
+  it("rejects a coverage date more than a year out (catches a typo'd year)", async () => {
+    const coach = await createThrowawayCoach();
+    const typo = parsePfaInput("2206-07-31", "00:00");
+
+    await expect(
+      createPaymentInternal(fixtures.admin, {
+        ...baseCreateInput(coach.id),
+        coversThrough: typo,
+      }),
+    ).rejects.toThrow();
+
+    const created = await createPaymentInternal(
+      fixtures.admin,
+      baseCreateInput(coach.id),
+    );
+    await expect(
+      updatePaymentInternal(fixtures.admin, created.id, {
+        coversThrough: typo,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("rejects a coverage date before PFA go-live", async () => {
+    const coach = await createThrowawayCoach();
+    const preGoLive = parsePfaInput("2026-06-18", "00:00");
+
+    await expect(
+      createPaymentInternal(fixtures.admin, {
+        ...baseCreateInput(coach.id),
+        coversThrough: preGoLive,
+      }),
+    ).rejects.toThrow();
+
+    const created = await createPaymentInternal(
+      fixtures.admin,
+      baseCreateInput(coach.id),
+    );
+    await expect(
+      updatePaymentInternal(fixtures.admin, created.id, {
+        coversThrough: preGoLive,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("accepts a coverage date in the future (a prepayment is real money)", async () => {
+    const coach = await createThrowawayCoach();
+    const created = await createPaymentInternal(fixtures.admin, {
+      ...baseCreateInput(coach.id),
+      coversThrough: futurePrepayment,
+    });
+    expect((await readRow(created.id)).coversThrough!.getTime()).toBe(
+      futurePrepayment.getTime(),
+    );
   });
 });
 

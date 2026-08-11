@@ -716,6 +716,29 @@ export const coachPayments = pgTable(
     // pre-existing (cage-rental) payment backfills to the correct direction.
     direction: paymentDirection("direction").notNull().default("coach_to_pfa"),
     paidAt: timestamp("paid_at", { mode: "date" }).notNull(),
+    // payment-statement SPEC §4 — the PERIOD this money settles, as opposed to
+    // `paidAt`, which is when it arrived. The two genuinely differ: Alex Milone
+    // owed $660 for July and Zelled it on Aug 7, and Mark was recording that by
+    // typing "July 2026" into `reference`, where nothing could read it.
+    //
+    // 🔴 NULLABLE IS LOAD-BEARING, and it is never inferred from `paidAt`.
+    // Every pre-existing row backfills to "no period stated" and is counted in
+    // NO period (SPEC §7) — guessing would file Alex's $660 under August, which
+    // is the exact wrong answer this column exists to prevent. Untagged money
+    // surfaces in the statement's NOT-INCLUDED block instead, which is also
+    // what teaches Mark to tag it.
+    //
+    // A DATE, not a month: it handles catch-up payments, partial settlements
+    // and one payment covering two months, and it composes with the from/to
+    // range every filtered surface here already uses. Mark gets the month
+    // mental model in the INPUT (chips), not in the schema.
+    //
+    // Stored at PFA-midnight of the named day via parsePfaInput(d, "00:00") —
+    // deliberately the SAME convention as `paidAt` above, because two date
+    // columns on one row disagreeing about wall-clock is how you get an
+    // off-by-one at a month boundary, and the month boundary is the whole
+    // failure mode here (SPEC §12.6).
+    coversThrough: timestamp("covers_through", { mode: "date" }),
     // Free-text: Venmo txn id, check number, etc. Optional — cash
     // payments don't have one and that's fine.
     reference: text("reference"),

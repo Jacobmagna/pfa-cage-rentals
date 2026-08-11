@@ -30,6 +30,7 @@ export type SubmittedPaymentValues = {
   method: string;
   direction: string;
   paidAtDate: string;
+  coversThroughDate: string;
   reference: string;
   note: string;
 };
@@ -49,6 +50,7 @@ function snapshot(formData: FormData): SubmittedPaymentValues {
     method: formData.get("method")?.toString() ?? "",
     direction: formData.get("direction")?.toString() ?? "",
     paidAtDate: formData.get("paidAtDate")?.toString() ?? "",
+    coversThroughDate: formData.get("coversThroughDate")?.toString() ?? "",
     reference: formData.get("reference")?.toString() ?? "",
     note: formData.get("note")?.toString() ?? "",
   };
@@ -75,6 +77,37 @@ function dollarsToCents(raw: string): number {
   return cents;
 }
 
+/**
+ * Throws when a `DateInput` produced an EMPTY ISO while its box was not empty.
+ *
+ * `DateInput` optionally emits the raw typed text in a second hidden input
+ * (`rawName`). That is the only way this boundary can tell the two apart:
+ *
+ *   raw ""            → the user left it blank. A legitimate answer for a field
+ *                       where blank is legal; the caller decides what it means.
+ *   raw "02/31/2026"  → the user MEANT a date and mistyped it. Rejecting is the
+ *                       only honest response — accepting it as blank is the
+ *                       silent clear.
+ *
+ * ⚠️ The raw key being ABSENT means "no evidence either way", and must behave
+ * exactly as before: `rawName` is opt-in, so most `DateInput` callers across the
+ * app emit no raw input at all and their contract is unchanged.
+ *
+ * The bad value is quoted in the message. A money form that says "invalid date"
+ * without saying which one, on a form with two date fields, is a support call.
+ */
+function rejectUnparseableDate(
+  formData: FormData,
+  rawFieldName: string,
+  label: string,
+): void {
+  const raw = formData.get(rawFieldName)?.toString().trim();
+  if (!raw) return;
+  throw new Error(
+    `“${raw}” is not a real ${label} date. Use MM/DD/YYYY, or clear the field.`,
+  );
+}
+
 function buildInput(formData: FormData) {
   const methodRaw = formData.get("method")?.toString().trim() ?? "";
   if (!PAYMENT_METHODS.includes(methodRaw as PaymentMethod)) {
@@ -92,11 +125,45 @@ function buildInput(formData: FormData) {
 
   const paidAtDate = formData.get("paidAtDate")?.toString().trim();
   if (!paidAtDate) {
+    // A typo is a DIFFERENT answer from an empty box, and saying so is the whole
+    // point of `rejectUnparseableDate` — see the coverage field below, where the
+    // difference between the two was a silent data loss.
+    rejectUnparseableDate(formData, "paidAtRaw", "payment date");
     throw new Error("Pick a payment date");
   }
   // Store as midnight PFA wall-clock — same convention as
   // session start times when no time-of-day was supplied.
   const paidAt = parsePfaInput(paidAtDate, "00:00");
+
+  // The period this money settles (optional — "no period stated" is a real
+  // answer). Stored at PFA-midnight through the SAME parsePfaInput convention
+  // as paidAt two lines above: two date columns on one row disagreeing about
+  // wall-clock is how a month-boundary off-by-one gets in, and the month
+  // boundary is the whole failure mode here (SPEC §4, §12.6).
+  //
+  // 🔴 Blank must become an EXPLICIT null, not an omitted key. This object is
+  // COMPLETE on every submit and `updatePaymentSchema` reads omitted as "leave
+  // unchanged" — omit it and Mark could set a coverage date and never clear it
+  // (SPEC §12.1). Hence the same `|| null` shape reference/note use below.
+  //
+  // 🔴 …and blank must be a DELIBERATE blank, not a typo. `DateInput`'s
+  // `maskedToIso` emits "" for anything that is not a fully valid calendar date
+  // — an IMPOSSIBLE one (`02/31/2026`) and a HALF-TYPED one (`07/31/202`) alike
+  // — so without the raw text a typo was indistinguishable from "Not stated"
+  // right here, and became the explicit null two lines down. That CLEARED a
+  // coverage date Mark had already set, with no error on screen, and dropped the
+  // payment out of its period's statement into "no period stated": exactly the
+  // failure this feature exists to prevent. `paidAtDate` above can lean on
+  // `if (!paidAtDate) throw` because empty is illegal there; coverage
+  // structurally cannot, because empty is a real answer.
+  const coversThroughDate =
+    formData.get("coversThroughDate")?.toString().trim() || null;
+  if (!coversThroughDate) {
+    rejectUnparseableDate(formData, "coversThroughRaw", "covers through");
+  }
+  const coversThrough = coversThroughDate
+    ? parsePfaInput(coversThroughDate, "00:00")
+    : null;
 
   return {
     coachId: formData.get("coachId")?.toString() ?? "",
@@ -104,6 +171,7 @@ function buildInput(formData: FormData) {
     method: methodRaw as PaymentMethod,
     direction: directionRaw as PaymentDirection,
     paidAt,
+    coversThrough,
     reference: formData.get("reference")?.toString().trim() || null,
     note: formData.get("note")?.toString().trim() || null,
   };

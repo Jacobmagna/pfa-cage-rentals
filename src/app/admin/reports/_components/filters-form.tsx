@@ -15,7 +15,7 @@
 // whenever the resource-type filter narrowed, so it could be ticked and
 // still show nothing. With tabs there is no scope box left to override.
 
-import { Search } from "lucide-react";
+import { FileText, Search } from "lucide-react";
 import { MultiSelect } from "@/app/_components/multi-select";
 import { DateInput } from "@/app/_components/date-input";
 import type { ReportTab } from "@/lib/reports/tabs";
@@ -72,10 +72,12 @@ export function FiltersForm({
       action="/admin/reports"
       className="rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)] p-5 mb-6"
     >
-      {/* A GET submit rebuilds the query string from the form's fields
-          alone, so without this the tab would reset to Cage every time
-          the admin pressed Apply. */}
-      <input type="hidden" name="tab" value={activeTab} />
+      {/* A GET submit rebuilds the query string from the form's fields alone,
+          so the tab has to ride along or it would reset to Cage every time.
+          It is carried by the SUBMIT BUTTONS (name="tab") rather than a hidden
+          input, because only the clicked button's name/value is submitted —
+          that is what lets "See statement" jump tabs while "Apply filters"
+          stays put, with no JS and no duplicate `tab` param to disambiguate. */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
         <Field label="From">
           <DateInput
@@ -154,13 +156,30 @@ export function FiltersForm({
         </Field>
       </div>
 
-      <div className="mt-4">
+      <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
           type="submit"
+          name="tab"
+          value={activeTab}
           className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-gold px-5 h-10 text-sm font-medium text-gold-ink shadow-[var(--shadow-sm)] hover:bg-gold-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
           <Search className="h-4 w-4" strokeWidth={2.5} />
           Apply filters
+        </button>
+
+        {/* payment-statement SPEC §8. Same filters, one click, no navigating
+            away: whatever period and coaches are set above is exactly what the
+            statement covers. A second submit button rather than a link, so it
+            picks up edits made to the fields but not yet applied — a link would
+            carry the LAST-APPLIED filters and quietly show the wrong period. */}
+        <button
+          type="submit"
+          name="tab"
+          value="statements"
+          className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-line-strong bg-surface px-4 text-sm font-medium text-fg-muted shadow-[var(--shadow-sm)] transition hover:-translate-y-px hover:text-fg hover:shadow-[var(--shadow-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+        >
+          <FileText className="h-4 w-4" />
+          See statement for this period
         </button>
       </div>
     </form>

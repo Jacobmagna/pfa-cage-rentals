@@ -144,3 +144,34 @@ export const FIXTURE_STATEMENT: StatementPair = {
   cage: CAGE,
   work: WORK,
 };
+
+/* ── Roster fixture ────────────────────────────────────────────────────────
+   The Statements tab has to answer for MANY coaches too, because Mark reaches
+   it from the Reports filter bar and will usually not have narrowed to one.
+   That case is not a degraded statement — it is his actual job ("who owes me,
+   who do I owe"), and today NO screen answers it both ranged AND netted
+   (SPEC §1b). So the tab shows this roll-up, and each row opens one statement.
+
+   Balances below are what each coach's statement would CLOSE at for the period.
+   Deliberately mixed: someone square, someone owing, someone owed, and one
+   credit — so the sign/direction handling is visible rather than assumed. */
+
+export type StatementRosterRow = {
+  coachId: string;
+  coachName: string;
+  /** Positive = coach owes PFA. Negative = credit (overpaid). */
+  cageBalanceCents: number;
+  /** Positive = PFA owes coach. */
+  workBalanceCents: number;
+  /** Payments in range with no covers-through date — the nag that gets it fixed. */
+  unappliedCents: number;
+};
+
+export const FIXTURE_ROSTER: StatementRosterRow[] = [
+  { coachId: "alex", coachName: "Alex Milone", cageBalanceCents: 8_800, workBalanceCents: 120_000, unappliedCents: 17_000 },
+  { coachId: "mitchell", coachName: "Mitchell Torres", cageBalanceCents: 0, workBalanceCents: 25_500, unappliedCents: 0 },
+  { coachId: "cole", coachName: "Cole Parker", cageBalanceCents: 26_400, workBalanceCents: 40_000, unappliedCents: 0 },
+  { coachId: "jorge", coachName: "Jorge Romero", cageBalanceCents: -4_000, workBalanceCents: 27_500, unappliedCents: 4_000 },
+  { coachId: "david", coachName: "David Lusk", cageBalanceCents: 13_200, workBalanceCents: 180_000, unappliedCents: 0 },
+  { coachId: "serena", coachName: "Serena Rodriguez", cageBalanceCents: 4_400, workBalanceCents: 0, unappliedCents: 0 },
+];

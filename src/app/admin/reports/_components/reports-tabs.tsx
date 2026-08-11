@@ -22,10 +22,17 @@ import {
 export function ReportsTabs({
   activeTab,
   filterQueryString,
+  basePath = "/admin/reports",
 }: {
   activeTab: ReportTab;
   /** Current filters, already serialized. Must NOT contain `tab`. */
   filterQueryString: string;
+  /**
+   * Route the tabs point at. Defaults to the real page; parameterised only so
+   * the statement design mock can render this component verbatim instead of
+   * growing a second copy of the tab strip that would drift from it.
+   */
+  basePath?: string;
 }) {
   return (
     <nav aria-label="Report sections" className="border-b border-line mb-6">
@@ -35,7 +42,7 @@ export function ReportsTabs({
           return (
             <li key={tab}>
               <Link
-                href={`/admin/reports?${filterQueryString}&tab=${tab}`}
+                href={`${basePath}?${filterQueryString}&tab=${tab}`}
                 aria-current={isActive ? "page" : undefined}
                 className={[
                   "inline-flex items-center px-3 sm:px-4 py-3 text-sm border-b-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold rounded-sm",

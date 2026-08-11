@@ -14,7 +14,7 @@
 // printed or screenshotted row can't lose it.
 
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { AlertTriangle, ArrowRight } from "lucide-react";
 import { formatDollarsExact } from "@/lib/format-money";
 
 export type StatementRosterEntry = {
@@ -24,7 +24,11 @@ export type StatementRosterEntry = {
   cageBalanceCents: number;
   /** Positive = PFA owes coach. */
   workBalanceCents: number;
-  /** Payments in range carrying no covers-through date. */
+  /**
+   * Payments carrying no covers-through date. ⚠️ ALL-TIME, not ranged — an
+   * untagged payment belongs to no period, so there is no honest way to filter
+   * it by one. The column is labelled "all time" for that reason.
+   */
   unappliedCents: number;
 };
 
@@ -68,6 +72,21 @@ export function StatementRoster({
         />
       </dl>
 
+      {/* SPEC §11 — the caveat has to ride on THIS surface too. The individual
+          work statement carries it, but this table shows the same payout
+          figures for the whole roster at once, so omitting it here would be the
+          exact "symmetrical and silent" failure §11 forbids. */}
+      <p className="mb-3 flex gap-2.5 rounded-lg border border-warning/40 bg-warning/5 p-3 text-xs leading-relaxed">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+        <span>
+          <span className="font-medium">Work pay is what the logged work is
+          worth — not what is still owed.</span>{" "}
+          PFA pays coaches outside this system, so any payout that was never
+          recorded here is not subtracted. The cage-rental column has no such
+          gap: those charges and payments both live in the app.
+        </span>
+      </p>
+
       <div className="overflow-x-auto rounded-lg border border-line">
         <table className="w-full min-w-[640px] text-sm">
           <thead className="border-b border-line bg-surface-2/50 text-[10px] font-semibold uppercase tracking-wider text-fg-muted">
@@ -90,6 +109,9 @@ export function StatementRoster({
               </th>
               <th scope="col" className="px-3 py-2 text-right">
                 No period stated
+                <span className="block font-normal normal-case tracking-normal text-fg-subtle">
+                  all time
+                </span>
               </th>
               <th scope="col" className="px-3 py-2 text-right">
                 <span className="sr-only">Statement</span>
@@ -132,7 +154,9 @@ export function StatementRoster({
       <p className="mt-3 text-[11px] leading-relaxed text-fg-subtle">
         The two balance columns run in opposite directions and are never added
         together. A cage balance in parentheses is a credit — that coach has
-        paid ahead.
+        paid ahead. <span className="font-medium">No period stated</span> is
+        all-time, not this period: a payment with no coverage date belongs to no
+        period at all, which is why it needs one.
       </p>
     </section>
   );

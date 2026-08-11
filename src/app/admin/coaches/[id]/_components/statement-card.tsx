@@ -445,25 +445,40 @@ function StatementDocument({
           /admin/payments for reasons invisible on the page. Itemizing the
           difference is what makes the statement trustworthy, and showing Mark
           how much money is untagged is what makes him go tag it. */}
-      <Block title={`Not included in this statement`}>
-        <dl className="max-w-md break-inside-avoid text-sm">
+      {/* 🔴 This block CONTINUES the summary column's arithmetic rather than
+          listing three loose figures. The first draft listed "no period stated
+          $170" and "charges after $132" and then a bold "$50" — which reads as
+          a SUM of the two above it (and $170 + $132 = $302, not $50). On a page
+          whose entire claim is "arithmetic you can add up yourself", a total
+          that doesn't visibly follow from the lines above it is worse than no
+          total at all: it looks like the math is broken. So it restates the
+          statement balance, then adds and subtracts with explicit signs. */}
+      <Block title={`How this reconciles to today`}>
+        <dl className="max-w-md break-inside-avoid rounded-lg border border-line bg-surface-2/40 p-4 text-sm">
           <Line
-            label="Payments with no period stated"
-            cents={statement.unappliedCents}
-            muted={statement.unappliedCents === 0}
+            label={statement.closingLabel}
+            cents={statement.closingCents}
           />
           <Line
             label={`Charges after ${pair.periodEndShort}`}
             cents={statement.chargesAfterCents}
+            sign="+"
             muted={statement.chargesAfterCents === 0}
           />
           {statement.paymentsCoveringAfterCents > 0 ? (
             <Line
               label={`Payments covering after ${pair.periodEndShort}`}
               cents={statement.paymentsCoveringAfterCents}
+              sign="−"
             />
           ) : null}
-          <div className="mt-2 flex items-baseline justify-between gap-4 border-t border-line pt-2">
+          <Line
+            label="Payments with no period stated"
+            cents={statement.unappliedCents}
+            sign="−"
+            muted={statement.unappliedCents === 0}
+          />
+          <div className="mt-2 flex items-baseline justify-between gap-4 border-t-2 border-fg/25 pt-2.5">
             <dt className="font-semibold">
               Current account balance
               <span className="ml-1.5 text-xs font-normal text-fg-subtle">

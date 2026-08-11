@@ -16,6 +16,7 @@ import {
   type DetailRow,
   type SummaryRow,
 } from "@/lib/reports/aggregate";
+import { cageRateParts } from "@/lib/reports/rate-display";
 
 export function ReportPreview({
   detail,
@@ -261,6 +262,15 @@ function SlotsAndCashCell({
 // column is never ambiguous. The stored snapshot is per-30-min cents; we
 // display weight-room rates per HOUR (×2) and cage/bullpen per 30 min.
 // Display-only — the snapshot and all totals/sums are untouched.
+//
+// ⚠️ The unit convention itself now lives in `lib/reports/rate-display.ts` and is
+// SHARED with the payment statement's charge rows. It was duplicated for a
+// while, and the copies disagreed: the statement labelled every cage rate "/hr",
+// so one session's rate read `$22.00 /30 min` here and `$44.00/hr` on the
+// printed statement handed to the coach. Behaviour on this screen is unchanged —
+// `cageRateParts` is this component's own rule, extracted verbatim, including
+// that a group weight-room session (still `resourceType: "weight_room"`) is
+// quoted per hour.
 function RateCell({
   cents,
   resourceType,
@@ -275,9 +285,7 @@ function RateCell({
       </td>
     );
   }
-  const perHour = resourceType === "weight_room";
-  const displayCents = perHour ? cents * 2 : cents;
-  const unit = perHour ? "/hr" : "/30 min";
+  const { amountCents: displayCents, unit } = cageRateParts(cents, resourceType);
   return (
     <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-muted whitespace-nowrap">
       {formatCents(displayCents)}{" "}

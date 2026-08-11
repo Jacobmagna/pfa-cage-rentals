@@ -37,6 +37,7 @@ import {
   type PaymentEventKind,
   type PaymentTimelineData,
 } from "./payments-timeline";
+import { cageRateParts } from "./rate-display";
 import { formatPfaDate, formatPfaTime12h } from "@/lib/timezone";
 import type { WorkReportData } from "./work-report";
 
@@ -232,7 +233,19 @@ function addDetailSheet(workbook: ExcelJS.Workbook, report: ReportData) {
     // per HOUR (×2); cage/bullpen stay per 30 min. The adjacent "Rate basis"
     // column makes the numeric Rate cell's unit unambiguous per row. This is
     // display-only — totals and the stored snapshot are untouched.
-    const perHour = row.resourceType === "weight_room";
+    //
+    // ⚠️ The rule itself is `cageRateParts` (lib/reports/rate-display.ts), shared
+    // with the Reports screen's `RateCell` and the payment statement's charge
+    // rows. It was written out separately in each of the three, and the
+    // statement's copy DISAGREED (it quoted everything per hour), so one
+    // session's rate read three ways across screen, workbook and printed
+    // statement. Values in this sheet are unchanged — this call is the same
+    // arithmetic, from one place.
+    const { amountCents: rateDisplayCents, unit } = cageRateParts(
+      row.ratePerSlotCents,
+      row.resourceType,
+    );
+    const perHour = unit === "/hr";
     // Group weight-room sessions share the weight_room rate basis (per hr)
     // but must be visually distinguishable in the detail sheet — tag the
     // resource label so a scan of the Resource column separates them from
@@ -250,9 +263,7 @@ function addDetailSheet(workbook: ExcelJS.Workbook, report: ReportData) {
       resource: resourceLabel,
       coach: row.coachName,
       slots: row.slots,
-      rate: perHour
-        ? (row.ratePerSlotCents * 2) / 100
-        : row.ratePerSlotCents / 100,
+      rate: rateDisplayCents / 100,
       rateBasis: perHour ? "per hr" : "per 30 min",
       total: row.totalCents / 100,
       note: row.note ?? "",

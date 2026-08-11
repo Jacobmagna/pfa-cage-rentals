@@ -71,6 +71,9 @@ export type RecentPaymentRow = {
   method: "venmo" | "zelle" | "check" | "cash" | "other";
   direction: PaymentDirection;
   paidAt: Date;
+  // The period this money settles, or null for "no period stated". Never
+  // inferred from paidAt — an untagged row renders as "—" (SPEC §4).
+  coversThrough: Date | null;
   reference: string | null;
   note: string | null;
   status: "pending" | "confirmed";
@@ -155,6 +158,7 @@ export function PaymentsClient({
           method: dialog.row.method,
           direction: dialog.row.direction,
           paidAt: dialog.row.paidAt,
+          coversThrough: dialog.row.coversThrough,
           reference: dialog.row.reference,
           note: dialog.row.note,
         }
@@ -546,10 +550,15 @@ function RecentTable({
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
-          <table className="w-full min-w-[720px]">
+          {/* min-w up from 720px with the added coverage column, so the row
+              scrolls horizontally instead of crushing the two date cells. */}
+          <table className="w-full min-w-[840px]">
             <thead className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted border-b border-line bg-surface-2/50">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">Date</th>
+                <th className="px-4 py-3 text-left font-semibold">
+                  Covers through
+                </th>
                 <th className="px-4 py-3 text-left font-semibold">Coach</th>
                 <th className="px-4 py-3 text-left font-semibold">Direction</th>
                 <th className="px-4 py-3 text-left font-semibold">Method</th>
@@ -571,6 +580,12 @@ function RecentTable({
                   >
                     <td className="px-4 py-3 text-sm font-mono tnum tabular-nums whitespace-nowrap">
                       {formatDate(row.paidAt)}
+                    </td>
+                    {/* An untagged payment shows an em dash, NOT a guessed
+                        date — the statement counts it in no period, and a
+                        stand-in here would hide that from Mark (SPEC §4, §7). */}
+                    <td className="px-4 py-3 text-sm font-mono tnum tabular-nums whitespace-nowrap text-fg-muted">
+                      {row.coversThrough ? formatDate(row.coversThrough) : "—"}
                     </td>
                     <td className="px-4 py-3 text-sm max-w-[14rem]">
                       <span className="block truncate" title={row.coachName}>

@@ -134,6 +134,9 @@ export default async function AdminPaymentsPage() {
         method: coachPayments.method,
         direction: coachPayments.direction,
         paidAt: coachPayments.paidAt,
+        // The period the money settles (nullable — "no period stated"). Shown
+        // as its own column so July money that arrived in August reads as July.
+        coversThrough: coachPayments.coversThrough,
         reference: coachPayments.reference,
         note: coachPayments.note,
         status: coachPayments.status,
@@ -252,6 +255,7 @@ export default async function AdminPaymentsPage() {
     method: p.method,
     direction: p.direction,
     paidAt: p.paidAt,
+    coversThrough: p.coversThrough,
     reference: p.reference,
     note: p.note,
     status: p.status,

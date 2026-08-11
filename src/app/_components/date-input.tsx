@@ -220,6 +220,23 @@ const BASE_STYLES =
 type DateInputProps = {
   /** Hidden-input field name the server reads (same as the old date input). */
   name?: string;
+  /**
+   * OPT-IN second hidden input carrying the RAW typed text (`MM/DD/YYYY`, or a
+   * partial like `07/31/202`), under this field name.
+   *
+   * 🔴 Why it exists. The canonical `name` input carries the ISO, and the ISO is
+   * `""` for anything not a fully valid date — an IMPOSSIBLE date (`02/31/2026`)
+   * and a HALF-TYPED one alike. A server that only sees `""` cannot distinguish
+   * "the user left this blank" from "the user mistyped a date", and for a field
+   * where blank is LEGAL and means something (payments' `covers_through`:
+   * "no period stated") that ambiguity silently threw away a value the user had
+   * already set. Emitting the raw text lets the boundary reject a typo and still
+   * honour a real blank.
+   *
+   * ⚠️ Opt-in on purpose. Omit it and this component emits exactly the fields it
+   * always has, so every existing caller's server contract is untouched.
+   */
+  rawName?: string;
   /** Controlled ISO value (`YYYY-MM-DD` or ""). */
   value?: string;
   /** Uncontrolled initial ISO value (`YYYY-MM-DD`). */
@@ -236,6 +253,7 @@ type DateInputProps = {
 
 export function DateInput({
   name,
+  rawName,
   value,
   defaultValue,
   onChange,
@@ -681,6 +699,11 @@ export function DateInput({
       ) : null}
 
       {name ? <input type="hidden" name={name} value={iso} /> : null}
+      {/* The raw typed text, only when a caller asked for it. `text` and not
+          `fillCurrentYear(text, …)`: this input's job is to answer "was the box
+          empty?", and the year fill turns "07/31" into a longer string without
+          changing that answer. */}
+      {rawName ? <input type="hidden" name={rawName} value={text} /> : null}
     </div>
   );
 }

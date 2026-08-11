@@ -19,6 +19,7 @@ import { FileText, Search } from "lucide-react";
 import { MultiSelect } from "@/app/_components/multi-select";
 import { DateInput } from "@/app/_components/date-input";
 import type { ReportTab } from "@/lib/reports/tabs";
+import type { StatementAccount } from "@/lib/statement/types";
 
 type FilterValues = {
   from: string;
@@ -51,12 +52,28 @@ export function FiltersForm({
   programs,
   values,
   activeTab,
+  account,
 }: {
   coaches: CoachOption[];
   programs: ProgramOption[];
   values: FilterValues;
   /** Carried through the submit so applying filters stays on this tab. */
   activeTab: ReportTab;
+  /**
+   * Carried through the submit so applying filters stays on this ACCOUNT.
+   *
+   * 🔴 View state, exactly like `activeTab`, and for a sharper reason: without
+   * it a GET submit rebuilt the query string from the form's fields alone and
+   * DROPPED `?account=`. Reading a coach's Work pay statement, adjusting the
+   * dates and pressing Apply landed on Cage rentals — an unrequested DIRECTION
+   * change on a money document, from a button labelled "Apply filters".
+   *
+   * ⚠️ Being on the form does NOT make it a filter. It stays out of
+   * `NormalizedFilters` and out of `filtersToQueryString` (see
+   * `statement/types.ts`), so it can never narrow a query, a workbook sheet or
+   * a download — same contract `tab` has had all along.
+   */
+  account: StatementAccount;
 }) {
   const isTypeChecked = (t: (typeof ALL_RESOURCE_TYPES)[number]) =>
     values.resourceTypes.length === 0 || values.resourceTypes.includes(t);
@@ -77,7 +94,14 @@ export function FiltersForm({
           It is carried by the SUBMIT BUTTONS (name="tab") rather than a hidden
           input, because only the clicked button's name/value is submitted —
           that is what lets "See statement" jump tabs while "Apply filters"
-          stays put, with no JS and no duplicate `tab` param to disambiguate. */}
+          stays put, with no JS and no duplicate `tab` param to disambiguate.
+
+          `account` rides along the same way but as ONE HIDDEN INPUT, because
+          unlike `tab` both buttons agree about it — so a hidden input cannot
+          submit the key twice, and `normalizeStatementAccount` takes the first
+          value, which would make a duplicate a silent wrong-direction bug. */}
+      <input type="hidden" name="account" value={account} />
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
         <Field label="From">
           <DateInput

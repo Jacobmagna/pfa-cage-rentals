@@ -68,6 +68,7 @@ describe("reportTabLabel", () => {
     ["cage", "Cage rentals"],
     ["work", "Work hours"],
     ["payments", "Payments"],
+    ["statements", "Statements"],
   ])("labels %s as %s", (tab, label) => {
     expect(reportTabLabel(tab)).toBe(label);
   });
@@ -80,7 +81,16 @@ describe("reportTabLabel", () => {
 });
 
 describe("REPORT_TABS", () => {
-  it("is exactly the three tabs the spec names, in display order", () => {
-    expect([...REPORT_TABS]).toEqual(["cage", "work", "payments"]);
+  it("is exactly the four tabs the spec names, in display order", () => {
+    // FOUR since 088af83 — payment-statement SPEC §8/§16.5 added Statements
+    // as a fourth sub-tab, and that is a settled decision. Display order is
+    // asserted, not just membership: the tab strip maps this array directly,
+    // so a reorder is a visible change to a money screen's navigation.
+    expect([...REPORT_TABS]).toEqual([
+      "cage",
+      "work",
+      "payments",
+      "statements",
+    ]);
   });
 });

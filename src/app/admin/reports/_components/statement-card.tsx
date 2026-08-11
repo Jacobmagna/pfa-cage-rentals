@@ -43,6 +43,7 @@
 import { AlertTriangle, Printer } from "lucide-react";
 import Link from "next/link";
 import { formatDollarsExact } from "@/lib/format-money";
+import { CAGE_SLOT_EXPLAINER } from "@/lib/reports/rate-display";
 import {
   STATEMENT_ACCOUNTS,
   statementAccountLabel,
@@ -86,10 +87,31 @@ export function StatementCard({
           <PrintButton />
         </div>
 
+        {/* 🔴 THE PERIOD COMES FIRST — SPEC §2 rule 2, "one period, stated
+            once, AT THE TOP", and the §5.0 mock puts this line above the two
+            balances for the same reason.
+
+            It shipped below them: the masthead that states the period sits
+            inside the document, under the switcher and the chips, so this block
+            opened with "Work pay · PFA owes Alex Milone · $660.00" and the
+            nearest date was three controls away. A dated balance with no date
+            near it is the one thing a statement reader will not tolerate, and it
+            is a PAYOUT figure on the work account — §11's most expensive
+            mistake. Screen-only (`data-print-hide` on the wrapper), so this
+            never reached paper; the printed masthead was always correct. */}
+        <p className="mt-4 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-fg-muted">
+            Statement period
+          </span>
+          <span className="text-sm font-medium tabular-nums">
+            {pair.periodLabel}
+          </span>
+        </p>
+
         {/* Both balances, each with its direction in words. This is the
             "clear on who paid who in the same area" half of the design —
             and there is deliberately no total beneath them. */}
-        <dl className="mt-4 grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-2">
+        <dl className="mt-2 grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-2">
           {STATEMENT_ACCOUNTS.map((key) => {
             const s = key === "cage" ? pair.cage : pair.work;
             return (
@@ -106,9 +128,17 @@ export function StatementCard({
                 <dd className="mt-1 flex items-baseline justify-between gap-3">
                   <span className="text-xs text-fg-subtle">
                     {s.directionLabel}
+                    {/* And each cell carries its own "as of", so the figure is
+                        still dated if the line above it scrolls away or a
+                        screenshot crops it — the same reason the printed
+                        masthead repeats on page 2. */}
+                    <span className="mt-0.5 block text-[10px] text-fg-muted">
+                      as of {pair.periodEndShort}
+                    </span>
                   </span>
                   <span className="text-lg font-semibold tabular-nums tracking-tight">
                     {formatDollarsExact(Math.abs(s.closingCents))}
+                    <CreditBadge cents={s.closingCents} />
                   </span>
                 </dd>
               </div>
@@ -184,15 +214,65 @@ function StatementDocument({
   pair: StatementPair;
   statement: Statement;
 }) {
-  const chargeTotal = statement.chargesCents;
-  const pendingRows = statement.paymentRows.filter((r) => r.pending);
-  const settledRows = statement.paymentRows.filter((r) => !r.pending);
-  const isCredit = statement.closingCents < 0;
-
   return (
     <div className="p-5 print:p-0">
-      {/* Document masthead. Re-states coach + period + DIRECTION so a printed
-          page that has left its context still says who owes whom. */}
+      {/* 🔴 A LAYOUT TABLE, AND ONLY BECAUSE PRINT LEAVES NO OTHER OPTION.
+          SPEC §9: "print the period and the coach name in a header that
+          SURVIVES A PAGE BREAK." Alex's own July statement is already two
+          printed pages, and before this the masthead lived on page 1 only — so
+          page 2 carried the payments table, the reconciliation and the current
+          balance with NO coach name, NO period and NO direction on it. A sheet
+          of money figures about nobody is precisely the §5.0 failure ("a bare
+          bold figure with no direction on it") arriving by a different route,
+          and on the WORK account it is a payout figure, which §11 calls the
+          most expensive mistake available in this feature. Found by rendering
+          the PDF and reading page 2; every assertion was green.
+
+          A real <thead> is the ONLY mechanism Chromium actually repeats. Both
+          alternatives were TESTED and rejected rather than assumed:
+          `display: table-header-group` on a plain <header> does not repeat (and
+          it wrecked the detail table's column widths), and Chromium supports
+          neither CSS named strings nor running @page margin boxes.
+
+          `role="presentation"` because this asserts no tabular relationship —
+          it is a paged-media mechanism, not data. `table-fixed` is load-bearing
+          too: with `auto` layout the cell would stretch to the detail table's
+          `min-w-[560px]` and put a horizontal scrollbar on the whole page at
+          mobile widths instead of letting the inner `overflow-x-auto` scroll. */}
+      <table role="presentation" className="w-full table-fixed">
+        <thead>
+          <tr>
+            <td className="p-0 align-top">
+              <StatementMasthead pair={pair} statement={statement} />
+            </td>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td className="p-0 align-top">
+              <StatementBody pair={pair} statement={statement} />
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Coach + period + DIRECTION, re-stated on EVERY printed page (see the table
+ * comment above). Split out only so the repeating region is one component and
+ * cannot drift from the body's idea of which account it is describing.
+ */
+function StatementMasthead({
+  pair,
+  statement,
+}: {
+  pair: StatementPair;
+  statement: Statement;
+}) {
+  return (
+    <>
       <header className="break-inside-avoid border-b border-line pb-4">
         <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-3">
           <div className="min-w-0">
@@ -229,7 +309,35 @@ function StatementDocument({
           </dl>
         </div>
       </header>
+    </>
+  );
+}
 
+/**
+ * Everything BELOW the repeating masthead.
+ *
+ * ⚠️ The arithmetic panel lives here and NOT in the header, deliberately: a
+ * balance re-printed at the top of page 2 reads as a second, different balance,
+ * which is worse than the anonymity this split was made to fix. Only the
+ * identity — coach, period, direction — repeats.
+ */
+function StatementBody({
+  pair,
+  statement,
+}: {
+  pair: StatementPair;
+  statement: Statement;
+}) {
+  const chargeTotal = statement.chargesCents;
+  const pendingRows = statement.paymentRows.filter((r) => r.pending);
+  const settledRows = statement.paymentRows.filter((r) => !r.pending);
+  // Cage rows carry a slot count; work rows are `null` because that ledger has
+  // no slot model. Derived from the ROWS rather than from `statement.account` so
+  // the column follows the data it describes.
+  const hasSlots = statement.chargeRows.some((r) => r.slots !== null);
+
+  return (
+    <>
       {/* The arithmetic, in the order Citi uses. BOXED so the narrow column
           reads as a deliberate summary panel rather than a ragged half-width
           list beside the full-width tables below — and so the one thing Mark
@@ -246,11 +354,7 @@ function StatementDocument({
           <dt className="font-semibold">{statement.closingLabel}</dt>
           <dd className="text-lg font-bold tabular-nums tracking-tight">
             {formatDollarsExact(Math.abs(statement.closingCents))}
-            {isCredit ? (
-              <span className="ml-1.5 text-xs font-semibold uppercase tracking-wider text-fg-muted">
-                credit
-              </span>
-            ) : null}
+            <CreditBadge cents={statement.closingCents} />
           </dd>
         </div>
       </dl>
@@ -300,7 +404,22 @@ function StatementDocument({
             </dl>
 
             {/* Itemized, INLINE — not behind a disclosure. A statement that
-                gets printed must carry its own detail. */}
+                gets printed must carry its own detail.
+
+                🔴 THE SLOTS COLUMN IS LOAD-BEARING, NOT DECORATION. Without it
+                an off-slot booking printed `9:14 – 10:01 AM · $22.00 /30 min ·
+                $66.00` and the only arithmetic a reader could do — 47 minutes
+                against the rate — came out roughly HALF the amount charged. The
+                slot count is the term that reconciles them, and the explainer
+                beneath the table supplies the one fact it needs (a slot is 30
+                minutes; bookings bill in whole slots). SPEC §5.3 required "the
+                existing Cage Detail column set", which has this column; the
+                first build dropped it.
+
+                Rendered only when the account HAS a slot model. Work pay is
+                per-hour × exact duration or a flat per-session rate, so a
+                column of dashes there would invent a unit that ledger never
+                charges in. */}
             <div className="print-flow mt-4 overflow-x-auto rounded-lg border border-line">
               <table className="print-flow w-full min-w-[560px] text-xs">
                 <thead className="border-b border-line bg-surface-2/50 text-[10px] font-semibold uppercase tracking-wider text-fg-muted">
@@ -309,7 +428,8 @@ function StatementDocument({
                     <Th>Day</Th>
                     <Th>Time</Th>
                     <Th>Description</Th>
-                    <Th>Rate</Th>
+                    {hasSlots ? <Th align="right">Slots</Th> : null}
+                    <Th align="right">Rate</Th>
                     <Th align="right">Amount</Th>
                   </tr>
                 </thead>
@@ -327,7 +447,15 @@ function StatementDocument({
                         {row.timeRange}
                       </Td>
                       <Td>{row.description}</Td>
-                      <Td className="tabular-nums text-fg-muted whitespace-nowrap">
+                      {hasSlots ? (
+                        <Td align="right" className="tabular-nums">
+                          {row.slots ?? "—"}
+                        </Td>
+                      ) : null}
+                      <Td
+                        align="right"
+                        className="tabular-nums text-fg-muted whitespace-nowrap"
+                      >
                         {row.rateLabel}
                       </Td>
                       <Td align="right" className="tabular-nums font-medium">
@@ -338,13 +466,36 @@ function StatementDocument({
                 </tbody>
               </table>
             </div>
+
+            {/* The one fact the Slots column needs to be usable. Printed, not a
+                tooltip: the reader who most needs it is holding paper. */}
+            {hasSlots ? (
+              <p className="mt-2 text-[11px] leading-relaxed text-fg-subtle">
+                {CAGE_SLOT_EXPLAINER}
+              </p>
+            ) : null}
           </>
         )}
       </Block>
 
       {/* ── Payments ────────────────────────────────────────────────── */}
       <Block title="Payments & credits covering this period">
-        {settledRows.length === 0 ? (
+        {/* 🔴 The empty state is keyed on the WHOLE payment block, not on the
+            settled rows alone. Keyed on `settledRows` it contradicted the block
+            directly beneath it: a period with only pending payments printed "No
+            payments covering this period have been recorded." immediately above
+            a Pending block listing them. On a money document a sentence that the
+            next paragraph disproves costs more than no sentence at all — it
+            makes the reader stop trusting the figures too.
+
+            Three states, each true: rows to show, nothing at all, or nothing
+            CONFIRMED but something pending. */}
+        {settledRows.length === 0 && pendingRows.length > 0 ? (
+          <Empty>
+            No confirmed payments covering this period — see pending below,
+            which is not counted in the balance.
+          </Empty>
+        ) : settledRows.length === 0 ? (
           <Empty>
             No payments covering this period have been recorded.
           </Empty>
@@ -406,6 +557,18 @@ function StatementDocument({
             <p className="text-[10px] font-semibold uppercase tracking-wider text-fg-muted">
               Pending — not included in the balance above
             </p>
+            {/* A pending payment with NO coverage date is listed here too (see
+                the engine's untagged-pending branch): it belongs to no period,
+                so it appears on every period's statement rather than one, and
+                the note says why it is here at all. Before this it appeared
+                NOWHERE, though /admin/payments showed it. */}
+            {pendingRows.some((r) => r.coversThrough === null) ? (
+              <p className="mt-1 text-[11px] text-fg-subtle">
+                One or more of these states no period. It is shown so it is not
+                lost, and it is counted in no period&rsquo;s figures — give it a
+                &ldquo;covers through&rdquo; date and confirm it to place it.
+              </p>
+            ) : null}
             <ul className="mt-2 space-y-1 text-xs">
               {pendingRows.map((row, i) => (
                 <li
@@ -423,7 +586,15 @@ function StatementDocument({
                         {" "}
                         · covers through {row.coversThrough}
                       </span>
-                    ) : null}
+                    ) : (
+                      // Said out loud rather than left blank: a row with no
+                      // coverage date beside rows that have one reads as a
+                      // rendering gap unless the absence is stated.
+                      <span className="italic text-fg-subtle">
+                        {" "}
+                        · no period stated
+                      </span>
+                    )}
                   </span>
                   <span className="tabular-nums">
                     {formatDollarsExact(row.amountCents)}
@@ -487,6 +658,7 @@ function StatementDocument({
             </dt>
             <dd className="font-semibold tabular-nums">
               {formatDollarsExact(Math.abs(statement.currentBalanceCents))}
+              <CreditBadge cents={statement.currentBalanceCents} />
             </dd>
           </div>
         </dl>
@@ -498,12 +670,67 @@ function StatementDocument({
           statement.
         </p>
       </Block>
-    </div>
+    </>
   );
 }
 
 /* ── small pieces ─────────────────────────────────────────────────────── */
 
+/**
+ * SPEC §5.2 — "`$40.00 credit` with the direction stated", and it is BOTH, not
+ * either. The engine keeps cents signed and flips `directionLabel` when a
+ * balance goes negative, so the sentence is already correct; every place this
+ * file renders `Math.abs` therefore has to say WHY the sign was dropped, or an
+ * overpaid account renders byte-identical to a normally-owed one and the only
+ * difference is a sentence in a different element.
+ *
+ * 🔴 ONE badge, three call sites (the two header balance cells, the arithmetic
+ * block's closing line, and the reconciliation block's current balance). Two of
+ * those shipped bare in the mock while the third carried an inline badge — one
+ * document disagreeing with itself about the same rule. A component rather than
+ * a repeated span so a future fourth money cell inherits the idiom instead of
+ * inventing a second one.
+ *
+ * Renders nothing at zero: square is not a credit.
+ */
+function CreditBadge({ cents }: { cents: number }) {
+  if (cents >= 0) return null;
+  return (
+    <span className="ml-1.5 text-xs font-semibold uppercase tracking-wider text-fg-muted">
+      credit
+    </span>
+  );
+}
+
+/**
+ * One row of a printed arithmetic column.
+ *
+ * 🔴 THE PRESENCE OF `sign` IS WHAT DISTINGUISHES THE TWO KINDS OF FIGURE HERE,
+ * and the distinction decides where a credit marker belongs:
+ *
+ *   · **No `sign` → a signed BALANCE.** Exactly two rows in this document:
+ *     "Previous balance (as of …)" and the reconciliation panel's restated
+ *     closing balance. Both can legitimately be negative — a coach who prepaid
+ *     in June opens July at −$40 — so both get the marker. This is the guard,
+ *     and it is live: without it, the previous-balance line printed "$40.00" for
+ *     $40 of CREDIT, asserting the wrong direction on the statement's first
+ *     line, and every figure below it derives from that line.
+ *
+ *   · **With `sign` → a MAGNITUDE beside an explicit operator** (new charges,
+ *     payments covering, charges after, payments with no period stated). Each is
+ *     a sum of non-negative amounts — `amountCents` is `.positive()` in the
+ *     payment schema, and a charge is slots × a non-negative snapshot rate — so
+ *     none of them can go negative. A badge on these rows would be dead code
+ *     today and AMBIGUOUS if it ever fired: "− $40.00 credit" is a double
+ *     negative that reads as +$40 to a careful reader and −$40 to everyone else.
+ *     So they get no badge.
+ *
+ * The magnitude rows are not left unguarded, though: their OPERATOR FOLLOWS THE
+ * SIGN. If a negative ever reaches one, the row prints "− $40.00" instead of
+ * "+ $40.00" and the column still foots, rather than silently being wrong by
+ * twice the amount. That keeps SPEC §2 rule 1 — the arithmetic is visible and it
+ * ties out — true by construction instead of by assumption about upstream data.
+ */
 function Line({
   label,
   cents,
@@ -515,6 +742,11 @@ function Line({
   sign?: "+" | "−";
   muted?: boolean;
 }) {
+  // Unreachable with today's inputs (see above) and deliberately not an
+  // exception: a statement that throws is a statement Mark cannot read at all,
+  // and the honest fallback for a money column is one that still adds up.
+  const operator = sign === undefined ? undefined : cents < 0 ? flipSign(sign) : sign;
+
   return (
     <div className="flex items-baseline justify-between gap-4 border-b border-line/60 py-1.5">
       <dt className={muted ? "text-fg-muted" : undefined}>{label}</dt>
@@ -526,13 +758,20 @@ function Line({
           .filter(Boolean)
           .join(" ")}
       >
-        {sign ? (
-          <span className="mr-1.5 text-fg-muted">{sign}</span>
+        {operator ? (
+          <span className="mr-1.5 text-fg-muted">{operator}</span>
         ) : null}
         {formatDollarsExact(Math.abs(cents))}
+        {/* Balance rows only — an operator row carries its sign in the
+            operator, so a badge there would be the double negative. */}
+        {sign === undefined ? <CreditBadge cents={cents} /> : null}
       </dd>
     </div>
   );
+}
+
+function flipSign(sign: "+" | "−"): "+" | "−" {
+  return sign === "+" ? "−" : "+";
 }
 
 function Block({

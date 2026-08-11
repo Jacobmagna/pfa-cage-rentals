@@ -19,8 +19,37 @@ export const STATEMENT_ACCOUNTS: readonly StatementAccount[] = [
   "work",
 ] as const;
 
+/** Landing account — the receivable side, the one whose data is complete. */
+export const DEFAULT_STATEMENT_ACCOUNT: StatementAccount = "cage";
+
 export function statementAccountLabel(account: StatementAccount): string {
   return account === "cage" ? "Cage rentals" : "Work pay";
+}
+
+/**
+ * Resolves the `?account=` query param to a known account (SPEC §5.0).
+ *
+ * 🔴 THE SELECTED ACCOUNT IS NOT PART OF `NormalizedFilters`, and must never
+ * become part of it. This is the same separation `reports/tabs.ts` documents for
+ * `tab`, for the same safety reason and not for tidiness: the account picks
+ * which of two already-computed statements is DISPLAYED, so if it ever reached
+ * the filter object it could narrow a fetch, a workbook sheet, or a download —
+ * and a money surface that quietly shows one direction's rows while claiming to
+ * show a period is worse than one that shows nothing.
+ *
+ * Fallback shape mirrors `normalizeReportTab` deliberately: absent, empty,
+ * whitespace, a typo, a hand-edited URL and a repeated param all resolve to the
+ * default rather than rendering an empty document. Case-sensitive, like the tab.
+ */
+export function normalizeStatementAccount(
+  input: string | string[] | undefined,
+): StatementAccount {
+  const raw = (Array.isArray(input) ? input[0] : input)?.trim();
+  return isStatementAccount(raw) ? raw : DEFAULT_STATEMENT_ACCOUNT;
+}
+
+function isStatementAccount(v: string | undefined): v is StatementAccount {
+  return v !== undefined && (STATEMENT_ACCOUNTS as readonly string[]).includes(v);
 }
 
 /**
@@ -50,11 +79,33 @@ export type StatementChargeRow = {
   /** "Cage 2" · "Weight Room (Group)" · "HS Summer Program-Throwing" */
   description: string;
   /**
-   * "$44.00/hr" · "$100.00/session" · "No rate". Never "$0.00/hr" for a
-   * missing rate — a log with no stamped rate says so, because a rendered
-   * zero reads as a deliberate decision to pay nothing.
+   * Cage account: `cageRateLabel` — "$22.00 /30 min" for cage and bullpen,
+   * "$14.00 /hr" for the weight room. 🔴 That split is the shipped Reports
+   * screen's (`RateCell`) and is reused from one module rather than restated
+   * here, because for a while this said "/hr" for everything and the same
+   * session's rate read differently on two surfaces.
+   *
+   * Work account: "$30.00/hr" · "$100.00/session" · "No rate". Never "$0.00/hr"
+   * for a MISSING rate — a log with no stamped rate says so, because a rendered
+   * zero reads as a deliberate decision to pay nothing. (A $0 CAGE rate does
+   * print a figure: that column is NOT NULL, so zero there is a comp.)
    */
   rateLabel: string;
+  /**
+   * Billed 30-minute slots, or null on the work account, which has no slot
+   * model.
+   *
+   * 🔴 REQUIRED FOR THE ROW TO FOOT, not decoration. A cage booking bills in
+   * WHOLE slots — `slotsBetween` floors the start and ceils the end, so
+   * 9:14–10:01 bills 9:00–10:30 — and without the slot count printed, that row
+   * read `$44.00/hr · $66.00` against 47 minutes of wall clock. A coach doing
+   * that multiplication gets $34.47 and concludes he was charged twice over,
+   * and nothing else on the page could tell him otherwise. `amount = slots ×
+   * the printed rate` (halved when the rate is quoted per hour) is the identity
+   * the document now supports, and SPEC §5.3's "reuse the existing Cage Detail
+   * column set" already called for this column.
+   */
+  slots: number | null;
   amountCents: number;
 };
 
@@ -139,4 +190,44 @@ export type StatementPair = {
   periodEndShort: string;
   cage: Statement;
   work: Statement;
+};
+
+/**
+ * One row of the many-coach roll-up (SPEC §8.1) — the zero-or-many-coaches
+ * case, which is the USUAL one because Mark arrives from the Reports filter bar.
+ *
+ * 🔴 Declared HERE, once. It previously existed three times: in `engine.ts`, in
+ * `statement-roster.tsx`, and as a near-copy in the (now deleted) fixture — two
+ * of which named the same field `unappliedCents` while describing it as ranged
+ * in one place and all-time in the other. A money row whose two declarations
+ * disagree about what a column MEANS is the drift this feature keeps guarding
+ * against, so the shape lives in the contract module that both the pure engine
+ * and the React component can import: the engine may not import a component,
+ * and the component must not own the engine's output shape.
+ *
+ * 🔴 There are deliberately only TWO balance fields and no third that adds
+ * them. The directions are opposite and this codebase forbids summing them.
+ */
+export type StatementRosterEntry = {
+  coachId: string;
+  coachName: string;
+  /** RANGED + NETTED closing balance. Positive = coach owes PFA. */
+  cageBalanceCents: number;
+  /** RANGED + NETTED closing balance. Positive = PFA owes coach. */
+  workBalanceCents: number;
+  /**
+   * Payments carrying no covers-through date.
+   *
+   * ⚠️ ALL-TIME, not ranged — and the column is labelled "all time" on screen
+   * for exactly this reason. An untagged payment belongs to no period, so there
+   * is no honest way to filter it BY one; a "ranged unapplied" figure would be
+   * inventing the very placement the null is there to refuse.
+   *
+   * Both directions are summed here, which is NOT a violation of the
+   * never-net-the-two-ledgers rule: this is a count of MONEY THAT NEEDS A DATE,
+   * not a balance. It answers "how much is untagged" (the nag that fixes the
+   * data), not "who owes whom" — no direction is asserted about it, and it is
+   * never combined with either balance column.
+   */
+  unappliedCents: number;
 };

@@ -22,11 +22,29 @@ import {
 export function ReportsTabs({
   activeTab,
   filterQueryString,
+  account,
+  basePath = "/admin/reports",
 }: {
   activeTab: ReportTab;
   /** Current filters, already serialized. Must NOT contain `tab`. */
   filterQueryString: string;
+  /**
+   * The Statements tab's selected account, carried through so leaving the tab
+   * and coming back does not silently flip which of a coach's two opposite
+   * ledgers is on screen. Same reasoning as the hidden `account` input on the
+   * filter form: this is VIEW state, and — like `tab` — it is deliberately not
+   * part of `NormalizedFilters`, so it can never narrow a query or a workbook.
+   * Omitted on the other three tabs, which have no account.
+   */
+  account?: string;
+  /**
+   * Route the tabs point at. Defaults to the real page; parameterised only so
+   * a caller can render this component verbatim instead of growing a second
+   * copy of the tab strip that would drift from it.
+   */
+  basePath?: string;
 }) {
+  const accountParam = account ? `&account=${encodeURIComponent(account)}` : "";
   return (
     <nav aria-label="Report sections" className="border-b border-line mb-6">
       <ul className="flex gap-1 overflow-x-auto whitespace-nowrap -mb-px">
@@ -35,7 +53,7 @@ export function ReportsTabs({
           return (
             <li key={tab}>
               <Link
-                href={`/admin/reports?${filterQueryString}&tab=${tab}`}
+                href={`${basePath}?${filterQueryString}&tab=${tab}${accountParam}`}
                 aria-current={isActive ? "page" : undefined}
                 className={[
                   "inline-flex items-center px-3 sm:px-4 py-3 text-sm border-b-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold rounded-sm",

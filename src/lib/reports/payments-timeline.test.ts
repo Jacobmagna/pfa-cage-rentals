@@ -36,6 +36,7 @@ function row(overrides: Partial<PaymentAuditRow> = {}): PaymentAuditRow {
     paymentCoachId: "coach-1",
     paymentMethod: "check",
     paymentPaidAt: PAID_AT,
+    paymentCoversThrough: null,
     paymentReference: null,
     paymentNote: null,
     ...overrides,
@@ -166,6 +167,126 @@ describe("buildPaymentTimeline — event shaping", () => {
     expect(events[0].changes).toEqual([
       { label: "Amount", from: "$1,800.00", to: "$1,900.50" },
     ]);
+  });
+
+  // ── payment-statement SPEC §8 — THE COVERAGE DATE IS THE AUDITED FIELD ────
+  //
+  // 🔴 `CHANGE_FIELDS` is an ALLOWLIST, and `coversThrough` shipped missing
+  // from it. `coversThrough` is the one field in the whole statement feature
+  // that MOVES MONEY BETWEEN PERIODS — setting Alex Milone's coverage date to
+  // Jul 31 takes $660 out of "no period stated" and onto July, flipping July's
+  // closing balance from $660 owed to $0. With the key absent, that edit
+  // produced an `edited` event whose `changes` array was EMPTY, and
+  // payments-preview.tsx guards its change list on `changes.length > 0` — so
+  // the row rendered "Mark edited David Lusk $1,800.00" and could not say what
+  // changed. This file's own `paidAt` comment already names that outcome as
+  // the thing to avoid: it "tells a reader the system changed something and
+  // cannot say what, which is worse than silence on a money screen."
+  //
+  // All three transitions are covered because they fail differently:
+  // a first-time SET is the one that must not be swallowed by the
+  // `from === to` no-op rule, and a CLEAR is the one whose "from" side is the
+  // only record that a period was ever stated.
+  describe("🔴 coversThrough is narrated (payment-statement SPEC §8)", () => {
+    function editedChanges(
+      before: Record<string, unknown>,
+      after: Record<string, unknown>,
+    ) {
+      const { events } = buildPaymentTimeline([
+        row({ action: "update", diff: { before, after } }),
+      ]);
+      expect(events[0].kind).toBe("edited");
+      return events[0].changes;
+    }
+
+    it("narrates a FIRST-TIME set as — → the date", () => {
+      // Alex's payment: recorded with no period, then given one.
+      expect(
+        editedChanges(
+          { coversThrough: null },
+          { coversThrough: "2026-07-31T07:00:00.000Z" },
+        ),
+      ).toEqual([
+        { label: "Covers through", from: null, to: "2026-07-31" },
+      ]);
+    });
+
+    it("narrates CLEARING a coverage date as the date → —", () => {
+      // SPEC §12.1's clearing case, seen from the audit surface: the "from"
+      // side is the only surviving record that a period was ever stated.
+      expect(
+        editedChanges(
+          { coversThrough: "2026-07-31T07:00:00.000Z" },
+          { coversThrough: null },
+        ),
+      ).toEqual([
+        { label: "Covers through", from: "2026-07-31", to: null },
+      ]);
+    });
+
+    it("narrates MOVING a coverage date from one period to another", () => {
+      // The most consequential edit available: this single change moves $660
+      // off July's statement and onto June's.
+      expect(
+        editedChanges(
+          { coversThrough: "2026-07-31T07:00:00.000Z" },
+          { coversThrough: "2026-06-30T07:00:00.000Z" },
+        ),
+      ).toEqual([
+        { label: "Covers through", from: "2026-07-31", to: "2026-06-30" },
+      ]);
+    });
+
+    it("🔴 an edit that ONLY moved the coverage date is never a silent row", () => {
+      // The exact shipped defect: a lone coversThrough key in the diff. The
+      // event says money was edited, so it has to be able to say what.
+      const changes = editedChanges(
+        { coversThrough: null },
+        { coversThrough: "2026-07-31T07:00:00.000Z" },
+      );
+      expect(changes.length).toBeGreaterThan(0);
+    });
+
+    it("renders the PFA calendar day, not the UTC one", () => {
+      // PFA-midnight Aug 1 is 2026-08-01T07:00:00Z; a naive ISO slice would
+      // agree here. PFA 5pm on Jul 31 is 2026-08-01T00:00:00Z, where it would
+      // NOT — and reporting the wrong DAY is the whole month-boundary failure.
+      expect(
+        editedChanges(
+          { coversThrough: null },
+          { coversThrough: "2026-08-01T00:00:00.000Z" },
+        ),
+      ).toEqual([
+        { label: "Covers through", from: null, to: "2026-07-31" },
+      ]);
+    });
+
+    it("drops a coverage change that renders identically on both sides", () => {
+      // Same PFA day, different instant (a re-save through the date picker).
+      // Same rule `paidAt` already follows, for the same reason.
+      expect(
+        editedChanges(
+          { coversThrough: "2026-07-31T07:00:00.000Z" },
+          { coversThrough: "2026-07-31T18:30:00.000Z" },
+        ),
+      ).toEqual([]);
+    });
+
+    it("narrates a coverage change ALONGSIDE the other fields, in order", () => {
+      const changes = editedChanges(
+        { amountCents: 180000, paidAt: "2026-08-03T19:00:00.000Z", coversThrough: null },
+        {
+          amountCents: 66000,
+          paidAt: "2026-08-07T19:00:00.000Z",
+          coversThrough: "2026-07-31T07:00:00.000Z",
+        },
+      );
+      expect(changes.map((c) => c.label)).toEqual([
+        "Amount",
+        "Paid on",
+        "Covers through",
+      ]);
+    });
   });
 
   it("does not attach a change list to non-edit events", () => {

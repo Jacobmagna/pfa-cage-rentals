@@ -85,6 +85,7 @@ export async function fetchPaymentTimelineRows(
       paymentCoachId: coachPayments.coachId,
       paymentMethod: coachPayments.method,
       paymentPaidAt: coachPayments.paidAt,
+      paymentCoversThrough: coachPayments.coversThrough,
       paymentReference: coachPayments.reference,
       paymentNote: coachPayments.note,
     })

@@ -1,0 +1,1 @@
+ALTER TABLE "coach_payments" ADD COLUMN "covers_through" timestamp;

@@ -130,3 +130,38 @@ button,
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
 }
+
+/* ─── Print: the per-coach STATEMENT is a document, not a screenshot of an app.
+   payment-statement SPEC §9. Print is the whole delivery mechanism for it
+   (Mark prints or saves as PDF and forwards it himself), so anything that is
+   app chrome has to leave the page, and the paper has to be white rather than
+   the warm page wash.
+
+   Scoped to a `printing-document` marker on <body> so this NEVER changes how
+   any other page prints — every rule below is inert unless a page opts in. */
+@media print {
+  /* The app paints `bg-page` (a warm wash) on <body>; on paper that prints as
+     a grey band wherever content runs out. Force white on both html and body —
+     a Tailwind class on body needs !important to lose. */
+  html:has(body.printing-document),
+  body.printing-document {
+    background: #fff !important;
+  }
+  /* Drop the shell's min-height so a short statement doesn't drag a full
+     viewport of background onto a second sheet. */
+  body.printing-document {
+    min-height: 0 !important;
+  }
+  /* App chrome and anything else explicitly marked screen-only. Matched by an
+     explicit attribute rather than by tag/DOM shape: the statement itself uses
+     <header> and <nav>, so a structural selector would eat the document. */
+  body.printing-document [data-print-hide] {
+    display: none !important;
+  }
+  /* Never carry a scroll container onto paper — a clipped table is a clipped
+     money figure, and a right-clipped direction label is the 40bf31c defect. */
+  body.printing-document .print-flow {
+    overflow: visible !important;
+    max-width: none !important;
+  }
+}

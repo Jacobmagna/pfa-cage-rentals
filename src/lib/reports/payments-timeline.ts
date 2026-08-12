@@ -99,6 +99,7 @@ export type PaymentCurrentValues = {
   method: string;
   direction: PaymentDirection;
   paidAt: Date;
+  coversThrough: Date | null;
   reference: string | null;
   note: string | null;
 };
@@ -141,6 +142,10 @@ export type PaymentAuditRow = {
   paymentCoachId: string | null;
   paymentMethod: string | null;
   paymentPaidAt: Date | null;
+  // Doubly nullable: null because the leftJoin found no payment row, OR
+  // because the payment genuinely states no coverage period. Both collapse
+  // to "no period stated", which is why readCurrent doesn't gate on it.
+  paymentCoversThrough: Date | null;
   paymentReference: string | null;
   paymentNote: string | null;
 };
@@ -258,6 +263,11 @@ function readCurrent(row: PaymentAuditRow): PaymentCurrentValues | null {
     method: row.paymentMethod,
     direction: row.paymentDirection,
     paidAt: row.paymentPaidAt,
+    // Carried so the shared edit dialog opens on the LIVE coverage period.
+    // Dropping it would make the dialog's blank field submit an explicit null
+    // and silently clear a period Mark had set — the same SPEC §12.1 failure,
+    // just arrived at from the reports tab instead of the payments page.
+    coversThrough: row.paymentCoversThrough,
     reference: row.paymentReference,
     note: row.paymentNote,
   };
@@ -282,7 +292,25 @@ export function deriveEventKind(
   return becameConfirmed ? "confirmed" : "edited";
 }
 
-/** Fields worth narrating, in display order. Anything else is ignored. */
+/**
+ * Fields worth narrating, in display order. Anything else is ignored.
+ *
+ * 🔴 THIS IS AN ALLOWLIST, so a new auditable column on `coach_payments` is
+ * INVISIBLE here until it is added. That is not a theoretical risk — it is a
+ * shipped defect: `coversThrough` (payment-statement SPEC §4) went in without a
+ * row here, and because `payments-preview.tsx` renders its change list only
+ * when `changes.length > 0`, an edit that ONLY set a coverage date produced an
+ * "edited" event with nothing under it. The row asserted that money had been
+ * changed and could not say what — see the `from === to` comment below, which
+ * already names that as the outcome to avoid on a money screen.
+ *
+ * ⚠️ `coversThrough` is the field that most needs narrating, not the least:
+ * every other column here describes the payment, while this one decides WHICH
+ * PERIOD'S STATEMENT the money lands on. Setting Alex Milone's date to Jul 31
+ * moves $660 out of "no period stated" onto July and flips July's closing
+ * balance from $660 owed to $0 — a bigger consequence than an amount edit of
+ * the same size, because it silently changes two statements at once.
+ */
 const CHANGE_FIELDS: {
   key: string;
   label: string;
@@ -292,6 +320,10 @@ const CHANGE_FIELDS: {
   { key: "direction", label: "Direction", format: formatDirectionValue },
   { key: "method", label: "Method", format: formatPlain },
   { key: "paidAt", label: "Paid on", format: formatDateValue },
+  // Immediately after `paidAt`, because the pair only makes sense read
+  // together: the whole feature is that money ARRIVES on one date and COVERS
+  // through another (SPEC §5.1).
+  { key: "coversThrough", label: "Covers through", format: formatDateValue },
   { key: "reference", label: "Reference", format: formatPlain },
   { key: "note", label: "Note", format: formatPlain },
   { key: "coachId", label: "Coach", format: () => "changed" },
@@ -384,6 +416,13 @@ function formatPlain(v: unknown): string | null {
  * made on the evening of the 3rd is the 4th in UTC — slicing the ISO
  * string would silently report the wrong DAY for every late-afternoon
  * payment, and only west of UTC, which is the entire customer.
+ *
+ * ⚠️ Shared with `coversThrough`, which unlike `paidAt` is NULLABLE. A JSON
+ * `null` is `typeof "object"`, so it falls out of the guard below as `null` and
+ * the view renders it "—". That is what makes a first-time set narrate as
+ * "— → 2026-07-31" and a clear as "2026-07-31 → —", and what keeps both out of
+ * the `from === to` no-op drop: only two states that render identically are
+ * dropped, and "no period stated" never renders like a date.
  */
 function formatDateValue(v: unknown): string | null {
   if (typeof v !== "string") return null;

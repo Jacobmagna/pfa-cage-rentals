@@ -75,7 +75,19 @@ export function normalizeFilters(input: RawFilterInput): NormalizedFilters {
   const from = isDateInput(fromCandidate) ? fromCandidate : defaultFrom;
   const to = isDateInput(toCandidate) ? toCandidate : defaultTo;
 
-  const coachIds = toArray(input.coachIds).filter(Boolean);
+  // 🔴 DEDUPED, and that is not tidiness. `?coachIds=X&coachIds=X` gave
+  // `length === 2`, and the Statements tab branches on `coachIds.length !== 1`
+  // to decide "one coach's statement" vs "the roster roll-up" — so a duplicated
+  // id silently degraded a single-coach money document to a one-row summary. A
+  // `Set` preserves first-seen insertion order, so the emitted query string and
+  // the `inArray` predicate keep the order the caller asked for.
+  //
+  // Deduped at THIS layer because it is the one parser the page and the
+  // /admin/reports/download route share, and because `filtersToQueryString`
+  // round-trips this object into every link the page builds (the account
+  // switcher, the month chips, each roster row's `Statement →`) — a duplicate
+  // left here would be re-emitted by all of them.
+  const coachIds = [...new Set(toArray(input.coachIds).filter(Boolean))];
   const resourceTypes = toArray(input.resourceTypes).filter(
     (t): t is ResourceType => VALID_RESOURCE_TYPES.has(t as ResourceType),
   );

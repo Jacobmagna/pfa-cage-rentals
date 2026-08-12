@@ -16,6 +16,35 @@ const METHODS = ["venmo", "zelle", "check", "cash", "other"] as const;
 // hours. Defaults to "coach_to_pfa" so legacy form submits stay correct.
 const DIRECTIONS = ["coach_to_pfa", "pfa_to_coach"] as const;
 
+// payment-statement SPEC §4 — typo guards for `coversThrough`, and ONLY typo
+// guards. Both are expressed as bounds on the instant so they read identically
+// on create and update.
+//
+// Lower bound: PFA went live 2026-06-19; there are no charges to settle before
+// the system existed, so an earlier coverage date is a mis-key rather than a
+// real period. Compared as a UTC midnight so a legitimate go-live-day value
+// (stored at PFA midnight = 07:00Z) sits comfortably inside the bound.
+const COVERS_THROUGH_MIN = new Date("2026-06-19T00:00:00.000Z");
+const COVERS_THROUGH_MIN_MESSAGE =
+  "Coverage date can't be before PFA went live (June 19, 2026)";
+const COVERS_THROUGH_MAX_MESSAGE =
+  "Coverage date can't be more than a year from now";
+
+// Upper bound is a year out, evaluated at parse time — it exists to catch a
+// typo'd year like 2206, nothing else.
+//
+// ⚠️ Future dates are DELIBERATELY ALLOWED here, which is the opposite call
+// from `0054`'s future-dating ban on `effective_from`. The difference is what
+// the date means: `effective_from` is a RE-PRICING INSTRUCTION that moves
+// money, so a future one would silently mis-bill; `coversThrough` is a LABEL on
+// money that ALREADY moved. A coach prepaying through the end of next month is
+// a real thing Mark can receive, and a statement has to be able to say so.
+function coversThroughMax(): number {
+  const d = new Date();
+  d.setUTCFullYear(d.getUTCFullYear() + 1);
+  return d.getTime();
+}
+
 export const createPaymentSchema = z.object({
   coachId: z.string().min(1, "coachId is required"),
   amountCents: z
@@ -26,6 +55,24 @@ export const createPaymentSchema = z.object({
   method: z.enum(METHODS),
   direction: z.enum(DIRECTIONS).default("coach_to_pfa"),
   paidAt: z.coerce.date(),
+  // The PERIOD this money settles, as opposed to `paidAt` (when it arrived).
+  // Nullish with NO `.default()`: `null` = "no period stated" and CLEARS the
+  // column, omitted = leave unchanged. It gets the same explicit-optional
+  // treatment `direction` needed below and for the same reason — `.partial()`
+  // does NOT strip a `.default()`, so any default here would re-assert itself
+  // on every edit that didn't resend the field.
+  //
+  // Both guards are attached to the FIELD (not to the object) so `.partial()`
+  // carries them onto the update schema unchanged; the integration suite
+  // asserts that on both paths rather than trusting it.
+  coversThrough: z.coerce
+    .date()
+    .refine(
+      (d) => d.getTime() >= COVERS_THROUGH_MIN.getTime(),
+      COVERS_THROUGH_MIN_MESSAGE,
+    )
+    .refine((d) => d.getTime() <= coversThroughMax(), COVERS_THROUGH_MAX_MESSAGE)
+    .nullish(),
   reference: z.string().max(200).nullish(),
   note: z.string().max(500).nullish(),
 });

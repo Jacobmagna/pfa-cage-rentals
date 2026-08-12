@@ -7,6 +7,7 @@
 import { and, asc, eq, gte, inArray, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { hourLogs, resources, sessionsBilling, users } from "@/db/schema";
+import type { ResourceType } from "@/lib/billing";
 import {
   aggregateReport,
   type AggregateHourLogInput,
@@ -15,24 +16,53 @@ import {
 } from "./aggregate";
 import type { NormalizedFilters } from "./filters";
 
-export async function fetchReportData(
-  filters: NormalizedFilters,
-): Promise<ReportData> {
+/**
+ * The slice of `NormalizedFilters` the SESSION query reads. A
+ * `NormalizedFilters` is assignable, so the reports page and the download route
+ * keep passing their filter object unchanged.
+ *
+ * Structural rather than the whole filter type because the statement fetch
+ * (`src/lib/statement/fetch.ts`) needs the same rows over a deliberately
+ * unbounded window and with no resource-type narrowing — see its header for
+ * why. Fabricating the `from`/`to` display STRINGS that `NormalizedFilters`
+ * also carries, purely to satisfy a type, would put two date representations on
+ * a money path where only the instants are ever read.
+ */
+export type SessionQueryScope = {
+  fromDate: Date;
+  toDateExclusive: Date;
+  /** Empty = every coach. */
+  coachIds: string[];
+  /** Empty (or all three) = every resource type. CAGE SIDE ONLY. */
+  resourceTypes: ResourceType[];
+};
+
+/**
+ * The priced-session inputs behind the cage report — the rows `aggregateReport`
+ * turns into `DetailRow`s.
+ *
+ * Extracted from `fetchReportData` (which still calls it, unchanged) so the
+ * statement can obtain BOTH the aggregate's `DetailRow`s and the real
+ * `startAt` / `endAt` instants they were built from, out of ONE query. The
+ * statement engine's cage adapter needs the instants because `DetailRow`
+ * carries PFA-formatted date STRINGS, and re-parsing a formatted string to
+ * place a charge in a month is exactly how a month-boundary off-by-one gets in.
+ */
+export async function fetchReportSessionInputs(
+  scope: SessionQueryScope,
+): Promise<AggregateSessionInput[]> {
   const conditions = [
-    gte(sessionsBilling.startAt, filters.fromDate),
-    lt(sessionsBilling.startAt, filters.toDateExclusive),
+    gte(sessionsBilling.startAt, scope.fromDate),
+    lt(sessionsBilling.startAt, scope.toDateExclusive),
   ];
-  if (filters.coachIds.length > 0) {
-    conditions.push(inArray(sessionsBilling.coachId, filters.coachIds));
+  if (scope.coachIds.length > 0) {
+    conditions.push(inArray(sessionsBilling.coachId, scope.coachIds));
   }
   // Skip the resource-type WHERE when all three are selected — the
   // query planner doesn't care, but keeping the SQL tight reads
   // better in logs.
-  if (
-    filters.resourceTypes.length > 0 &&
-    filters.resourceTypes.length < 3
-  ) {
-    conditions.push(inArray(resources.type, filters.resourceTypes));
+  if (scope.resourceTypes.length > 0 && scope.resourceTypes.length < 3) {
+    conditions.push(inArray(resources.type, scope.resourceTypes));
   }
 
   // Snapshot rule: read ratePer30MinCents directly off the session
@@ -59,6 +89,27 @@ export async function fetchReportData(
     .innerJoin(users, eq(sessionsBilling.coachId, users.id))
     .where(and(...conditions))
     .orderBy(asc(sessionsBilling.startAt));
+
+  return sessionRows.map((r) => ({
+    sessionId: r.sessionId,
+    coachId: r.coachId,
+    coachName: r.coachName,
+    coachEmail: r.coachEmail,
+    resourceId: r.resourceId,
+    resourceName: r.resourceName,
+    resourceType: r.resourceType,
+    startAt: r.startAt,
+    endAt: r.endAt,
+    note: r.note,
+    ratePer30MinCents: r.ratePer30MinCents,
+    isGroupSession: r.isGroupSession,
+  }));
+}
+
+export async function fetchReportData(
+  filters: NormalizedFilters,
+): Promise<ReportData> {
+  const aggregateInputs = await fetchReportSessionInputs(filters);
 
   // Work hours: same date window as sessions, plus the coach filter when
   // one is set. ALWAYS fetched.
@@ -111,21 +162,6 @@ export async function fetchReportData(
     endAt: r.endAt,
     ratePer30MinCents: r.ratePer30MinCents ?? 0,
     perSessionRateCents: r.perSessionRateCents,
-  }));
-
-  const aggregateInputs: AggregateSessionInput[] = sessionRows.map((r) => ({
-    sessionId: r.sessionId,
-    coachId: r.coachId,
-    coachName: r.coachName,
-    coachEmail: r.coachEmail,
-    resourceId: r.resourceId,
-    resourceName: r.resourceName,
-    resourceType: r.resourceType,
-    startAt: r.startAt,
-    endAt: r.endAt,
-    note: r.note,
-    ratePer30MinCents: r.ratePer30MinCents,
-    isGroupSession: r.isGroupSession,
   }));
 
   return aggregateReport(aggregateInputs, hourLogInputs);

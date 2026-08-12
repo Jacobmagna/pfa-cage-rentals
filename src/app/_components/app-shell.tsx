@@ -27,7 +27,13 @@ export async function AppShell({
 
   return (
     <>
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-black backdrop-blur-md">
+      {/* data-print-hide: app chrome must not print on pages that render a
+          DOCUMENT (the per-coach statement). Inert unless <body> carries
+          `printing-document` — see the @media print block in globals.css. */}
+      <header
+        data-print-hide
+        className="sticky top-0 z-40 border-b border-white/10 bg-black backdrop-blur-md"
+      >
         <div className="mx-auto flex h-16 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8 2xl:px-12">
           <div className="flex min-w-0 items-center gap-3">
             <Link
@@ -91,7 +97,10 @@ export async function AppShell({
         {children}
       </main>
 
-      <footer className="mx-auto w-full px-6 lg:px-8 2xl:px-12 pb-6 pt-4 border-t border-line/60 text-xs text-fg-subtle">
+      <footer
+        data-print-hide
+        className="mx-auto w-full px-6 lg:px-8 2xl:px-12 pb-6 pt-4 border-t border-line/60 text-xs text-fg-subtle"
+      >
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
           <div className="flex gap-4">
             <Link href="/privacy" className="hover:text-fg-muted transition-colors">

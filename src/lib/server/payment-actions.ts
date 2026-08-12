@@ -15,9 +15,9 @@
 //     pass `status: "pending"` instead.
 //   - confirm: pending → confirmed, sets confirmedBy + confirmedAt.
 //     No-op (throws PaymentAlreadyConfirmedError) if already confirmed.
-//   - update: edits to amount/method/reference/note/paidAt. Status
-//     transitions go through `confirm` only (separate mutation kept
-//     auditable distinctly).
+//   - update: edits to amount/method/reference/note/paidAt/coversThrough.
+//     Status transitions go through `confirm` only (separate mutation
+//     kept auditable distinctly).
 //   - delete: soft-delete via deletedAt, keeps the audit trail.
 
 import { and, eq, isNull } from "drizzle-orm";
@@ -92,6 +92,9 @@ export async function createPaymentInternal(
       method: parsed.method,
       direction: parsed.direction,
       paidAt: parsed.paidAt,
+      // Nullish → NULL: "no period stated" is a real, load-bearing value and
+      // is never inferred from paidAt (SPEC §4).
+      coversThrough: parsed.coversThrough ?? null,
       reference: parsed.reference ?? null,
       note: parsed.note ?? null,
       status,
@@ -133,6 +136,12 @@ export async function updatePaymentInternal(
       ...(parsed.method !== undefined && { method: parsed.method }),
       ...(parsed.direction !== undefined && { direction: parsed.direction }),
       ...(parsed.paidAt !== undefined && { paidAt: parsed.paidAt }),
+      // The `!== undefined` test (not a truthiness test) is what lets an
+      // explicit `null` from a blank coverage input CLEAR the column while an
+      // omitted field still means "leave unchanged" — SPEC §12.1.
+      ...(parsed.coversThrough !== undefined && {
+        coversThrough: parsed.coversThrough,
+      }),
       ...(parsed.reference !== undefined && { reference: parsed.reference }),
       ...(parsed.note !== undefined && { note: parsed.note }),
     })

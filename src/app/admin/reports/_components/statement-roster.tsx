@@ -29,7 +29,7 @@
 // uses, and the only things marked screen-only are the print button itself and
 // the per-row `Statement →` links, which are dead affordances on paper.
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, Printer } from "lucide-react";
+import { ArrowRight, Printer } from "lucide-react";
 import { formatDollarsExact } from "@/lib/format-money";
 import { ClientPrintButton, PrintDocumentMode } from "./client-print-button";
 // The row shape is the ENGINE's output, not this component's invention — it was
@@ -155,10 +155,17 @@ export function StatementRoster({
           the subtraction in the same breath as the definition, so an unrecorded
           payout is visibly outside it. Locked by a test in
           statement-roster.test.ts, because nothing else holds this sentence in
-          place. */}
-      <p className="mb-3 flex gap-2.5 rounded-lg border border-warning/40 bg-warning/5 p-3 text-xs leading-relaxed">
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-        <span className="font-medium">
+          place.
+
+          ⚠️ The amber/AlertTriangle treatment went with the old wording. A
+          DEFINITION in an alarm box is a warning that never resolves, which
+          trains the reader to skip the box — the same failure as over-warning,
+          arrived at through styling instead of words. Now carries the neutral
+          note styling `PayoutLedgerCaveat` already uses on the Work hours tab
+          (`work-preview.tsx`), so the two surfaces state the same caution in
+          the same voice. */}
+      <p className="mb-3 rounded-lg border border-line/60 bg-surface-2/40 px-4 py-3 text-xs text-fg-muted leading-relaxed">
+        <span className="font-semibold text-fg">
           Work pay is the logged work&rsquo;s value minus the payouts recorded
           here.
         </span>

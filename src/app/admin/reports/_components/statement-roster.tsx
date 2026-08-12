@@ -29,7 +29,7 @@
 // uses, and the only things marked screen-only are the print button itself and
 // the per-row `Statement →` links, which are dead affordances on paper.
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, Printer } from "lucide-react";
+import { ArrowRight, Printer } from "lucide-react";
 import { formatDollarsExact } from "@/lib/format-money";
 import { ClientPrintButton, PrintDocumentMode } from "./client-print-button";
 // The row shape is the ENGINE's output, not this component's invention — it was
@@ -138,15 +138,36 @@ export function StatementRoster({
       {/* SPEC §11 — the caveat has to ride on THIS surface too. The individual
           work statement carries it, but this table shows the same payout
           figures for the whole roster at once, so omitting it here would be the
-          exact "symmetrical and silent" failure §11 forbids. */}
-      <p className="mb-3 flex gap-2.5 rounded-lg border border-warning/40 bg-warning/5 p-3 text-xs leading-relaxed">
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-        <span>
-          <span className="font-medium">Work pay is what the logged work is
-          worth — not what is still owed.</span>{" "}
-          PFA pays coaches outside this system, so any payout that was never
-          recorded here is not subtracted. The cage-rental column has no such
-          gap: those charges and payments both live in the app.
+          exact "symmetrical and silent" failure §11 forbids.
+
+          🔴 REWRITTEN 2026-08-12 (Jacob) to a single DEFINING sentence, and the
+          change is deliberate. The old copy warned in the negative — "not what
+          is still owed … PFA pays coaches outside this system, so any payout
+          that was never recorded here is not subtracted" — which was written
+          when prod held ONE payment row and the payout ledger was empty. It is
+          no longer true in that flat form: 17 payouts totalling $18,597.50 were
+          recorded on 2026-08-03, and they ARE subtracted. A caveat that
+          overstates the gap teaches the reader to skip it, which costs exactly
+          when it finally matters.
+
+          §11 is still satisfied, by saying what the number IS rather than what
+          it is not: "minus the payouts RECORDED HERE" states the boundary of
+          the subtraction in the same breath as the definition, so an unrecorded
+          payout is visibly outside it. Locked by a test in
+          statement-roster.test.ts, because nothing else holds this sentence in
+          place.
+
+          ⚠️ The amber/AlertTriangle treatment went with the old wording. A
+          DEFINITION in an alarm box is a warning that never resolves, which
+          trains the reader to skip the box — the same failure as over-warning,
+          arrived at through styling instead of words. Now carries the neutral
+          note styling `PayoutLedgerCaveat` already uses on the Work hours tab
+          (`work-preview.tsx`), so the two surfaces state the same caution in
+          the same voice. */}
+      <p className="mb-3 rounded-lg border border-line/60 bg-surface-2/40 px-4 py-3 text-xs text-fg-muted leading-relaxed">
+        <span className="font-semibold text-fg">
+          Work pay is the logged work&rsquo;s value minus the payouts recorded
+          here.
         </span>
       </p>
 

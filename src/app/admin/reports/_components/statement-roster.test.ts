@@ -252,3 +252,50 @@ describe("🔴 the footnote gives a parentheses rule for BOTH columns", () => {
     expect(note).toMatch(/other way|opposite direction|runs the other/i);
   });
 });
+
+// SPEC §11 on the roll-up — nothing held this sentence in place until now. It
+// was rewritten 2026-08-12 and the OLD copy would have been just as green,
+// because no test looked at it at all.
+describe("the payout caveat", () => {
+  /**
+   * The caveat block ALONE — between the glance stats and the table.
+   *
+   * Block-scoped on purpose. The words "work pay" and "payouts" both appear in
+   * the column headers and the footnote, so a whole-page grep for this sentence
+   * would pass on a page that had dropped it entirely.
+   */
+  function caveat(html: string): string {
+    const start = html.indexOf("</dl>");
+    const end = html.indexOf("print-flow", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    return text(html.slice(start, end));
+  }
+
+  const HTML = render([entry()]);
+
+  it("DEFINES work pay as net of the payouts recorded in the app", () => {
+    // Says what the number IS. "recorded here" is the load-bearing half: it
+    // bounds the subtraction in the same breath as the definition, so a payout
+    // that was never entered is visibly outside it.
+    // `['’]` because the source writes `&rsquo;` but React renders it as the
+    // literal curly character, which the shared `text()` helper only maps back
+    // when it arrives in entity form. An assertion on printed copy should not
+    // care which apostrophe the renderer chose.
+    expect(caveat(HTML)).toMatch(
+      /work pay is the logged work['’]s value minus the payouts recorded here/i,
+    );
+  });
+
+  it("does not claim outside payouts are simply never subtracted", () => {
+    // 🔴 THE REGRESSION THIS EXISTS TO CATCH. The original copy read "PFA pays
+    // coaches outside this system, so any payout that was never recorded here
+    // is not subtracted" — true when prod held ONE payment row, false once 17
+    // payouts totalling $18,597.50 were recorded on 2026-08-03. Over-warning
+    // about a number that has become trustworthy is how a reader learns to skip
+    // the warning, which costs on the day it matters.
+    const block = caveat(HTML);
+    expect(block).not.toMatch(/is not subtracted/i);
+    expect(block).not.toMatch(/outside this system/i);
+  });
+});

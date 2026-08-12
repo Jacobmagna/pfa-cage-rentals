@@ -338,26 +338,123 @@ function StatementBody({
 
   return (
     <>
-      {/* The arithmetic, in the order Citi uses. BOXED so the narrow column
-          reads as a deliberate summary panel rather than a ragged half-width
-          list beside the full-width tables below — and so the one thing Mark
-          checks first is the one thing framed on the page. */}
-      <dl className="mt-5 max-w-md break-inside-avoid rounded-lg border border-line bg-surface-2/40 p-4 text-sm">
-        <Line label={statement.openingLabel} cents={statement.openingCents} />
-        <Line label="New charges this period" cents={chargeTotal} sign="+" />
-        <Line
-          label="Payments & credits covering this period"
-          cents={statement.paymentsCents}
-          sign="−"
-        />
-        <div className="mt-2 flex items-baseline justify-between gap-4 border-t-2 border-fg/25 pt-2.5">
-          <dt className="font-semibold">{statement.closingLabel}</dt>
-          <dd className="text-lg font-bold tabular-nums tracking-tight">
-            {formatDollarsExact(Math.abs(statement.closingCents))}
-            <CreditBadge cents={statement.closingCents} />
-          </dd>
+      {/* ── The two balance panels, SIDE BY SIDE ──────────────────────────
+          They are ONE continuous piece of arithmetic, not two summaries. The
+          right panel OPENS on the exact figure the left panel closes with —
+          `statement.closingLabel` is rendered in both — and then carries it
+          forward to today.
+
+          🔴 The reconciliation used to sit at the BOTTOM, below the charge and
+          payment tables. That put the two halves of one calculation a full
+          page apart, so the repeated "Statement balance as of Jul 31" line
+          read as a duplicate of the total rather than the hand-off it is, and
+          checking one against the other meant scrolling past every detail row
+          on the page. Adjacent, the shared line is visibly a seam.
+
+          The arithmetic inside each is unchanged, and still in the order Citi
+          uses. Boxed for the same reason as before: the figures Mark checks
+          first are the ones framed on the page.
+
+          ⚠️ `items-start` so the shorter panel is not stretched to match the
+          taller one, and `print:grid-cols-1` because two `max-w-md` panels do
+          NOT fit side by side on letter paper — at roughly 350px each the
+          longest label ("Payments & credits covering this period") wraps under
+          its own figure, and a cramped money row is precisely what this
+          document's print pass has had to fix twice already. In print they
+          stack, in this same order. */}
+      <div className="mt-5 grid gap-6 md:grid-cols-2 md:items-start print:grid-cols-1 print:gap-5">
+        <div>
+          <PanelHeading>This period</PanelHeading>
+          <dl className="max-w-md break-inside-avoid rounded-lg border border-line bg-surface-2/40 p-4 text-sm">
+            <Line
+              label={statement.openingLabel}
+              cents={statement.openingCents}
+            />
+            <Line
+              label="New charges this period"
+              cents={chargeTotal}
+              sign="+"
+            />
+            <Line
+              label="Payments & credits covering this period"
+              cents={statement.paymentsCents}
+              sign="−"
+            />
+            <div className="mt-2 flex items-baseline justify-between gap-4 border-t-2 border-fg/25 pt-2.5">
+              <dt className="font-semibold">{statement.closingLabel}</dt>
+              <dd className="text-lg font-bold tabular-nums tracking-tight">
+                {formatDollarsExact(Math.abs(statement.closingCents))}
+                <CreditBadge cents={statement.closingCents} />
+              </dd>
+            </div>
+          </dl>
         </div>
-      </dl>
+
+        {/* ── Not included ────────────────────────────────────────────────
+            The honesty block. Money we cannot place in a period is not
+            evidence about any month, so it is excluded from every figure to
+            the left — but silently dropping it would make this document
+            disagree with /admin/payments for reasons invisible on the page.
+            Itemizing the difference is what makes the statement trustworthy,
+            and showing Mark how much money is untagged is what makes him go
+            tag it. */}
+        {/* 🔴 This panel CONTINUES the left column's arithmetic rather than
+            listing three loose figures. The first draft listed "no period
+            stated $170" and "charges after $132" and then a bold "$50" —
+            which reads as a SUM of the two above it (and $170 + $132 = $302,
+            not $50). On a page whose entire claim is "arithmetic you can add
+            up yourself", a total that doesn't visibly follow from the lines
+            above it is worse than no total at all: it looks like the math is
+            broken. So it restates the statement balance, then adds and
+            subtracts with explicit signs. */}
+        <div>
+          <PanelHeading>How this reconciles to today</PanelHeading>
+          <dl className="max-w-md break-inside-avoid rounded-lg border border-line bg-surface-2/40 p-4 text-sm">
+            <Line
+              label={statement.closingLabel}
+              cents={statement.closingCents}
+            />
+            <Line
+              label={`Charges after ${pair.periodEndShort}`}
+              cents={statement.chargesAfterCents}
+              sign="+"
+              muted={statement.chargesAfterCents === 0}
+            />
+            {statement.paymentsCoveringAfterCents > 0 ? (
+              <Line
+                label={`Payments covering after ${pair.periodEndShort}`}
+                cents={statement.paymentsCoveringAfterCents}
+                sign="−"
+              />
+            ) : null}
+            <Line
+              label="Payments with no period stated"
+              cents={statement.unappliedCents}
+              sign="−"
+              muted={statement.unappliedCents === 0}
+            />
+            <div className="mt-2 flex items-baseline justify-between gap-4 border-t-2 border-fg/25 pt-2.5">
+              <dt className="font-semibold">
+                Current account balance
+                <span className="ml-1.5 text-xs font-normal text-fg-subtle">
+                  (all time, today)
+                </span>
+              </dt>
+              <dd className="font-semibold tabular-nums">
+                {formatDollarsExact(Math.abs(statement.currentBalanceCents))}
+                <CreditBadge cents={statement.currentBalanceCents} />
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-2 max-w-md text-[11px] leading-relaxed text-fg-subtle">
+            A statement balance is where this account stood at the end of the
+            period. The current balance is where it stands right now. Payments
+            with no period stated are counted in no period at all — give one a
+            &ldquo;covers through&rdquo; date and it moves onto that
+            period&rsquo;s statement.
+          </p>
+        </div>
+      </div>
 
       {statement.caveat ? (
         <p className="mt-5 flex gap-2.5 rounded-lg border border-warning/40 bg-warning/5 p-3 text-xs leading-relaxed text-fg">
@@ -608,68 +705,6 @@ function StatementBody({
           </div>
         ) : null}
       </Block>
-
-      {/* ── Not included ────────────────────────────────────────────────
-          The honesty block. Money we cannot place in a period is not evidence
-          about any month, so it is excluded from every figure above — but
-          silently dropping it would make this document disagree with
-          /admin/payments for reasons invisible on the page. Itemizing the
-          difference is what makes the statement trustworthy, and showing Mark
-          how much money is untagged is what makes him go tag it. */}
-      {/* 🔴 This block CONTINUES the summary column's arithmetic rather than
-          listing three loose figures. The first draft listed "no period stated
-          $170" and "charges after $132" and then a bold "$50" — which reads as
-          a SUM of the two above it (and $170 + $132 = $302, not $50). On a page
-          whose entire claim is "arithmetic you can add up yourself", a total
-          that doesn't visibly follow from the lines above it is worse than no
-          total at all: it looks like the math is broken. So it restates the
-          statement balance, then adds and subtracts with explicit signs. */}
-      <Block title={`How this reconciles to today`}>
-        <dl className="max-w-md break-inside-avoid rounded-lg border border-line bg-surface-2/40 p-4 text-sm">
-          <Line
-            label={statement.closingLabel}
-            cents={statement.closingCents}
-          />
-          <Line
-            label={`Charges after ${pair.periodEndShort}`}
-            cents={statement.chargesAfterCents}
-            sign="+"
-            muted={statement.chargesAfterCents === 0}
-          />
-          {statement.paymentsCoveringAfterCents > 0 ? (
-            <Line
-              label={`Payments covering after ${pair.periodEndShort}`}
-              cents={statement.paymentsCoveringAfterCents}
-              sign="−"
-            />
-          ) : null}
-          <Line
-            label="Payments with no period stated"
-            cents={statement.unappliedCents}
-            sign="−"
-            muted={statement.unappliedCents === 0}
-          />
-          <div className="mt-2 flex items-baseline justify-between gap-4 border-t-2 border-fg/25 pt-2.5">
-            <dt className="font-semibold">
-              Current account balance
-              <span className="ml-1.5 text-xs font-normal text-fg-subtle">
-                (all time, today)
-              </span>
-            </dt>
-            <dd className="font-semibold tabular-nums">
-              {formatDollarsExact(Math.abs(statement.currentBalanceCents))}
-              <CreditBadge cents={statement.currentBalanceCents} />
-            </dd>
-          </div>
-        </dl>
-        <p className="mt-2 max-w-md text-[11px] leading-relaxed text-fg-subtle">
-          A statement balance is where this account stood at the end of the
-          period. The current balance is where it stands right now. Payments
-          with no period stated are counted in no period at all — give one a
-          &ldquo;covers through&rdquo; date and it moves onto that period&rsquo;s
-          statement.
-        </p>
-      </Block>
     </>
   );
 }
@@ -772,6 +807,24 @@ function Line({
 
 function flipSign(sign: "+" | "−"): "+" | "−" {
   return sign === "+" ? "−" : "+";
+}
+
+/**
+ * The heading over each of the two top balance panels.
+ *
+ * Deliberately the SAME type treatment as `Block`'s `<h4>` rather than a second
+ * heading idiom — the panels sit above the blocks on the same document, and two
+ * section-heading styles on one page is how a reader stops being able to tell
+ * what is a peer of what. It is a separate component only because `Block`
+ * carries `mt-7` and renders a `<section>`, both wrong inside a grid cell where
+ * the two headings must sit on the same line for the panels to align.
+ */
+function PanelHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <h4 className="mb-3 break-after-avoid text-[10px] font-semibold uppercase tracking-[0.14em] text-fg-muted">
+      {children}
+    </h4>
+  );
 }
 
 function Block({

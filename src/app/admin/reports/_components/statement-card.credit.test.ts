@@ -119,14 +119,40 @@ function cells(block: string): Cell[] {
   });
 }
 
+/**
+ * The two panels are located by their HEADING TEXT, never by a class string.
+ *
+ * 🔴 This was learned the hard way on 2026-08-12. `arithmeticPanel` used to
+ * anchor on the literal `<dl class="mt-5 max-w-md`, and the moment the panel
+ * moved into a grid cell — losing its own top margin to the grid wrapper —
+ * `indexOf` returned -1, the slice produced garbage, and the strongest test on
+ * this document (does the printed column ADD UP) started throwing
+ * `Cannot read properties of undefined` instead of checking arithmetic. A
+ * styling tweak must not be able to silently blank a money assertion.
+ *
+ * `locate` therefore FAILS LOUDLY on a missed anchor rather than returning a
+ * nonsense slice, so the next person who moves this markup gets told which
+ * anchor died instead of debugging an undefined.
+ */
+function locate(html: string, anchor: string): string {
+  const at = html.indexOf(anchor);
+  expect(at, `panel anchor not found in rendered output: ${anchor}`).toBeGreaterThan(-1);
+  const start = html.indexOf("<dl", at);
+  expect(start, `no <dl> after anchor: ${anchor}`).toBeGreaterThan(-1);
+  const end = html.indexOf("</dl>", start);
+  expect(end, `unterminated <dl> after anchor: ${anchor}`).toBeGreaterThan(start);
+  return html.slice(start, end);
+}
+
 function arithmeticPanel(html: string): string {
-  const start = html.indexOf('<dl class="mt-5 max-w-md');
-  return html.slice(start, html.indexOf("</dl>", start));
+  // `>This period</h4>` and not `This period`: the words also occur inside
+  // "New charges this period" and "Payments & credits covering this period",
+  // both of which are rows WITHIN this panel.
+  return locate(html, ">This period</h4>");
 }
 
 function reconciliationPanel(html: string): string {
-  const start = html.indexOf("How this reconciles to today");
-  return html.slice(start, html.indexOf("</dl>", start));
+  return locate(html, "How this reconciles to today");
 }
 
 /**

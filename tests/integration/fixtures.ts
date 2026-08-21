@@ -143,6 +143,6 @@ export async function getSeededResources() {
 // inline (see rate-defaults-actions.test.ts).
 export async function truncateMutables(): Promise<void> {
   await db.execute(
-    sql`TRUNCATE TABLE sessions_billing, blocked_times, audit_log, coach_payments, coach_rate_overrides RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE sessions_billing, blocked_times, audit_log, coach_payments, coach_rate_overrides, coach_stipend_earnings, coach_stipends RESTART IDENTITY CASCADE`,
   );
 }

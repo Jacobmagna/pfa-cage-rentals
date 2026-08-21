@@ -127,6 +127,11 @@ async function referenceSingleCoachRows(coachId: string) {
       // or this test fails on column count rather than on behavior.
       ratePer30MinCents: hourLogs.ratePer30MinCents,
       perSessionRateCents: hourLogs.perSessionRateCents,
+      // Added with the stipend feature. This test failing on a new column is
+      // the mirror working as intended — it is a DEEP equal, so any column the
+      // real query gains has to be added here deliberately rather than drifting
+      // in unnoticed.
+      stipendCovered: hourLogs.stipendCovered,
     })
     .from(hourLogs)
     .innerJoin(users, eq(hourLogs.coachId, users.id))

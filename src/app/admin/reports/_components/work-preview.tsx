@@ -10,7 +10,16 @@
 //
 // Server component, no client state.
 
-import type { WorkDetailRow, WorkSummaryRow } from "@/lib/reports/work-report";
+import type {
+  WorkDetailKind,
+  WorkDetailRow,
+  WorkSummaryRow,
+} from "@/lib/reports/work-report";
+import {
+  COVERED_BY_STIPEND_LABEL,
+  STIPEND_FLAT_RATE_LABEL,
+  WORK_PAY_CAVEAT,
+} from "@/lib/stipend/labels";
 
 export function WorkPreview({
   detail,
@@ -115,19 +124,29 @@ export function WorkPreview({
                   <td className="px-3 py-3 font-mono tnum tabular-nums whitespace-nowrap text-fg-muted">
                     {row.date}
                   </td>
-                  <td className="px-3 py-3 text-fg-muted">{row.dayOfWeek}</td>
-                  <td className="px-3 py-3 font-mono tnum tabular-nums text-fg">
-                    {row.startTime}
+                  {/* 🔴 A stipend has no weekday and no clock times. Em
+                      dashes, never a blank cell (reads as a rendering bug) and
+                      never a zero (reads as a real value). */}
+                  <td className="px-3 py-3 text-fg-muted">
+                    {row.dayOfWeek ?? EM_DASH}
                   </td>
                   <td className="px-3 py-3 font-mono tnum tabular-nums text-fg">
-                    {row.endTime}
+                    {row.startTime ?? EM_DASH}
+                  </td>
+                  <td className="px-3 py-3 font-mono tnum tabular-nums text-fg">
+                    {row.endTime ?? EM_DASH}
                   </td>
                   <td className="px-3 py-3 text-fg">{row.programName}</td>
                   <td className="px-3 py-3 text-fg">{row.coachName}</td>
                   <td className="px-3 py-3 text-right font-mono tnum tabular-nums text-fg-muted">
-                    {formatHours(row.hours)}
+                    {/* 🔴 THE ONE HONEST ZERO, and it still must not print as
+                        "0". A stipend genuinely has no hours; "0" beside a
+                        $2,500 payout reads as "worked nothing, paid anyway". */}
+                    {row.kind === "stipend" ? EM_DASH : formatHours(row.hours)}
                   </td>
                   <RateCell
+                    kind={row.kind}
+                    stipendCovered={row.stipendCovered}
                     ratePer30MinCents={row.ratePer30MinCents}
                     perSessionRateCents={row.perSessionRateCents}
                   />
@@ -157,11 +176,11 @@ export function WorkPreview({
 function PayoutLedgerCaveat() {
   return (
     <p className="rounded-lg border border-line/60 bg-surface-2/40 px-4 py-3 text-xs text-fg-muted leading-relaxed">
-      <span className="font-semibold text-fg">
-        This is what the logged work is worth — not what is still owed.
-      </span>{" "}
-      Payments made outside the app are not deducted here. Posted work only;
-      rejected entries are on the{" "}
+      {/* 🔴 One shared constant with the statement and the workbook. Splitting
+          it back into inline copy is how the three drifted before. */}
+      <span className="font-semibold text-fg">{WORK_PAY_CAVEAT}</span> Posted
+      work only; a stipend is earned for a whole pay period and is never
+      pro-rated. Rejected entries are on the{" "}
       <a
         href="/admin/hour-log"
         className="underline underline-offset-2 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold rounded-sm"
@@ -220,12 +239,35 @@ function GrandTotal({ cents, hours }: { cents: number; hours: number }) {
 // pays the flat amount regardless of duration, so it says so rather than
 // showing an hourly figure that would not reproduce the "$" column.
 function RateCell({
+  kind,
+  stipendCovered,
   ratePer30MinCents,
   perSessionRateCents,
 }: {
+  kind: WorkDetailKind;
+  stipendCovered: boolean;
   ratePer30MinCents: number | null;
   perSessionRateCents: number | null;
 }) {
+  // 🔴 Both stipend branches come FIRST. A covered log carries no rate
+  // snapshot either, so it would otherwise fall through to "No rate" — and
+  // "No rate" beside 72 real hours reads as a misconfiguration rather than as
+  // the decision it is. Mark's whole ask is to see the hours AND see they are
+  // deliberately not being charged (SPEC §10.3).
+  if (kind === "stipend") {
+    return (
+      <td className="px-3 py-3 text-right text-fg-subtle whitespace-nowrap">
+        {STIPEND_FLAT_RATE_LABEL}
+      </td>
+    );
+  }
+  if (stipendCovered) {
+    return (
+      <td className="px-3 py-3 text-right text-fg-subtle whitespace-nowrap">
+        {COVERED_BY_STIPEND_LABEL}
+      </td>
+    );
+  }
   if (perSessionRateCents != null) {
     return (
       <td className="px-3 py-3 text-right font-mono tnum tabular-nums text-fg-muted whitespace-nowrap">
@@ -251,6 +293,8 @@ function RateCell({
     </td>
   );
 }
+
+const EM_DASH = "\u2014";
 
 // 2 decimals, trailing zeros stripped ("2 hr", "1.5 hr", "0.75 hr").
 function formatHours(hours: number): string {

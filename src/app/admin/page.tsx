@@ -35,6 +35,7 @@ import {
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
 import { totalFromSnapshot, workPayForLog } from "@/lib/billing";
+import { fetchStipendEarningsInRange } from "@/lib/stipend/fetch";
 import { listActiveCoaches } from "@/lib/server/coaches";
 import { formatDollars } from "@/lib/format-money";
 import { formatRelative } from "@/lib/format-relative";
@@ -361,6 +362,23 @@ export default async function AdminHome({
       ratePer30MinCents: l.ratePer30MinCents ?? 0,
     });
   }
+
+
+  // 🔴 STIPENDS BELONG IN THIS CARD TOO (SPEC §10.6/§10.7). A calendar month
+  // is exactly TWO pay periods, so the month's stipend total is the earnings
+  // whose periods fall inside it — no partial-period arithmetic, because a
+  // stipend is not pro-ratable.
+  //
+  // Leaving them out would put a figure on the dashboard that is smaller than
+  // the same month's figure on /admin/reports?tab=work, and two different
+  // numbers for one month reads as a bug in the money.
+  const monthStipendCents = (
+    await fetchStipendEarningsInRange({
+      fromDate: monthStart,
+      toDateExclusive: monthEndExclusive,
+    })
+  ).reduce((total, e) => total + e.amountCents, 0);
+  programPayMonthCents += monthStipendCents;
 
   // Shape the Master Schedule rows for the read-only grid.
   const masterResources: MasterResourceRow[] = resourceRows.map((r) => ({

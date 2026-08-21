@@ -1031,18 +1031,39 @@ describe("labels, caveat and scope note", () => {
   });
 
   it("the caveat is on the WORK account only", () => {
+    // 🔴 The literal is spelled out rather than compared to the constant. A
+    // test that asserts `caveat === WORK_PAY_CAVEAT` passes no matter what
+    // the constant says, which is not a test of the copy at all — and this
+    // sentence goes on the document Mark hands to a coach.
     expect(pair.work.caveat).toBe(
-      "This is what the logged work is worth — not what is still owed. " +
-        "Payments made outside the app are not deducted here.",
+      "This is what the logged work and any stipends are worth — not what is " +
+        "still owed. Payments made outside the app are not deducted here.",
     );
     expect(pair.cage.caveat).toBeNull();
   });
 
+  it("🔴 the caveat does NOT claim the figure is only logged work", () => {
+    // The old wording — "This is what the logged work is worth" — became FALSE
+    // the moment a stipend line could appear beside it: a stipend is not logged
+    // work. This pins the retirement of that claim, so it cannot come back in a
+    // copy edit by someone who has not read SPEC §10.4.
+    expect(pair.work.caveat).not.toContain("the logged work is worth");
+    expect(pair.work.caveat).toContain("stipends");
+  });
+
   it("the scope note is on the WORK account only", () => {
     expect(pair.work.scopeNote).toBe(
-      "Posted work only — rejected and held logs are excluded.",
+      "Posted work only — rejected and held logs are excluded. A stipend is " +
+        "earned for a whole pay period, never pro-rated.",
     );
     expect(pair.cage.scopeNote).toBeNull();
+  });
+
+  it("🔴 the scope note states the no-pro-rating rule", () => {
+    // Without this clause the document silently describes a scope it no longer
+    // has: a filtered range that overlaps two half-months shows TWO full
+    // stipends, and nothing on the page would explain why.
+    expect(pair.work.scopeNote).toMatch(/never pro-rated/i);
   });
 
   it("direction labels are full sentences with real names", () => {
@@ -1173,6 +1194,7 @@ describe("labels, caveat and scope note", () => {
 describe("agreement with the shipped Work hours tab (SPEC §10)", () => {
   function log(over: Partial<HourLogFetchRow>): HourLogFetchRow {
     return {
+      stipendCovered: false,
       id: "log-1",
       coachId: "alex",
       coachName: "Alex Milone",
@@ -1539,6 +1561,7 @@ describe("🔴 a printed cage row can be verified by hand", () => {
 describe("the WORK account's rate labels and slots are unchanged", () => {
   function log(over: Partial<HourLogFetchRow>): HourLogFetchRow {
     return {
+      stipendCovered: false,
       id: "log-1",
       coachId: "alex",
       coachName: "Alex Milone",

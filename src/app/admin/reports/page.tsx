@@ -14,6 +14,7 @@ import {
 import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
 import { hourLogFiltersFromReportFilters } from "@/lib/reports/hour-log-filters";
 import { buildWorkReport } from "@/lib/reports/work-report";
+import { fetchStipendEarningsInRange } from "@/lib/stipend/fetch";
 import { buildPaymentTimeline } from "@/lib/reports/payments-timeline";
 import { fetchPaymentTimelineRows } from "@/lib/reports/payments-timeline-fetch";
 import { normalizeReportTab } from "@/lib/reports/tabs";
@@ -123,9 +124,21 @@ export default async function AdminReportsPage({
       : Promise.resolve([]),
   ]);
 
+  // Stipends earned in any pay period OVERLAPPING the filter range. ⚠️
+  // Overlap, not containment — a stipend is owed for a whole half-month and is
+  // not pro-ratable, so a 10-day filter can legitimately show two of them.
+  // Every stipend row prints its own period label so that reads as a fact
+  // rather than a double-count.
+  const stipendEarnings = await fetchStipendEarningsInRange({
+    fromDate: filters.fromDate,
+    toDateExclusive: filters.toDateExclusive,
+    coachIds: filters.coachIds,
+  });
+
   // Summary and detail both come out of this one call, off the one row
   // set — so the rows on screen always add up to the total above them.
-  const workReport = buildWorkReport(workRows);
+  // Stipends go IN here, as detail rows, for exactly that reason.
+  const workReport = buildWorkReport(workRows, stipendEarnings);
   const paymentTimeline = buildPaymentTimeline(paymentRows.rows);
 
   // The edit dialog's coach <select> is CONTROLLED and `required`, so a

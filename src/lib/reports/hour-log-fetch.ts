@@ -53,6 +53,12 @@ export type HourLogFetchRow = HourLogWorkbookRow & {
    * Both are NULLABLE: a pre-rate log carries neither and pays $0.
    */
   ratePer30MinCents: number | null;
+  /**
+   * 🔴 The log's own write-time snapshot: a stipend covered this work, so it
+   * pays $0 BY DECISION rather than for want of a rate. Every rate cell must
+   * say "Covered by stipend" instead of "No rate" — see SPEC §10.3.
+   */
+  stipendCovered: boolean;
   perSessionRateCents: number | null;
 };
 
@@ -109,6 +115,7 @@ export async function fetchHourLogRows(
       status: hourLogs.status,
       decisionReason: hourLogs.decisionReason,
       ratePer30MinCents: hourLogs.ratePer30MinCents,
+      stipendCovered: hourLogs.stipendCovered,
       perSessionRateCents: hourLogs.perSessionRateCents,
     })
     .from(hourLogs)

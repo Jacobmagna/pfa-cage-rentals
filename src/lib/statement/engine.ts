@@ -54,6 +54,13 @@
 
 import { formatDollarsExact } from "@/lib/format-money";
 import {
+  COVERED_BY_STIPEND_LABEL,
+  STIPEND_FLAT_RATE_LABEL,
+  STIPEND_LINE_LABEL,
+  WORK_PAY_CAVEAT,
+  WORK_SCOPE_NOTE_TEXT,
+} from "@/lib/stipend/labels";
+import {
   netCoachLedgers,
   type LedgerPayment,
 } from "@/lib/payment-ledger";
@@ -120,8 +127,16 @@ export type StatementChargeInput = {
    * just "24.0 h".
    */
   slots: number | null;
-  /** Exact hours for display. A 45-min work log is 0.75. */
-  hours: number;
+  /**
+   * Exact hours for display. A 45-min work log is 0.75.
+   *
+   * 🔴 `null` means THIS CHARGE HAS NO HOURS CONCEPT — a stipend is owed for a
+   * period, not for time. It is deliberately not `0`: a rendered "0.0 h" beside
+   * a $2,500 line reads as "worked nothing, paid anyway", which is the same
+   * class of misreading as "$0.00/hr" for an unset rate. A summary line whose
+   * charges are all hour-less renders an em dash instead of a duration.
+   */
+  hours: number | null;
   /** ALREADY COMPUTED by the shared money helpers. Never recomputed here. */
   amountCents: number;
 };
@@ -205,9 +220,9 @@ const DIRECTION_FOR_ACCOUNT: Record<StatementAccount, PaymentDirection> = {
  * most expensive mistake available in this feature. Null on the cage account,
  * whose charges AND payments both live in the app.
  */
-const WORK_CAVEAT =
-  "This is what the logged work is worth — not what is still owed. " +
-  "Payments made outside the app are not deducted here.";
+// 🔴 Imported, not restated. This sentence lives in THREE places and the
+// rule that they match used to be a comment; it is now a constant.
+const WORK_CAVEAT = WORK_PAY_CAVEAT;
 
 /**
  * SPEC §5.0/§11 — the work account counts POSTED work only, matching the
@@ -217,8 +232,7 @@ const WORK_CAVEAT =
  * period is worse than either figure alone, and an unexplained gap is what
  * makes a reader distrust the rest of the page.
  */
-const WORK_SCOPE_NOTE =
-  "Posted work only — rejected and held logs are excluded.";
+const WORK_SCOPE_NOTE = WORK_SCOPE_NOTE_TEXT;
 
 /* ── The engine ──────────────────────────────────────────────────────────── */
 
@@ -626,6 +640,35 @@ export function chargesFromWorkDetail(
 ): StatementChargeInput[] {
   const byId = new Map(sources.map((s) => [s.id, s]));
   return detail.map((row) => {
+    // 🔴 A stipend row has NO source hour log — it is owed to a person for a
+    // period, not for a logged session. It is mapped here rather than filtered
+    // out, because the work statement's total comes from these charges and a
+    // stipend that is paid but not shown is the "rows do not add up" failure
+    // this whole module is built to avoid.
+    if (row.kind === "stipend") {
+      if (!row.periodStart || !row.periodEndExclusive || !row.periodLabel) {
+        // Unreachable through `buildWorkReport`, which always sets all three
+        // together. Loud rather than silently mis-bucketing to the epoch.
+        throw new Error(
+          `chargesFromWorkDetail: stipend row ${row.id} is missing its period`,
+        );
+      }
+      return {
+        // Buckets the stipend into the period containing its own start.
+        startAt: row.periodStart,
+        endAt: row.periodEndExclusive,
+        // Its OWN summary line, never merged into a program's.
+        lineLabel: STIPEND_LINE_LABEL,
+        // 🔴 The period label is IN the row: a filtered range can overlap two
+        // periods and show two stipends, and the reader must see why.
+        description: `${STIPEND_LINE_LABEL} — ${row.periodLabel}`,
+        rateLabel: STIPEND_FLAT_RATE_LABEL,
+        slots: null,
+        // Not 0 — see the note on StatementChargeInput.hours.
+        hours: null,
+        amountCents: row.payCents,
+      };
+    }
     const source = byId.get(row.id);
     if (!source) {
       throw new Error(`chargesFromWorkDetail: no source hour log for ${row.id}`);
@@ -646,13 +689,21 @@ export function chargesFromWorkDetail(
 }
 
 /**
- * "$100.00/session" · "$30.00/hr" · "No rate".
+ * "$100.00/session" · "$30.00/hr" · "Flat rate" · "Covered by stipend" ·
+ * "No rate".
  *
  * Never "$0.00/hr" for a MISSING rate: both work snapshots are nullable (a
  * pre-rate log carries neither and pays $0), and a rendered zero reads as a
  * deliberate decision to pay nothing rather than as an unset rate.
+ *
+ * 🔴 The two stipend branches come FIRST and are checked before the rate
+ * snapshots, because a covered log carries no snapshot either — it would
+ * otherwise fall through to "No rate", which is the exact misreading SPEC
+ * §10.3 exists to prevent.
  */
 function workRateLabel(row: WorkDetailRow): string {
+  if (row.kind === "stipend") return STIPEND_FLAT_RATE_LABEL;
+  if (row.stipendCovered) return COVERED_BY_STIPEND_LABEL;
   if (row.perSessionRateCents != null) {
     return `${formatDollarsExact(row.perSessionRateCents)}/session`;
   }
@@ -667,12 +718,27 @@ function workRateLabel(row: WorkDetailRow): string {
 function buildChargeLines(
   charges: readonly StatementChargeInput[],
 ): StatementChargeLine[] {
-  type Bucket = { label: string; slots: number | null; hours: number; cents: number };
+  // `hours` accumulates only real durations; `hasHours` records whether ANY
+  // charge in the bucket had a duration at all. Without that flag a stipend
+  // bucket would be indistinguishable from a genuine 0.0-hour one.
+  type Bucket = {
+    label: string;
+    slots: number | null;
+    hours: number;
+    hasHours: boolean;
+    cents: number;
+  };
   const buckets = new Map<string, Bucket>();
   for (const charge of charges) {
     let bucket = buckets.get(charge.lineLabel);
     if (!bucket) {
-      bucket = { label: charge.lineLabel, slots: 0, hours: 0, cents: 0 };
+      bucket = {
+        label: charge.lineLabel,
+        slots: 0,
+        hours: 0,
+        hasHours: false,
+        cents: 0,
+      };
       buckets.set(charge.lineLabel, bucket);
     }
     // A single slotless charge makes the whole line slotless: half a slot
@@ -682,7 +748,12 @@ function buildChargeLines(
       charge.slots == null || bucket.slots == null
         ? null
         : bucket.slots + charge.slots;
-    bucket.hours += charge.hours;
+    // Same reasoning as `slots` above, mirrored: an hour-less charge does not
+    // contribute a zero, it records that this line has no duration to quote.
+    if (charge.hours != null) {
+      bucket.hours += charge.hours;
+      bucket.hasHours = true;
+    }
     bucket.cents += charge.amountCents;
   }
 
@@ -694,8 +765,10 @@ function buildChargeLines(
     .sort(byCanonicalThenName)
     .map((bucket) => ({
       label: bucket.label,
-      units:
-        bucket.slots == null
+      units: !bucket.hasHours
+        ? // 🔴 A stipend line: no slots, no hours, no fabricated zero.
+          EM_DASH
+        : bucket.slots == null
           ? formatHours(bucket.hours)
           : `${formatSlots(bucket.slots)} · ${formatHours(bucket.hours)}`,
       amountCents: bucket.cents,
@@ -728,8 +801,18 @@ function buildChargeRows(
     )
     .map((charge) => ({
       date: pfaMonthDayPadded(charge.startAt),
-      dayOfWeek: formatPfaWeekday(charge.startAt),
-      timeRange: pfaTimeRange(charge.startAt, charge.endAt),
+      // 🔴 A charge with NO hours has no weekday and no clock times either.
+      // Its `startAt`/`endAt` are a PAY PERIOD's bounds, so deriving a time
+      // range from them prints "12:00 – 12:00 AM" against a $2,500 stipend —
+      // a rendered fact that is not true, on the one document Mark hands to a
+      // coach. `hours == null` is the same signal the summary line uses, so
+      // the row and the line can never disagree about what kind of charge
+      // this is.
+      dayOfWeek: charge.hours == null ? EM_DASH : formatPfaWeekday(charge.startAt),
+      timeRange:
+        charge.hours == null
+          ? EM_DASH
+          : pfaTimeRange(charge.startAt, charge.endAt),
       description: charge.description,
       rateLabel: charge.rateLabel,
       // 🔴 Carried onto the ROW, not just the summary line. Without it an
@@ -864,6 +947,9 @@ function formatSlots(slots: number): string {
  * and trailing "8.00 h" would read as false precision — hence one decimal
  * whenever the second is zero.
  */
+/** The one em dash this document uses for "there is nothing to quote". */
+const EM_DASH = "\u2014";
+
 function formatHours(hours: number): string {
   const rounded = Math.round(hours * 100) / 100;
   // `rounded * 10` is an integer exactly when the hundredths digit is 0.

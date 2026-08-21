@@ -21,6 +21,7 @@ import {
 import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
 import { countHeldHourLogs } from "@/lib/server/hour-log-actions";
 import { programMinutes, workPayForLog } from "@/lib/billing";
+import { fetchStipendEarningsInRange } from "@/lib/stipend/fetch";
 import { formatDollarsExact } from "@/lib/format-money";
 import { pfaDayEnd, pfaDayStart, pfaMonthEnd, pfaMonthStart } from "@/lib/timezone";
 import { fetchNeedsReviewItems } from "@/lib/server/needs-review";
@@ -148,6 +149,23 @@ export default async function AdminHourLogPage({
       ratePer30MinCents: r.ratePer30MinCents ?? 0,
     });
   }
+
+  // 🔴 STIPENDS BELONG IN THIS CARD TOO (SPEC §10.6/§10.7). A calendar month
+  // is exactly TWO pay periods, so the month's stipend total is the earnings
+  // whose periods fall inside it — no partial-period arithmetic, because a
+  // stipend is not pro-ratable.
+  //
+  // Leaving them out would put a figure on the dashboard that is smaller than
+  // the same month's figure on /admin/reports?tab=work, and two different
+  // numbers for one month reads as a bug in the money.
+  const monthStipendCents = (
+    await fetchStipendEarningsInRange({
+      fromDate: monthStart,
+      toDateExclusive: monthEndExclusive,
+    })
+  ).reduce((total, e) => total + e.amountCents, 0);
+  owedProgramCents += monthStipendCents;
+
   const monthHours = monthMinutes / 60;
   // Up to 2 decimals, trailing zeros stripped: 42.75 → "42.75", 42.5 → "42.5", 40 → "40".
   const monthHoursLabel = monthHours

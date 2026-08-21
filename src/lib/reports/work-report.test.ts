@@ -20,6 +20,9 @@ function at(hour: number, minute = 0): Date {
 
 function row(overrides: Partial<HourLogFetchRow> = {}): HourLogFetchRow {
   return {
+    // Default false: an ordinary log. The stipend-covered cases set it
+    // explicitly, so a fixture never claims coverage by accident.
+    stipendCovered: false,
     id: "log-1",
     coachId: "coach-a",
     coachName: "Coach A",
@@ -240,5 +243,185 @@ describe("buildWorkReport — RECONCILIATION (the reason this module exists)", (
     for (const d of detail) expect(Number.isInteger(d.payCents)).toBe(true);
     for (const s of summary) expect(Number.isInteger(s.payCents)).toBe(true);
     expect(Number.isInteger(grandTotalCents)).toBe(true);
+  });
+});
+
+/* ── STIPENDS (SPEC §10.3) ───────────────────────────────────────────────── */
+
+describe("🔴 buildWorkReport — stipends are DETAIL ROWS, not a total-only adjustment", () => {
+  // Sept 2026 is PDT, so PFA midnight on the 1st is 07:00Z.
+  const SEP_P1_START = new Date("2026-09-01T07:00:00.000Z");
+  const SEP_P1_END = new Date("2026-09-16T07:00:00.000Z");
+  const SEP_P2_START = new Date("2026-09-16T07:00:00.000Z");
+  const SEP_P2_END = new Date("2026-10-01T07:00:00.000Z");
+
+  function earning(over: Partial<{
+    id: string;
+    coachId: string;
+    periodKey: string;
+    periodStart: Date;
+    periodEndExclusive: Date;
+    amountCents: number;
+  }> = {}) {
+    return {
+      id: "earn-1",
+      coachId: "coach-a",
+      periodKey: "2026-09-P1",
+      periodStart: SEP_P1_START,
+      periodEndExclusive: SEP_P1_END,
+      amountCents: 250_000,
+      ...over,
+    };
+  }
+
+  it("passing none keeps behaviour byte-identical to before stipends existed", () => {
+    // The property that let every existing caller and test stay untouched.
+    const withArg = buildWorkReport([row()], []);
+    const without = buildWorkReport([row()]);
+    expect(withArg).toEqual(without);
+  });
+
+  it("🔴 THE INVARIANT: the grand total is the sum of the rows on screen", () => {
+    // This module's contract is "the detail rows ARE the summands". A stipend
+    // added to the total but not shown would produce rows that visibly fail to
+    // add up — the exact failure that contract exists to prevent. Asserted as
+    // an identity, so it cannot be updated to match a bug.
+    const report = buildWorkReport([row()], [earning()]);
+    const summed = report.detail.reduce((t, r) => t + r.payCents, 0);
+    expect(report.grandTotalCents).toBe(summed);
+    expect(report.detail).toHaveLength(2);
+  });
+
+  it("the summary per coach also equals its own detail rows", () => {
+    const report = buildWorkReport(
+      [row({ id: "l1" }), row({ id: "l2", startAt: at(11), endAt: at(12) })],
+      [earning(), earning({ id: "earn-2", periodKey: "2026-09-P2", periodStart: SEP_P2_START, periodEndExclusive: SEP_P2_END })],
+    );
+    const [only] = report.summary;
+    const own = report.detail.filter((r) => r.coachId === only.coachId);
+    expect(only.payCents).toBe(own.reduce((t, r) => t + r.payCents, 0));
+    expect(only.entries).toBe(own.length);
+    // 🔴 Two stipends + two logs; the stipends contribute NO hours.
+    expect(only.hours).toBe(own.reduce((t, r) => t + r.hours, 0));
+    expect(only.hours).toBe(2);
+  });
+
+  it("🔴 a stipend row has no times, no weekday and no hours", () => {
+    const { detail } = buildWorkReport([], [earning()]);
+    const [s] = detail;
+    expect(s.kind).toBe("stipend");
+    expect(s.dayOfWeek).toBeNull();
+    expect(s.startTime).toBeNull();
+    expect(s.endTime).toBeNull();
+    // The one honest zero — and every renderer turns it into an em dash.
+    expect(s.hours).toBe(0);
+    expect(s.ratePer30MinCents).toBeNull();
+    expect(s.perSessionRateCents).toBeNull();
+  });
+
+  it("🔴 carries its PERIOD LABEL in the row, because a range can hold two", () => {
+    // SPEC §5.4: a report filtered Sep 10 → Sep 20 overlaps BOTH half-months,
+    // so a coach shows two full stipends. Without the label in the row that
+    // reads as a double-count instead of as two periods.
+    const { detail } = buildWorkReport(
+      [],
+      [
+        earning(),
+        earning({
+          id: "earn-2",
+          periodKey: "2026-09-P2",
+          periodStart: SEP_P2_START,
+          periodEndExclusive: SEP_P2_END,
+        }),
+      ],
+    );
+    expect(detail.map((d) => d.periodLabel)).toEqual([
+      "Sep 1–15, 2026",
+      "Sep 16–30, 2026",
+    ]);
+    // And the label is visible in the column a reader actually looks at.
+    expect(detail[0].programName).toBe("Stipend — Sep 1–15, 2026");
+    expect(detail[1].programName).toBe("Stipend — Sep 16–30, 2026");
+  });
+
+  it("carries real period INSTANTS, so the statement can bucket it", () => {
+    const [s] = buildWorkReport([], [earning()]).detail;
+    // Never re-parsed from the display string — that is how a PFA-vs-UTC
+    // misbucket gets reintroduced.
+    expect(s.periodStart?.toISOString()).toBe("2026-09-01T07:00:00.000Z");
+    expect(s.periodEndExclusive?.toISOString()).toBe("2026-09-16T07:00:00.000Z");
+  });
+
+  it("takes the coach's display name from the logs in scope", () => {
+    const { detail } = buildWorkReport(
+      [row({ coachId: "coach-a", coachName: "Coach A" })],
+      [earning({ coachId: "coach-a" })],
+    );
+    const s = detail.find((d) => d.kind === "stipend")!;
+    expect(s.coachName).toBe("Coach A");
+    expect(s.coachEmail).toBe("a@example.com");
+  });
+
+  it("🔴 T12 — a COVERED log keeps its hours and is flagged, not hidden", () => {
+    // Mark's Q2: he wants to SEE all the hours while they charge him $0.
+    const { detail, grandTotalHours, grandTotalCents } = buildWorkReport(
+      [
+        row({
+          id: "covered",
+          stipendCovered: true,
+          ratePer30MinCents: null,
+          perSessionRateCents: null,
+        }),
+      ],
+      [earning()],
+    );
+    const log = detail.find((d) => d.kind === "log")!;
+    expect(log.stipendCovered).toBe(true);
+    expect(log.hours).toBe(1); // real hours, untouched
+    expect(log.payCents).toBe(0); // and no pay
+    expect(grandTotalHours).toBe(1);
+    // The stipend is the pay — the whole total, with the hours charging $0.
+    expect(grandTotalCents).toBe(250_000);
+  });
+
+  it("an UNCOVERED log on the same coach still pays hourly ON TOP (T11)", () => {
+    // The positive control: without it, "covered pays $0" could be passing
+    // because nothing pays anything.
+    const { grandTotalCents } = buildWorkReport(
+      [
+        row({ id: "covered", stipendCovered: true, ratePer30MinCents: null }),
+        row({
+          id: "extra",
+          startAt: at(19),
+          endAt: at(21),
+          ratePer30MinCents: 1500,
+        }),
+      ],
+      [earning()],
+    );
+    // $2,500 stipend + 2 h × $30 = $2,560.
+    expect(grandTotalCents).toBe(250_000 + 6_000);
+  });
+
+  it("keeps two coaches' stipends in their own summary rows", () => {
+    const { summary } = buildWorkReport(
+      [
+        row({ coachId: "coach-a", coachName: "Coach A" }),
+        row({
+          id: "l2",
+          coachId: "coach-b",
+          coachName: "Coach B",
+          coachEmail: "b@example.com",
+        }),
+      ],
+      [
+        earning({ coachId: "coach-a" }),
+        earning({ id: "e2", coachId: "coach-b", amountCents: 100_000 }),
+      ],
+    );
+    const a = summary.find((s) => s.coachId === "coach-a")!;
+    const b = summary.find((s) => s.coachId === "coach-b")!;
+    expect(a.payCents).toBe(250_000 + 3_000);
+    expect(b.payCents).toBe(100_000 + 3_000);
   });
 });

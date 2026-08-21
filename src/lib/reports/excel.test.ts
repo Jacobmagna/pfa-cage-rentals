@@ -121,6 +121,11 @@ function makeReport(): ReportData {
 function makeWork(): WorkReportData {
   const detail: WorkDetailRow[] = [
     {
+      kind: "log" as const,
+      stipendCovered: false,
+      periodLabel: null,
+      periodStart: null,
+      periodEndExclusive: null,
       id: "w1",
       date: "2026-05-05",
       dayOfWeek: "Tue",
@@ -138,6 +143,11 @@ function makeWork(): WorkReportData {
       scheduleNote: null,
     },
     {
+      kind: "log" as const,
+      stipendCovered: false,
+      periodLabel: null,
+      periodStart: null,
+      periodEndExclusive: null,
       id: "w2",
       date: "2026-05-06",
       dayOfWeek: "Wed",
@@ -155,6 +165,11 @@ function makeWork(): WorkReportData {
       scheduleNote: "Scheduled 5:00 PM–8:00 PM",
     },
     {
+      kind: "log" as const,
+      stipendCovered: false,
+      periodLabel: null,
+      periodStart: null,
+      periodEndExclusive: null,
       id: "w3",
       date: "2026-05-07",
       dayOfWeek: "Thu",
@@ -689,15 +704,15 @@ describe("buildReportWorkbook", () => {
 
   describe("workRateCell", () => {
     it("matches the on-screen RateCell for all three shapes", () => {
-      expect(workRateCell(1500, null)).toEqual({
+      expect(workRateCell(1500, null, { kind: "log", covered: false })).toEqual({
         dollars: 30,
         basis: "per hr",
       });
-      expect(workRateCell(null, 10000)).toEqual({
+      expect(workRateCell(null, 10000, { kind: "log", covered: false })).toEqual({
         dollars: 100,
         basis: "per session",
       });
-      expect(workRateCell(null, null)).toEqual({
+      expect(workRateCell(null, null, { kind: "log", covered: false })).toEqual({
         dollars: undefined,
         basis: "No rate",
       });
@@ -707,7 +722,7 @@ describe("buildReportWorkbook", () => {
       // workPayForLog branches on perSessionRateCents first, so the rate
       // shown has to branch the same way or the Rate column would stop
       // explaining the Pay column.
-      expect(workRateCell(1500, 10000)).toEqual({
+      expect(workRateCell(1500, 10000, { kind: "log", covered: false })).toEqual({
         dollars: 100,
         basis: "per session",
       });

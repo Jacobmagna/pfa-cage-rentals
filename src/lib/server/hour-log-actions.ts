@@ -53,6 +53,7 @@ import {
   type ReconBlock,
 } from "@/lib/server/reconciliation";
 import { formatPfaTime12h } from "@/lib/timezone";
+import { recordStipendEarning } from "@/lib/stipend/earnings";
 import { safeLogAudit } from "./audit-helpers";
 
 // DESIGN-1: the (coach, program) pay mode + rates now live on a SINGLE
@@ -117,9 +118,12 @@ export function resolveStipendCovered(
  * makes the answer for September stable forever, no matter when the question
  * is asked or how many times the amount changes afterwards (SPEC §7.2, Q5).
  *
- * `coach_stipends` windows are non-overlapping per coach (enforced in the
- * write action inside a transaction), so at most one row can match; `limit(1)`
- * is a safety net, not a tie-break.
+ * `coach_stipends` windows are non-overlapping per coach, so at most one row
+ * can match; `limit(1)` is a safety net, not a tie-break. ⚠️ That non-overlap
+ * is NOT enforced by a transaction — neon-http has none. It is structural: the
+ * write path in `stipend-actions.ts` is append-only and forward-only, and the
+ * batch that inserts a new version closes the previous one at exactly its
+ * start, so the windows meet rather than overlap.
  */
 export async function fetchStipendAmountCentsForPeriod(
   coachId: string,
@@ -519,6 +523,20 @@ export async function logHourInternal(
         before: existing as unknown as Record<string, unknown>,
         after: upgraded as unknown as Record<string, unknown>,
       });
+
+      // 🔴 POSTED MOMENT 2 of 3 — the HELD → POSTED auto-upgrade. This branch
+      // is a long way from the insert below and is the one a reader misses:
+      // it is an UPDATE inside the duplicate-conflict path. `stipendCovered`
+      // comes off the EXISTING row's snapshot, stamped when the held row was
+      // first written.
+      await recordStipendEarning({
+        actorUserId: actor.id,
+        coachId: upgraded.coachId,
+        hourLogId: upgraded.id,
+        logStartAt: upgraded.startAt,
+        stipendCovered: upgraded.stipendCovered,
+        resolveAmountCents: fetchStipendAmountCentsForPeriod,
+      });
       return upgraded;
     }
 
@@ -535,6 +553,21 @@ export async function logHourInternal(
     action: "create",
     after: inserted as unknown as Record<string, unknown>,
   });
+
+  // 🔴 POSTED MOMENT 1 of 3 — a clean log takes the schema's `posted` default.
+  // Gated on the row's OWN status rather than on `heldReason === null`: the
+  // two agree today, and reading the status is the one that stays true if the
+  // insert's status handling ever changes.
+  if (inserted.status === "posted") {
+    await recordStipendEarning({
+      actorUserId: actor.id,
+      coachId: inserted.coachId,
+      hourLogId: inserted.id,
+      logStartAt: inserted.startAt,
+      stipendCovered: inserted.stipendCovered,
+      resolveAmountCents: fetchStipendAmountCentsForPeriod,
+    });
+  }
   return inserted;
 }
 
@@ -696,6 +729,20 @@ export async function approveHeldHourLogInternal(
     action: "update",
     before: existing as unknown as Record<string, unknown>,
     after: updated as unknown as Record<string, unknown>,
+  });
+
+  // 🔴 POSTED MOMENT 3 of 3 — an admin approving a held log.
+  // ⚠️ `updated.startAt` deliberately, NOT `existing.startAt`: an approval may
+  // carry a time EDIT, and the edited time is what decides the pay period.
+  // Approving a September log in October must earn a SEPTEMBER stipend — the
+  // approval date never buckets anything.
+  await recordStipendEarning({
+    actorUserId: actor.id,
+    coachId: updated.coachId,
+    hourLogId: updated.id,
+    logStartAt: updated.startAt,
+    stipendCovered: updated.stipendCovered,
+    resolveAmountCents: fetchStipendAmountCentsForPeriod,
   });
   return updated;
 }

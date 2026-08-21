@@ -310,6 +310,13 @@ export type RepriceLogRow = {
   ratePer30MinCents: number | null;
   perSessionRateCents: number | null;
   rateSourceKind: RateSourceKind | null;
+  /**
+   * STIPEND SPEC §2.11 / §10.9 — the log's OWN record that a stipend covers it.
+   * Read here so a covered log can be excluded from a re-price rather than
+   * re-rated. Reading the snapshot rather than re-deriving coverage is
+   * deliberate: what mattered is what was true when the log was written.
+   */
+  stipendCovered: boolean;
 };
 
 /** One log's before/after. Only logs that WOULD be written appear in these. */
@@ -374,7 +381,22 @@ export type RepriceExcludedCoach = {
   coachId: string;
   coachName: string;
   logCount: number;
-  reason: "resolves_from_own_override";
+  /**
+   * `resolves_from_own_override` — SPEC §5: the coach's own override supplied
+   * the rate, so a program-default change cannot reach them.
+   *
+   * 🔴 `covered_by_stipend` — STIPEND SPEC §10.9: the log is paid by the
+   * coach's half-month stipend and carries NO rate. Re-pricing it would stamp
+   * a real hourly rate onto work the stipend already paid for, i.e. pay it
+   * twice. Excluded and REPORTED, never silently skipped: a preview that
+   * omitted these would tell Mark a stipend coach's pay is changing when it
+   * must not.
+   *
+   * ⚠️ One entry per coach, first reason wins. A coach with BOTH kinds (a
+   * stipend that began mid-window) reports as `covered_by_stipend` since that
+   * check runs first, while `logCount` still counts all their excluded logs.
+   */
+  reason: "resolves_from_own_override" | "covered_by_stipend";
 };
 
 export type RateRepricePreview = {
@@ -613,15 +635,49 @@ export function computeRateRepriceDiff(args: {
     // this rate change concerns them).
     if (scope.kind === "override" && log.coachId !== scope.coachId) continue;
 
+    // 🔴 STIPEND SPEC §10.9 — BEFORE any re-resolution. This module was
+    // originally scoped as "no change: a stipend has no hour_logs snapshot",
+    // which was wrong in the most dangerous way: it does not READ stipends, but
+    // it WRITES the very rate snapshots that make a covered log $0. Left alone,
+    // Mark running a retro rate change on a program would silently un-zero
+    // every covered log and pay it hourly ON TOP of the stipend.
+    //
+    // Excluded and REPORTED, never quietly skipped.
+    if (log.stipendCovered) {
+      excludedLogCount += 1;
+      const covered = excludedByCoach.get(log.coachId) ?? {
+        coachId: log.coachId,
+        coachName: displayName(log),
+        logCount: 0,
+        reason: "covered_by_stipend" as const,
+      };
+      covered.logCount += 1;
+      excludedByCoach.set(log.coachId, covered);
+      continue;
+    }
+
     // ── RE-RESOLUTION. The identical precedence chain logHourInternal runs
     // for a brand-new log, with this log's own (coach, program) rows. ──
     const override = overrideByCoach.get(log.coachId) ?? null;
-    const newRatePer30MinCents = resolveRateCentsForProgram(override, program);
+    // `log.stipendCovered` is false on every row that reaches here (the guard
+    // above returned), but it is passed EXPLICITLY rather than as a literal
+    // `false`: the value stays correct if that guard is ever moved, and the
+    // call site keeps saying which log it is talking about.
+    const newRatePer30MinCents = resolveRateCentsForProgram(
+      override,
+      program,
+      log.stipendCovered,
+    );
     const newPerSessionRateCents = resolvePerSessionRateCents(
       override,
       program,
+      log.stipendCovered,
     );
-    const newRateSourceKind = resolveRateSourceKind(override, program);
+    const newRateSourceKind = resolveRateSourceKind(
+      override,
+      program,
+      log.stipendCovered,
+    );
 
     // ── SPEC §5, structurally. This is not a coach blocklist: we asked the
     // resolvers who supplied this log's rate. "override" means the chain
@@ -752,10 +808,17 @@ export function computeRateRepriceDiff(args: {
     if (log.programId !== program.id) continue;
     if (log.startAt.getTime() < effectiveFrom.getTime()) continue;
     if (scope.kind === "override" && log.coachId !== scope.coachId) continue;
+    // A covered held log would not be re-priced after approval either, so
+    // counting it here would nudge Mark to re-run for something that can never
+    // move — the same false-alarm reasoning as the §5 exclusion below.
+    if (log.stipendCovered) continue;
     if (
       scope.kind === "program_default" &&
-      resolveRateSourceKind(overrideByCoach.get(log.coachId) ?? null, program) ===
-        "override"
+      resolveRateSourceKind(
+        overrideByCoach.get(log.coachId) ?? null,
+        program,
+        log.stipendCovered,
+      ) === "override"
     ) {
       continue;
     }
@@ -904,6 +967,7 @@ async function loadRepriceInputs(
       payMode: programs.payMode,
       defaultRatePer30MinCents: programs.defaultRatePer30MinCents,
       defaultPerSessionRateCents: programs.defaultPerSessionRateCents,
+      stipendEligible: programs.stipendEligible,
     })
     .from(programs)
     .where(eq(programs.id, scope.programId))
@@ -939,6 +1003,7 @@ async function loadRepriceInputs(
         ratePer30MinCents: hourLogs.ratePer30MinCents,
         perSessionRateCents: hourLogs.perSessionRateCents,
         rateSourceKind: hourLogs.rateSourceKind,
+        stipendCovered: hourLogs.stipendCovered,
       })
       .from(hourLogs)
       .innerJoin(users, eq(users.id, hourLogs.coachId))

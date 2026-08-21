@@ -64,3 +64,25 @@ export const endCoachStipendSchema = z.object({
 
 export type SetCoachStipendInput = z.infer<typeof setCoachStipendSchema>;
 export type EndCoachStipendInput = z.infer<typeof endCoachStipendSchema>;
+
+/**
+ * Dollars as typed → whole cents. Returns null for anything that is not a
+ * plain amount, so the caller can surface a real message instead of storing a
+ * guess.
+ *
+ * ⚠️ NOT `Math.round(parseFloat(v) * 100)`. That is the obvious version and it
+ * is wrong often enough to matter on money — `19.99 * 100` is
+ * `1998.9999999999998`, and `2500.10 * 100` is `250009.99999999997`. This
+ * splits on the decimal point and works in integers, so what the admin typed
+ * is exactly what gets stored.
+ *
+ * Lives here rather than beside the form action because a `"use server"` file
+ * may only export async functions, and because this is the same "shape of the
+ * input" concern the schemas above own.
+ */
+export function dollarsToCents(raw: string): number | null {
+  const v = raw.trim().replace(/^\$/, "").replace(/,/g, "");
+  if (!/^\d+(\.\d{1,2})?$/.test(v)) return null;
+  const [whole, frac = ""] = v.split(".");
+  return Number(whole) * 100 + Number(frac.padEnd(2, "0"));
+}

@@ -75,13 +75,19 @@ export const STIPEND_ENTITY_TYPE = "coach_stipend" as const;
  */
 export async function fetchCoachStipendVersions(
   coachId: string,
-): Promise<StipendVersion[]> {
+): Promise<Array<StipendVersion & { note: string | null }>> {
+  // ⚠️ ONE query serves BOTH the planner and the history card. `note` is a
+  // superset of what `StipendVersion` requires, and structural typing means
+  // the planner takes this row unchanged. A second "history" query would be
+  // two reads that must agree about this coach's versions — the exact *"same
+  // function is not the same inputs"* trap the 2026-08-13 sweep named.
   return db
     .select({
       id: coachStipends.id,
       amountCents: coachStipends.amountCents,
       effectiveFrom: coachStipends.effectiveFrom,
       effectiveTo: coachStipends.effectiveTo,
+      note: coachStipends.note,
     })
     .from(coachStipends)
     .where(eq(coachStipends.coachId, coachId))

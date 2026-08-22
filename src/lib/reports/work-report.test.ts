@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { buildWorkReport } from "./work-report";
 import type { StipendEarningRow } from "@/lib/stipend/fetch";
+import { coachScopeFromFilters } from "@/lib/stipend/scope";
 import type { HourLogFetchRow } from "./hour-log-fetch";
 
 // 2026-05-01 is PDT (UTC-7), so 16:00 UTC → 09:00 PFA.
@@ -541,5 +542,28 @@ describe("🔴 buildWorkReport — stipends are DETAIL ROWS, not a total-only ad
     const b = summary.find((s) => s.coachId === "coach-b")!;
     expect(a.payCents).toBe(250_000 + 3_000);
     expect(b.payCents).toBe(100_000 + 3_000);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// 🔴 THE EMPTY-SCOPE MISMATCH — `[]` means ALL to the filter bar and NONE to
+// the stipend fetch. Two of the three callers passed it raw, so on the
+// DEFAULT "All coaches" view every stipend vanished from the Work tab, the
+// grand total, and the workbook. Found by rendering the page and reading it.
+// ─────────────────────────────────────────────────────────────────────────
+describe("coachScopeFromFilters", () => {
+  it("turns the filter bar's EMPTY 'all coaches' into the fetch's 'all'", () => {
+    expect(coachScopeFromFilters([])).toBeUndefined();
+  });
+
+  it("passes a real coach scope straight through", () => {
+    expect(coachScopeFromFilters(["c1", "c2"])).toEqual(["c1", "c2"]);
+  });
+
+  it("copies rather than aliasing, so a caller cannot mutate the filters", () => {
+    const filterIds = ["c1"];
+    const scope = coachScopeFromFilters(filterIds);
+    scope!.push("c2");
+    expect(filterIds).toEqual(["c1"]);
   });
 });

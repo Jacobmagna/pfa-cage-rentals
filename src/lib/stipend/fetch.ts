@@ -33,6 +33,10 @@ import { db } from "@/db";
 import { coachStipendEarnings, users } from "@/db/schema";
 import { payPeriodFor } from "@/lib/pay-period";
 
+// Re-exported so a caller needs one import for the scope rule and the queries
+// it feeds. The definition is pure and lives in `scope.ts`.
+export { coachScopeFromFilters } from "./scope";
+
 export type StipendEarningRow = {
   id: string;
   coachId: string;

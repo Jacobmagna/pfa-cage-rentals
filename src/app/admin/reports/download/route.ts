@@ -19,6 +19,7 @@ import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch"
 import { hourLogFiltersFromReportFilters } from "@/lib/reports/hour-log-filters";
 import { buildWorkReport } from "@/lib/reports/work-report";
 import { fetchStipendEarningsInRange } from "@/lib/stipend/fetch";
+import { coachScopeFromFilters } from "@/lib/stipend/scope";
 import { buildPaymentTimeline } from "@/lib/reports/payments-timeline";
 import { fetchPaymentTimelineRows } from "@/lib/reports/payments-timeline-fetch";
 import { requireRole } from "@/lib/authz";
@@ -49,7 +50,10 @@ export async function GET(request: Request) {
     fetchStipendEarningsInRange({
       fromDate: filters.fromDate,
       toDateExclusive: filters.toDateExclusive,
-      coachIds: filters.coachIds,
+      // 🔴 See `coachScopeFromFilters` — an empty filter means ALL coaches
+      // here and NONE in the fetch, and passing it raw emptied the workbook
+      // of stipends on the default download.
+      coachIds: coachScopeFromFilters(filters.coachIds),
     }),
   ]);
 

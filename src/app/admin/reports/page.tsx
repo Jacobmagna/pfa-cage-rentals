@@ -15,6 +15,7 @@ import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch"
 import { hourLogFiltersFromReportFilters } from "@/lib/reports/hour-log-filters";
 import { buildWorkReport } from "@/lib/reports/work-report";
 import { fetchStipendEarningsInRange } from "@/lib/stipend/fetch";
+import { coachScopeFromFilters } from "@/lib/stipend/scope";
 import { buildPaymentTimeline } from "@/lib/reports/payments-timeline";
 import { fetchPaymentTimelineRows } from "@/lib/reports/payments-timeline-fetch";
 import { normalizeReportTab } from "@/lib/reports/tabs";
@@ -132,7 +133,10 @@ export default async function AdminReportsPage({
   const stipendEarnings = await fetchStipendEarningsInRange({
     fromDate: filters.fromDate,
     toDateExclusive: filters.toDateExclusive,
-    coachIds: filters.coachIds,
+    // 🔴 `coachScopeFromFilters`, NOT `filters.coachIds`. An empty filter means
+    // ALL coaches here and NONE in the fetch — passing it raw made every
+    // stipend disappear from the default view. See the note on the helper.
+    coachIds: coachScopeFromFilters(filters.coachIds),
   });
 
   // Summary and detail both come out of this one call, off the one row

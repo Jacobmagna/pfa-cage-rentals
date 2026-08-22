@@ -10,6 +10,7 @@
 //
 // Server component, no client state.
 
+import { formatDollarsExact } from "@/lib/format-money";
 import type {
   WorkDetailKind,
   WorkDetailRow,
@@ -301,6 +302,16 @@ function formatHours(hours: number): string {
   return hours.toFixed(2).replace(/\.?0+$/, "");
 }
 
+// 🔴 `formatDollarsExact`, the shared formatter — NOT a local `toFixed(2)`.
+//
+// `toFixed` has no thousands separator, so this screen printed "$2500.00" and
+// a grand total of "$2580.00" while the printed statement, the coach's stipend
+// card and the history table all printed "$2,500.00". One number, two formats,
+// one click apart.
+//
+// It was invisible until stipends arrived: per-log pay rarely reaches four
+// figures, so the gap had nothing to show it. A half-month stipend is four
+// figures every time, and it is the LARGEST number on the payroll screen.
 function formatCents(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
+  return formatDollarsExact(cents);
 }

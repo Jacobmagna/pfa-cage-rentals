@@ -62,6 +62,7 @@ import { fetchReportSessionInputs } from "@/lib/reports/fetch";
 import { fetchHourLogRows } from "@/lib/reports/hour-log-fetch";
 import { buildWorkReport } from "@/lib/reports/work-report";
 import { fetchStipendEarningsAllTime } from "@/lib/stipend/fetch";
+import { coachScopeFromFilters } from "@/lib/stipend/scope";
 import {
   chargesFromCageDetail,
   chargesFromWorkDetail,
@@ -151,7 +152,7 @@ export async function fetchStatementCoaches(
     // 🔴 ALL-TIME, like every other fetch on this path. The engine computes
     // opening balances from history, so it needs the whole ledger; the period
     // arrives later, as a bucketing decision, not as a query filter.
-    fetchStipendEarningsAllTime(coachIds.length > 0 ? coachIds : undefined),
+    fetchStipendEarningsAllTime(coachScopeFromFilters(coachIds)),
   ]);
 
   // Charges get bucketed per coach BEFORE the adapters run, because

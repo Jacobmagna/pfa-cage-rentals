@@ -54,6 +54,10 @@ import {
 } from "@/lib/server/hour-log-actions";
 import { setCoachStipendInternal } from "@/lib/server/stipend-actions";
 import {
+  createProgramInternal,
+  updateProgramInternal,
+} from "@/lib/server/program-actions";
+import {
   backfillStipendEarnings,
   SANCTIONED_FLOOR,
   StipendBackfillFloorError,
@@ -284,6 +288,160 @@ describe("🔴 T10 — a covered log stamps NO rate, even with a program default
     expect(log!.stipendCovered).toBe(false);
     expect(log!.ratePer30MinCents).toBe(PROGRAM_DEFAULT_RATE);
     expect(await earningsFor(coach.id)).toHaveLength(0);
+  });
+});
+
+/* ── 🔴 THE OPERATOR'S PATH ──────────────────────────────────────────────── */
+
+/**
+ * Create a program through the APP'S OWN ACTION rather than a raw INSERT.
+ *
+ * 🔴 This is the whole point of the block below. Every other fixture in this
+ * file writes `stipend_eligible` with SQL, which is exactly why the feature
+ * could pass 1,591 unit tests, 502 integration tests and eleven mutations
+ * while being completely unusable: the column had three readers and no
+ * writers, so nothing an admin could do in the product ever set it. A test
+ * that sets it directly proves the resolver; only a test that goes through
+ * `createProgramInternal` / `updateProgramInternal` proves Mark can reach it.
+ */
+async function createProgramViaAction(stipendEligible: boolean) {
+  const row = await createProgramInternal(fixtures.admin, {
+    name: `Stipend Toggle Test ${uniqueSuffix()}`,
+    // 🔴 Non-zero, like every other fixture here: the program-default
+    // fall-through's ammunition. Without it a covered log would stamp null
+    // whether or not the switch is doing anything.
+    defaultRatePer30MinCents: PROGRAM_DEFAULT_RATE,
+    stipendEligible,
+  });
+  createdProgramIds.push(row.id);
+  return row;
+}
+
+describe("🔴 the admin toggle actually reaches the money", () => {
+  it("a program made eligible THROUGH THE ACTION covers a stipend coach's log", async () => {
+    const { coach } = fixtures;
+    await putCoachOnStipend(coach.id);
+
+    const covered = await createProgramViaAction(true);
+    const uncovered = await createProgramViaAction(false); // ← the CONTROL
+
+    const coveredLog = await logCleanHour({
+      coachId: coach.id,
+      programId: covered.id,
+      startAt: sept(8, "09:00"),
+      endAt: sept(8, "11:00"),
+    });
+    const uncoveredLog = await logCleanHour({
+      coachId: coach.id,
+      programId: uncovered.id,
+      startAt: sept(8, "19:00"),
+      endAt: sept(8, "21:00"),
+    });
+
+    expect(coveredLog!.stipendCovered).toBe(true);
+    expect(coveredLog!.ratePer30MinCents).toBeNull();
+    expect(workPayForLog(coveredLog!)).toBe(0);
+
+    // 🔴 THE CONTROL. Both programs were created the same way, one call apart;
+    // the ONLY difference is the flag the admin set. Without this passing, the
+    // $0 above could be $0 for any other reason.
+    expect(uncoveredLog!.stipendCovered).toBe(false);
+    expect(uncoveredLog!.ratePer30MinCents).toBe(PROGRAM_DEFAULT_RATE);
+    expect(workPayForLog(uncoveredLog!)).toBe(PROGRAM_DEFAULT_RATE * 4);
+  });
+
+  it("🔴 FLIPPING the toggle is what changes the pay — before it, nothing happens", async () => {
+    // This is the merge blocker, as a test. Before the toggle existed, an
+    // admin could put a coach on a $2,500 stipend and watch every log keep
+    // paying hourly, with no way to reach the switch that would change it.
+    const { coach } = fixtures;
+    await putCoachOnStipend(coach.id);
+
+    const program = await createProgramViaAction(false);
+
+    // BEFORE — the state the whole feature was stuck in.
+    const before = await logCleanHour({
+      coachId: coach.id,
+      programId: program.id,
+      startAt: sept(9, "09:00"),
+      endAt: sept(9, "11:00"),
+    });
+    expect(before!.stipendCovered).toBe(false);
+    expect(before!.ratePer30MinCents).toBe(PROGRAM_DEFAULT_RATE);
+    expect(await earningsFor(coach.id)).toHaveLength(0);
+
+    // THE ADMIN TICKS THE BOX.
+    const updated = await updateProgramInternal(fixtures.admin, program.id, {
+      stipendEligible: true,
+    });
+    expect(updated.stipendEligible).toBe(true);
+
+    // AFTER — same coach, same program, same shift length.
+    const after = await logCleanHour({
+      coachId: coach.id,
+      programId: program.id,
+      startAt: sept(9, "13:00"),
+      endAt: sept(9, "15:00"),
+    });
+    expect(after!.stipendCovered).toBe(true);
+    expect(after!.ratePer30MinCents).toBeNull();
+    expect(workPayForLog(after!)).toBe(0);
+
+    // 🔴 And the money actually moved: the flip is what caused the stipend to
+    // be earned at all. One earning, not two — R4 holds across the change.
+    expect(await earningsFor(coach.id)).toHaveLength(1);
+
+    // 🔴 THE IMMUTABLE SNAPSHOT (SPEC §3.3). The log written BEFORE the flip
+    // keeps its hourly rate. Coverage is stamped at write time and never
+    // recomputed, so ticking the box is not a retro — which is exactly what
+    // the checkbox's own copy promises the admin.
+    const [beforeNow] = await db
+      .select()
+      .from(hourLogs)
+      .where(eq(hourLogs.id, before!.id))
+      .limit(1);
+    expect(beforeNow.stipendCovered).toBe(false);
+    expect(beforeNow.ratePer30MinCents).toBe(PROGRAM_DEFAULT_RATE);
+  });
+
+  it("🔴 UN-ticking the box stops covering new logs, and does not un-zero old ones", async () => {
+    const { coach } = fixtures;
+    await putCoachOnStipend(coach.id);
+
+    const program = await createProgramViaAction(true);
+
+    const whileCovered = await logCleanHour({
+      coachId: coach.id,
+      programId: program.id,
+      startAt: sept(10, "09:00"),
+      endAt: sept(10, "11:00"),
+    });
+    expect(whileCovered!.stipendCovered).toBe(true);
+
+    await updateProgramInternal(fixtures.admin, program.id, {
+      stipendEligible: false,
+    });
+
+    const afterOff = await logCleanHour({
+      coachId: coach.id,
+      programId: program.id,
+      startAt: sept(10, "13:00"),
+      endAt: sept(10, "15:00"),
+    });
+    // New work is paid hourly again.
+    expect(afterOff!.stipendCovered).toBe(false);
+    expect(afterOff!.ratePer30MinCents).toBe(PROGRAM_DEFAULT_RATE);
+
+    // 🔴 The already-covered log stays covered. If un-ticking re-priced it,
+    // the coach would be paid hourly for work their stipend already paid for
+    // — the double-pay landmine, reached from a checkbox.
+    const [stillCovered] = await db
+      .select()
+      .from(hourLogs)
+      .where(eq(hourLogs.id, whileCovered!.id))
+      .limit(1);
+    expect(stillCovered.stipendCovered).toBe(true);
+    expect(stillCovered.ratePer30MinCents).toBeNull();
   });
 });
 

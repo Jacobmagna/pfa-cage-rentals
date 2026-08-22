@@ -30,6 +30,9 @@ import {
   parseEffectiveFromInput,
 } from "@/lib/rate-effective-gate";
 import { DECREASE_REFUSED_MESSAGE } from "@/lib/rate-reprice-copy";
+// 🔴 The "unticked vs not asked" distinction lives there, not here: this file
+// is "use server", so a helper in it is unreachable from any unit test.
+import { readStipendEligible } from "@/lib/program-stipend-field";
 import type { RateRepricePreview } from "@/lib/server/rate-reprice";
 
 export type ProgramFormValues = {
@@ -37,6 +40,12 @@ export type ProgramFormValues = {
   rateDollars: string;
   payMode: "hourly" | "per_session";
   perSessionDollars: string;
+  /**
+   * STIPEND SPEC §2.13 — whether a stipend coach's work on this program is
+   * covered by their stipend. Echoed back on a failed submit like every other
+   * field, so a rejected save cannot silently un-tick it.
+   */
+  stipendEligible: boolean;
   /**
    * SPEC rate-effective-dating §7 — "YYYY-MM-DD" the admin picked for the
    * program DEFAULT rate, or "" for "going forward only". EDIT ONLY: a
@@ -94,10 +103,10 @@ function snapshotProgram(formData: FormData): ProgramFormValues {
         ? "per_session"
         : "hourly",
     perSessionDollars: formData.get("perSessionDollars")?.toString() ?? "",
+    stipendEligible: readStipendEligible(formData) === true,
     effectiveFrom: formData.get("defaultRateEffectiveFrom")?.toString() ?? "",
   };
 }
-
 
 // Maps FormData → the createProgramSchema / updateProgramSchema shape:
 // name + an optional pay rate. The program-level session cap was removed
@@ -107,6 +116,8 @@ function buildProgramInput(formData: FormData): {
   defaultRatePer30MinCents: number | null;
   payMode: "hourly" | "per_session";
   defaultPerSessionRateCents: number | null;
+  /** `undefined` = the form carried no eligibility control — leave it alone. */
+  stipendEligible: boolean | undefined;
 } {
   const name = formData.get("name")?.toString().trim() ?? "";
   // Optional pay rate (dollars → cents; empty → null). Always present on
@@ -131,6 +142,11 @@ function buildProgramInput(formData: FormData): {
     payMode,
     defaultPerSessionRateCents:
       payMode === "per_session" ? defaultPerSessionRateCents : null,
+    // Deliberately NOT gated on payMode. Coverage is orthogonal to how the
+    // program pays: an hourly program and a per-session program can each be
+    // covered by a stipend, and zeroing one of the two amount columns is
+    // about which amount applies, not about who pays.
+    stipendEligible: readStipendEligible(formData),
   };
 }
 

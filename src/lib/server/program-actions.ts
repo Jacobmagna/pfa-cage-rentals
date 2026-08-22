@@ -73,6 +73,10 @@ export async function createProgramInternal(
         // don't know about pay mode create exactly the program they used to.
         payMode: parsed.payMode ?? "hourly",
         defaultPerSessionRateCents: parsed.defaultPerSessionRateCents ?? null,
+        // STIPEND SPEC §2.13 — absent → false (the column default), so every
+        // caller that predates the stipend creates exactly the program it
+        // used to.
+        stipendEligible: parsed.stipendEligible ?? false,
       })
       .returning();
   } catch (err) {
@@ -118,6 +122,7 @@ export async function updateProgramInternal(
     payMode?: "hourly" | "per_session";
     defaultPerSessionRateCents?: number | null;
     defaultRateEffectiveFrom?: Date | null;
+    stipendEligible?: boolean;
   } = {};
   if (parsed.name !== undefined) patch.name = parsed.name;
   if (parsed.active !== undefined) patch.active = parsed.active;
@@ -139,6 +144,21 @@ export async function updateProgramInternal(
   // rate-history menu (§7).
   if ("defaultRateEffectiveFrom" in parsed) {
     patch.defaultRateEffectiveFrom = parsed.defaultRateEffectiveFrom ?? null;
+  }
+  // 🔴 STIPEND SPEC §2.13 — the only write to programs.stipend_eligible in
+  // the app. `!== undefined` rather than key-presence because there is no
+  // meaningful null: the column is NOT NULL, so a caller either states the
+  // boolean or says nothing. Saying nothing must leave it alone — that is
+  // what keeps `reactivateProgramAction`'s `{ active: true }` from silently
+  // switching a program's payroll behaviour.
+  //
+  // ⚠️ Flipping this does NOT re-price anything. Coverage is stamped on each
+  // log at write time (`hour_logs.stipend_covered`) and never recomputed, so
+  // un-marking a program cannot retroactively change how a past log describes
+  // itself — the immutable-snapshot rule applied to a boolean (SPEC §3.3).
+  // `rate-reprice.ts` excludes by that stored snapshot, not by this flag.
+  if (parsed.stipendEligible !== undefined) {
+    patch.stipendEligible = parsed.stipendEligible;
   }
 
   let updated;

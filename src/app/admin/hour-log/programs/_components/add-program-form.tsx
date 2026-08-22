@@ -34,6 +34,9 @@ export function AddProgramForm() {
       rateDollars: "",
       payMode: "hourly" as const,
       perSessionDollars: "",
+      // New programs are not stipend-eligible — the column default, and the
+      // only safe default for a switch that changes what a coach is paid.
+      stipendEligible: false,
     };
   }, [state]);
 

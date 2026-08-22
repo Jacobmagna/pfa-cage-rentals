@@ -31,28 +31,37 @@ export const STIPEND_FLAT_RATE_LABEL = "Flat rate";
 export const STIPEND_LINE_LABEL = "Stipend";
 
 /**
- * 🔴 THE WORK-PAY CAVEAT. One definition, three surfaces: the printed
- * statement (`statement/engine.ts`), the Work tab (`work-preview.tsx`) and the
- * Excel workbook (`excel.ts`).
+ * 🔴 THE WORK-PAY CAVEAT, IN TWO SENTENCES THAT ARE STORED SEPARATELY.
  *
- * ── Why it changed, and why all three moved together ────────────────────
+ * One definition, three surfaces: the printed statement (`statement/engine.ts`),
+ * the Work tab (`work-preview.tsx`) and the Excel workbook (`excel.ts`).
+ *
+ * ── Why it changed ──────────────────────────────────────────────────────
  * It used to read *"This is what the logged work is worth — not what is still
- * owed."* That sentence became FALSE the moment a stipend line appeared beside
- * it: **a stipend is not logged work.** It is owed to a person for a period,
- * and no amount of reading the hours explains where the figure came from.
+ * owed."* That became FALSE the moment a stipend line could appear beside it:
+ * **a stipend is not logged work.** `engine.ts` already required this string be
+ * VERBATIM with `work-preview.tsx`, enforced only by a comment; this constant
+ * is the version of that rule the compiler keeps.
  *
- * `engine.ts`'s own comment already required this string be VERBATIM with
- * `work-preview.tsx`, enforced only by a comment, and `MAINTENANCE-HANDOFF`
- * records that the same stale framing had drifted into a third place. This
- * constant is the version of that rule the compiler keeps.
+ * ── 🔴 WHY IT IS SPLIT, AND WHY THAT IS NOT COSMETIC ────────────────────
+ * The workbook writes each note as a row in COLUMN A, which can only overflow
+ * across the empty cells beside it — about **90 characters** before Excel
+ * clips it. The joined sentence is **134**. Shipping it as one string put a
+ * caveat on the deliverable Mark emails around that would be **cut off
+ * mid-sentence**, on the exact surface whose own comment says *"a caveat that
+ * gets cut off mid-sentence is worse than one that reads."*
  *
- * ⚠️ Overstating what a coach is owed IN WRITING is the most expensive mistake
- * available in this feature — this is the document Mark hands to a coach. The
- * wording therefore still says plainly that outside payments are not deducted.
+ * So: HTML surfaces join the two (`WORK_PAY_CAVEAT`); the workbook writes them
+ * as two rows. ⚠️ Keep each half under ~90 characters.
  */
-export const WORK_PAY_CAVEAT =
-  "This is what the logged work and any stipends are worth — not what is " +
-  "still owed. Payments made outside the app are not deducted here.";
+export const WORK_PAY_CAVEAT_LEAD =
+  "This is what the logged work and any stipends are worth — not what is still owed.";
+
+export const WORK_PAY_CAVEAT_PAYMENTS =
+  "Payments made outside the app are not deducted here.";
+
+/** The two sentences joined, for surfaces that wrap freely (HTML, print). */
+export const WORK_PAY_CAVEAT = `${WORK_PAY_CAVEAT_LEAD} ${WORK_PAY_CAVEAT_PAYMENTS}`;
 
 /**
  * The scope line beneath the caveat. Gained its stipend clause at the same

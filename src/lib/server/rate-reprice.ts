@@ -392,9 +392,11 @@ export type RepriceExcludedCoach = {
    * omitted these would tell Mark a stipend coach's pay is changing when it
    * must not.
    *
-   * ⚠️ One entry per coach, first reason wins. A coach with BOTH kinds (a
-   * stipend that began mid-window) reports as `covered_by_stipend` since that
-   * check runs first, while `logCount` still counts all their excluded logs.
+   * ⚠️ One entry per coach, and `covered_by_stipend` WINS. A coach with BOTH
+   * kinds (a stipend that began mid-window) reports as `covered_by_stipend`
+   * whichever reason was recorded first, while `logCount` counts all their
+   * excluded logs. The stipend is the reason that means "do not touch this
+   * coach's pay", so it is the one the preview has to surface.
    */
   reason: "resolves_from_own_override" | "covered_by_stipend";
 };
@@ -652,6 +654,15 @@ export function computeRateRepriceDiff(args: {
         reason: "covered_by_stipend" as const,
       };
       covered.logCount += 1;
+      // 🔴 STIPEND COVERAGE WINS THE LABEL, whichever reason got recorded
+      // first. The check runs first per LOG, but the map keeps one entry per
+      // COACH — so a coach whose first excluded log happened to be an override
+      // case was reported as `resolves_from_own_override` even though some of
+      // their logs were excluded because a stipend already paid for them.
+      // Of the two, the stipend is the one Mark needs to see: it is the reason
+      // that means "do not touch this coach's pay", and the preview is where
+      // he decides whether the re-price is safe.
+      covered.reason = "covered_by_stipend";
       excludedByCoach.set(log.coachId, covered);
       continue;
     }

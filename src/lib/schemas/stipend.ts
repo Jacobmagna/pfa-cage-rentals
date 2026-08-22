@@ -62,6 +62,16 @@ export const endCoachStipendSchema = z.object({
   confirmBackdate: z.boolean().optional(),
 });
 
+/**
+ * Cancelling a stipend that has not started yet. No date and no confirmation:
+ * the planner decides WHICH versions qualify (every one whose period has not
+ * begun), and there is nothing to confirm because nothing has been earned
+ * against them — that is precisely what makes them cancellable.
+ */
+export const cancelCoachStipendSchema = z.object({
+  coachId: z.string().min(1, "coachId is required"),
+});
+
 export type SetCoachStipendInput = z.infer<typeof setCoachStipendSchema>;
 export type EndCoachStipendInput = z.infer<typeof endCoachStipendSchema>;
 

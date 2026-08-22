@@ -81,6 +81,7 @@ export default async function AdminHourLogPage({
     [{ count: programsScheduledToday }],
     reviewItems,
     heldCount,
+    monthStipendEarnings,
   ] = await Promise.all([
     fetchHourLogRowsWithScheduleNotes(filters),
     // Filter dropdown — coaches role only, active only.
@@ -129,6 +130,13 @@ export default async function AdminHourLogPage({
     // 1b security B: count of HELD manual logs awaiting approval — powers the
     // entry-point card below (rendered only when > 0).
     countHeldHourLogs(),
+    // Stipends earned in this month's two pay periods. In the SAME batch as
+    // everything else — it was a sequential await, which put an extra
+    // round-trip on every render of this page for no reason.
+    fetchStipendEarningsInRange({
+      fromDate: monthStart,
+      toDateExclusive: monthEndExclusive,
+    }),
   ]);
 
   // Card 1: program hours this month — EXACT duration (a 45-min block is
@@ -158,12 +166,10 @@ export default async function AdminHourLogPage({
   // Leaving them out would put a figure on the dashboard that is smaller than
   // the same month's figure on /admin/reports?tab=work, and two different
   // numbers for one month reads as a bug in the money.
-  const monthStipendCents = (
-    await fetchStipendEarningsInRange({
-      fromDate: monthStart,
-      toDateExclusive: monthEndExclusive,
-    })
-  ).reduce((total, e) => total + e.amountCents, 0);
+  const monthStipendCents = monthStipendEarnings.reduce(
+    (total, e) => total + e.amountCents,
+    0,
+  );
   owedProgramCents += monthStipendCents;
 
   const monthHours = monthMinutes / 60;

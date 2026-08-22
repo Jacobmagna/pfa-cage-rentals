@@ -157,6 +157,7 @@ export default async function AdminHome({
     coachAuditRows,
     coachAccountRows,
     activeCoaches,
+    monthStipendEarnings,
   ] = await Promise.all([
     // Cage rentals this month → coaches OWE PFA (receivable).
     db
@@ -338,6 +339,13 @@ export default async function AdminHome({
     // Same canonical list both dialogs' coach pickers use on the standalone
     // pages; the {id,name,email} shape satisfies both dialog prop types.
     listActiveCoaches(),
+    // Stipends earned in this month's two pay periods. In the SAME batch as
+    // everything else — it was a sequential await, which put an extra
+    // round-trip on every render of the dashboard for no reason.
+    fetchStipendEarningsInRange({
+      fromDate: monthStart,
+      toDateExclusive: monthEndExclusive,
+    }),
   ]);
 
   // Money totals read each row's snapshotted rate directly — never
@@ -372,12 +380,10 @@ export default async function AdminHome({
   // Leaving them out would put a figure on the dashboard that is smaller than
   // the same month's figure on /admin/reports?tab=work, and two different
   // numbers for one month reads as a bug in the money.
-  const monthStipendCents = (
-    await fetchStipendEarningsInRange({
-      fromDate: monthStart,
-      toDateExclusive: monthEndExclusive,
-    })
-  ).reduce((total, e) => total + e.amountCents, 0);
+  const monthStipendCents = monthStipendEarnings.reduce(
+    (total, e) => total + e.amountCents,
+    0,
+  );
   programPayMonthCents += monthStipendCents;
 
   // Shape the Master Schedule rows for the read-only grid.

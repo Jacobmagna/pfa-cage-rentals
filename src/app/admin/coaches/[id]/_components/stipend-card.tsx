@@ -22,14 +22,26 @@
 // a mistake.
 //
 // ── What this card cannot do, on purpose ─────────────────────────────────
-// It cannot edit a past period, because nothing can: versions are append-only
-// and forward-only, and changing an amount never rewrites what an earlier
-// half-month was worth (Mark's Q5). The history table below is the proof of
-// that, which is why it renders every version rather than just the live one.
+// It cannot edit a period that has already BEGUN, because nothing can:
+// versions are forward-only over started history, and changing an amount never
+// rewrites what an earlier half-month was worth (Mark's Q5). The history table
+// below is the proof of that, which is why it renders every version rather
+// than just the live one.
+//
+// ── 🔴 BUT A STIPEND THAT HAS NOT STARTED IS FULLY REVERSIBLE ────────────
+// Set up in August for a September start, it has paid nobody — so it can be
+// updated to a different amount, or cancelled outright, right up until its
+// first pay period begins. That is not a hole in the append-only rule; it is
+// the boundary of it. Without it, a stipend put on the WRONG COACH could not
+// be corrected (forward-only refused the same period) or removed (the end
+// guard refused to close a window that had not opened), so the earliest
+// reachable removal was the FOLLOWING period — by which point they had earned
+// one, and there is no void UI to take it back.
 
 import { useActionState } from "react";
 import { CalendarClock, TriangleAlert } from "lucide-react";
 import {
+  cancelCoachStipendFormAction,
   endCoachStipendFormAction,
   setCoachStipendFormAction,
   type StipendActionResult,
@@ -53,7 +65,10 @@ export type StipendVersionRow = {
   /** null = still in effect. */
   toLabel: string | null;
   note: string | null;
+  /** Open AND its first pay period has begun. */
   isCurrent: boolean;
+  /** Open but not started yet — set up in advance. */
+  isUpcoming: boolean;
 };
 
 export function StipendCard({
@@ -61,6 +76,7 @@ export function StipendCard({
   coachName,
   currentAmountLabel,
   currentFromLabel,
+  currentHasStarted,
   periodOptions,
   versions,
   readOnly = false,
@@ -70,6 +86,13 @@ export function StipendCard({
   /** null = this coach is not on a stipend. */
   currentAmountLabel: string | null;
   currentFromLabel: string | null;
+  /**
+   * 🔴 False when the stipend is set up but its first pay period has not
+   * begun. Drives the tense ("Starts" vs "In effect since"), the badge, and
+   * whether the card offers CANCEL or END — those are different operations
+   * and only one of them is reachable at a time.
+   */
+  currentHasStarted: boolean;
   periodOptions: StipendPeriodOption[];
   versions: StipendVersionRow[];
   /** Archived coaches render read-only, matching every other card here. */
@@ -81,6 +104,10 @@ export function StipendCard({
   );
   const [endState, endAction, endPending] = useActionState(
     endCoachStipendFormAction,
+    INITIAL_STATE,
+  );
+  const [cancelState, cancelAction, cancelPending] = useActionState(
+    cancelCoachStipendFormAction,
     INITIAL_STATE,
   );
 
@@ -138,9 +165,19 @@ export function StipendCard({
                   <span className="font-normal text-fg-muted">
                     per pay period
                   </span>
+                  {currentHasStarted ? null : (
+                    <span className="ml-2 rounded-full bg-surface-3 px-2 py-0.5 text-[11px] font-medium text-fg-muted align-middle">
+                      not started yet
+                    </span>
+                  )}
                 </p>
+                {/* 🔴 TENSE FOLLOWS REALITY. "In effect since Sep 1–15" on
+                    Aug 21 is a statement the app cannot support, and it is the
+                    default state for every coach during the Sept 1 rollout. */}
                 <p className="text-xs text-fg-muted">
-                  In effect since {currentFromLabel}.
+                  {currentHasStarted
+                    ? `In effect since ${currentFromLabel}.`
+                    : `Starts ${currentFromLabel}. Nothing is earned until then.`}
                 </p>
               </>
             ) : (
@@ -289,14 +326,63 @@ export function StipendCard({
                   {pending
                     ? "Saving…"
                     : onStipend
-                      ? "Change amount"
+                      ? currentHasStarted
+                        ? "Change amount"
+                        : "Update this stipend"
                       : "Put on a stipend"}
                 </button>
               </div>
             </form>
 
-            {/* ── End ──────────────────────────────────────────────────── */}
-            {onStipend ? (
+            {/* ── Cancel (not started yet) ─────────────────────────────
+                🔴 CANCEL AND END ARE DIFFERENT OPERATIONS, and only one of
+                them is reachable at a time.
+
+                A stipend whose first pay period has not begun has paid
+                nobody, so the right undo is to REMOVE it. Ending it is not
+                available and never was: the end guard refuses to close a
+                window that has not opened, so a stipend put on the wrong
+                coach could not be corrected OR removed — the earliest
+                reachable end was the FOLLOWING period, by which point they
+                had earned one, and there is no void UI. */}
+            {onStipend && !currentHasStarted ? (
+              <form
+                action={cancelAction}
+                key={cancelState.ok ? `cancel-ok-${versions.length}` : "cancel-error"}
+                className="space-y-3 border-t border-line pt-4"
+              >
+                <input type="hidden" name="coachId" defaultValue={coachId} />
+
+                {!cancelState.ok ? (
+                  <div
+                    role="alert"
+                    className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+                  >
+                    {cancelState.needsBackdateConfirm
+                      ? cancelState.message
+                      : cancelState.error.message}
+                  </div>
+                ) : null}
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs text-fg-muted leading-relaxed max-w-md">
+                    This stipend has not started, so nothing has been earned
+                    against it. Cancelling removes it and puts {who} back on
+                    whatever they were on before.
+                  </p>
+                  <button
+                    type="submit"
+                    disabled={cancelPending}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-2 hover:bg-surface-3 h-9 px-4 text-sm font-medium text-fg disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+                  >
+                    {cancelPending ? "Cancelling…" : "Cancel this stipend"}
+                  </button>
+                </div>
+              </form>
+            ) : null}
+
+            {/* ── End (already started) ────────────────────────────────── */}
+            {onStipend && currentHasStarted ? (
               <form
                 action={endAction}
                 key={endState.ok ? `end-ok-${versions.length}` : "end-decision"}
@@ -396,9 +482,16 @@ export function StipendCard({
                     <tr key={v.id} className="border-t border-line/60">
                       <td className="py-2 pr-4 tabular-nums text-fg">
                         {v.amountLabel}
+                        {/* 🔴 A version set up in advance is UPCOMING, not
+                            current. Badging it `current` claimed a stipend was
+                            live weeks before its first pay period began. */}
                         {v.isCurrent ? (
                           <span className="ml-2 rounded-full bg-gold/15 px-2 py-0.5 text-[11px] font-medium text-gold align-middle">
                             current
+                          </span>
+                        ) : v.isUpcoming ? (
+                          <span className="ml-2 rounded-full bg-surface-3 px-2 py-0.5 text-[11px] font-medium text-fg-muted align-middle">
+                            upcoming
                           </span>
                         ) : null}
                       </td>

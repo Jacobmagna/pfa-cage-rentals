@@ -613,6 +613,29 @@ export async function updateHourInternal(
     before: existing as unknown as Record<string, unknown>,
     after: updated as unknown as Record<string, unknown>,
   });
+
+  // 🔴 A TIME EDIT CAN MOVE A POSTED LOG INTO A DIFFERENT PAY PERIOD.
+  //
+  // The trigger's rule is "an hour log becomes POSTED", and an edit is not a
+  // post — so correcting a date from Sep 3 to Sep 20 moved real covered work
+  // into 2026-09-P2 while NOTHING ever earned that period's stipend. The coach
+  // was silently short a half-month, and the only evidence was an absence.
+  //
+  // Safe to call unconditionally on this path: the upsert is idempotent
+  // (`UNIQUE (coach_id, period_key)`), it never removes an earning, and it
+  // never throws into the caller. So it can only ever ADD a period that should
+  // already have been there — an edit WITHIN one period earns nothing new, and
+  // the ORIGINAL period's earning still stands, which is Mark's Q3 answer.
+  if (updated.status === "posted") {
+    await recordStipendEarning({
+      actorUserId: actor.id,
+      coachId: updated.coachId,
+      hourLogId: updated.id,
+      logStartAt: updated.startAt,
+      stipendCovered: updated.stipendCovered,
+      resolveAmountCents: fetchStipendAmountCentsForPeriod,
+    });
+  }
   return updated;
 }
 
@@ -857,6 +880,29 @@ export async function acceptNeedsReviewLogInternal(
     before: existing as unknown as Record<string, unknown>,
     after: updated as unknown as Record<string, unknown>,
   });
+
+  // 🔴 A TIME EDIT CAN MOVE A POSTED LOG INTO A DIFFERENT PAY PERIOD.
+  //
+  // The trigger's rule is "an hour log becomes POSTED", and an edit is not a
+  // post — so correcting a date from Sep 3 to Sep 20 moved real covered work
+  // into 2026-09-P2 while NOTHING ever earned that period's stipend. The coach
+  // was silently short a half-month, and the only evidence was an absence.
+  //
+  // Safe to call unconditionally on this path: the upsert is idempotent
+  // (`UNIQUE (coach_id, period_key)`), it never removes an earning, and it
+  // never throws into the caller. So it can only ever ADD a period that should
+  // already have been there — an edit WITHIN one period earns nothing new, and
+  // the ORIGINAL period's earning still stands, which is Mark's Q3 answer.
+  if (updated.status === "posted") {
+    await recordStipendEarning({
+      actorUserId: actor.id,
+      coachId: updated.coachId,
+      hourLogId: updated.id,
+      logStartAt: updated.startAt,
+      stipendCovered: updated.stipendCovered,
+      resolveAmountCents: fetchStipendAmountCentsForPeriod,
+    });
+  }
   return updated;
 }
 

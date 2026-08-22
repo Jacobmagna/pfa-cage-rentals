@@ -19,6 +19,7 @@
 import { describe, expect, it } from "vitest";
 import { parsePfaInput } from "@/lib/timezone";
 import {
+  planCancelStipend,
   planEndStipend,
   planSetStipend,
   StipendPlanError,
@@ -242,13 +243,18 @@ describe("planSetStipend — forward-only (the no-overlap property)", () => {
     expect(plan.closeRowId).toBeNull();
   });
 
-  it("refuses a start in the SAME period as an existing version", () => {
+  it("refuses a start in the SAME period as a version that has ALREADY STARTED", () => {
+    // ⚠️ THE FIXTURE IS THE POINT. This used to use SEP_1 — a FUTURE period,
+    // since NOW is Aug 20 — and so it asserted that a stipend set up in
+    // advance could never be corrected before it paid. That was the defect,
+    // not the guard. AUG_16 is under way at NOW, which is the case the
+    // forward-only rule actually exists to refuse.
     expectPlanError(
       () =>
         planSetStipend({
-          existing: [version({ effectiveFrom: SEP_1 })],
+          existing: [version({ effectiveFrom: AUG_16 })],
           amountCents: 300_000,
-          effectiveFrom: SEP_1,
+          effectiveFrom: AUG_16,
           now: NOW,
           confirmBackdate: true,
         }),
@@ -256,13 +262,29 @@ describe("planSetStipend — forward-only (the no-overlap property)", () => {
     );
   });
 
-  it("refuses a start BEFORE an existing version — past periods are never rewritten (Q5)", () => {
+  it("🔴 but ALLOWS a re-set of a version whose period has not begun", () => {
+    // The other half of the same rule, and the reason the fixture above had to
+    // change. A stipend starting Sep 1, corrected on Aug 20, has paid nobody.
+    const plan = planSetStipend({
+      existing: [version({ id: "typo", effectiveFrom: SEP_1 })],
+      amountCents: 300_000,
+      effectiveFrom: SEP_1,
+      now: NOW,
+    });
+    expect(plan.replacedRowIds).toEqual(["typo"]);
+    expect(plan.amountCents).toBe(300_000);
+  });
+
+  it("refuses a start BEFORE a version that has already started — begun periods are never rewritten (Q5)", () => {
+    // Same fixture correction as above: AUG_16 has begun at NOW, so moving a
+    // new version to AUG_1 would rewrite a half-month that may already have
+    // been logged against.
     expectPlanError(
       () =>
         planSetStipend({
-          existing: [version({ effectiveFrom: SEP_16 })],
+          existing: [version({ effectiveFrom: AUG_16 })],
           amountCents: 300_000,
-          effectiveFrom: SEP_1,
+          effectiveFrom: AUG_1,
           now: NOW,
           confirmBackdate: true,
         }),
@@ -291,16 +313,20 @@ describe("planSetStipend — forward-only (the no-overlap property)", () => {
   it("does not depend on the order the existing rows arrive in", () => {
     // The action's SELECT has an ORDER BY today. A future edit to that query
     // must not be able to turn this check into a coin flip.
+    // Both rows have STARTED at NOW (Aug 20), so the forward-only rule is in
+    // force for them regardless of which order the query hands them over.
     const rows = [
-      version({ id: "b", effectiveFrom: SEP_16 }),
-      version({ id: "a", effectiveFrom: AUG_16, effectiveTo: SEP_16 }),
+      version({ id: "b", effectiveFrom: AUG_16 }),
+      version({ id: "a", effectiveFrom: AUG_1, effectiveTo: AUG_16 }),
     ];
+    // AUG_16 is the latest STARTED row, so a new version starting there must
+    // be refused whichever order the two rows arrive in.
     expectPlanError(
       () =>
         planSetStipend({
           existing: rows,
           amountCents: 300_000,
-          effectiveFrom: SEP_1,
+          effectiveFrom: AUG_16,
           now: NOW,
           confirmBackdate: true,
         }),
@@ -369,8 +395,11 @@ describe("planSetStipend — the §12.4 back-pay guard", () => {
       "BACKDATE_NOT_CONFIRMED",
     );
     expect(err.backdatedPeriods).toHaveLength(2);
-    expect(err.message).toContain("$2500.00"); // per period
-    expect(err.message).toContain("$5000.00"); // 2 periods
+    // 🔴 Thousands separators, matching `formatDollarsExact` — the formatter
+    // the card's current-amount line and history table already use. `toFixed`
+    // printed "$2500.00" next to "$2,500.00" on the same screen.
+    expect(err.message).toContain("$2,500.00"); // per period
+    expect(err.message).toContain("$5,000.00"); // 2 periods
   });
 
   it("proceeds once the caller confirms, and still reports what it did", () => {
@@ -477,5 +506,241 @@ describe("planEndStipend", () => {
     });
     expect(plan.closeRowId).toBe("open");
     expect(plan.backdatedPeriods).toHaveLength(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// 🔴 A STIPEND THAT HAS NOT STARTED IS FULLY REVERSIBLE
+//
+// The whole block exists because it used to be the opposite. A stipend set up
+// in August for a September start could not be corrected (forward-only refused
+// a re-set of the same period) and could not be cancelled (the end guard
+// refused to close a window that had not opened), so the earliest reachable
+// removal was the FOLLOWING period — by which point a covered log had earned
+// it, and there is no void UI. That made "wrong coach" and "wrong amount"
+// unrecoverable on the exact path everyone walks during the Sept 1 rollout.
+// ─────────────────────────────────────────────────────────────────────────
+describe("correcting a stipend that has not started yet", () => {
+  it("REPLACES a not-yet-started version at the same pay period", () => {
+    const plan = planSetStipend({
+      existing: [
+        { id: "typo", amountCents: 900_000, effectiveFrom: SEP_1, effectiveTo: null },
+      ],
+      amountCents: 250_000,
+      effectiveFrom: SEP_1,
+      now: NOW,
+    });
+    expect(plan.replacedRowIds).toEqual(["typo"]);
+    expect(plan.amountCents).toBe(250_000);
+    expect(plan.effectiveFrom).toEqual(SEP_1);
+    // Nothing to close — the row it displaces is being deleted, not bounded.
+    expect(plan.closeRowId).toBeNull();
+    expect(plan.backdatedPeriods).toHaveLength(0);
+  });
+
+  it("🔴 does NOT replace a future version at a DIFFERENT period — that is a scheduled change", () => {
+    // The guard on the guard. Mark setting $2,500 from Sep 1 and then $3,000
+    // from Sep 16 is a legitimate two-step plan. A replacement rule keyed on
+    // "not started yet" alone would DELETE the September 1 row when the
+    // September 16 one was saved — trading the bug this fixes for a worse,
+    // quieter one.
+    const plan = planSetStipend({
+      existing: [
+        { id: "sep1", amountCents: 250_000, effectiveFrom: SEP_1, effectiveTo: null },
+      ],
+      amountCents: 300_000,
+      effectiveFrom: SEP_16,
+      now: NOW,
+    });
+    expect(plan.replacedRowIds).toEqual([]);
+    // Closed off in the normal forward-only way, so the two windows MEET.
+    expect(plan.closeRowId).toBe("sep1");
+    expect(plan.closeAt).toEqual(SEP_16);
+  });
+
+  it("MOVES the previous version's boundary when a same-period typo is replaced", () => {
+    // Aug is live and was closed off at Sep 1 to make room for the typo. The
+    // replacement also starts Sep 1, so August's boundary stays at Sep 1 —
+    // but it must be RE-STAMPED, because the row that created that boundary
+    // is being deleted.
+    const plan = planSetStipend({
+      existing: [
+        { id: "aug", amountCents: 200_000, effectiveFrom: AUG_1, effectiveTo: SEP_1 },
+        { id: "typo", amountCents: 900_000, effectiveFrom: SEP_1, effectiveTo: null },
+      ],
+      amountCents: 250_000,
+      effectiveFrom: SEP_1,
+      now: NOW,
+    });
+    expect(plan.replacedRowIds).toEqual(["typo"]);
+    expect(plan.closeRowId).toBe("aug");
+    expect(plan.closeAt).toEqual(SEP_1);
+  });
+
+  it("🔴 STILL refuses to rewrite a period that has already begun", () => {
+    // The guard this feature actually rests on. Aug 16–31 is under way at NOW.
+    expect(() =>
+      planSetStipend({
+        existing: [
+          { id: "live", amountCents: 250_000, effectiveFrom: AUG_16, effectiveTo: null },
+        ],
+        amountCents: 300_000,
+        effectiveFrom: AUG_16,
+        now: NOW,
+      }),
+    ).toThrow(StipendPlanError);
+  });
+
+  it("says 'already begun', never 'past periods', about a FUTURE period", () => {
+    // The old message justified the refusal with "past periods are never
+    // rewritten" — about a period eleven days in the future. A correct-sounding
+    // reason attached to the wrong situation is worse than no reason.
+    let message = "";
+    try {
+      planSetStipend({
+        existing: [
+          { id: "live", amountCents: 250_000, effectiveFrom: AUG_16, effectiveTo: null },
+        ],
+        amountCents: 300_000,
+        effectiveFrom: AUG_16,
+        now: NOW,
+      });
+    } catch (err) {
+      message = (err as StipendPlanError).message;
+    }
+    expect(message).toMatch(/already started/i);
+    expect(message).not.toMatch(/past periods are never rewritten/i);
+  });
+});
+
+describe("planCancelStipend", () => {
+  it("deletes a not-yet-started version outright", () => {
+    const plan = planCancelStipend({
+      existing: [
+        { id: "oops", amountCents: 250_000, effectiveFrom: SEP_1, effectiveTo: null },
+      ],
+      now: NOW,
+    });
+    expect(plan.deleteRowIds).toEqual(["oops"]);
+    expect(plan.reopenRowId).toBeNull();
+  });
+
+  it("🔴 REOPENS whatever the cancelled version displaced", () => {
+    // Without this, cancelling a September change leaves August closed off at
+    // a boundary that no longer exists — the coach on NO stipend at all, a
+    // silent pay cut produced by an undo.
+    const plan = planCancelStipend({
+      existing: [
+        { id: "aug", amountCents: 200_000, effectiveFrom: AUG_1, effectiveTo: SEP_1 },
+        { id: "oops", amountCents: 900_000, effectiveFrom: SEP_1, effectiveTo: null },
+      ],
+      now: NOW,
+    });
+    expect(plan.deleteRowIds).toEqual(["oops"]);
+    expect(plan.reopenRowId).toBe("aug");
+  });
+
+  it("does NOT reopen a version that someone explicitly ended", () => {
+    // Aug was ended at Aug 16 on purpose; Sep was set up separately. Cancelling
+    // Sep must not resurrect August's coverage.
+    const plan = planCancelStipend({
+      existing: [
+        { id: "aug", amountCents: 200_000, effectiveFrom: AUG_1, effectiveTo: AUG_16 },
+        { id: "sep", amountCents: 250_000, effectiveFrom: SEP_1, effectiveTo: null },
+      ],
+      now: NOW,
+    });
+    expect(plan.deleteRowIds).toEqual(["sep"]);
+    expect(plan.reopenRowId).toBeNull();
+  });
+
+  it("refuses to cancel a stipend that has already started, and says what to do instead", () => {
+    let err: StipendPlanError | null = null;
+    try {
+      planCancelStipend({
+        existing: [
+          { id: "live", amountCents: 250_000, effectiveFrom: AUG_16, effectiveTo: null },
+        ],
+        now: NOW,
+      });
+    } catch (e) {
+      err = e as StipendPlanError;
+    }
+    expect(err?.code).toBe("ALREADY_STARTED");
+    expect(err?.message).toMatch(/end it from a future pay period/i);
+  });
+
+  it("refuses when the coach is not on a stipend at all", () => {
+    let err: StipendPlanError | null = null;
+    try {
+      planCancelStipend({ existing: [], now: NOW });
+    } catch (e) {
+      err = e as StipendPlanError;
+    }
+    expect(err?.code).toBe("NO_OPEN_VERSION");
+  });
+});
+
+describe("the words the admin actually reads", () => {
+  it("🔴 formats money the same way the rest of the card does", () => {
+    // `toFixed(2)` printed "$2500.00" inside the back-pay panel while the
+    // card header and history table printed "$2,500.00" — two formats for one
+    // number, on one screen, inside the most important warning in the feature.
+    let message = "";
+    try {
+      planSetStipend({
+        existing: [],
+        amountCents: 250_000,
+        effectiveFrom: AUG_16,
+        now: NOW,
+      });
+    } catch (err) {
+      message = (err as StipendPlanError).message;
+    }
+    expect(message).toContain("$2,500.00");
+    expect(message).not.toContain("$2500.00");
+  });
+
+  it("does not quote the same figure twice when only ONE period is affected", () => {
+    // "owed $2,500.00 per period — up to $2,500.00" read as broken arithmetic.
+    let message = "";
+    try {
+      planSetStipend({
+        existing: [],
+        amountCents: 250_000,
+        effectiveFrom: AUG_16,
+        now: NOW,
+      });
+    } catch (err) {
+      message = (err as StipendPlanError).message;
+    }
+    expect(message).not.toMatch(/per period/);
+    expect(message).toMatch(/becomes owed \$2,500\.00 for work/);
+  });
+
+  it("🔴 never names a form field at the admin", () => {
+    // "Re-submit with confirmBackdate to apply it." named a form field to a
+    // non-technical admin, and pointed away from the confirm button sitting
+    // directly beneath the sentence.
+    const messages: string[] = [];
+    for (const attempt of [
+      () => planSetStipend({ existing: [], amountCents: 250_000, effectiveFrom: AUG_16, now: NOW }),
+      () =>
+        planEndStipend({
+          existing: [
+            { id: "open", amountCents: 250_000, effectiveFrom: AUG_1, effectiveTo: null },
+          ],
+          effectiveTo: AUG_16,
+          now: NOW,
+        }),
+    ]) {
+      try {
+        attempt();
+      } catch (err) {
+        messages.push((err as StipendPlanError).message);
+      }
+    }
+    expect(messages).toHaveLength(2);
+    for (const m of messages) expect(m).not.toMatch(/confirmBackdate/);
   });
 });

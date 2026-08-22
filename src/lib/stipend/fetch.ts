@@ -30,12 +30,26 @@
 
 import { and, asc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { db } from "@/db";
-import { coachStipendEarnings } from "@/db/schema";
+import { coachStipendEarnings, users } from "@/db/schema";
 import { payPeriodFor } from "@/lib/pay-period";
 
 export type StipendEarningRow = {
   id: string;
   coachId: string;
+  /**
+   * 🔴 THE EARNING CARRIES ITS OWN COACH IDENTITY, joined here rather than
+   * borrowed from whatever hour logs happen to be in scope.
+   *
+   * The Work tab is RANGE-filtered and stipends are included by period
+   * OVERLAP, so the two sets genuinely diverge: filter Sep 10–20 and the Sep-3
+   * log that earned the Sep 1–15 stipend is outside the range while the
+   * stipend itself is inside it. Borrowing the name from the logs printed a
+   * raw UUID in the Coach column and an empty Email cell — on a payroll screen
+   * and in the workbook. `null` name falls back to email, matching every other
+   * coach-display path in this codebase.
+   */
+  coachName: string | null;
+  coachEmail: string;
   /** "2026-09-P1" — stable, and what the UNIQUE constraint dedupes on. */
   periodKey: string;
   /** PFA-midnight on the period's first day. THE bucketing instant. */
@@ -49,6 +63,8 @@ export type StipendEarningRow = {
 function toRow(r: {
   id: string;
   coachId: string;
+  coachName: string | null;
+  coachEmail: string;
   periodKey: string;
   periodStart: Date;
   amountCents: number;
@@ -58,13 +74,22 @@ function toRow(r: {
   return { ...r, periodEndExclusive: payPeriodFor(r.periodStart).toDateExclusive };
 }
 
+/**
+ * The shared column list. ⚠️ Every query below INNER-joins `users`, and that
+ * join cannot drop a row: `coach_id` is `.notNull().references(users.id)` with
+ * `ON DELETE cascade`, so an earning whose coach is gone does not exist to be
+ * joined in the first place.
+ */
 const SELECT = {
   id: coachStipendEarnings.id,
   coachId: coachStipendEarnings.coachId,
+  coachName: users.name,
+  coachEmail: users.email,
   periodKey: coachStipendEarnings.periodKey,
   periodStart: coachStipendEarnings.periodStart,
   amountCents: coachStipendEarnings.amountCents,
 };
+
 
 /**
  * Every non-voided earning for the given coaches, all time.
@@ -87,6 +112,7 @@ export async function fetchStipendEarningsAllTime(
   const rows = await db
     .select(SELECT)
     .from(coachStipendEarnings)
+    .innerJoin(users, eq(coachStipendEarnings.coachId, users.id))
     .where(
       and(
         isNull(coachStipendEarnings.voidedAt),
@@ -119,6 +145,7 @@ export async function fetchStipendEarningsInRange(args: {
   const rows = await db
     .select(SELECT)
     .from(coachStipendEarnings)
+    .innerJoin(users, eq(coachStipendEarnings.coachId, users.id))
     .where(
       and(
         isNull(coachStipendEarnings.voidedAt),
@@ -142,6 +169,7 @@ export async function fetchStipendEarningsForCoach(
   const rows = await db
     .select(SELECT)
     .from(coachStipendEarnings)
+    .innerJoin(users, eq(coachStipendEarnings.coachId, users.id))
     .where(
       and(
         eq(coachStipendEarnings.coachId, coachId),

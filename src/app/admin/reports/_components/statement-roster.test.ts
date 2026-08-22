@@ -283,8 +283,17 @@ describe("the payout caveat", () => {
     // when it arrives in entity form. An assertion on printed copy should not
     // care which apostrophe the renderer chose.
     expect(caveat(HTML)).toMatch(
-      /work pay is the logged work['’]s value minus the payouts recorded here/i,
+      /work pay is the logged work['’]s value, plus any stipends earned, minus the payouts recorded here/i,
     );
+  });
+
+  it("🔴 NAMES STIPENDS, because this column now sums two different kinds of pay", () => {
+    // The regression: the copy used to define the column as "the logged work's
+    // value" alone. A stipend is NOT logged work — it is a flat half-month
+    // amount owed whatever the hours say — so once stipends could land in this
+    // column, that definition described only half the number beside it.
+    // Same defect the 2026-08-12 rewrite fixed, reached from a new direction.
+    expect(caveat(HTML)).toMatch(/stipend/i);
   });
 
   it("does not claim outside payouts are simply never subtracted", () => {

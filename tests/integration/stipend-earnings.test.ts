@@ -36,9 +36,10 @@ import {
   it,
   vi,
 } from "vitest";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  auditLog,
   coachStipendEarnings,
   hourLogs,
   programScheduleBlockCoaches,
@@ -49,6 +50,7 @@ import {
   approveHeldHourLogInternal,
   fetchStipendAmountCentsForPeriod,
   logHourInternal,
+  updateHourInternal,
 } from "@/lib/server/hour-log-actions";
 import { setCoachStipendInternal } from "@/lib/server/stipend-actions";
 import {
@@ -191,6 +193,18 @@ async function logCleanHour(args: {
   });
 }
 
+async function earningAuditRows(earningId: string) {
+  return db
+    .select()
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.entityType, "coach_stipend_earning"),
+        eq(auditLog.entityId, earningId),
+      ),
+    );
+}
+
 async function earningsFor(coachId: string) {
   return db
     .select()
@@ -327,6 +341,39 @@ describe("🔴 the earning trigger — all three posted moments", () => {
     expect(await earningsFor(coach.id)).toHaveLength(0);
   });
 
+  it("🔴 an earned stipend is AUDITED — and the actor must be a REAL user", async () => {
+    // 🔴 REGRESSION TEST FOR A DEFECT THE ADVERSARIAL PASS FOUND, and one this
+    // suite could not previously have caught: `audit_log.actor_user_id` is NOT
+    // NULL with an FK to `users.id`, and `safeLogAudit` SWALLOWS its failures
+    // by design. The backfill CLI passed the literal string
+    // "system:stipend-backfill", which violates that FK with a 23503 — so the
+    // one-time run that creates real back-pay would have written EVERY earning
+    // with NO AUDIT TRAIL, silently.
+    //
+    // The tests passed because they use a real admin id. This one now asserts
+    // the audit row EXISTS rather than assuming the write succeeded.
+    const { coach } = fixtures;
+    await putCoachOnStipend(coach.id);
+    const program = await createProgram(true);
+    await logCleanHour({
+      coachId: coach.id,
+      programId: program.id,
+      startAt: sept(2, "09:00"),
+      endAt: sept(2, "11:00"),
+    });
+
+    const [earning] = await earningsFor(coach.id);
+    expect(earning).toBeDefined();
+    const audits = await earningAuditRows(earning.id);
+    expect(audits, "an earned stipend with no audit row").toHaveLength(1);
+    expect(audits[0].action).toBe("create");
+    // The actor is a real users row — that is the FK the fake string broke.
+    expect(audits[0].actorUserId).toBe(coach.id);
+    const diff = audits[0].diff as { after?: Record<string, unknown> };
+    expect(diff.after?.amountCents).toBe(STIPEND_CENTS);
+    expect(diff.after?.periodKey).toBe("2026-09-P1");
+  });
+
   it("MOMENT 3 — approving a HELD log earns it; the held log alone does not", async () => {
     const { admin, coach } = fixtures;
     await putCoachOnStipend(coach.id);
@@ -406,6 +453,89 @@ describe("🔴 the earning trigger — all three posted moments", () => {
     expect(earnings).toHaveLength(1);
     // Bucketed by the LOG's own startAt. The approval date never buckets.
     expect(earnings[0].periodKey).toBe("2026-09-P2");
+  });
+});
+
+/* ── TIME EDITS THAT MOVE A LOG BETWEEN PAY PERIODS ─────────────────────── */
+
+describe("🔴 an admin EDIT that moves a covered log into another pay period", () => {
+  it("earns the NEW period, and the old earning still stands", async () => {
+    // 🔴 REGRESSION TEST FOR A GAP THE ADVERSARIAL PASS FOUND. The trigger
+    // fires when a log becomes POSTED — but `updateHourInternal` can change a
+    // POSTED log's start/end times, and an edit is not a post. So an admin
+    // correcting a date from Sep 3 to Sep 20 moved real covered work into
+    // 2026-09-P2 while NOTHING ever earned that period's stipend. The coach is
+    // silently short a half-month's pay, and the only evidence is an absence.
+    //
+    // Both halves are asserted together because they are the whole rule:
+    //   · the NEW period earns (the gap being closed), and
+    //   · the OLD earning STANDS (Mark's Q3 — nothing automatic un-earns).
+    const { admin, coach } = fixtures;
+    await putCoachOnStipend(coach.id);
+    const program = await createProgram(true);
+
+    const log = await logCleanHour({
+      coachId: coach.id,
+      programId: program.id,
+      startAt: sept(3, "09:00"),
+      endAt: sept(3, "11:00"),
+    });
+    expect((await earningsFor(coach.id)).map((e) => e.periodKey)).toEqual([
+      "2026-09-P1",
+    ]);
+
+    await updateHourInternal(admin, log!.id, {
+      programId: program.id,
+      startAt: sept(20, "09:00"),
+      endAt: sept(20, "11:00"),
+    });
+
+    const keys = (await earningsFor(coach.id)).map((e) => e.periodKey).sort();
+    expect(keys).toEqual(["2026-09-P1", "2026-09-P2"]);
+  });
+
+  it("an edit WITHIN the same period earns nothing new (R4 still holds)", async () => {
+    // The positive control. Without it, "the edit earns a period" could be
+    // passing because every edit earns something, which would double-pay any
+    // coach whose times get corrected.
+    const { admin, coach } = fixtures;
+    await putCoachOnStipend(coach.id);
+    const program = await createProgram(true);
+
+    const log = await logCleanHour({
+      coachId: coach.id,
+      programId: program.id,
+      startAt: sept(3, "09:00"),
+      endAt: sept(3, "11:00"),
+    });
+    await updateHourInternal(admin, log!.id, {
+      programId: program.id,
+      startAt: sept(5, "09:00"),
+      endAt: sept(5, "11:00"),
+    });
+
+    expect(await earningsFor(coach.id)).toHaveLength(1);
+  });
+
+  it("an edit on an UNCOVERED log earns nothing at all", async () => {
+    // The second control: the coverage guard still governs on this path.
+    const { admin, coach } = fixtures;
+    await putCoachOnStipend(coach.id);
+    const uncovered = await createProgram(false);
+
+    const log = await logCleanHour({
+      coachId: coach.id,
+      programId: uncovered.id,
+      startAt: sept(3, "19:00"),
+      endAt: sept(3, "21:00"),
+    });
+    await updateHourInternal(admin, log!.id, {
+      programId: uncovered.id,
+      startAt: sept(20, "19:00"),
+      endAt: sept(20, "21:00"),
+    });
+
+    expect(await earningsFor(coach.id)).toHaveLength(0);
   });
 });
 

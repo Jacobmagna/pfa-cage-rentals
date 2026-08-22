@@ -28,9 +28,16 @@
 //
 // So overlap is prevented STRUCTURALLY instead of by a locked read. The
 // history is append-only and forward-only: a new version must start strictly
-// after every version on file, and the same batch that inserts it closes the
-// previously-open row at exactly that instant. Two windows that meet at a
-// shared boundary cannot overlap. The check-then-write gap remains — a second
+// after every version that has ALREADY STARTED, and the same batch that
+// inserts it closes the previously-open row at exactly that instant. Two
+// windows that meet at a shared boundary cannot overlap.
+//
+// ⚠️ "Already started", not "on file". A version whose period has not begun is
+// a PLAN, not history — it has paid nobody — so it can be replaced or
+// cancelled outright, in the same batch, and the planner reports which rows
+// that was. Treating those as immutable history is what made a September
+// stipend set up in August impossible to correct before it paid.
+// The check-then-write gap remains — a second
 // admin saving in the same few milliseconds would have their check pass
 // against stale rows — but the failure mode is bounded: the LATER insert
 // still starts after the earlier one on file only if it genuinely does, and
@@ -46,16 +53,18 @@
 // nothing automatic ever removes one (Q3). This module writes `coach_stipends`
 // and the audit trail, and that is all it writes.
 
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { coachStipends, users } from "@/db/schema";
 import type { AuthedSession } from "@/lib/authz";
 import { CoachNotFoundError } from "@/lib/errors";
 import {
+  cancelCoachStipendSchema,
   endCoachStipendSchema,
   setCoachStipendSchema,
 } from "@/lib/schemas/stipend";
 import {
+  planCancelStipend,
   planEndStipend,
   planSetStipend,
   type StipendVersion,
@@ -165,6 +174,18 @@ export async function setCoachStipendInternal(
   // silently off a stipend, and an insert without its close is the overlap
   // this whole module exists to prevent.
   const statements = [
+    // 🔴 DELETE FIRST. Versions that never took effect are removed in the same
+    // transaction that writes their replacement, so there is no instant where
+    // the coach has two overlapping future versions — and none where they have
+    // none. A future row has paid nobody (no period it governs has begun), so
+    // removing it rewrites no history; see `replacedRowIds` in the planner.
+    ...(plan.replacedRowIds.length > 0
+      ? [
+          db
+            .delete(coachStipends)
+            .where(inArray(coachStipends.id, plan.replacedRowIds)),
+        ]
+      : []),
     ...(plan.closeRowId && plan.closeAt
       ? [
           db
@@ -212,11 +233,81 @@ export async function setCoachStipendInternal(
       // cash; "who approved that, and what were they told it cost" has to
       // survive in the audit trail.
       backdatedPeriodKeys: plan.backdatedPeriods.map((p) => p.key),
+      // Recorded so a replacement is distinguishable from a first-time set in
+      // the audit trail — otherwise a corrected typo looks identical to a
+      // brand-new stipend and the row it displaced is simply gone.
+      replacedVersionIds: plan.replacedRowIds,
       note: row.note,
     } as unknown as Record<string, unknown>,
   });
 
   return { row, closedVersionId: plan.closeRowId, plan };
+}
+
+/**
+ * Cancel a stipend that has NOT STARTED YET — the wrong-coach / wrong-amount
+ * escape hatch.
+ *
+ * Deletes every not-yet-effective version and reopens whatever they displaced.
+ * Nothing already earned is touched, because nothing can have been earned: no
+ * period these rows govern has begun.
+ *
+ * @throws StipendPlanError · CoachNotFoundError
+ */
+export async function cancelCoachStipendInternal(
+  actor: AuthedSession["user"],
+  input: unknown,
+  now: Date = new Date(),
+) {
+  const parsed = cancelCoachStipendSchema.parse(input);
+
+  await assertCoachExists(parsed.coachId);
+
+  const existing = await fetchCoachStipendVersions(parsed.coachId);
+  const plan = planCancelStipend({ existing, now });
+
+  const removed = existing.filter((v) => plan.deleteRowIds.includes(v.id));
+
+  // ONE batch: the delete and the reopen land together. A delete without its
+  // reopen would leave the previous version closed off at a boundary that no
+  // longer exists — the coach silently on no stipend at all, produced by an
+  // undo.
+  const statements = [
+    db
+      .delete(coachStipends)
+      .where(inArray(coachStipends.id, plan.deleteRowIds)),
+    ...(plan.reopenRowId
+      ? [
+          db
+            .update(coachStipends)
+            .set({ effectiveTo: null })
+            .where(eq(coachStipends.id, plan.reopenRowId)),
+        ]
+      : []),
+  ] as const;
+
+  type BatchStatements = Parameters<typeof db.batch>[0];
+  await db.batch(statements as unknown as BatchStatements);
+
+  await safeLogAudit(db, {
+    actorUserId: actor.id,
+    entityType: STIPEND_ENTITY_TYPE,
+    entityId: parsed.coachId,
+    action: "delete",
+    diffMode: "full",
+    before: {
+      cancelledVersions: removed.map((v) => ({
+        id: v.id,
+        amountCents: v.amountCents,
+        effectiveFrom: v.effectiveFrom,
+      })),
+    } as unknown as Record<string, unknown>,
+    after: {
+      reopenedVersionId: plan.reopenRowId,
+    } as unknown as Record<string, unknown>,
+  });
+
+  return { plan, cancelledCount: plan.deleteRowIds.length };
 }
 
 /**

@@ -46,6 +46,8 @@ import {
 const JULY = period("2026-07-01", "2026-07-31");
 const AUGUST = period("2026-08-01", "2026-08-31");
 const JUNE = period("2026-06-01", "2026-06-30");
+/** For the stipend block — a whole month spanning BOTH half-month periods. */
+const SEPTEMBER = period("2026-09-01", "2026-09-30");
 
 /** Through the REAL filter parser, so the boundaries are production's. */
 function period(from: string, to: string): StatementPeriod {
@@ -1741,5 +1743,320 @@ describe("buildStatementRoster", () => {
 
   it("zero coaches in scope yields zero rows, not a row of zeroes", () => {
     expect(buildStatementRoster({ period: JULY, coaches: [] })).toEqual([]);
+  });
+});
+
+/* ── STIPENDS THROUGH THE REAL ENGINE PATH (SPEC §10.3/§10.4) ────────────── */
+
+describe("🔴 stipend labelling, through buildWorkReport → chargesFromWorkDetail", () => {
+  // 🔴 THIS BLOCK EXISTS BECAUSE FIVE MUTATIONS SURVIVED WITHOUT IT.
+  //
+  // The statement-card tests build `Statement` fixtures BY HAND with
+  // `rateLabel: "Flat rate"` already baked in — so they prove the CARD renders
+  // a label it was handed, and prove nothing about the ENGINE that produces
+  // it. Deleting `workRateLabel`'s stipend branches, or the em-dash handling
+  // for a charge with no hours, broke no test at all.
+  //
+  // These go through the real path: real log rows → `buildWorkReport` → the
+  // adapter → the charge inputs the document is built from.
+
+  const SEP_P1_START = new Date("2026-09-01T07:00:00.000Z");
+  const SEP_P1_END = new Date("2026-09-16T07:00:00.000Z");
+
+  /** 2026-09-03 is PDT (UTC-7). */
+  function sep3(hour: number): Date {
+    return new Date(Date.UTC(2026, 8, 3, hour + 7, 0, 0, 0));
+  }
+
+  function workLog(over: Partial<HourLogFetchRow>): HourLogFetchRow {
+    return {
+      id: "log-1",
+      coachId: "c1",
+      coachName: "Nick Milone",
+      coachEmail: "nick@example.com",
+      programId: "p1",
+      programName: "Manager Work",
+      startAt: sep3(9),
+      endAt: sep3(13),
+      note: null,
+      scheduleNote: null,
+      status: "posted",
+      decisionReason: null,
+      ratePer30MinCents: null,
+      perSessionRateCents: null,
+      stipendCovered: false,
+      ...over,
+    };
+  }
+
+  const earning = {
+    id: "e1",
+    coachId: "c1",
+    coachName: "Nick Milone",
+    coachEmail: "nick@example.com",
+    periodKey: "2026-09-P1",
+    periodStart: SEP_P1_START,
+    periodEndExclusive: SEP_P1_END,
+    amountCents: 250_000,
+  };
+
+  function charges(logs: HourLogFetchRow[], earnings: typeof earning[]) {
+    const report = buildWorkReport(logs, earnings);
+    const sources = logs.map((l) => ({
+      id: l.id,
+      startAt: l.startAt,
+      endAt: l.endAt,
+    }));
+    return chargesFromWorkDetail(report.detail, sources);
+  }
+
+  it("🔴 a COVERED log reads 'Covered by stipend', never 'No rate'", () => {
+    // "No rate" beside four real hours reads as a misconfiguration. Mark's
+    // whole Q2 ask is to see the hours AND see they are deliberately not
+    // charged (SPEC §10.3).
+    const [covered] = charges(
+      [workLog({ stipendCovered: true })],
+      [],
+    );
+    expect(covered.rateLabel).toBe("Covered by stipend");
+    expect(covered.amountCents).toBe(0);
+    // The hours are REAL and still quoted — that is the decoupling.
+    expect(covered.hours).toBe(4);
+  });
+
+  it("🔴 an UNCOVERED log still reads as its real rate — the control", () => {
+    // Without this, the assertion above could be passing because every row
+    // says "Covered by stipend".
+    const [normal] = charges(
+      [workLog({ ratePer30MinCents: 2_000 })],
+      [],
+    );
+    expect(normal.rateLabel).toBe("$40.00/hr");
+    expect(normal.amountCents).toBe(16_000);
+  });
+
+  it("a log with genuinely NO rate still reads 'No rate'", () => {
+    // The third control: the stipend branches must not swallow the
+    // pre-existing unset-rate case.
+    const [none] = charges([workLog({})], []);
+    expect(none.rateLabel).toBe("No rate");
+  });
+
+  it("🔴 the STIPEND row reads 'Flat rate' and carries NO hours", () => {
+    const [stipend] = charges([], [earning]);
+    expect(stipend.rateLabel).toBe("Flat rate");
+    expect(stipend.lineLabel).toBe("Stipend");
+    // 🔴 null, not 0 — a rendered "0.0 h" beside $2,500 reads as
+    // "worked nothing, paid anyway".
+    expect(stipend.hours).toBeNull();
+    expect(stipend.slots).toBeNull();
+    expect(stipend.amountCents).toBe(250_000);
+  });
+
+  it("🔴 the stipend's PERIOD is in its description", () => {
+    const [stipend] = charges([], [earning]);
+    expect(stipend.description).toBe("Stipend — Sep 1–15, 2026");
+  });
+
+  it("🔴 the stipend is bucketed at its PERIOD START, not the log's date", () => {
+    // `computeStatement` places a charge by `startAt`. A stipend that borrowed
+    // a log's instant would land in whatever half-month that log fell in.
+    const [stipend] = charges([], [earning]);
+    expect(stipend.startAt.toISOString()).toBe("2026-09-01T07:00:00.000Z");
+    expect(stipend.endAt.toISOString()).toBe("2026-09-16T07:00:00.000Z");
+  });
+
+  it("🔴 a stipend line prints an em dash for units, never '0.0 h'", () => {
+    // Straight through `buildChargeLines` — the summary line a reader adds up.
+    const lines = buildStatement({
+      account: "work",
+      coachName: "Nick Milone",
+      period: SEPTEMBER,
+      charges: charges([workLog({ stipendCovered: true })], [earning]),
+      payments: [],
+    }).chargeLines;
+
+    const stipendLine = lines.find((l) => l.label === "Stipend");
+    expect(stipendLine, "no Stipend summary line").toBeDefined();
+    expect(stipendLine!.units).toBe("—");
+    expect(stipendLine!.units).not.toContain("0.0");
+  });
+
+  it("🔴 a stipend ROW prints em dashes for weekday and time range", () => {
+    // Its startAt/endAt are a PAY PERIOD's bounds, so deriving a clock range
+    // from them would print "12:00 – 12:00 AM" against $2,500 — a rendered
+    // fact that is not true, on the document Mark hands to a coach.
+    const rows = buildStatement({
+      account: "work",
+      coachName: "Nick Milone",
+      period: SEPTEMBER,
+      charges: charges([], [earning]),
+      payments: [],
+    }).chargeRows;
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].dayOfWeek).toBe("—");
+    expect(rows[0].timeRange).toBe("—");
+    expect(rows[0].rateLabel).toBe("Flat rate");
+  });
+
+  it("a normal work row still prints a real weekday and time range — the control", () => {
+    const rows = buildStatement({
+      account: "work",
+      coachName: "Nick Milone",
+      period: SEPTEMBER,
+      charges: charges([workLog({ ratePer30MinCents: 2_000 })], []),
+      payments: [],
+    }).chargeRows;
+
+    expect(rows[0].dayOfWeek).not.toBe("—");
+    expect(rows[0].timeRange).not.toBe("—");
+    expect(rows[0].timeRange).toMatch(/\d/);
+  });
+
+  it("🔴 the work total INCLUDES the stipend and the covered log's $0", () => {
+    const statement = buildStatement({
+      account: "work",
+      coachName: "Nick Milone",
+      period: SEPTEMBER,
+      charges: charges(
+        [
+          workLog({ id: "covered", stipendCovered: true }),
+          workLog({ id: "extra", programName: "Weightlifting", startAt: sep3(19), endAt: sep3(21), ratePer30MinCents: 2_000 }),
+        ],
+        [earning],
+      ),
+      payments: [],
+    });
+    // $2,500 stipend + $0 covered + $80 hourly on top.
+    expect(statement.chargesCents).toBe(250_000 + 0 + 8_000);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// 🔴 A STIPEND OCCUPIES A SPAN, SO IT IS BUCKETED BY OVERLAP
+//
+// The Work tab and the Statements tab sit on the same page behind the same
+// filter bar. `fetchStipendEarningsInRange` includes a stipend whose PERIOD
+// overlaps the filter; this engine used to bucket every charge by the instant
+// `startAt`. Filter Sep 10–20 with one Sep 1–15 stipend and the Work tab said
+// $2,500 while the statement said $0 in the period, $2,500 in the opening
+// balance, and rendered NO stipend row at all — so a coach whose only pay in
+// that range was the stipend got a statement with no charges on it and nothing
+// explaining why. Two answers, one filter, one click apart.
+//
+// Entry is at the TOP of the pipeline (real rows → buildWorkReport →
+// chargesFromWorkDetail → buildStatement), because a hand-built charge would
+// prove only that the engine renders what it was handed — discipline rule 26.
+// ─────────────────────────────────────────────────────────────────────────
+describe("🔴 stipend period bucketing — overlap, not containment", () => {
+  const P1_START = parsePfaInput("2026-09-01", "00:00");
+  const P1_END = parsePfaInput("2026-09-16", "00:00");
+
+  function stipend(over: Record<string, unknown> = {}) {
+    return {
+      id: "earn-1",
+      coachId: "c1",
+      coachName: "Nick Milone",
+      coachEmail: "n@x.com",
+      periodKey: "2026-09-P1",
+      periodStart: P1_START,
+      periodEndExclusive: P1_END,
+      amountCents: 250_000,
+      ...over,
+    };
+  }
+
+  function statementFor(period: StatementPeriod, earnings = [stipend()]) {
+    const work = buildWorkReport([], earnings as never);
+    return {
+      work,
+      statement: buildStatement({
+        account: "work",
+        coachName: "Nick Milone",
+        charges: chargesFromWorkDetail(work.detail, []),
+        payments: [],
+        period,
+      }),
+    };
+  }
+
+  it("counts a stipend whose period OVERLAPS a filter that starts mid-period", () => {
+    const { work, statement } = statementFor({
+      fromDate: parsePfaInput("2026-09-10", "00:00"),
+      toDateExclusive: parsePfaInput("2026-09-21", "00:00"),
+    });
+    // 🔴 The identity that matters: the two surfaces agree.
+    expect(statement.chargesCents).toBe(work.grandTotalCents);
+    expect(statement.chargesCents).toBe(250_000);
+    expect(statement.openingCents).toBe(0);
+    // And it is VISIBLE — a charge counted but not shown is the "rows do not
+    // add up" failure this document exists to avoid.
+    expect(statement.chargeRows).toHaveLength(1);
+  });
+
+  it("still puts a stipend that ENDS before the range in the opening balance", () => {
+    const { statement } = statementFor(
+      {
+        fromDate: parsePfaInput("2026-09-20", "00:00"),
+        toDateExclusive: parsePfaInput("2026-09-30", "00:00"),
+      },
+      [
+        stipend({
+          periodKey: "2026-08-P1",
+          periodStart: parsePfaInput("2026-08-01", "00:00"),
+          periodEndExclusive: parsePfaInput("2026-08-16", "00:00"),
+        }),
+      ],
+    );
+    expect(statement.openingCents).toBe(250_000);
+    expect(statement.chargesCents).toBe(0);
+    expect(statement.chargeRows).toHaveLength(0);
+  });
+
+  it("🔴 the closing balance is the SAME whichever bucket it lands in", () => {
+    // The property that makes this change safe on a live money surface: the
+    // three buckets stay a complete partition, so moving a charge between
+    // them can never change what the coach is owed in total.
+    const overlapping = statementFor({
+      fromDate: parsePfaInput("2026-09-10", "00:00"),
+      toDateExclusive: parsePfaInput("2026-09-21", "00:00"),
+    }).statement;
+    const after = statementFor({
+      fromDate: parsePfaInput("2026-10-01", "00:00"),
+      toDateExclusive: parsePfaInput("2026-10-16", "00:00"),
+    }).statement;
+    expect(overlapping.closingCents).toBe(250_000);
+    expect(after.closingCents).toBe(250_000);
+  });
+
+  it("an ordinary LOG is still placed by its start, never by overlap", () => {
+    // The opt-in half of the rule. A log that straddles a period boundary is
+    // placed by `startAt` by design, and widening the bucketing rule to every
+    // charge would silently change that shipped behaviour.
+    const day = parsePfaInput("2026-09-05", "09:00");
+    const end = parsePfaInput("2026-09-05", "10:00");
+    const rows: HourLogFetchRow[] = [
+      {
+        stipendCovered: false, id: "l1", coachId: "c1", coachName: "Nick Milone",
+        coachEmail: "n@x.com", programId: "p1", programName: "Manager Work",
+        startAt: day, endAt: end, note: null, scheduleNote: null,
+        status: "posted", decisionReason: null, ratePer30MinCents: 1500,
+        perSessionRateCents: null,
+      },
+    ];
+    const work = buildWorkReport(rows);
+    const statement = buildStatement({
+      account: "work", coachName: "Nick Milone",
+      charges: chargesFromWorkDetail(work.detail, rows),
+      payments: [],
+      period: {
+        fromDate: parsePfaInput("2026-09-10", "00:00"),
+        toDateExclusive: parsePfaInput("2026-09-21", "00:00"),
+      },
+    });
+    // Sep 5 is before the range → opening balance, not in-period.
+    expect(statement.chargesCents).toBe(0);
+    expect(statement.openingCents).toBe(3000);
   });
 });

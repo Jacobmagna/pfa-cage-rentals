@@ -7,7 +7,23 @@
 //   npx tsx src/db/stipend-backfill-cli.ts                      # DEV, dry run
 //   npx tsx src/db/stipend-backfill-cli.ts --apply              # DEV, writes
 //   npx tsx src/db/stipend-backfill-cli.ts --target prod        # PROD, dry run
-//   npx tsx src/db/stipend-backfill-cli.ts --target prod --apply --confirm-prod
+//   npx tsx src/db/stipend-backfill-cli.ts --target prod --apply --confirm-prod \
+//       --actor mdm@pfasports.com
+//
+// ── 🔴 --actor IS NOT OPTIONAL DECORATION ────────────────────────────────
+// `audit_log.actor_user_id` is NOT NULL with a foreign key to `users.id`, and
+// `safeLogAudit` SWALLOWS its failures by design (a logging hiccup must not
+// report a successful mutation as failed). An earlier version of this CLI
+// passed the literal string "system:stipend-backfill" as the actor. That
+// violates the FK with a 23503 — proven against the dev branch — so every
+// audit insert failed and was silently swallowed, and the one-time backfill
+// that creates real back-pay would have written EVERY earning with NO AUDIT
+// TRAIL AT ALL. The integration tests could not catch it: they pass a real
+// admin id, and only the CLI passed the fake one.
+//
+// So the actor is resolved to a REAL user row and verified BEFORE anything is
+// written, and the run refuses if it cannot be. "Who ran the backfill" is
+// exactly what an audit trail on a payroll surface is for.
 //
 // ── 🔴 WHY THE TARGET IS AN EXPLICIT FLAG ────────────────────────────────
 // `.env.local`'s `DATABASE_URL` POINTS AT PRODUCTION (MAINTENANCE-HANDOFF open
@@ -41,6 +57,11 @@ const HOST_MARKERS: Record<Target, { must: string; mustNot: string }> = {
 
 function flag(name: string): boolean {
   return process.argv.includes(`--${name}`);
+}
+
+function option(name: string): string | null {
+  const i = process.argv.indexOf(`--${name}`);
+  return i === -1 ? null : (process.argv[i + 1] ?? null);
 }
 
 function parseTarget(): Target {
@@ -108,21 +129,65 @@ async function main() {
   const { backfillStipendEarnings, SANCTIONED_FLOOR } = await import(
     "@/lib/stipend/backfill"
   );
+  const { db } = await import("@/db");
+  const { users } = await import("@/db/schema");
+  const { and, eq, isNull } = await import("drizzle-orm");
   const { fetchStipendAmountCentsForPeriod } = await import(
     "@/lib/server/hour-log-actions"
   );
   const { payPeriodLabel } = await import("@/lib/pay-period");
 
+  // ── 🔴 RESOLVE A REAL ACTOR, OR REFUSE. See the module note. ───────────
+  const actorEmail = option("actor");
+  const admins = await db
+    .select({ id: users.id, email: users.email, name: users.name })
+    .from(users)
+    .where(and(eq(users.role, "admin"), isNull(users.deletedAt)))
+    .orderBy(users.email);
+
+  // ⚠️ CAP the list. The dev branch carries ~250 synthetic admins from years
+  // of integration runs, and dumping them all buries the actual instruction in
+  // a wall of `@test.invalid` addresses. An error nobody can read is an error
+  // that does not work. Prod has four.
+  const knownAdmins =
+    admins.length <= 10
+      ? admins.map((a) => a.email).join(", ")
+      : `${admins.slice(0, 10).map((a) => a.email).join(", ")} … and ${admins.length - 10} more`;
+
+  const actor = actorEmail
+    ? admins.find((a) => a.email.toLowerCase() === actorEmail.toLowerCase())
+    : admins.length === 1
+      ? admins[0]
+      : undefined;
+
+  if (!actor) {
+    if (actorEmail) {
+      throw new Error(
+        `REFUSING TO RUN: no active ADMIN user with email "${actorEmail}". ` +
+          `Known admins: ${knownAdmins || "(none)"}`,
+      );
+    }
+    throw new Error(
+      "REFUSING TO RUN: --actor <email> is required when more than one admin " +
+        "exists. Every earning this writes is audited to that person, and " +
+        "`audit_log.actor_user_id` must be a real user row — a placeholder " +
+        "string fails the FK and the audit insert is silently swallowed.\n" +
+        `Known admins: ${knownAdmins || "(none)"}`,
+    );
+  }
+
   console.log(`target:  ${target.toUpperCase()}`);
+  console.log(`actor:   ${actor.name ?? "(no name)"} <${actor.email}>`);
   console.log(`host:    ${host}`);
   console.log(`mode:    ${apply ? "APPLY (writes)" : "DRY RUN (reads only)"}`);
   console.log(`floor:   ${SANCTIONED_FLOOR.toISOString()}  (2026-09-01 PFA)\n`);
 
   const report = await backfillStipendEarnings({
-    // Backfilled earnings are attributed to the system, not to a person — no
-    // admin performed this action, and stamping one would put a name on rows
-    // they never clicked. The audit row's entityType still makes them findable.
-    actorUserId: "system:stipend-backfill",
+    // 🔴 A REAL user id, verified above. This is deliberately a PERSON and not
+    // a synthetic "system" actor: the FK requires a real row, and on a payroll
+    // surface "who authorised this back-pay" is the question the audit trail
+    // exists to answer.
+    actorUserId: actor.id,
     resolveAmountCents: fetchStipendAmountCentsForPeriod,
     apply,
   });

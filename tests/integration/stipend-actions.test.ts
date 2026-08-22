@@ -31,6 +31,7 @@ import { CoachNotFoundError } from "@/lib/errors";
 import { parsePfaInput } from "@/lib/timezone";
 import { StipendPlanError } from "@/lib/stipend/engine";
 import {
+  cancelCoachStipendInternal,
   endCoachStipendInternal,
   fetchCoachStipendVersions,
   fetchCurrentCoachStipend,
@@ -204,11 +205,15 @@ describe("setCoachStipendInternal — versioning", () => {
 });
 
 describe("a refusal writes NOTHING", () => {
-  it("refuses a start in the same period and leaves the table untouched", async () => {
+  it("refuses a start in the same period as a STARTED version, and leaves the table untouched", async () => {
+    // ⚠️ THE FIXTURE IS THE POINT. This used SEP_1 — a FUTURE period, since
+    // NOW is Aug 20 — so it asserted that a stipend set up in advance could
+    // never be corrected before it paid. That was the defect, not the guard.
+    // AUG_16 is under way at NOW, which is what forward-only exists to refuse.
     const { admin, coach } = fixtures;
     await setCoachStipendInternal(
       admin,
-      { coachId: coach.id, amountCents: 250_000, effectiveFrom: SEP_1 },
+      { coachId: coach.id, amountCents: 250_000, effectiveFrom: AUG_16, confirmBackdate: true },
       NOW,
     );
     const before = await rowsFor(coach.id);
@@ -217,7 +222,7 @@ describe("a refusal writes NOTHING", () => {
     await expect(
       setCoachStipendInternal(
         admin,
-        { coachId: coach.id, amountCents: 999_999, effectiveFrom: SEP_1 },
+        { coachId: coach.id, amountCents: 999_999, effectiveFrom: AUG_16, confirmBackdate: true },
         NOW,
       ),
     ).rejects.toBeInstanceOf(StipendPlanError);
@@ -360,6 +365,74 @@ describe("endCoachStipendInternal", () => {
         NOW,
       ),
     ).rejects.toMatchObject({ code: "NO_OPEN_VERSION" });
+  });
+
+  it("🔴 REPLACES a not-yet-started version in place — one row, not two", async () => {
+    // The correction path, end to end against the real table. The delete and
+    // the insert ride in ONE batch, so there is never an instant with two
+    // overlapping future versions — and never one with none.
+    //
+    // This is the Sept 1 rollout's most likely mistake: Mark sets a coach up
+    // in August, mistypes the amount, and needs it fixed before it pays. It
+    // used to be unfixable — forward-only refused the re-set, and the end
+    // guard refused to close a window that had not opened.
+    const { admin, coach } = fixtures;
+    await setCoachStipendInternal(
+      admin,
+      { coachId: coach.id, amountCents: 900_000, effectiveFrom: SEP_1 },
+      NOW,
+    );
+    await setCoachStipendInternal(
+      admin,
+      { coachId: coach.id, amountCents: 250_000, effectiveFrom: SEP_1 },
+      NOW,
+    );
+
+    const versions = await fetchCoachStipendVersions(coach.id);
+    expect(versions).toHaveLength(1);
+    expect(versions[0].amountCents).toBe(250_000);
+    expect(versions[0].effectiveFrom.getTime()).toBe(SEP_1.getTime());
+    expect(versions[0].effectiveTo).toBeNull();
+  });
+
+  it("🔴 cancelling a not-yet-started stipend REOPENS what it displaced", async () => {
+    // Without the reopen, cancelling a September change would leave August
+    // closed off at a boundary that no longer exists — the coach on NO
+    // stipend at all, a silent pay cut produced by an undo.
+    const { admin, coach } = fixtures;
+    await setCoachStipendInternal(
+      admin,
+      { coachId: coach.id, amountCents: 200_000, effectiveFrom: AUG_16, confirmBackdate: true },
+      NOW,
+    );
+    await setCoachStipendInternal(
+      admin,
+      { coachId: coach.id, amountCents: 900_000, effectiveFrom: SEP_1 },
+      NOW,
+    );
+    await cancelCoachStipendInternal(admin, { coachId: coach.id }, NOW);
+
+    const versions = await fetchCoachStipendVersions(coach.id);
+    expect(versions).toHaveLength(1);
+    expect(versions[0].amountCents).toBe(200_000);
+    // 🔴 Reopened. The August version runs on, exactly as it did before the
+    // September change was ever entered.
+    expect(versions[0].effectiveTo).toBeNull();
+  });
+
+  it("refuses to cancel a stipend that has already started", async () => {
+    const { admin, coach } = fixtures;
+    await setCoachStipendInternal(
+      admin,
+      { coachId: coach.id, amountCents: 250_000, effectiveFrom: AUG_16, confirmBackdate: true },
+      NOW,
+    );
+    await expect(
+      cancelCoachStipendInternal(admin, { coachId: coach.id }, NOW),
+    ).rejects.toBeInstanceOf(StipendPlanError);
+
+    const versions = await fetchCoachStipendVersions(coach.id);
+    expect(versions).toHaveLength(1);
   });
 
   it("lets a coach be put BACK on a stipend after ending, with no overlap", async () => {

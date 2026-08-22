@@ -181,25 +181,11 @@ export function buildWorkReport(
       scheduleNote: r.scheduleNote,
     }));
 
-  // A stipend earning carries only a coachId, so the display name comes from
-  // whatever log rows are already in scope. ⚠️ A coach with a stipend and NO
-  // logs in the range falls back to the id — visible and ugly on purpose,
-  // rather than a blank cell that reads as a rendering bug. In practice it
-  // cannot happen: an earning exists only because a covered log posted.
-  const coachIdentity = new Map<string, { coachName: string; coachEmail: string }>();
-  for (const r of rows) {
-    coachIdentity.set(r.coachId, {
-      coachName: r.coachName ?? r.coachEmail,
-      coachEmail: r.coachEmail,
-    });
-  }
-
   // 🔴 Stipend rows join the SAME array the summary and the grand total are
   // computed from. There is deliberately no separate "stipendTotalCents" —
   // a second total is a second thing to drift.
   for (const e of stipendEarnings) {
     const period = payPeriodFor(e.periodStart);
-    const coach = coachIdentity.get(e.coachId);
     detail.push({
       kind: "stipend",
       id: e.id,
@@ -216,8 +202,13 @@ export function buildWorkReport(
       // land inside one filtered range and the reader must see why.
       programName: `Stipend — ${payPeriodLabel(period)}`,
       coachId: e.coachId,
-      coachName: coach?.coachName ?? e.coachId,
-      coachEmail: coach?.coachEmail ?? "",
+      // 🔴 From the EARNING's own joined identity, never borrowed from the log
+      // rows in scope. The Work tab is range-filtered while stipends are
+      // included by period OVERLAP, so a stipend can legitimately appear with
+      // none of its coach's logs beside it — and borrowing printed a raw UUID.
+      // name → email is the same fallback every other coach-display path uses.
+      coachName: e.coachName ?? e.coachEmail,
+      coachEmail: e.coachEmail,
       ratePer30MinCents: null,
       perSessionRateCents: null,
       payCents: e.amountCents,
@@ -225,6 +216,65 @@ export function buildWorkReport(
       scheduleNote: null,
     });
   }
+
+  // 🔴 SORT THE STIPEND ROWS INTO PLACE — WITHOUT RE-ORDERING THE LOGS.
+  //
+  // Stipend rows are pushed onto the end of the array, so a Sep-1 stipend
+  // landed BELOW two Sep-3 logs and the printed Date column ran
+  // 09-03, 09-03, 09-01. On a payroll document that reads as a sorting bug,
+  // and a reader who distrusts the ordering distrusts the arithmetic next to
+  // it (discipline rule 9 — read the page as the USER).
+  //
+  // ⚠️ THE COACH ORDER COMES FROM THE FETCH, NOT FROM A COMPARATOR.
+  // An earlier version sorted on `coachName.localeCompare`, which is NOT the
+  // order the fetch produces: the query is `ORDER BY users.name`, and
+  // **Postgres puts NULLs LAST**, while `coachName` here is the DISPLAY
+  // fallback `name ?? email` — so a coach with no name set moved from the
+  // bottom of the report into alphabetical position by their email address,
+  // in reports containing NO STIPENDS AT ALL. `users.name` is nullable and
+  // such coaches exist. Ranking by first appearance reproduces whatever the
+  // database did, including its NULL handling, without restating it.
+  //
+  // Within a coach: `date` is "YYYY-MM-DD" and `startTime` is "HH:MM", both
+  // sort correctly as strings and both are already PFA-local, so this cannot
+  // reintroduce a timezone question. A stipend has no start time and sorts to
+  // the top of its own day, which is where a whole-period charge belongs. The
+  // original index is the final tie-break, so equal keys keep the fetch's
+  // order rather than relying on sort stability.
+  const coachRank = new Map<string, number>();
+  for (const row of detail) {
+    if (row.kind === "log" && !coachRank.has(row.coachId)) {
+      coachRank.set(row.coachId, coachRank.size);
+    }
+  }
+  // A coach can have a stipend and no logs in range — the period-overlap rule
+  // makes that a normal case, not an edge one. They sort after every coach who
+  // does, in a deterministic order of their own.
+  const stipendOnly = [
+    ...new Set(
+      detail
+        .filter((r) => r.kind === "stipend" && !coachRank.has(r.coachId))
+        .map((r) => r.coachId),
+    ),
+  ];
+  const nameOf = new Map(detail.map((r) => [r.coachId, r.coachName]));
+  stipendOnly
+    .sort((a, b) => (nameOf.get(a) ?? "").localeCompare(nameOf.get(b) ?? ""))
+    .forEach((coachId) => coachRank.set(coachId, coachRank.size));
+
+  const rankOf = (row: WorkDetailRow) => coachRank.get(row.coachId) ?? 0;
+  const sorted = detail
+    .map((row, index) => ({ row, index }))
+    .sort(
+      (a, b) =>
+        rankOf(a.row) - rankOf(b.row) ||
+        a.row.date.localeCompare(b.row.date) ||
+        (a.row.startTime ?? "").localeCompare(b.row.startTime ?? "") ||
+        a.index - b.index,
+    )
+    .map((d) => d.row);
+  detail.length = 0;
+  detail.push(...sorted);
 
   // Roll the SAME rows up per coach — the summary is a view of the detail,
   // not a second query, so the two always agree.

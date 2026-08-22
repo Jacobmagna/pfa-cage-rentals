@@ -250,6 +250,17 @@ export default async function AdminCoachDetailPage({
 
   const currentStipend =
     stipendVersions.find((v) => v.effectiveTo === null) ?? null;
+
+  // 🔴 OPEN IS NOT THE SAME AS IN EFFECT. A version set up in August for a
+  // September start has no end date, so "the open row" finds it — and the card
+  // used to announce it as "In effect since Sep 1–15, 2026" on Aug 21, badge
+  // it `current`, and offer to end something that had not begun. That is the
+  // DEFAULT state for every coach during the Sept 1 rollout, so it is the
+  // first thing Mark sees.
+  const stipendHasStarted =
+    currentStipend !== null &&
+    currentStipend.effectiveFrom.getTime() <= nowForPeriods.getTime();
+
   const stipendRows: StipendVersionRow[] = stipendVersions
     .slice()
     .reverse()
@@ -262,7 +273,13 @@ export default async function AdminCoachDetailPage({
           ? null
           : payPeriodLabel(payPeriodFor(new Date(v.effectiveTo.getTime() - 1))),
       note: v.note,
-      isCurrent: v.effectiveTo === null,
+      isCurrent:
+        v.effectiveTo === null &&
+        v.effectiveFrom.getTime() <= nowForPeriods.getTime(),
+      /** Set up, but its first pay period has not begun. */
+      isUpcoming:
+        v.effectiveTo === null &&
+        v.effectiveFrom.getTime() > nowForPeriods.getTime(),
     }));
 
   // Always render one row per resource type; merge in the override
@@ -477,6 +494,7 @@ export default async function AdminCoachDetailPage({
             ? payPeriodLabel(payPeriodFor(currentStipend.effectiveFrom))
             : null
         }
+        currentHasStarted={stipendHasStarted}
         periodOptions={periodOptions}
         versions={stipendRows}
         readOnly={isArchived}

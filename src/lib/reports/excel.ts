@@ -41,7 +41,8 @@ import { cageRateParts } from "./rate-display";
 import {
   COVERED_BY_STIPEND_LABEL,
   STIPEND_FLAT_RATE_LABEL,
-  WORK_PAY_CAVEAT,
+  WORK_PAY_CAVEAT_LEAD,
+  WORK_PAY_CAVEAT_PAYMENTS,
 } from "@/lib/stipend/labels";
 import { formatPfaDate, formatPfaTime12h } from "@/lib/timezone";
 import type { WorkReportData } from "./work-report";
@@ -349,10 +350,22 @@ function addWorkSummarySheet(
   // only overflow across the empty cells beside it (~90 characters here);
   // past that Excel clips it. A caveat that gets cut off mid-sentence is
   // worse than one that reads.
+  // 🔴 TWO ROWS, not one joined string. Column A clips past ~90 characters and
+  // the joined caveat is 134 — shipping it whole cut it off mid-sentence. And
+  // the second line is the caveat's OWN second sentence, not a bonus note:
+  // writing `WORK_PAY_CAVEAT` here alongside it printed it twice.
+  // ⚠️ The stipend note is written ONLY when the report actually contains a
+  // stipend. A caveat about something not on the page is noise, and noise in
+  // the notes block is how a reader learns to skip the block that also carries
+  // the payout caveat — the one that matters.
+  const hasStipend = work.detail.some((r) => r.kind === "stipend");
   addNoteRows(sheet, [
-    WORK_PAY_CAVEAT,
-    "Payments made outside the app are not deducted here.",
+    WORK_PAY_CAVEAT_LEAD,
+    WORK_PAY_CAVEAT_PAYMENTS,
     "Posted work only. Rejected entries are on the Work Log page.",
+    ...(hasStipend
+      ? ["A stipend is earned for a whole pay period, never pro-rated."]
+      : []),
   ]);
 
   styleHeader(sheet);

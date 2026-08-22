@@ -40,6 +40,7 @@ import { updateCoachNotesInternal } from "@/lib/server/coach-notes-actions";
 import { updateCoachPaySettingsInternal } from "@/lib/server/coach-pay-settings-actions";
 import { setScheduleAdminInternal } from "@/lib/server/schedule-admin-actions";
 import {
+  cancelCoachStipendInternal,
   endCoachStipendInternal,
   fetchCoachStipendVersions,
   setCoachStipendInternal,
@@ -315,6 +316,22 @@ export async function endCoachStipend(input: unknown) {
   if (coachId) await assertCoachNotArchived(coachId);
   const result = await endCoachStipendInternal(session.user, input);
   revalidateOverrideSurfaces(result.row.coachId);
+  revalidateWorkPaySurfaces();
+  return result;
+}
+
+/**
+ * Cancel a stipend that has not started yet — remove it rather than end it.
+ *
+ * 🔴 `requireRole("admin")` like every other stipend write, NEVER the schedule
+ * guard. This one deletes rows, so if anything it deserves more care, not less.
+ */
+export async function cancelCoachStipend(input: unknown) {
+  const session = await requireRole("admin");
+  const coachId = coachIdFromInput(input);
+  if (coachId) await assertCoachNotArchived(coachId);
+  const result = await cancelCoachStipendInternal(session.user, input);
+  if (coachId) revalidateOverrideSurfaces(coachId);
   revalidateWorkPaySurfaces();
   return result;
 }

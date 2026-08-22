@@ -20,14 +20,26 @@
 // be written out of order. This module enforces that by making the history
 // APPEND-ONLY and FORWARD-ONLY:
 //
-//   • a new version must start strictly AFTER every version already on file;
+//   • a new version must start strictly AFTER every version that SURVIVES the
+//     write (see the replacement rule below);
 //   • writing it closes the currently-open row at exactly that instant.
+//
+// ── The ONE exception, and it is deliberately narrow ───────────────────────
+// A version that has not started yet AND starts in the SAME pay period as the
+// one being written is REPLACED rather than appended to. It has paid nobody —
+// no period it governs has begun — so replacing it rewrites no history. That
+// is the "wrong number" / "wrong coach" correction, and without it a stipend
+// set up in August for a September start could not be fixed or removed before
+// it paid. ⚠️ Same period ONLY: a $2,500-from-Sep-1 plus $3,000-from-Oct-1
+// schedule is legitimate, and a broader rule would silently delete the
+// September row when October was saved.
 //
 // Two windows that meet at a shared boundary cannot overlap, so "no overlap"
 // stops being a check that could be raced and becomes a property of the shape.
 // The only thing a concurrent second writer could do is fail the
 // already-on-file check — which is the safe direction.
 
+import { formatDollarsExact } from "@/lib/format-money";
 import {
   isPayPeriodStart,
   payPeriodFor,
@@ -60,6 +72,26 @@ export type StipendChangePlan = {
   closeRowId: string | null;
   /** The instant to close it at — always the new version's start. */
   closeAt: Date | null;
+  /**
+   * 🔴 Versions that had NOT YET TAKEN EFFECT, at the SAME pay period as this
+   * one, and are therefore being replaced outright.
+   *
+   * A row whose `effectiveFrom` is still in the future has never paid anybody:
+   * no period it governs has begun, so no earning can reference it. Deleting it
+   * rewrites nothing, which is why this does not violate the append-only rule —
+   * that rule protects HISTORY, and a future row is not history yet.
+   *
+   * ⚠️ SAME PERIOD ONLY. A future version at a DIFFERENT period is a scheduled
+   * change, not a mistake, and is closed off in the normal way instead.
+   *
+   * Without this, a fat-fingered amount (or a stipend put on the wrong coach)
+   * set up in August for a September start could not be corrected OR cancelled
+   * before it paid: the forward-only guard refused a re-set of the same period,
+   * and the end guard refused to close a window that had not opened. The
+   * earliest reachable end was the FOLLOWING period, so the wrong amount was
+   * locked in for a full half-month, on a payroll surface with no void UI.
+   */
+  replacedRowIds: string[];
   /** The new version's window start. */
   effectiveFrom: Date;
   amountCents: number;
@@ -79,6 +111,22 @@ export type StipendEndPlan = {
 };
 
 /**
+ * CANCELLING a stipend that has not started yet — the mirror of
+ * `replacedRowIds` above, for when the answer is "remove it" rather than
+ * "replace it with a different amount".
+ *
+ * Nothing is closed and nothing is inserted: the rows are deleted, and any
+ * earlier version that was closed off to make room for them is REOPENED. That
+ * second half is the part it is easy to miss — cancelling September must put
+ * the coach back on whatever they were on in August, not leave them on nothing.
+ */
+export type StipendCancelPlan = {
+  deleteRowIds: string[];
+  /** The version to un-close, or null when there was nothing before. */
+  reopenRowId: string | null;
+};
+
+/**
  * 🔴 Every refusal in this module is one of these. They are thrown, not
  * returned, because there is no partial success to report: a plan that cannot
  * be built must not reach the database at all.
@@ -93,7 +141,9 @@ export class StipendPlanError extends Error {
       | "NOT_FORWARD_ONLY"
       | "NO_OPEN_VERSION"
       | "BACKDATE_NOT_CONFIRMED"
-      | "AMOUNT_NOT_POSITIVE",
+      | "AMOUNT_NOT_POSITIVE"
+      /** Cancel was asked for, but the stipend has already started. */
+      | "ALREADY_STARTED",
     message: string,
     /** Populated only on BACKDATE_NOT_CONFIRMED. */
     readonly backdatedPeriods: PayPeriod[] = [],
@@ -150,21 +200,53 @@ export function planSetStipend(input: {
   // not pick.
   assertPeriodStart(effectiveFrom, "start");
 
-  // ── 3. Forward-only ──────────────────────────────────────────────────────
+  // ── 3. Forward-only, over the versions that have actually STARTED ────────
   // Sorting here rather than trusting the caller's order is deliberate: the
   // action's SELECT has an ORDER BY today, and a future edit to that query
   // must not be able to turn this check into a coin flip.
   const sorted = [...existing].sort(
     (a, b) => a.effectiveFrom.getTime() - b.effectiveFrom.getTime(),
   );
-  const latest = sorted.at(-1) ?? null;
+
+  // 🔴 THE NARROW RULE THAT MAKES A NOT-YET-STARTED STIPEND CORRECTABLE.
+  //
+  // A version is REPLACED only when it has not started AND the new version
+  // starts in the SAME pay period. That is the "I typed the wrong number" /
+  // "I picked the wrong coach" case, and nothing else.
+  //
+  // ⚠️ NOT "replace every future version". Scheduling $2,500 from Sep 1 and
+  // then $3,000 from Oct 1 is a legitimate two-step plan, and a broader rule
+  // would silently delete the September row when the October one was saved —
+  // trading the bug being fixed here for a worse one. Anything that does not
+  // collide with the new start is left exactly alone and closed off in the
+  // normal forward-only way.
+  const replaced = sorted.filter(
+    (v) =>
+      v.effectiveFrom.getTime() > now.getTime() &&
+      v.effectiveFrom.getTime() === effectiveFrom.getTime(),
+  );
+  const replacedRowIds = replaced.map((v) => v.id);
+  // The instants that the rows being deleted had CLOSED an earlier row at. A
+  // boundary created by a row that is going away is not a real boundary.
+  const vacatedBoundaries = new Set(
+    replaced.map((v) => v.effectiveFrom.getTime()),
+  );
+
+  // Forward-only is enforced against everything that SURVIVES this write.
+  const remaining = sorted.filter((v) => !replacedRowIds.includes(v.id));
+  const latest = remaining.at(-1) ?? null;
 
   if (latest && latest.effectiveFrom.getTime() >= effectiveFrom.getTime()) {
     throw new StipendPlanError(
       "NOT_FORWARD_ONLY",
-      `This coach already has a stipend version starting ` +
-        `${payPeriodLabel(payPeriodFor(latest.effectiveFrom))}. A new amount ` +
-        `must start in a LATER pay period — past periods are never rewritten.`,
+      latest.effectiveFrom.getTime() <= now.getTime()
+        ? `This coach's stipend already started in ` +
+          `${payPeriodLabel(payPeriodFor(latest.effectiveFrom))}. A new amount ` +
+          `must start in a LATER pay period — a period that has already begun ` +
+          `is never rewritten.`
+        : `This coach already has a stipend scheduled from ` +
+          `${payPeriodLabel(payPeriodFor(latest.effectiveFrom))}. Pick that ` +
+          `period to change it, or a later one to schedule another change.`,
     );
   }
 
@@ -172,10 +254,12 @@ export function planSetStipend(input: {
   // overlap it. Unreachable while every write goes through this planner (an
   // end always closes the newest row), but the invariant is what money
   // correctness rests on, so it is checked rather than reasoned about.
-  const straddling = sorted.find(
+  // ⚠️ A boundary left behind by a row we are about to delete does not count.
+  const straddling = remaining.find(
     (v) =>
       v.effectiveTo !== null &&
-      v.effectiveTo.getTime() > effectiveFrom.getTime(),
+      v.effectiveTo.getTime() > effectiveFrom.getTime() &&
+      !vacatedBoundaries.has(v.effectiveTo.getTime()),
   );
   if (straddling) {
     throw new StipendPlanError(
@@ -195,17 +279,85 @@ export function planSetStipend(input: {
   }
 
   // ── 5. The plan ──────────────────────────────────────────────────────────
-  // The open row is closed at exactly the new row's start, so the two windows
-  // meet and cannot overlap.
-  const open = sorted.find((v) => v.effectiveTo === null) ?? null;
+  // The latest STARTED row is closed at exactly the new row's start, so the
+  // two windows meet and cannot overlap.
+  //
+  // It is closed when it is either still open, or was closed only to make room
+  // for a row we are now deleting — in that second case its boundary has to
+  // MOVE to the replacement's start, or the coach silently falls off the
+  // stipend in the gap between the two. A row that someone explicitly ENDED is
+  // left exactly as it is.
+  const closeRow =
+    latest &&
+    (latest.effectiveTo === null ||
+      vacatedBoundaries.has(latest.effectiveTo.getTime()))
+      ? latest
+      : null;
 
   return {
-    closeRowId: open?.id ?? null,
-    closeAt: open ? effectiveFrom : null,
+    closeRowId: closeRow?.id ?? null,
+    closeAt: closeRow ? effectiveFrom : null,
+    replacedRowIds,
     effectiveFrom,
     amountCents,
     backdatedPeriods,
   };
+}
+
+/**
+ * Cancel a stipend that has NOT STARTED YET — remove it outright rather than
+ * replacing it with a different amount.
+ *
+ * This is the "wrong coach" escape hatch. Setting a stipend on the wrong person
+ * used to be unrecoverable through the UI: it could not be re-set (forward-only
+ * refused the same period) and it could not be ended (the end guard refused to
+ * close a window that had not opened), so the earliest reachable removal was
+ * the FOLLOWING period — by which point they had earned one.
+ *
+ * @throws StipendPlanError
+ */
+export function planCancelStipend(input: {
+  existing: StipendVersion[];
+  now: Date;
+}): StipendCancelPlan {
+  const { existing, now } = input;
+  const sorted = [...existing].sort(
+    (a, b) => a.effectiveFrom.getTime() - b.effectiveFrom.getTime(),
+  );
+  const notStarted = sorted.filter(
+    (v) => v.effectiveFrom.getTime() > now.getTime(),
+  );
+
+  if (notStarted.length === 0) {
+    const open = sorted.find((v) => v.effectiveTo === null) ?? null;
+    throw new StipendPlanError(
+      open ? "ALREADY_STARTED" : "NO_OPEN_VERSION",
+      open
+        ? "This stipend has already started, so it cannot be cancelled — " +
+          "end it from a future pay period instead. Anything already earned " +
+          "stays earned."
+        : "This coach is not currently on a stipend.",
+    );
+  }
+
+  // Whatever the deleted rows displaced has to come back. Without this,
+  // cancelling a September change would leave August's version closed off and
+  // the coach on no stipend at all — a silent pay cut produced by an undo.
+  const vacatedBoundaries = new Set(
+    notStarted.map((v) => v.effectiveFrom.getTime()),
+  );
+  const settled = sorted.filter(
+    (v) => v.effectiveFrom.getTime() <= now.getTime(),
+  );
+  const previous = settled.at(-1) ?? null;
+  const reopenRowId =
+    previous &&
+    previous.effectiveTo !== null &&
+    vacatedBoundaries.has(previous.effectiveTo.getTime())
+      ? previous.id
+      : null;
+
+  return { deleteRowIds: notStarted.map((v) => v.id), reopenRowId };
 }
 
 /**
@@ -237,10 +389,18 @@ export function planEndStipend(input: {
   // period at all, and would resolve to nothing while still looking like a
   // stipend in the history.
   if (effectiveTo.getTime() <= open.effectiveFrom.getTime()) {
+    // ⚠️ Point at the action that DOES work. A stipend that has not started
+    // yet is cancelled, not ended, and a bare refusal here left the admin with
+    // no reachable way to undo a stipend they had just set on the wrong coach.
+    const notStartedYet = open.effectiveFrom.getTime() > now.getTime();
     throw new StipendPlanError(
       "NOT_FORWARD_ONLY",
-      `The stipend must end AFTER it started ` +
-        `(${payPeriodLabel(payPeriodFor(open.effectiveFrom))}).`,
+      notStartedYet
+        ? `This stipend has not started yet — it begins ` +
+          `${payPeriodLabel(payPeriodFor(open.effectiveFrom))}. Cancel it ` +
+          `instead, or pick a pay period after it starts.`
+        : `The stipend must end AFTER it started ` +
+          `(${payPeriodLabel(payPeriodFor(open.effectiveFrom))}).`,
     );
   }
 
@@ -252,10 +412,12 @@ export function planEndStipend(input: {
   if (backdatedPeriods.length > 0 && input.confirmBackdate !== true) {
     throw new StipendPlanError(
       "BACKDATE_NOT_CONFIRMED",
+      // ⚠️ No "re-submit with confirmBackdate" here. That named a form field
+      // to a non-technical admin, and pointed away from the confirm button
+      // sitting directly beneath this sentence.
       `Ending the stipend then removes it from ` +
         `${describePeriods(backdatedPeriods)}, which ` +
-        `${backdatedPeriods.length === 1 ? "is" : "are"} already under way. ` +
-        "Re-submit with confirmBackdate to apply it.",
+        `${backdatedPeriods.length === 1 ? "is" : "are"} already under way.`,
       backdatedPeriods,
     );
   }
@@ -312,13 +474,22 @@ function describePeriods(periods: PayPeriod[]): string {
 }
 
 function backdateMessage(periods: PayPeriod[], amountCents: number): string {
-  const each = `$${(amountCents / 100).toFixed(2)}`;
-  const most = `$${((amountCents * periods.length) / 100).toFixed(2)}`;
+  // 🔴 `formatDollarsExact`, not `toFixed(2)`. This message sits on the SAME
+  // card as the current-amount line and the history table, both of which use
+  // the shared formatter — so `toFixed` printed "$2500.00" beside "$2,500.00":
+  // two formats for one number, inside the most important warning in the
+  // feature.
+  const each = formatDollarsExact(amountCents);
+  const total = formatDollarsExact(amountCents * periods.length);
+  // "owed $2,500.00 per period — up to $2,500.00" read as broken arithmetic
+  // when there was only one period and the two figures were the same number.
+  const cost =
+    periods.length === 1
+      ? `The coach becomes owed ${each}`
+      : `The coach becomes owed ${each} per period — ${total} in total`;
   return (
     `This starts the stipend in ${describePeriods(periods)}, which ` +
     `${periods.length === 1 ? "is" : "are"} already under way. ` +
-    `The coach becomes owed ${each} per period — up to ${most} — for work ` +
-    "that may already have been paid outside the app. " +
-    "Re-submit with confirmBackdate to apply it."
+    `${cost} for work that may already have been paid outside the app.`
   );
 }

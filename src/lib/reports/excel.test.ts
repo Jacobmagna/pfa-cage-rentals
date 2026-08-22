@@ -8,6 +8,7 @@
 // drifts, this test fires.
 
 import ExcelJS from "exceljs";
+import { buildWorkReport } from "./work-report";
 import { describe, expect, it } from "vitest";
 import { buildReportWorkbook, workRateCell, type ReportWorkbookInput } from "./excel";
 import type { ReportData } from "./aggregate";
@@ -301,6 +302,46 @@ describe("buildReportWorkbook", () => {
       "Work Detail",
       "Payments",
     ]);
+  });
+
+  describe("the Work Summary note rows", () => {
+    const NOTE = "A stipend is earned for a whole pay period, never pro-rated.";
+
+    it("🔴 does NOT carry the stipend note when the report has no stipends", async () => {
+      // A caveat about something that is not on the page is noise, and noise
+      // in this block is how a reader learns to skip the block — which also
+      // carries the payout caveat, the one that matters.
+      const wb = await loadWorkbook(await build(makeReport()));
+      expect(columnText(wb.getWorksheet("Work Summary")!, 1)).not.toContain(NOTE);
+    });
+
+    it("carries it as soon as one stipend row is present", async () => {
+      const work = buildWorkReport(
+        [],
+        [
+          {
+            id: "earn-1",
+            coachId: "c1",
+            coachName: "Nick Milone",
+            coachEmail: "n@x.com",
+            periodKey: "2026-09-P1",
+            periodStart: new Date("2026-09-01T07:00:00.000Z"),
+            periodEndExclusive: new Date("2026-09-16T07:00:00.000Z"),
+            amountCents: 250_000,
+          },
+        ],
+      );
+      const wb = await loadWorkbook(await build(makeReport(), { work }));
+      expect(columnText(wb.getWorksheet("Work Summary")!, 1)).toContain(NOTE);
+    });
+
+    it("always carries the payout caveat, stipends or not", async () => {
+      // The one that is never conditional — it is true of every work figure
+      // in this workbook.
+      const wb = await loadWorkbook(await build(makeReport()));
+      const notes = columnText(wb.getWorksheet("Work Summary")!, 1);
+      expect(notes.some((n) => /not what is still owed/i.test(n))).toBe(true);
+    });
   });
 
   // A workbook whose SHAPE depends on the data is a workbook nobody can
@@ -716,6 +757,40 @@ describe("buildReportWorkbook", () => {
         dollars: undefined,
         basis: "No rate",
       });
+    });
+
+    it("🔴 a COVERED log says so instead of falling through to 'No rate'", () => {
+      // 🔴 A MUTATION SURVIVED WITHOUT THIS. A covered log carries no rate
+      // snapshot either, so removing the coverage branch made it read
+      // "No rate" beside four real hours — which is a misconfiguration, not
+      // the decision it actually is (SPEC §10.3). Nothing caught it.
+      expect(workRateCell(null, null, { kind: "log", covered: true })).toEqual({
+        dollars: undefined,
+        basis: "Covered by stipend",
+      });
+    });
+
+    it("🔴 a STIPEND row says 'Flat rate', and never a dollar figure", () => {
+      expect(
+        workRateCell(null, null, { kind: "stipend", covered: false }),
+      ).toEqual({ dollars: undefined, basis: "Flat rate" });
+      // 🔴 `dollars: undefined` is load-bearing: writing 0 there renders
+      // "$0.00", which reads as a deliberate zero rate.
+      expect(
+        workRateCell(null, null, { kind: "stipend", covered: false }).dollars,
+      ).toBeUndefined();
+    });
+
+    it("both stipend branches beat a real rate snapshot, deliberately", () => {
+      // If a covered log somehow still carries a stale snapshot, the coverage
+      // fact wins — the log pays $0, so quoting a per-hour rate beside it
+      // would invite the reader to multiply and get a number never charged.
+      expect(workRateCell(1500, null, { kind: "log", covered: true }).basis).toBe(
+        "Covered by stipend",
+      );
+      expect(
+        workRateCell(1500, 10000, { kind: "stipend", covered: false }).basis,
+      ).toBe("Flat rate");
     });
 
     it("prefers the per-session snapshot when a log somehow carries both", () => {

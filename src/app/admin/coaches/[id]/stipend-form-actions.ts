@@ -24,7 +24,7 @@ import { CoachArchivedError, CoachNotFoundError } from "@/lib/errors";
 import { dollarsToCents } from "@/lib/schemas/stipend";
 import { StipendPlanError } from "@/lib/stipend/engine";
 import { parsePfaInput } from "@/lib/timezone";
-import { endCoachStipend, setCoachStipend } from "./actions";
+import { cancelCoachStipend, endCoachStipend, setCoachStipend } from "./actions";
 
 export type StipendFormValues = {
   /** Dollars as typed, e.g. "2500" or "2500.00". Never cents at this layer. */
@@ -189,5 +189,35 @@ export async function endCoachStipendFormAction(
     return { ok: true };
   } catch (err) {
     return translate(err, values);
+  }
+}
+
+/**
+ * Cancel a not-yet-started stipend.
+ *
+ * No date, no confirmation step: the planner decides which versions qualify
+ * (every one whose pay period has not begun) and there is nothing to confirm
+ * because nothing can have been earned against them. If the stipend HAS
+ * started, the planner refuses with `ALREADY_STARTED` and the admin is told to
+ * end it from a future period instead.
+ */
+export async function cancelCoachStipendFormAction(
+  _prev: StipendActionResult,
+  formData: FormData,
+): Promise<StipendActionResult> {
+  const coachId = formData.get("coachId")?.toString();
+  if (!coachId) {
+    return {
+      ok: false,
+      error: { code: "VALIDATION", message: "Missing coach id" },
+      values: EMPTY_VALUES,
+    };
+  }
+
+  try {
+    await cancelCoachStipend({ coachId });
+    return { ok: true };
+  } catch (err) {
+    return translate(err, EMPTY_VALUES);
   }
 }

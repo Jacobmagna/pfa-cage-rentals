@@ -137,6 +137,30 @@ export type StatementChargeInput = {
    * charges are all hour-less renders an em dash instead of a duration.
    */
   hours: number | null;
+  /**
+   * 🔴 WHEN SET, THIS CHARGE IS BUCKETED BY OVERLAP OF
+   * `[startAt, spansToExclusive)` RATHER THAN BY THE INSTANT `startAt`.
+   *
+   * Only a stipend sets it, and only because a stipend genuinely occupies a
+   * SPAN — it is owed for a whole half-month, not incurred at a moment.
+   *
+   * Without this the Work tab and the Statements tab answered the same
+   * question differently. `fetchStipendEarningsInRange` includes a stipend
+   * whose period OVERLAPS the filter; `computeStatement` bucketed by
+   * `startAt`, i.e. containment. Filter Sep 10–20 with one Sep 1–15 stipend
+   * and the Work tab showed $2,500 in range while the statement showed $0 in
+   * the period, $2,500 in the opening balance, and NO stipend row at all — so
+   * a coach whose only pay in the range was the stipend got a statement with
+   * no charges on it and nothing explaining why. Two answers, adjacent tabs,
+   * one filter bar, which is the exact failure the roster-vs-statement
+   * incident is remembered for.
+   *
+   * ⚠️ Opt-in on purpose. Bucketing EVERY charge by `[startAt, endAt)` would
+   * silently change shipped behaviour for an hour log or cage session that
+   * straddles a period boundary — those are placed by `startAt` by design, and
+   * that rule is documented in the pay-period spec.
+   */
+  spansToExclusive?: Date | null;
   /** ALREADY COMPUTED by the shared money helpers. Never recomputed here. */
   amountCents: number;
 };
@@ -233,6 +257,9 @@ const WORK_CAVEAT = WORK_PAY_CAVEAT;
  * makes a reader distrust the rest of the page.
  */
 const WORK_SCOPE_NOTE = WORK_SCOPE_NOTE_TEXT;
+
+/** The one em dash this document uses for "there is nothing to quote". */
+const EM_DASH = "\u2014";
 
 /* ── The engine ──────────────────────────────────────────────────────────── */
 
@@ -331,9 +358,17 @@ function computeStatement(args: {
   const inPeriod: StatementChargeInput[] = [];
   for (const charge of args.charges) {
     const at = charge.startAt.getTime();
-    if (at < from) {
+    // A SPAN charge (a stipend) is placed by overlap; an instant charge (every
+    // log and session) is placed by its start, exactly as before. The three
+    // buckets stay a complete partition either way — a span is "before" only
+    // when it ENDS at or before the period opens — so no charge can be counted
+    // twice or dropped, and the closing balance is unchanged by the choice.
+    const spanEnd = charge.spansToExclusive?.getTime() ?? null;
+    const endsBefore = spanEnd == null ? at < from : spanEnd <= from;
+    const startsAfter = at >= toExclusive;
+    if (endsBefore) {
       chargesBeforeCents += charge.amountCents;
-    } else if (at < toExclusive) {
+    } else if (!startsAfter) {
       chargesCents += charge.amountCents;
       inPeriod.push(charge);
     } else {
@@ -654,9 +689,13 @@ export function chargesFromWorkDetail(
         );
       }
       return {
-        // Buckets the stipend into the period containing its own start.
         startAt: row.periodStart,
         endAt: row.periodEndExclusive,
+        // 🔴 The stipend occupies a SPAN, so it is bucketed by overlap — the
+        // same rule `fetchStipendEarningsInRange` applies for the Work tab.
+        // This is what stops the two surfaces quoting different money for the
+        // same filter; see the note on `StatementChargeInput.spansToExclusive`.
+        spansToExclusive: row.periodEndExclusive,
         // Its OWN summary line, never merged into a program's.
         lineLabel: STIPEND_LINE_LABEL,
         // 🔴 The period label is IN the row: a filtered range can overlap two
@@ -689,20 +728,30 @@ export function chargesFromWorkDetail(
 }
 
 /**
- * "$100.00/session" · "$30.00/hr" · "Flat rate" · "Covered by stipend" ·
- * "No rate".
+ * "$100.00/session" · "$30.00/hr" · "Covered by stipend" · "No rate".
  *
  * Never "$0.00/hr" for a MISSING rate: both work snapshots are nullable (a
  * pre-rate log carries neither and pays $0), and a rendered zero reads as a
  * deliberate decision to pay nothing rather than as an unset rate.
  *
- * 🔴 The two stipend branches come FIRST and are checked before the rate
- * snapshots, because a covered log carries no snapshot either — it would
- * otherwise fall through to "No rate", which is the exact misreading SPEC
- * §10.3 exists to prevent.
+ * 🔴 The COVERED branch comes FIRST, before the rate snapshots, because a
+ * covered log carries no snapshot either — it would otherwise fall through to
+ * "No rate" beside four real hours, which reads as a misconfiguration rather
+ * than the decision it is (SPEC §10.3).
+ *
+ * ⚠️ THIS ONLY EVER SEES A **LOG** ROW, and the parameter type says so rather
+ * than leaving it to a comment. `chargesFromWorkDetail` early-returns for a
+ * stipend row long before it gets here, so a `kind === "stipend"` branch in
+ * this function is DEAD CODE — an earlier version had one, and a mutation that
+ * deleted it broke nothing, which is how it was found. A guard that cannot run
+ * is worse than no guard: the next reader trusts it.
  */
-function workRateLabel(row: WorkDetailRow): string {
-  if (row.kind === "stipend") return STIPEND_FLAT_RATE_LABEL;
+function workRateLabel(
+  row: Pick<
+    WorkDetailRow,
+    "stipendCovered" | "perSessionRateCents" | "ratePer30MinCents"
+  >,
+): string {
   if (row.stipendCovered) return COVERED_BY_STIPEND_LABEL;
   if (row.perSessionRateCents != null) {
     return `${formatDollarsExact(row.perSessionRateCents)}/session`;
@@ -947,9 +996,6 @@ function formatSlots(slots: number): string {
  * and trailing "8.00 h" would read as false precision — hence one decimal
  * whenever the second is zero.
  */
-/** The one em dash this document uses for "there is nothing to quote". */
-const EM_DASH = "\u2014";
-
 function formatHours(hours: number): string {
   const rounded = Math.round(hours * 100) / 100;
   // `rounded * 10` is an integer exactly when the hundredths digit is 0.

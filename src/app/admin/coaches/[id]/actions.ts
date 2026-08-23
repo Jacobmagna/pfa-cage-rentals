@@ -39,6 +39,12 @@ import { updateUserHandlesInternal } from "@/lib/server/handles-actions";
 import { updateCoachNotesInternal } from "@/lib/server/coach-notes-actions";
 import { updateCoachPaySettingsInternal } from "@/lib/server/coach-pay-settings-actions";
 import { setScheduleAdminInternal } from "@/lib/server/schedule-admin-actions";
+import {
+  cancelCoachStipendInternal,
+  endCoachStipendInternal,
+  fetchCoachStipendVersions,
+  setCoachStipendInternal,
+} from "@/lib/server/stipend-actions";
 import { setScheduleAdminSchema } from "@/lib/schemas/user";
 
 // QA-2 write guard (defense in depth). The coach-detail page is now
@@ -279,6 +285,63 @@ export async function updateCoachPaySettings(input: unknown) {
 // this is what the danger-zone "Archive coach" card calls. Mirrors the
 // revalidation set of deleteCoach / restoreCoach so the coach leaves the
 // active surfaces and appears (with real identity) on /admin/coaches/archive.
+// ─────────────────────────────────────────────────────────────────────────
+// STIPEND (SPEC §6, Phase C)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// 🔴 requireRole("admin"), NEVER requireScheduleAccess(). A stipend is PAY.
+// A schedule admin is a coach with a Master-schedule tab and nothing else;
+// wiring these to that guard would let the one coach on a stipend set his own
+// amount. The internals take the actor as a parameter, which is exactly why
+// they live outside this "use server" file.
+//
+// Revalidation: a stipend changes what WORK PAY is owed, so the full
+// WORK_PAY_SURFACES set is busted, not just the coach page. The read surfaces
+// land in Phases D/E — busting them now costs nothing and means the wiring is
+// already right when they do.
+
+export async function setCoachStipend(input: unknown) {
+  const session = await requireRole("admin");
+  const coachId = coachIdFromInput(input);
+  if (coachId) await assertCoachNotArchived(coachId);
+  const result = await setCoachStipendInternal(session.user, input);
+  revalidateOverrideSurfaces(result.row.coachId);
+  revalidateWorkPaySurfaces();
+  return result;
+}
+
+export async function endCoachStipend(input: unknown) {
+  const session = await requireRole("admin");
+  const coachId = coachIdFromInput(input);
+  if (coachId) await assertCoachNotArchived(coachId);
+  const result = await endCoachStipendInternal(session.user, input);
+  revalidateOverrideSurfaces(result.row.coachId);
+  revalidateWorkPaySurfaces();
+  return result;
+}
+
+/**
+ * Cancel a stipend that has not started yet — remove it rather than end it.
+ *
+ * 🔴 `requireRole("admin")` like every other stipend write, NEVER the schedule
+ * guard. This one deletes rows, so if anything it deserves more care, not less.
+ */
+export async function cancelCoachStipend(input: unknown) {
+  const session = await requireRole("admin");
+  const coachId = coachIdFromInput(input);
+  if (coachId) await assertCoachNotArchived(coachId);
+  const result = await cancelCoachStipendInternal(session.user, input);
+  if (coachId) revalidateOverrideSurfaces(coachId);
+  revalidateWorkPaySurfaces();
+  return result;
+}
+
+/** Read-only: the version history for the card. Admin-gated all the same. */
+export async function getCoachStipendHistory(coachId: string) {
+  await requireRole("admin");
+  return fetchCoachStipendVersions(coachId);
+}
+
 export async function archiveCoach(coachId: string) {
   const session = await requireRole("admin");
   await archiveCoachInternal(session.user, coachId);

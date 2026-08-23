@@ -775,6 +775,115 @@ export const coachPaySettings = pgTable("coach_pay_settings", {
     .$onUpdate(() => new Date()),
 });
 
+// STIPEND SPEC §2.13 / §6.2 — WHO is on a stipend, and for how much.
+//
+// ONE amount per coach, covering EVERY stipend-eligible program they log
+// (SPEC §2.13: a coach earns one stipend per pay period no matter how many
+// stipend programs are involved, so a per-program amount would be a number
+// that never gets used).
+//
+// 🔴 VERSIONED, NEVER EDITED IN PLACE. Changing a coach's stipend closes the
+// current row (`effectiveTo`) and inserts a new one. Mark answered Q5 "no" —
+// an amount change must never rewrite what a past period was worth — and rows
+// that are only ever inserted make that structural instead of a convention.
+// There is deliberately NO `updatedAt` column: nothing updates these rows.
+//
+// ⚠️ `effectiveFrom` / `effectiveTo` are PFA-midnight instants on a PAY-PERIOD
+// BOUNDARY (the 1st or the 16th), enforced in the action via
+// `isPayPeriodStart` — a stipend starting mid-period is not representable
+// under Mark's all-or-nothing rule, so the boundary rejects it loudly rather
+// than rounding to a period he did not pick (SPEC §6.3).
+//
+// ⚠️ Non-overlap per coach is enforced in the ACTION, inside a transaction —
+// this codebase enforces such invariants in app code. Overlapping rows would
+// silently double-resolve an amount.
+export const coachStipends = pgTable(
+  "coach_stipends",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** The flat amount for ONE half-month pay period, in cents. */
+    amountCents: integer("amount_cents").notNull(),
+    effectiveFrom: timestamp("effective_from", { mode: "date" }).notNull(),
+    /** NULL = still in effect. Exclusive upper bound when set. */
+    effectiveTo: timestamp("effective_to", { mode: "date" }),
+    note: text("note"),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("coach_stipends_coach_effective_idx").on(
+      table.coachId,
+      table.effectiveFrom,
+    ),
+  ],
+);
+
+// STIPEND SPEC §4.3 — the EARNED stipend, materialized.
+//
+// 🔴 WHY THIS TABLE EXISTS AT ALL. The obvious design derives "what did this
+// coach earn" on read, which is how the statement feature works and how the
+// rest of this codebase prefers to work. Mark ruled it out: he answered Q3
+// "yes, the stipend would stand" — an earning must survive the deletion of
+// whatever earned it. A derived figure cannot do that, so the earning is
+// written down once and nothing automatic ever removes it.
+//
+// 🔴 UNIQUE (coach_id, period_key) IS THE WHOLE SAFETY PROPERTY. Mark's rule is
+// that one logged hour and forty logged hours in a period earn the SAME single
+// stipend. With this constraint the trigger is a plain
+// `onConflictDoNothing` upsert and "once per period" is enforced by the
+// database, not by application logic anyone can get wrong.
+//
+// `amountCents` is a SNAPSHOT taken from the `coach_stipends` version in
+// effect for `periodStart` — never recomputed. That is what makes Q5 true: an
+// amount change tomorrow cannot move what September was worth.
+export const coachStipendEarnings = pgTable(
+  "coach_stipend_earnings",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    coachId: text("coach_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** "2026-09-P1" — `PayPeriod.key`. Stable format; never reformat. */
+    periodKey: text("period_key").notNull(),
+    /** PFA-midnight on the period's first day. The bucketing instant. */
+    periodStart: timestamp("period_start", { mode: "date" }).notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    // 🔴 ON DELETE SET NULL, never CASCADE. Deleting the hour log that earned
+    // this stipend must NOT delete the earning — that is Mark's Q3 answer
+    // encoded in the FK. Getting this one clause wrong silently reintroduces
+    // exactly the behavior he rejected.
+    earnedByHourLogId: text("earned_by_hour_log_id").references(
+      () => hourLogs.id,
+      { onDelete: "set null" },
+    ),
+    earnedAt: timestamp("earned_at", { mode: "date" }).notNull().defaultNow(),
+    // Admin correction only. NOTHING automatic ever sets this — the only way an
+    // earning stops counting is a person deciding it should.
+    voidedAt: timestamp("voided_at", { mode: "date" }),
+    voidedBy: text("voided_by").references(() => users.id),
+    voidReason: text("void_reason"),
+  },
+  (table) => [
+    uniqueIndex("coach_stipend_earnings_coach_period_idx").on(
+      table.coachId,
+      table.periodKey,
+    ),
+    index("coach_stipend_earnings_coach_start_idx").on(
+      table.coachId,
+      table.periodStart,
+    ),
+  ],
+);
+
 export const auditAction = pgEnum("audit_action", ["create", "update", "delete"]);
 
 // Append-only audit trail for every billing-relevant mutation. `diff`
@@ -874,6 +983,24 @@ export const programs = pgTable("programs", {
   defaultRateEffectiveFrom: timestamp("default_rate_effective_from", {
     mode: "date",
   }),
+  // STIPEND SPEC §2.13 — Mark's per-PROGRAM switch. TRUE = work logged on this
+  // program is covered by the coach's half-month STIPEND rather than paid by
+  // the hour, so its logs stamp NO rate and pay $0; the stipend is the pay.
+  //
+  // Deliberately on the PROGRAM and not on a (coach, program) pair: Mark runs
+  // SEVERAL softball programs (practice / game / training) and a coach earns
+  // ONE stipend per pay period across all of them. Per-pair marking would be
+  // programs × coaches settings to maintain, and adding a fourth program later
+  // would silently leave every existing coach uncovered on it.
+  //
+  // 🔴 Eligibility ALONE never zeroes a log. A log is covered only when this is
+  // true AND the coach has a `coach_stipends` amount in effect — see
+  // `resolveStipendCovered`. That conjunction is what stops a non-stipend coach
+  // who covers one softball session from being paid $0 (SPEC §2.16a).
+  //
+  // Additive, NOT NULL DEFAULT false: every existing program keeps today's
+  // exact behavior with no backfill.
+  stipendEligible: boolean("stipend_eligible").notNull().default(false),
   createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { mode: "date" })
     .notNull()
@@ -1037,6 +1164,22 @@ export const hourLogs = pgTable(
     // NULLABLE with no default and no backfill: every pre-existing row stays
     // NULL, meaning "provenance unrecorded, infer it" (§5).
     rateSourceKind: rateSourceKind("rate_source_kind"),
+    // STIPEND SPEC §3.3 — the write-time SNAPSHOT of "a stipend covers this
+    // log". TRUE = both rate snapshots above are null BY DESIGN and this log
+    // pays $0 because the coach's half-month stipend already pays for it.
+    //
+    // 🔴 THIS IS WHY THE COLUMN EXISTS RATHER THAN BEING DERIVED. Without it, a
+    // covered log is indistinguishable from a log whose rate was never set —
+    // and those two must NOT read the same way. `workRateLabel` renders a null
+    // rate as "No rate"; beside 72 real hours that reads as a misconfiguration
+    // rather than as a decision, which is the exact display risk Open item 4
+    // already flags for the $0 rate box. Covered logs must say "Covered by
+    // stipend".
+    //
+    // Snapshot, not a live lookup: un-marking a program later must never change
+    // how an already-logged row describes itself. Same immutable rule as the
+    // two rate snapshots, applied to a boolean.
+    stipendCovered: boolean("stipend_covered").notNull().default(false),
     // Admin "Resolve" marker for unscheduled logs (mark reviewed/acknowledged).
     // The log STAYS (real worked time/pay); a non-null reviewedAt drops it off
     // the needs-review queue. Additive + nullable, no backfill — existing rows

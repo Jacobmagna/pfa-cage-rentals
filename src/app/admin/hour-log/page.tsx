@@ -21,6 +21,7 @@ import {
 import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
 import { countHeldHourLogs } from "@/lib/server/hour-log-actions";
 import { programMinutes, workPayForLog } from "@/lib/billing";
+import { fetchStipendEarningsInRange } from "@/lib/stipend/fetch";
 import { formatDollarsExact } from "@/lib/format-money";
 import { pfaDayEnd, pfaDayStart, pfaMonthEnd, pfaMonthStart } from "@/lib/timezone";
 import { fetchNeedsReviewItems } from "@/lib/server/needs-review";
@@ -80,6 +81,7 @@ export default async function AdminHourLogPage({
     [{ count: programsScheduledToday }],
     reviewItems,
     heldCount,
+    monthStipendEarnings,
   ] = await Promise.all([
     fetchHourLogRowsWithScheduleNotes(filters),
     // Filter dropdown — coaches role only, active only.
@@ -128,6 +130,13 @@ export default async function AdminHourLogPage({
     // 1b security B: count of HELD manual logs awaiting approval — powers the
     // entry-point card below (rendered only when > 0).
     countHeldHourLogs(),
+    // Stipends earned in this month's two pay periods. In the SAME batch as
+    // everything else — it was a sequential await, which put an extra
+    // round-trip on every render of this page for no reason.
+    fetchStipendEarningsInRange({
+      fromDate: monthStart,
+      toDateExclusive: monthEndExclusive,
+    }),
   ]);
 
   // Card 1: program hours this month — EXACT duration (a 45-min block is
@@ -148,6 +157,21 @@ export default async function AdminHourLogPage({
       ratePer30MinCents: r.ratePer30MinCents ?? 0,
     });
   }
+
+  // 🔴 STIPENDS BELONG IN THIS CARD TOO (SPEC §10.6/§10.7). A calendar month
+  // is exactly TWO pay periods, so the month's stipend total is the earnings
+  // whose periods fall inside it — no partial-period arithmetic, because a
+  // stipend is not pro-ratable.
+  //
+  // Leaving them out would put a figure on the dashboard that is smaller than
+  // the same month's figure on /admin/reports?tab=work, and two different
+  // numbers for one month reads as a bug in the money.
+  const monthStipendCents = monthStipendEarnings.reduce(
+    (total, e) => total + e.amountCents,
+    0,
+  );
+  owedProgramCents += monthStipendCents;
+
   const monthHours = monthMinutes / 60;
   // Up to 2 decimals, trailing zeros stripped: 42.75 → "42.75", 42.5 → "42.5", 40 → "40".
   const monthHoursLabel = monthHours

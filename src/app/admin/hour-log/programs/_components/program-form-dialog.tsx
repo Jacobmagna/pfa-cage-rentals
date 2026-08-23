@@ -36,6 +36,8 @@ export type ProgramEditInitialValues = {
   // the migration (the column default).
   payMode: "hourly" | "per_session";
   defaultPerSessionRateCents: number | null;
+  // STIPEND SPEC §2.13 — whether a stipend coach's work here is covered.
+  stipendEligible: boolean;
 };
 
 // Native <dialog> edit form for a single program (name + optional pay
@@ -117,6 +119,7 @@ export function ProgramFormDialog({
           initial.defaultPerSessionRateCents != null
             ? (initial.defaultPerSessionRateCents / 100).toFixed(2)
             : "",
+        stipendEligible: initial.stipendEligible,
       };
     }
     return {
@@ -124,6 +127,7 @@ export function ProgramFormDialog({
       rateDollars: "",
       payMode: "hourly" as const,
       perSessionDollars: "",
+      stipendEligible: false,
     };
   }, [initial, state]);
 

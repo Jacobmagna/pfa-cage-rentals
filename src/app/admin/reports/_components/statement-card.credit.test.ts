@@ -180,6 +180,12 @@ function readsAsColumn(panel: string): { sum: number; printedTotal: number } {
   return { sum, printedTotal: value(total) };
 }
 
+/**
+ * ⚠️ `render` shows the CAGE account. Anything asserted about the WORK
+ * account's rows must go through `renderWork` — a work-side assertion made
+ * against this helper is checking a panel that was never on the page, which
+ * is how a test passes while proving nothing.
+ */
 function render(cage: Statement, work: Statement): string {
   const pair: StatementPair = {
     coachName: "Alex Milone",
@@ -194,6 +200,25 @@ function render(cage: Statement, work: Statement): string {
       pair,
       account: "cage",
       hrefForAccount: (a) => `/admin/reports?tab=statements&account=${a}`,
+    }),
+  );
+}
+
+/** The same card, showing the WORK account. */
+function renderWork(work: Statement): string {
+  return renderToStaticMarkup(
+    createElement(StatementCard, {
+      pair: {
+        coachName: "Alex Milone",
+        coachEmail: "alexmilone@example.com",
+        periodLabel: "Sep 1 – Sep 30, 2026",
+        periodEndShort: "Sep 30",
+        cage: statement("cage", 0, 0),
+        work,
+      },
+      account: "work",
+      hrefForAccount: (a: "cage" | "work") =>
+        `/admin/reports?tab=statements&account=${a}`,
     }),
   );
 }
@@ -436,5 +461,103 @@ describe("the credit marker never collides with an operator", () => {
     const panel = cells(arithmeticPanel(html));
     expect(panel.map((c) => c.op)).toEqual([null, "+", "−", null]);
     expect(panel.map((c) => c.credit)).toEqual([true, false, false, true]);
+  });
+});
+
+/* ── STIPENDS ON THE PRINTED DOCUMENT (SPEC §14.3) ───────────────────────── */
+
+describe("🔴 a stipend line does not break the printed arithmetic", () => {
+  // §14.3 is explicit: `readsAsColumn` — the strongest assertion on this
+  // document, the one that parses each PRINTED money cell and sums it the way
+  // a person would — must foot WITH a stipend row present. Extend it, never
+  // work around it.
+  //
+  // A stipend is the first charge this document has ever carried that has no
+  // hours and no rate, so it is exactly the shape most likely to put a figure
+  // on the page that a reader cannot derive.
+
+  const withStipend = () =>
+    full({
+      account: "work",
+      directionLabel: "PFA owes Alex Milone",
+      openingCents: 0,
+      // $2,500 stipend + $80 of logged work.
+      chargesCents: 258_000,
+      paymentsCents: 0,
+      closingCents: 258_000,
+      chargeLines: [
+        { label: "Stipend", units: "—", amountCents: 250_000 },
+        { label: "HS Summer Program", units: "2.0 h", amountCents: 8_000 },
+      ],
+      chargeRows: [
+        {
+          date: "Sep 01",
+          // 🔴 No weekday, no time range — a stipend is a period, not a day.
+          dayOfWeek: "—",
+          timeRange: "—",
+          description: "Stipend — Sep 1–15, 2026",
+          rateLabel: "Flat rate",
+          slots: null,
+          amountCents: 250_000,
+        },
+        {
+          date: "Sep 03",
+          dayOfWeek: "Thu",
+          timeRange: "9:00 – 11:00 AM",
+          description: "HS Summer Program",
+          rateLabel: "$40.00/hr",
+          slots: null,
+          amountCents: 8_000,
+        },
+      ],
+      currentBalanceCents: 258_000,
+    });
+
+  // 🔴 `renderWork`, NOT `render`. An earlier draft of this block used
+  // `render`, which shows the CAGE account — so it footed an all-zero panel
+  // and passed while proving nothing about stipends at all. Caught only
+  // because two sibling assertions in the same block went red looking for
+  // copy that was never on the page. A footing test pointed at the wrong
+  // panel is the same class as a green suite that asserts nothing.
+
+  it("🔴 the arithmetic panel still foots with a stipend in the charges", () => {
+    const panel = arithmeticPanel(renderWork(withStipend()));
+    // Guard the guard: prove the panel is really carrying the stipend money
+    // before trusting that it foots. The panel prints TOTALS, not lines, so
+    // the figure to look for is charges = $2,500 stipend + $80 logged work.
+    // (An earlier draft looked for "$2,500.00" here and went red — which is
+    // the guard doing its job on the person writing it.)
+    expect(panel).toContain("$2,580.00");
+    const { sum, printedTotal } = readsAsColumn(panel);
+    expect(sum).toBe(printedTotal);
+    expect(printedTotal).toBe(258_000);
+  });
+
+  it("🔴 the reconciliation panel still foots with a stipend in the charges", () => {
+    const { sum, printedTotal } = readsAsColumn(
+      reconciliationPanel(renderWork(withStipend())),
+    );
+    expect(sum).toBe(printedTotal);
+  });
+
+  it("prints the stipend's rate as 'Flat rate', never a zero per-hour", () => {
+    const html = renderWork(withStipend());
+    expect(html).toContain("Flat rate");
+    // A rendered "$0.00/hr" reads as a decision to pay nothing per hour — a
+    // different and wrong claim. `workRateLabel` already refuses it for an
+    // unset rate; the stipend row must not reintroduce it.
+    expect(html).not.toContain("$0.00/hr");
+  });
+
+  it("🔴 prints the PERIOD in the row, because a range can hold two stipends", () => {
+    const html = renderWork(withStipend());
+    expect(html).toContain("Stipend — Sep 1–15, 2026");
+  });
+
+  it("never prints '0.0 h' beside the stipend", () => {
+    const html = renderWork(withStipend());
+    // The one honest zero in this feature — and it still must not be shown as
+    // a number. "0.0 h" beside $2,500 reads as "worked nothing, paid anyway".
+    expect(html).not.toContain("0.0 h");
   });
 });

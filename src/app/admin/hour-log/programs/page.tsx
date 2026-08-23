@@ -33,6 +33,9 @@ export default async function ProgramsPage() {
     defaultRatePer30MinCents: p.defaultRatePer30MinCents,
     payMode: p.payMode,
     defaultPerSessionRateCents: p.defaultPerSessionRateCents,
+    // STIPEND SPEC §2.13 — seeds the edit dialog's checkbox and the table's
+    // "Stipend covers this" badge.
+    stipendEligible: p.stipendEligible,
   }));
 
   const activeCount = rows.filter((r) => r.active).length;

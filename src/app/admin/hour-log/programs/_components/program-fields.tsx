@@ -29,8 +29,22 @@
 // The state itself, and the transitions over it, live in
 // @/lib/program-pay-fields so the type → toggle → toggle sequence is pinned by
 // a unit test (this suite has no DOM — see vitest.config.ts).
+//
+// 🔴 STIPEND SPEC §2.13 — THE ELIGIBILITY CHECKBOX AT THE BOTTOM IS THE ONLY
+// WRITE PATH TO `programs.stipend_eligible` IN THE PRODUCT. Without it the
+// column has three readers and no writers, and the entire stipend feature
+// ships inert: an admin can set a coach's stipend amount and no log is ever
+// covered, because coverage requires BOTH facts. Its local `useState` is
+// deliberately NOT folded into the pay-fields state machine above — that
+// machine exists to stop two amount inputs drifting apart across a
+// mode-swapping remount, and a single always-mounted checkbox has neither a
+// mirror to drift nor an arm to swap.
 
 import { useState } from "react";
+import {
+  STIPEND_ELIGIBLE_FIELD,
+  stipendEligibleFormValue,
+} from "@/lib/program-stipend-field";
 import {
   initialProgramPayFields,
   setProgramPayAmount,
@@ -42,6 +56,8 @@ import {
 
 export type ProgramFieldDefaults = ProgramPayFieldValues & {
   name: string;
+  /** STIPEND SPEC §2.13 — seeds the eligibility checkbox. */
+  stipendEligible: boolean;
 };
 
 /**
@@ -224,6 +240,94 @@ export function ProgramFields({
           <span className="text-fg">
             Heads up: a coach with their own rate set for this program keeps
             that rate. Clear their override to put them on the flat fee.
+          </span>
+        </p>
+      ) : null}
+
+      <StipendEligibleField defaultChecked={defaults.stipendEligible} />
+    </div>
+  );
+}
+
+/**
+ * 🔴 STIPEND SPEC §2.13 — Mark's per-PROGRAM switch, and the only control in
+ * the app that writes `programs.stipend_eligible`.
+ *
+ * ── WHY THE COPY SAYS WHAT IT SAYS ──────────────────────────────────────
+ * A log is covered iff its program is eligible AND its coach has a stipend
+ * amount (`resolveStipendCovered`). Ticking this box on its own changes
+ * nobody's pay, and the label must not imply otherwise — "this work pays $0"
+ * would be a straightforward lie to every coach who is not on a stipend. The
+ * sentence therefore names both halves of the condition.
+ *
+ * The note also states that already-logged hours do not move, because they
+ * genuinely do not: coverage is stamped on each log at write time and never
+ * recomputed (SPEC §3.3). An admin who expects a retro here and does not get
+ * one would reasonably conclude the feature is broken.
+ *
+ * ── 🔴 WHY THE CHECKBOX HAS NO `name` ───────────────────────────────────
+ * An unchecked checkbox submits nothing, which would make "absent" mean both
+ * "unticked" and "this form has no eligibility control" — two readings that
+ * differ by a payroll change. So the box is a control only, and the hidden
+ * input beside it always submits an explicit "true"/"false". That is the
+ * pattern `payMode` already uses in this same component. The reasoning in
+ * full, and the reader, are in @/lib/program-stipend-field.
+ */
+function StipendEligibleField({ defaultChecked }: { defaultChecked: boolean }) {
+  const [checked, setChecked] = useState(defaultChecked);
+
+  return (
+    <div className="border-t border-line pt-4">
+      {/* 🔴 The submitted value. ALWAYS present, so its absence in a payload
+          means "that form did not ask the question" and never "the answer is
+          no". Read by readStipendEligible. */}
+      <input
+        type="hidden"
+        name={STIPEND_ELIGIBLE_FIELD}
+        value={stipendEligibleFormValue(checked)}
+        readOnly
+      />
+      <label className="flex cursor-pointer items-start gap-2.5">
+        {/* No `name` — see the hidden input above. This is the control; that
+            is the value.
+
+            ⚠️ The explicit aria-label is NOT decoration. Without it the
+            accessible name is the wrapping <label>'s whole text content —
+            the heading AND the two-sentence explanation concatenated — which
+            reads terribly in a screen reader and is unstable to target. Same
+            defect the two amount inputs above carry their own aria-labels to
+            avoid, found the same way: by reading the rendered page's
+            accessibility tree rather than trusting the markup. It is also
+            chosen not to CONTAIN another control's name on this form
+            ("Pay by time", "Pay per session", "Pay rate per hour", "Amount
+            paid per session"), because getByLabel matches on substring. */}
+        <input
+          type="checkbox"
+          aria-label="Stipend covers this work"
+          checked={checked}
+          onChange={(e) => setChecked(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-line bg-page text-gold accent-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+        />
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-fg">
+            A coach&rsquo;s stipend covers this work
+          </span>
+          <span className="mt-0.5 block text-xs text-fg-muted">
+            When a coach who is on a stipend logs this work, it pays $0 —
+            their stipend already covers it. Coaches without a stipend are
+            paid their normal rate.
+          </span>
+        </span>
+      </label>
+
+      {checked ? (
+        <p className="mt-3 rounded-md border border-line bg-surface-2 px-3 py-2 text-xs text-fg-muted">
+          This only affects coaches who have a stipend amount set on their
+          coach page. Everyone else keeps their normal rate for this work.
+          <br />
+          <span className="text-fg">
+            Hours already logged don&rsquo;t change — this applies from here
+            forward.
           </span>
         </p>
       ) : null}

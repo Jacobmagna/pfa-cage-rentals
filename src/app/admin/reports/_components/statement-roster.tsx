@@ -163,11 +163,21 @@ export function StatementRoster({
           arrived at through styling instead of words. Now carries the neutral
           note styling `PayoutLedgerCaveat` already uses on the Work hours tab
           (`work-preview.tsx`), so the two surfaces state the same caution in
-          the same voice. */}
+          the same voice.
+
+          🔴 AMENDED AGAIN FOR STIPENDS. "The logged work's value" became FALSE
+          the moment the Work pay column could contain a stipend, because a
+          stipend is NOT logged work — it is a flat half-month amount that is
+          owed whatever the hours say. That is the same defect the wording was
+          rewritten to avoid, arriving from a new direction: this column now
+          sums two different KINDS of pay, and a definition that names only one
+          of them is wrong about the number beside it. The statement, the Work
+          tab and the workbook all moved to `WORK_PAY_CAVEAT_LEAD`; this
+          surface is the fourth and was missed. */}
       <p className="mb-3 rounded-lg border border-line/60 bg-surface-2/40 px-4 py-3 text-xs text-fg-muted leading-relaxed">
         <span className="font-semibold text-fg">
-          Work pay is the logged work&rsquo;s value minus the payouts recorded
-          here.
+          Work pay is the logged work&rsquo;s value, plus any stipends earned,
+          minus the payouts recorded here.
         </span>
       </p>
 
@@ -260,8 +270,8 @@ export function StatementRoster({
         — in <span className="font-medium">Cage rentals</span>, ($40.00) means
         PFA owes that coach $40, because he paid ahead; in{" "}
         <span className="font-medium">Work pay</span>, ($40.00) means that coach
-        owes PFA $40, because he was paid more than his logged work is worth. A
-        coach with money running each way is counted in both stats above.
+        owes PFA $40, because he was paid more than he had earned. A coach with
+        money running each way is counted in both stats above.
         <br />
         <span className="font-medium">Untagged payments</span> is all-time and
         spans <span className="font-medium">both directions at once</span>, so

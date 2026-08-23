@@ -61,6 +61,8 @@ import { aggregateReport } from "@/lib/reports/aggregate";
 import { fetchReportSessionInputs } from "@/lib/reports/fetch";
 import { fetchHourLogRows } from "@/lib/reports/hour-log-fetch";
 import { buildWorkReport } from "@/lib/reports/work-report";
+import { fetchStipendEarningsAllTime } from "@/lib/stipend/fetch";
+import { coachScopeFromFilters } from "@/lib/stipend/scope";
 import {
   chargesFromCageDetail,
   chargesFromWorkDetail,
@@ -118,7 +120,8 @@ export async function fetchStatementCoaches(
 ): Promise<StatementCoachData[]> {
   const { coachIds } = scope;
 
-  const [sessionInputs, hourLogRows, paymentRows] = await Promise.all([
+  const [sessionInputs, hourLogRows, paymentRows, stipendEarnings] =
+    await Promise.all([
     // The SAME query the cage report and the workbook run, over an unbounded
     // window. Returns the priced session inputs, which double as the engine's
     // `CageChargeSource`s — they carry the real `startAt` / `endAt` instants,
@@ -146,6 +149,10 @@ export async function fetchStatementCoaches(
       isFiltered: coachIds.length > 0,
     }),
     fetchStatementPayments(coachIds),
+    // 🔴 ALL-TIME, like every other fetch on this path. The engine computes
+    // opening balances from history, so it needs the whole ledger; the period
+    // arrives later, as a bucketing decision, not as a query filter.
+    fetchStipendEarningsAllTime(coachScopeFromFilters(coachIds)),
   ]);
 
   // Charges get bucketed per coach BEFORE the adapters run, because
@@ -156,8 +163,11 @@ export async function fetchStatementCoaches(
     aggregateReport(sessionInputs).detail,
     (row) => row.coachId,
   );
+  // Stipends are handed to the SAME builder the Work tab uses, so the work
+  // statement quotes the same number as `?tab=work` by construction rather
+  // than by a test that can rot — the property SPEC §10 relies on.
   const workDetailByCoach = groupBy(
-    buildWorkReport(hourLogRows).detail,
+    buildWorkReport(hourLogRows, stipendEarnings).detail,
     (row) => row.coachId,
   );
   const paymentsByCoach = groupBy(paymentRows, (row) => row.coachId);

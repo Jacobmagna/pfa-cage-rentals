@@ -18,6 +18,8 @@ import { buildReportWorkbook } from "@/lib/reports/excel";
 import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
 import { hourLogFiltersFromReportFilters } from "@/lib/reports/hour-log-filters";
 import { buildWorkReport } from "@/lib/reports/work-report";
+import { fetchStipendEarningsInRange } from "@/lib/stipend/fetch";
+import { coachScopeFromFilters } from "@/lib/stipend/scope";
 import { buildPaymentTimeline } from "@/lib/reports/payments-timeline";
 import { fetchPaymentTimelineRows } from "@/lib/reports/payments-timeline-fetch";
 import { requireRole } from "@/lib/authz";
@@ -31,7 +33,7 @@ export async function GET(request: Request) {
   // The SAME three fetches the page runs, from the SAME normalized
   // filters — that shared contract is what makes the preview and the
   // workbook agree row for row. Run them together; they're independent.
-  const [report, workRows, paymentRows] = await Promise.all([
+  const [report, workRows, paymentRows, stipendEarnings] = await Promise.all([
     fetchReportData(filters),
     fetchHourLogRowsWithScheduleNotes(
       hourLogFiltersFromReportFilters(filters),
@@ -41,12 +43,24 @@ export async function GET(request: Request) {
       toDateExclusive: filters.toDateExclusive,
       coachIds: filters.coachIds,
     }),
+    // 🔴 The SAME range + scope the screen uses. The workbook and the Work tab
+    // are fed from one builder precisely so they cannot quote different money;
+    // fetching stipends here with different arguments would reintroduce that
+    // drift through the back door.
+    fetchStipendEarningsInRange({
+      fromDate: filters.fromDate,
+      toDateExclusive: filters.toDateExclusive,
+      // 🔴 See `coachScopeFromFilters` — an empty filter means ALL coaches
+      // here and NONE in the fetch, and passing it raw emptied the workbook
+      // of stipends on the default download.
+      coachIds: coachScopeFromFilters(filters.coachIds),
+    }),
   ]);
 
   const buffer = await buildReportWorkbook(
     {
       report,
-      work: buildWorkReport(workRows),
+      work: buildWorkReport(workRows, stipendEarnings),
       payments: buildPaymentTimeline(paymentRows.rows),
       paymentsTruncated: paymentRows.truncated,
     },

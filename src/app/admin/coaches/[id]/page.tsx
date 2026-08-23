@@ -37,6 +37,20 @@ import { RestoreCoachCard } from "./_components/restore-coach-card";
 import { CoachPaymentsCard } from "./_components/coach-payments-card";
 import { CoachHandlesCard } from "./_components/handles-card";
 import { ScheduleManagerCard } from "./_components/schedule-manager-card";
+import {
+  StipendCard,
+  type StipendPeriodOption,
+  type StipendVersionRow,
+} from "./_components/stipend-card";
+import { fetchCoachStipendVersions } from "@/lib/server/stipend-actions";
+import {
+  nextPayPeriod,
+  payPeriodFor,
+  payPeriodLabel,
+  type PayPeriod,
+} from "@/lib/pay-period";
+import { pfaParts } from "@/lib/timezone";
+import { formatDollarsExact } from "@/lib/format-money";
 
 // Coach detail page. Renders the coach identity header + the H3
 // rate-override editor (one row per resource type, inline save +
@@ -200,6 +214,73 @@ export default async function AdminCoachDetailPage({
   // write guards in actions.ts are the real enforcement; readOnly here is
   // the matching UI.
   const isArchived = coach.deletedAt !== null;
+
+  // ── STIPEND (SPEC §6, Phase C) ────────────────────────────────────────
+  //
+  // The period OPTIONS are built here, on the server, from `pay-period.ts` —
+  // the same module the write path and the earning trigger use. A component
+  // that computed "the next few 1sts and 16ths" itself would be a second
+  // implementation of the half-month calendar, and the two would drift the
+  // first time February came up.
+  //
+  // ⚠️ The window deliberately reaches one period BACKWARD. Starting a
+  // stipend in the period already under way is a legitimate thing Mark may
+  // want — it is just the §12.4 back-pay case, and it must be REACHABLE and
+  // clearly labelled rather than hidden. Hiding it would push him to backdate
+  // by some other route with no confirmation attached.
+  const stipendVersions = await fetchCoachStipendVersions(coach.id);
+  const nowForPeriods = new Date();
+  const currentPeriod = payPeriodFor(nowForPeriods);
+  const periodOptions: StipendPeriodOption[] = [];
+  {
+    let p: PayPeriod = currentPeriod;
+    for (let i = 0; i < 8; i += 1) {
+      const parts = pfaParts(p.fromDate);
+      periodOptions.push({
+        value: `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`,
+        label: payPeriodLabel(p),
+        // Only the current period is "already running" in this window; every
+        // later one is in the future. Computed rather than hardcoded so the
+        // window can grow backward later without the flag going stale.
+        alreadyRunning: p.fromDate.getTime() <= currentPeriod.fromDate.getTime(),
+      });
+      p = nextPayPeriod(p);
+    }
+  }
+
+  const currentStipend =
+    stipendVersions.find((v) => v.effectiveTo === null) ?? null;
+
+  // 🔴 OPEN IS NOT THE SAME AS IN EFFECT. A version set up in August for a
+  // September start has no end date, so "the open row" finds it — and the card
+  // used to announce it as "In effect since Sep 1–15, 2026" on Aug 21, badge
+  // it `current`, and offer to end something that had not begun. That is the
+  // DEFAULT state for every coach during the Sept 1 rollout, so it is the
+  // first thing Mark sees.
+  const stipendHasStarted =
+    currentStipend !== null &&
+    currentStipend.effectiveFrom.getTime() <= nowForPeriods.getTime();
+
+  const stipendRows: StipendVersionRow[] = stipendVersions
+    .slice()
+    .reverse()
+    .map((v) => ({
+      id: v.id,
+      amountLabel: formatDollarsExact(v.amountCents),
+      fromLabel: payPeriodLabel(payPeriodFor(v.effectiveFrom)),
+      toLabel:
+        v.effectiveTo === null
+          ? null
+          : payPeriodLabel(payPeriodFor(new Date(v.effectiveTo.getTime() - 1))),
+      note: v.note,
+      isCurrent:
+        v.effectiveTo === null &&
+        v.effectiveFrom.getTime() <= nowForPeriods.getTime(),
+      /** Set up, but its first pay period has not begun. */
+      isUpcoming:
+        v.effectiveTo === null &&
+        v.effectiveFrom.getTime() > nowForPeriods.getTime(),
+    }));
 
   // Always render one row per resource type; merge in the override
   // when present. The client component decides save-vs-create based
@@ -399,6 +480,23 @@ export default async function AdminCoachDetailPage({
       <CoachNotesCard
         coachId={coach.id}
         initialNotes={coach.notes}
+        readOnly={isArchived}
+      />
+
+      <StipendCard
+        coachId={coach.id}
+        coachName={coach.name ?? coach.email}
+        currentAmountLabel={
+          currentStipend ? formatDollarsExact(currentStipend.amountCents) : null
+        }
+        currentFromLabel={
+          currentStipend
+            ? payPeriodLabel(payPeriodFor(currentStipend.effectiveFrom))
+            : null
+        }
+        currentHasStarted={stipendHasStarted}
+        periodOptions={periodOptions}
+        versions={stipendRows}
         readOnly={isArchived}
       />
 

@@ -21,6 +21,11 @@ export type ProgramRow = {
   // prefill the right field and the table can label how a program pays.
   payMode: "hourly" | "per_session";
   defaultPerSessionRateCents: number | null;
+  // 🔴 STIPEND SPEC §2.13 — Mark's per-PROGRAM switch. Surfaced in the table
+  // as well as the dialog: which work a stipend covers is a payroll fact, and
+  // a fact you can only see by opening an edit dialog one program at a time
+  // is a fact nobody checks.
+  stipendEligible: boolean;
 };
 
 // Top-level client island for the programs page. Owns the edit-dialog
@@ -66,6 +71,7 @@ export function ProgramsClient({ programs }: { programs: ProgramRow[] }) {
         defaultRatePer30MinCents: editRow.defaultRatePer30MinCents,
         payMode: editRow.payMode,
         defaultPerSessionRateCents: editRow.defaultPerSessionRateCents,
+        stipendEligible: editRow.stipendEligible,
       }
     : undefined;
 
@@ -108,6 +114,18 @@ export function ProgramsClient({ programs }: { programs: ProgramRow[] }) {
                   >
                     <td className="px-4 py-3 text-sm font-medium text-fg">
                       {row.name}
+                      {row.stipendEligible ? (
+                        <span className="mt-0.5 block text-xs font-normal text-fg-muted">
+                          {/* Deliberately NOT stipend/labels.ts's
+                              COVERED_BY_STIPEND_LABEL. That constant is the
+                              rate cell on a LOG that was paid $0; this is a
+                              CONFIG fact about a program. Same idea, different
+                              claim — coupling them would drag a per-log
+                              wording change onto this badge. It matches the
+                              checkbox's own label instead. */}
+                          Stipend covers this work
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-sm whitespace-nowrap">
                       {row.active ? (

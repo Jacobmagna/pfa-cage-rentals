@@ -20,9 +20,10 @@
 // captures audit failures so a logging hiccup never loses a logged
 // hour). Same shape as the session create path.
 
-import { and, desc, eq, gte, lt } from "drizzle-orm";
+import { and, desc, eq, gt, gte, isNull, lt, lte, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  coachStipends,
   hourLogs,
   programRateOverrides,
   programScheduleBlockCoaches,
@@ -32,6 +33,7 @@ import {
 } from "@/db/schema";
 import { type AuthedSession } from "@/lib/authz";
 import { workPayForLog } from "@/lib/billing";
+import { payPeriodFor } from "@/lib/pay-period";
 import {
   DuplicateHourLogError,
   HeldHourLogNotFoundError,
@@ -51,6 +53,7 @@ import {
   type ReconBlock,
 } from "@/lib/server/reconciliation";
 import { formatPfaTime12h } from "@/lib/timezone";
+import { recordStipendEarning } from "@/lib/stipend/earnings";
 import { safeLogAudit } from "./audit-helpers";
 
 // DESIGN-1: the (coach, program) pay mode + rates now live on a SINGLE
@@ -68,12 +71,80 @@ type ProgramRateOverrideRow = typeof programRateOverrides.$inferSelect;
 // which mode the program is in.
 export type ProgramPayConfig = Pick<
   typeof programs.$inferSelect,
-  "payMode" | "defaultRatePer30MinCents" | "defaultPerSessionRateCents"
+  | "payMode"
+  | "defaultRatePer30MinCents"
+  | "defaultPerSessionRateCents"
+  // STIPEND SPEC §2.11 — in the Pick deliberately: adding it here makes every
+  // caller's SELECT list fetch the column, so no resolution site can be handed
+  // a program row that cannot answer the stipend question.
+  | "stipendEligible"
 >;
 
 /** A usable money amount: a positive whole number of cents. */
 function isPositiveCents(v: number | null | undefined): v is number {
   return typeof v === "number" && Number.isInteger(v) && v > 0;
+}
+
+/**
+ * STIPEND SPEC §2.11 / §2.13 — is this (coach, program) pairing covered by the
+ * coach's half-month stipend?
+ *
+ * 🔴 BOTH HALVES ARE REQUIRED, and the conjunction is the whole point:
+ *  - the PROGRAM must be stipend-eligible (Mark's per-program switch), AND
+ *  - the COACH must have a stipend amount in effect for the log's pay period.
+ *
+ * Requiring the coach half is what stops a NON-stipend coach who covers one
+ * softball session from being silently paid $0 (SPEC §2.16a) — they simply are
+ * not on a stipend, so they fall through to the program's normal rate. It is
+ * the presence of an amount that puts a coach on a stipend; nothing else does.
+ *
+ * Pure and total: no DB, no clock. The caller resolves the amount for the
+ * relevant period and passes it in.
+ */
+export function resolveStipendCovered(
+  program: Pick<ProgramPayConfig, "stipendEligible"> | null,
+  coachStipendAmountCents: number | null,
+): boolean {
+  return program?.stipendEligible === true && coachStipendAmountCents != null;
+}
+
+/**
+ * The stipend amount in effect for `coachId` during the pay period that
+ * contains `at`, or null when the coach is not on a stipend then.
+ *
+ * 🔴 RESOLVED AGAINST THE PERIOD'S START, NOT AGAINST `at` AND NOT AGAINST
+ * "now". A stipend is earned for a whole half-month, so the version that
+ * governs is the one in force at the period's first instant — that is what
+ * makes the answer for September stable forever, no matter when the question
+ * is asked or how many times the amount changes afterwards (SPEC §7.2, Q5).
+ *
+ * `coach_stipends` windows are non-overlapping per coach, so at most one row
+ * can match; `limit(1)` is a safety net, not a tie-break. ⚠️ That non-overlap
+ * is NOT enforced by a transaction — neon-http has none. It is structural: the
+ * write path in `stipend-actions.ts` is append-only and forward-only, and the
+ * batch that inserts a new version closes the previous one at exactly its
+ * start, so the windows meet rather than overlap.
+ */
+export async function fetchStipendAmountCentsForPeriod(
+  coachId: string,
+  at: Date,
+): Promise<number | null> {
+  const periodStart = payPeriodFor(at).fromDate;
+  const [row] = await db
+    .select({ amountCents: coachStipends.amountCents })
+    .from(coachStipends)
+    .where(
+      and(
+        eq(coachStipends.coachId, coachId),
+        lte(coachStipends.effectiveFrom, periodStart),
+        or(
+          isNull(coachStipends.effectiveTo),
+          gt(coachStipends.effectiveTo, periodStart),
+        ),
+      ),
+    )
+    .limit(1);
+  return row?.amountCents ?? null;
 }
 
 // Resolves the per-30-min cents HOURLY pay rate to stamp on a new
@@ -87,7 +158,20 @@ function isPositiveCents(v: number | null | undefined): v is number {
 export function resolveRateCentsForProgram(
   override: ProgramRateOverrideRow | undefined | null,
   program: ProgramPayConfig | null,
+  stipendCovered: boolean,
 ): number | null {
+  // 🔴 STIPEND SPEC §2.11 — FIRST, AND AN EXPLICIT EARLY RETURN, NEVER A
+  // FALL-THROUGH. This function ends in `return program?.defaultRate… ?? null`,
+  // so a covered log that merely failed the override branch would land on the
+  // PROGRAM DEFAULT and be paid hourly — on top of the stipend that already
+  // paid for it. Every gate would stay green: the rate is a real configured
+  // number and the hours are correct. That is the most expensive defect
+  // available in this feature, and this line is what prevents it.
+  //
+  // The argument is REQUIRED, not optional, so TypeScript fails the build at
+  // every call site — present and future — until each one answers the stipend
+  // question. A default would let a new caller silently opt out.
+  if (stipendCovered) return null;
   if (
     override &&
     override.payMode === "hourly" &&
@@ -121,7 +205,16 @@ export function resolveRateCentsForProgram(
 export function resolvePerSessionRateCents(
   override: ProgramRateOverrideRow | undefined | null,
   program: ProgramPayConfig | null,
+  stipendCovered: boolean,
 ): number | null {
+  // 🔴 STIPEND SPEC §2.11 — stated explicitly even though the `if (override)`
+  // branch below already returns null for every non-per_session override.
+  // ⚠️ THAT IS AN ACCIDENT OF CONTROL FLOW, NOT A CONTRACT: it does not hold
+  // when there is NO override row (the branch is skipped entirely and the
+  // PROGRAM's per-session default can win), and the next edit to this function
+  // could take it away with nobody noticing. Relying on it would make a
+  // double-pay depend on a coincidence.
+  if (stipendCovered) return null;
   // A (coach, program) override WINS OUTRIGHT — including an HOURLY one,
   // which returns null here on purpose so that coach is paid hourly even on
   // a per-session program. Coach-specific always beats the program default,
@@ -173,19 +266,30 @@ export function resolvePerSessionRateCents(
 export function resolveRateSourceKind(
   override: ProgramRateOverrideRow | undefined | null,
   program: ProgramPayConfig | null,
+  stipendCovered: boolean,
 ): "override" | "program_default" | "none" {
+  // STIPEND SPEC §2.11 — forwarded so provenance is derived from the SAME
+  // answer the two rate resolvers were given; asking them a different question
+  // than the one that produced the stamped rate is how provenance drifts.
+  //
+  // 📌 A covered log resolves to "none", and that is HONEST rather than a
+  // fallback: neither the override nor the program default supplied a rate.
+  // The `rate_source_kind` PG enum is deliberately NOT widened — no
+  // `ALTER TYPE`, which Postgres cannot use in the same transaction that adds
+  // it. `hour_logs.stipend_covered` is what distinguishes "covered by stipend"
+  // from "nobody ever set a rate"; the two must never read the same way.
   // Per-session takes precedence: when a flat amount is stamped, it IS the
   // pay for the log (billing.ts reads it ahead of the hourly snapshot).
   // resolvePerSessionRateCents returns non-null from exactly two places — the
   // override's own per_session amount, or, when there is NO override row at
   // all, the program's per_session default.
-  if (resolvePerSessionRateCents(override, program) != null) {
+  if (resolvePerSessionRateCents(override, program, stipendCovered) != null) {
     return override ? "override" : "program_default";
   }
   // Otherwise the hourly snapshot is the pay. resolveRateCentsForProgram
   // returns the override's rate under exactly this condition; every other
   // non-null result there came from program.defaultRatePer30MinCents.
-  if (resolveRateCentsForProgram(override, program) != null) {
+  if (resolveRateCentsForProgram(override, program, stipendCovered) != null) {
     return override &&
       override.payMode === "hourly" &&
       override.ratePer30MinCents != null
@@ -226,10 +330,26 @@ export async function logHourInternal(
     )
     .limit(1);
 
+  // STIPEND SPEC §2.11 — resolved BEFORE the three rate resolvers, because all
+  // three take it as a required argument. Covered work stamps NO rate and pays
+  // $0: the coach's half-month stipend is the pay for it.
+  //
+  // ⚠️ Keyed on the LOG's own `startAt`, never on "now" — backdating a log into
+  // an earlier period must resolve that period's stipend, not today's.
+  const stipendAmountCents = await fetchStipendAmountCentsForPeriod(
+    actor.id,
+    parsed.startAt,
+  );
+  const stipendCovered = resolveStipendCovered(program, stipendAmountCents);
+
   // Stamp the resolved HOURLY pay rate as a snapshot (cents per 30-min
   // slot), mirroring sessions_billing. May be null when neither the
   // override nor the program sets a rate → $0 pay; reads treat null as 0.
-  const ratePer30MinCents = resolveRateCentsForProgram(override, program);
+  const ratePer30MinCents = resolveRateCentsForProgram(
+    override,
+    program,
+    stipendCovered,
+  );
 
   // DESIGN-1 — per-session pay snapshot. Non-null only when this
   // (coach, program) override is on the "per_session" pay mode with a
@@ -237,13 +357,21 @@ export async function logHourInternal(
   // snapshot above applies). Snapshotted alongside the hourly rate so a
   // later mode change never re-rates this log. Applies to ALL insert paths
   // (coach self-log, schedule-confirm auto-confirm, held).
-  const perSessionRateCents = resolvePerSessionRateCents(override, program);
+  const perSessionRateCents = resolvePerSessionRateCents(
+    override,
+    program,
+    stipendCovered,
+  );
 
   // SPEC rate-effective-dating §5 — record WHERE the rate above came from.
   // Same `override` + `program` rows the two resolvers just used, so the
   // provenance and the rate can never disagree. Purely informational: it does
   // not change what gets stamped, and no pay math reads it.
-  const rateSourceKindValue = resolveRateSourceKind(override, program);
+  const rateSourceKindValue = resolveRateSourceKind(
+    override,
+    program,
+    stipendCovered,
+  );
 
   // 1b security B — held-then-approve gate. Runs for EVERY source. The
   // `source` flag (client-supplied) must NOT be able to bypass this check:
@@ -328,6 +456,10 @@ export async function logHourInternal(
       ratePer30MinCents,
       perSessionRateCents,
       rateSourceKind: rateSourceKindValue,
+      // STIPEND SPEC §3.3 — the immutable record that this log's $0 is a
+      // DECISION, not a missing rate. Read by every display so a covered row
+      // says "Covered by stipend" instead of "No rate" beside real hours.
+      stipendCovered,
       createdBy: actor.id,
       // A clean/auto-confirm log omits status → relies on the "posted"
       // default. Only the held branch stamps status + heldReason.
@@ -391,6 +523,20 @@ export async function logHourInternal(
         before: existing as unknown as Record<string, unknown>,
         after: upgraded as unknown as Record<string, unknown>,
       });
+
+      // 🔴 POSTED MOMENT 2 of 3 — the HELD → POSTED auto-upgrade. This branch
+      // is a long way from the insert below and is the one a reader misses:
+      // it is an UPDATE inside the duplicate-conflict path. `stipendCovered`
+      // comes off the EXISTING row's snapshot, stamped when the held row was
+      // first written.
+      await recordStipendEarning({
+        actorUserId: actor.id,
+        coachId: upgraded.coachId,
+        hourLogId: upgraded.id,
+        logStartAt: upgraded.startAt,
+        stipendCovered: upgraded.stipendCovered,
+        resolveAmountCents: fetchStipendAmountCentsForPeriod,
+      });
       return upgraded;
     }
 
@@ -407,6 +553,21 @@ export async function logHourInternal(
     action: "create",
     after: inserted as unknown as Record<string, unknown>,
   });
+
+  // 🔴 POSTED MOMENT 1 of 3 — a clean log takes the schema's `posted` default.
+  // Gated on the row's OWN status rather than on `heldReason === null`: the
+  // two agree today, and reading the status is the one that stays true if the
+  // insert's status handling ever changes.
+  if (inserted.status === "posted") {
+    await recordStipendEarning({
+      actorUserId: actor.id,
+      coachId: inserted.coachId,
+      hourLogId: inserted.id,
+      logStartAt: inserted.startAt,
+      stipendCovered: inserted.stipendCovered,
+      resolveAmountCents: fetchStipendAmountCentsForPeriod,
+    });
+  }
   return inserted;
 }
 
@@ -452,6 +613,29 @@ export async function updateHourInternal(
     before: existing as unknown as Record<string, unknown>,
     after: updated as unknown as Record<string, unknown>,
   });
+
+  // 🔴 A TIME EDIT CAN MOVE A POSTED LOG INTO A DIFFERENT PAY PERIOD.
+  //
+  // The trigger's rule is "an hour log becomes POSTED", and an edit is not a
+  // post — so correcting a date from Sep 3 to Sep 20 moved real covered work
+  // into 2026-09-P2 while NOTHING ever earned that period's stipend. The coach
+  // was silently short a half-month, and the only evidence was an absence.
+  //
+  // Safe to call unconditionally on this path: the upsert is idempotent
+  // (`UNIQUE (coach_id, period_key)`), it never removes an earning, and it
+  // never throws into the caller. So it can only ever ADD a period that should
+  // already have been there — an edit WITHIN one period earns nothing new, and
+  // the ORIGINAL period's earning still stands, which is Mark's Q3 answer.
+  if (updated.status === "posted") {
+    await recordStipendEarning({
+      actorUserId: actor.id,
+      coachId: updated.coachId,
+      hourLogId: updated.id,
+      logStartAt: updated.startAt,
+      stipendCovered: updated.stipendCovered,
+      resolveAmountCents: fetchStipendAmountCentsForPeriod,
+    });
+  }
   return updated;
 }
 
@@ -569,6 +753,20 @@ export async function approveHeldHourLogInternal(
     before: existing as unknown as Record<string, unknown>,
     after: updated as unknown as Record<string, unknown>,
   });
+
+  // 🔴 POSTED MOMENT 3 of 3 — an admin approving a held log.
+  // ⚠️ `updated.startAt` deliberately, NOT `existing.startAt`: an approval may
+  // carry a time EDIT, and the edited time is what decides the pay period.
+  // Approving a September log in October must earn a SEPTEMBER stipend — the
+  // approval date never buckets anything.
+  await recordStipendEarning({
+    actorUserId: actor.id,
+    coachId: updated.coachId,
+    hourLogId: updated.id,
+    logStartAt: updated.startAt,
+    stipendCovered: updated.stipendCovered,
+    resolveAmountCents: fetchStipendAmountCentsForPeriod,
+  });
   return updated;
 }
 
@@ -682,6 +880,29 @@ export async function acceptNeedsReviewLogInternal(
     before: existing as unknown as Record<string, unknown>,
     after: updated as unknown as Record<string, unknown>,
   });
+
+  // 🔴 A TIME EDIT CAN MOVE A POSTED LOG INTO A DIFFERENT PAY PERIOD.
+  //
+  // The trigger's rule is "an hour log becomes POSTED", and an edit is not a
+  // post — so correcting a date from Sep 3 to Sep 20 moved real covered work
+  // into 2026-09-P2 while NOTHING ever earned that period's stipend. The coach
+  // was silently short a half-month, and the only evidence was an absence.
+  //
+  // Safe to call unconditionally on this path: the upsert is idempotent
+  // (`UNIQUE (coach_id, period_key)`), it never removes an earning, and it
+  // never throws into the caller. So it can only ever ADD a period that should
+  // already have been there — an edit WITHIN one period earns nothing new, and
+  // the ORIGINAL period's earning still stands, which is Mark's Q3 answer.
+  if (updated.status === "posted") {
+    await recordStipendEarning({
+      actorUserId: actor.id,
+      coachId: updated.coachId,
+      hourLogId: updated.id,
+      logStartAt: updated.startAt,
+      stipendCovered: updated.stipendCovered,
+      resolveAmountCents: fetchStipendAmountCentsForPeriod,
+    });
+  }
   return updated;
 }
 

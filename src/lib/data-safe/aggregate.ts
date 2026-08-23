@@ -365,6 +365,26 @@ export async function computeAggregates(
     );
 
   type CoachAgg = { logs: number; minutes: number };
+  // 🔴 STIPENDS ARE DELIBERATELY *NOT* IN `programPayCents` — AND THIS IS AN
+  // OPEN DECISION, NOT A SETTLED ONE (stipend SPEC §10.8, decision D10).
+  //
+  // This fact is pushed nightly to Magna's central store and is a BENCHMARK
+  // SERIES. Silently widening what it counts would break comparability with
+  // every prior night's value, and §10.8 is explicit that "a benchmark series
+  // with an unannounced definition change is worse than either option."
+  //
+  // The two options, so whoever settles this does not have to re-derive them:
+  //   · INCLUDE → the fact means "total work cost"; comparable across
+  //     facilities, but every historical point silently means something else.
+  //   · EXCLUDE → the fact means "pay derived from logged hours"; PFA's number
+  //     understates what it actually pays coaches.
+  //
+  // Holding at EXCLUDE preserves the existing meaning, which is the only one
+  // of the two that cannot corrupt data already in the store. ⚠️ Changing it
+  // is a two-part job — the arithmetic here AND an annotation in the store —
+  // and §10.8 also requires re-checking k-anonymity, because a stipend is a
+  // per-coach figure and this module suppresses individual-partitioned rows
+  // below k.
   const byCoach = new Map<string, CoachAgg>();
   let programPayCents = 0;
   for (const log of postedLogs) {

@@ -58,6 +58,19 @@ export const createProgramSchema = z
     // Absent → "hourly", so every existing caller keeps working unchanged.
     payMode: programPayModeSchema.optional(),
     defaultPerSessionRateCents: perSessionCents,
+    // 🔴 STIPEND SPEC §2.13 — Mark's per-PROGRAM switch, and the ONLY write
+    // path to programs.stipend_eligible. A log is covered (and so pays $0)
+    // iff its program is stipend-eligible AND its coach has a stipend amount
+    // (`resolveStipendCovered`, hour-log-actions.ts) — so this flag alone
+    // never zeroes anyone's pay, and a coach with no stipend is untouched by
+    // it.
+    //
+    // OPTIONAL on both, for the same key-presence reason as the two rate
+    // columns: a partial update that never mentions eligibility (reactivate,
+    // a rename) must not clobber the stored value. The create/edit FORM
+    // always submits it explicitly — an unchecked checkbox posts nothing,
+    // which buildProgramInput reads as an explicit `false`.
+    stipendEligible: z.boolean().optional(),
   })
   .superRefine(requireAmountWhenPerSession);
 
@@ -70,6 +83,19 @@ export const updateProgramSchema = z
     defaultRatePer30MinCents: z.number().int().min(0).max(1_000_00).nullish(),
     payMode: programPayModeSchema.optional(),
     defaultPerSessionRateCents: perSessionCents,
+    // 🔴 STIPEND SPEC §2.13 — Mark's per-PROGRAM switch, and the ONLY write
+    // path to programs.stipend_eligible. A log is covered (and so pays $0)
+    // iff its program is stipend-eligible AND its coach has a stipend amount
+    // (`resolveStipendCovered`, hour-log-actions.ts) — so this flag alone
+    // never zeroes anyone's pay, and a coach with no stipend is untouched by
+    // it.
+    //
+    // OPTIONAL on both, for the same key-presence reason as the two rate
+    // columns: a partial update that never mentions eligibility (reactivate,
+    // a rename) must not clobber the stored value. The create/edit FORM
+    // always submits it explicitly — an unchecked checkbox posts nothing,
+    // which buildProgramInput reads as an explicit `false`.
+    stipendEligible: z.boolean().optional(),
     // SPEC rate-effective-dating §3 / §7 — OPTIONAL retro instruction on the
     // PROGRAM DEFAULT. Absent or null = "going forward only" (today's exact
     // behavior). A past date tells the Phase-C save action to re-price the

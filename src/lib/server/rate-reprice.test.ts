@@ -119,6 +119,7 @@ function program(p: {
   hourly?: number | null;
   flat?: number | null;
   name?: string;
+  stipendEligible?: boolean;
 }): ProgramFixture {
   return {
     id: PROGRAM_ID,
@@ -126,6 +127,7 @@ function program(p: {
     payMode: p.payMode ?? "hourly",
     defaultRatePer30MinCents: p.hourly ?? null,
     defaultPerSessionRateCents: p.flat ?? null,
+    stipendEligible: p.stipendEligible ?? false,
   };
 }
 
@@ -159,6 +161,7 @@ function log(l: {
   stampedFlat?: number | null;
   stampedSource?: RateSourceKind | null;
   id?: string;
+  stipendCovered?: boolean;
 }): RepriceLogRow {
   const startAt = l.startAt ?? new Date("2026-07-01T17:00:00Z");
   return {
@@ -172,6 +175,7 @@ function log(l: {
     ratePer30MinCents: l.stampedHourly ?? null,
     perSessionRateCents: l.stampedFlat ?? null,
     rateSourceKind: l.stampedSource ?? null,
+    stipendCovered: l.stipendCovered ?? false,
   };
 }
 
@@ -870,9 +874,9 @@ describe("parity with the production resolvers", () => {
           });
           const where = `override=${JSON.stringify(o)} program=${JSON.stringify(p)} minutes=${minutes}`;
 
-          const expectedHourly = resolveRateCentsForProgram(o, p);
-          const expectedFlat = resolvePerSessionRateCents(o, p);
-          const expectedKind = resolveRateSourceKind(o, p);
+          const expectedHourly = resolveRateCentsForProgram(o, p, false);
+          const expectedFlat = resolvePerSessionRateCents(o, p, false);
+          const expectedKind = resolveRateSourceKind(o, p, false);
           const changed =
             expectedHourly !== null ||
             expectedFlat !== null ||
@@ -1311,6 +1315,7 @@ describe("previewRateReprice — provably write-free", () => {
       ratePer30MinCents: null,
       perSessionRateCents: null,
       rateSourceKind: null,
+      stipendCovered: false,
     };
     seed({ logs: [oneLog] }); // program persists $30/hr
 
@@ -1552,5 +1557,104 @@ describe("🔒 applyRateReprice CANNOT be driven by a candidate rate", () => {
     expect(result.appliedLogCount).toBe(0);
     expect(result.preview.candidateRate).toBeNull();
     expect(dbDouble.writeAttempts).toEqual([]);
+  });
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T13 — STIPEND SPEC §10.9. This module was originally scoped "no change: a
+// re-price rewrites hour_logs snapshots and a stipend has none." Wrong, and
+// dangerously so: it does not READ stipends, but it WRITES the very snapshots
+// that make a covered log $0.
+//
+// Left unguarded, Mark raising a program's default rate would re-resolve every
+// stipend-covered log on it and stamp a real hourly rate — paying that work by
+// the clock ON TOP of the stipend that already covered it. Reached by an action
+// that has nothing to do with stipends.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("T13 — a retro re-price EXCLUDES stipend-covered logs", () => {
+  // $30/hr default, and it is being raised to $40/hr. That live rate is the
+  // fall-through's ammunition: a covered log must not receive either number.
+  const STIPEND_PROGRAM = program({ hourly: 1500, stipendEligible: true });
+
+  function preview(logs: RepriceLogRow[]) {
+    return computeRateRepriceDiff({
+      scope: { kind: "program_default", programId: PROGRAM_ID },
+      effectiveFrom: EFFECTIVE_FROM,
+      program: STIPEND_PROGRAM,
+      overrides: [],
+      logs,
+      candidateRate: {
+        kind: "program_default",
+        payMode: "hourly",
+        defaultRatePer30MinCents: 2000, // $40/hr
+        defaultPerSessionRateCents: null,
+      },
+    });
+  }
+
+  it("🔴 does not re-price a covered log — no diff, no money moved", () => {
+    const result = preview([
+      log({ coachId: "nick", stipendCovered: true, stampedHourly: null }),
+    ]);
+    expect(result.logs).toHaveLength(0);
+    expect(result.changedLogCount).toBe(0);
+    expect(result.totalDeltaCents).toBe(0);
+  });
+
+  it("REPORTS it rather than silently skipping it", () => {
+    // A preview that dropped these would tell Mark a stipend coach's pay is
+    // changing when it must not — or worse, omit them and look complete.
+    const result = preview([
+      log({ coachId: "nick", stipendCovered: true }),
+      log({ coachId: "nick", stipendCovered: true }),
+    ]);
+    expect(result.excludedLogCount).toBe(2);
+    expect(result.excludedCoaches).toHaveLength(1);
+    expect(result.excludedCoaches[0]).toMatchObject({
+      coachId: "nick",
+      logCount: 2,
+      reason: "covered_by_stipend",
+    });
+  });
+
+  it("still re-prices an UNCOVERED log on the same program", () => {
+    // The control. Without it, a mutation that excluded EVERYTHING would keep
+    // the two assertions above green while breaking the feature entirely.
+    const result = preview([
+      log({ coachId: "sam", stipendCovered: false, stampedHourly: 1500, minutes: 60 }),
+    ]);
+    expect(result.logs).toHaveLength(1);
+    expect(result.totalDeltaCents).toBe(1000); // $30 → $40 for one hour
+    expect(result.excludedLogCount).toBe(0);
+  });
+
+  it("separates covered from uncovered in the SAME run", () => {
+    const result = preview([
+      log({ coachId: "nick", stipendCovered: true }),
+      log({ coachId: "sam", stipendCovered: false, stampedHourly: 1500, minutes: 60 }),
+    ]);
+    expect(result.excludedLogCount).toBe(1);
+    expect(result.logs).toHaveLength(1);
+    expect(result.logs[0].coachId).toBe("sam");
+    expect(result.totalDeltaCents).toBe(1000);
+  });
+
+  it("does not count a covered HELD log as re-price-able after approval", () => {
+    // A covered held log would not be re-priced once approved either, so
+    // counting it here would nudge Mark to re-run for something that can
+    // never move.
+    const result = computeRateRepriceDiff({
+      scope: { kind: "program_default", programId: PROGRAM_ID },
+      effectiveFrom: EFFECTIVE_FROM,
+      program: STIPEND_PROGRAM,
+      overrides: [],
+      logs: [],
+      heldLogs: [
+        log({ coachId: "nick", stipendCovered: true }),
+        log({ coachId: "sam", stipendCovered: false }),
+      ],
+    });
+    expect(result.heldLogCount).toBe(1);
   });
 });

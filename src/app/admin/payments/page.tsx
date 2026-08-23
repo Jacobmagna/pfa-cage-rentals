@@ -9,6 +9,7 @@ import {
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
+import { fetchStipendEarningsAllTime } from "@/lib/stipend/fetch";
 import { totalFromSnapshot, workPayForLog } from "@/lib/billing";
 import { netCoachLedgers, type LedgerPayment } from "@/lib/payment-ledger";
 import { PaymentsClient, type CoachOption, type RecentPaymentRow } from "./_components/payments-client";
@@ -58,6 +59,7 @@ export default async function AdminPaymentsPage() {
     confirmedPaymentRows,
     pendingPaymentRows,
     recentRows,
+    stipendEarnings,
   ] = await Promise.all([
     db
       .select({
@@ -147,6 +149,9 @@ export default async function AdminPaymentsPage() {
       .where(isNull(coachPayments.deletedAt))
       .orderBy(desc(coachPayments.paidAt))
       .limit(RECENT_LIMIT),
+    // All-time, every coach — matching this page's own scope. Voided earnings
+    // are excluded inside the fetch, so no caller can forget to.
+    fetchStipendEarningsAllTime(),
   ]);
 
   // Cage owed (what the coach owes PFA) and work pay (what PFA owes the
@@ -173,6 +178,26 @@ export default async function AdminPaymentsPage() {
       (owedWorkByCoach.get(h.coachId) ?? 0) + total,
     );
   }
+  // 🔴 STIPENDS JOIN THE WORK LEDGER HERE — SPEC §10.2, the tie-out surface.
+  //
+  // `netCoachLedgers` takes `owedWork` as a PARAMETER, so the netting helper
+  // never learns stipends exist; callers add them before calling. That is why
+  // `payment-ledger.ts` stays byte-identical to main.
+  //
+  // ⚠️ THIS PAGE IS ALL-TIME AND HAS NO DATE FILTER, which SPEC §10.2 calls
+  // the single most likely place for this feature to produce a badly wrong
+  // number. It is safe because an earning EXISTS only where a covered hour log
+  // actually posted, and the earliest of those is bounded by when a stipend
+  // was first set — there is no historical backfill beyond §15.1's Sept-1 one.
+  // 🔴 If anyone ever adds a wider backfill, this page starts claiming PFA owes
+  // months of back-pay that Mark may already have settled in cash.
+  for (const e of stipendEarnings) {
+    owedWorkByCoach.set(
+      e.coachId,
+      (owedWorkByCoach.get(e.coachId) ?? 0) + e.amountCents,
+    );
+  }
+
   // Confirmed payments grouped per coach, keeping direction so the netting
   // helper can route each into the correct ledger.
   const confirmedByCoach = new Map<string, LedgerPayment[]>();

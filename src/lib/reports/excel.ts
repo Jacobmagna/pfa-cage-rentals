@@ -38,6 +38,12 @@ import {
   type PaymentTimelineData,
 } from "./payments-timeline";
 import { cageRateParts } from "./rate-display";
+import {
+  COVERED_BY_STIPEND_LABEL,
+  STIPEND_FLAT_RATE_LABEL,
+  WORK_PAY_CAVEAT_LEAD,
+  WORK_PAY_CAVEAT_PAYMENTS,
+} from "@/lib/stipend/labels";
 import { formatPfaDate, formatPfaTime12h } from "@/lib/timezone";
 import type { WorkReportData } from "./work-report";
 
@@ -344,10 +350,22 @@ function addWorkSummarySheet(
   // only overflow across the empty cells beside it (~90 characters here);
   // past that Excel clips it. A caveat that gets cut off mid-sentence is
   // worse than one that reads.
+  // 🔴 TWO ROWS, not one joined string. Column A clips past ~90 characters and
+  // the joined caveat is 134 — shipping it whole cut it off mid-sentence. And
+  // the second line is the caveat's OWN second sentence, not a bonus note:
+  // writing `WORK_PAY_CAVEAT` here alongside it printed it twice.
+  // ⚠️ The stipend note is written ONLY when the report actually contains a
+  // stipend. A caveat about something not on the page is noise, and noise in
+  // the notes block is how a reader learns to skip the block that also carries
+  // the payout caveat — the one that matters.
+  const hasStipend = work.detail.some((r) => r.kind === "stipend");
   addNoteRows(sheet, [
-    "This is what the logged work is worth — not what is still owed.",
-    "Payments made outside the app are not deducted here.",
+    WORK_PAY_CAVEAT_LEAD,
+    WORK_PAY_CAVEAT_PAYMENTS,
     "Posted work only. Rejected entries are on the Work Log page.",
+    ...(hasStipend
+      ? ["A stipend is earned for a whole pay period, never pro-rated."]
+      : []),
   ]);
 
   styleHeader(sheet);
@@ -377,13 +395,21 @@ function addWorkDetailSheet(workbook: ExcelJS.Workbook, work: WorkReportData) {
   ];
 
   for (const row of work.detail) {
-    const rate = workRateCell(row.ratePer30MinCents, row.perSessionRateCents);
+    const rate = workRateCell(row.ratePer30MinCents, row.perSessionRateCents, {
+      kind: row.kind,
+      covered: row.stipendCovered,
+    });
     sheet.addRow({
       date: row.date,
-      day: row.dayOfWeek,
-      start: row.startTime,
-      end: row.endTime,
-      hours: roundHours(row.hours),
+      // 🔴 A stipend row has no day, no clock times and no hours. Explicit em
+      // dashes, never 0 or a blank — a "0.0" in the Hours column beside a
+      // $2,500 payout reads as "worked nothing, paid anyway", and three Excel
+      // defects in this repo's history were found only by opening the
+      // workbook and reading cells exactly like these.
+      day: row.dayOfWeek ?? "—",
+      start: row.startTime ?? "—",
+      end: row.endTime ?? "—",
+      hours: row.kind === "stipend" ? "—" : roundHours(row.hours),
       program: row.programName,
       coach: row.coachName,
       // Deliberately left EMPTY when no rate was ever stamped. Writing 0
@@ -418,7 +444,22 @@ function addWorkDetailSheet(workbook: ExcelJS.Workbook, work: WorkReportData) {
 export function workRateCell(
   ratePer30MinCents: number | null,
   perSessionRateCents: number | null,
+  /**
+   * 🔴 REQUIRED, not optional-with-a-default. Every call site has to answer
+   * "is this a stipend row, or a log a stipend covers?" — an optional flag
+   * would let a new caller silently render "No rate" beside 72 real hours,
+   * which is the one thing SPEC §10.3 forbids on this surface.
+   */
+  stipend: { kind: "log" | "stipend"; covered: boolean },
 ): { dollars: number | undefined; basis: string } {
+  // Both stipend branches come BEFORE the snapshot checks: a covered log has
+  // no snapshot either, so it would otherwise fall through to "No rate".
+  if (stipend.kind === "stipend") {
+    return { dollars: undefined, basis: STIPEND_FLAT_RATE_LABEL };
+  }
+  if (stipend.covered) {
+    return { dollars: undefined, basis: COVERED_BY_STIPEND_LABEL };
+  }
   if (perSessionRateCents != null) {
     return { dollars: perSessionRateCents / 100, basis: "per session" };
   }

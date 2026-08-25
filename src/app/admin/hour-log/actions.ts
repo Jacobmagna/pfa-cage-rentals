@@ -36,6 +36,7 @@ import {
   approveHeldHourLogInternal,
   deleteHourInternal,
   getHeldLogDetailInternal,
+  logHourForCoachInternal,
   rejectHeldHourLogInternal,
   rejectNeedsReviewLogInternal,
   resolveHourLogInternal,
@@ -46,6 +47,22 @@ import {
 // every such export becomes a public RPC endpoint. Local by necessity.
 function revalidateHourLogSurfaces() {
   for (const path of HOUR_LOG_SURFACES) revalidatePath(path);
+}
+
+// 🔴 AN ADMIN RECORDS HOURS FOR A COACH. The one path in the product that can
+// create an hour log for somebody other than the signed-in user.
+//
+// `requireRole("admin")` and NEVER `requireScheduleAccess()`. The schedule
+// role (`schedule_admin`) is an additive flag on a COACH that grants the
+// master schedule tab and nothing else — it is documented as never reaching
+// money, pay, reports, roster, audit, import or settings. This writes a
+// payable row. Gating it on the wider check would hand payroll creation to
+// every schedule manager, which is the exact boundary the role exists to draw.
+export async function logHourForCoach(input: unknown) {
+  const session = await requireRole("admin");
+  const result = await logHourForCoachInternal(session.user, input);
+  revalidateHourLogSurfaces();
+  return result;
 }
 
 export async function updateHour(id: string, input: unknown) {

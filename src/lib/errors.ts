@@ -13,12 +13,17 @@
 // — the UI may want different framings (banner vs toast vs
 // confirmation modal). Keep the data structured.
 //
-// The ONE import in this file is TYPE-ONLY and therefore erased at build time
+// EVERY import in this file is TYPE-ONLY and therefore erased at build time
 // (`isolatedModules` guarantees it), so this module keeps its
 // zero-runtime-dependency property and stays safe to import from client
-// components. See RateRepriceDecreaseNotConfirmedError at the bottom.
+// components. See RateRepriceDecreaseNotConfirmedError and
+// AdminHourEntryNotConfirmedError at the bottom. 🔴 Keep it that way: a single
+// value import here would pull that module into every client bundle that
+// renders an error, which is why `@/lib/admin-hour-entry` is a plain
+// `import type` even though its own module is pure and would be harmless.
 
 import type { RateRepricePreview } from "@/lib/server/rate-reprice";
+import type { AdminHourEntryWarning } from "@/lib/admin-hour-entry";
 
 export class SessionOverlapError extends Error {
   readonly code = "SESSION_OVERLAP" as const;
@@ -587,5 +592,56 @@ export class RateRepriceDecreaseNotConfirmedError extends Error {
         "Re-submit with confirmDecrease to apply it.",
     );
     this.name = "RateRepriceDecreaseNotConfirmedError";
+  }
+}
+
+// ── ADMIN HOUR ENTRY ─────────────────────────────────────────────────────
+
+// An admin tried to record hours for a user id that is not a live account.
+// The picker only ever offers active coaches, so reaching this means either a
+// stale form or a hand-crafted request — and the id is stamped on `coach_id`,
+// which is what every pay read groups by. Refusing outright is correct: a
+// payable log against a deleted account is money owed to nobody, visible on
+// no coach's statement, and reachable by no UI afterwards.
+export class HourLogSubjectNotFoundError extends Error {
+  readonly code = "HOUR_LOG_SUBJECT_NOT_FOUND" as const;
+  constructor(public readonly coachId: string) {
+    super(`No active user ${coachId} to record hours for`);
+    this.name = "HourLogSubjectNotFoundError";
+  }
+}
+
+// An admin is recording hours the product has something to say about, and has
+// not confirmed it. Today that is "this coach is already paid through a date
+// covering these hours" and "these hours overlap one already recorded".
+//
+// 🔴 ONE ERROR CARRYING A LIST, NOT ONE ERROR PER WARNING. Both conditions can
+// hold at once — recording a duplicate shift inside a settled period is not
+// exotic, it is what a second pass over a paper timesheet looks like — and two
+// typed errors would make the admin confirm, get refused again for a reason he
+// was never shown, and confirm a second time. A refusal that hides the next
+// refusal behind it reads as the save being broken.
+//
+// This is the SERVER's gate, not the UI's. The action re-runs both checks
+// itself and refuses before any hour_logs row is written, so a stale dialog or
+// a direct RPC call cannot skip it. The `confirm` flag only ever unlocks a
+// refusal the server has independently decided is warranted.
+//
+// 📌 The messages arrive PRE-BUILT, which is the one deliberate departure from
+// this file's "keep the data structured" rule. They are built by the pure
+// modules that decide the warnings (`@/lib/paid-through`,
+// `@/lib/admin-hour-entry`) so the wording is unit-testable and so a second
+// surface cannot word the same finding differently — the structured fields
+// those modules need are not all on this error, and duplicating them here to
+// re-derive prose would be the drift the arrangement exists to prevent.
+export class AdminHourEntryNotConfirmedError extends Error {
+  readonly code = "ADMIN_HOUR_ENTRY_NOT_CONFIRMED" as const;
+  constructor(public readonly warnings: readonly AdminHourEntryWarning[]) {
+    super(
+      `Unconfirmed admin hour entry: ${warnings
+        .map((w) => w.kind)
+        .join(", ")}`,
+    );
+    this.name = "AdminHourEntryNotConfirmedError";
   }
 }

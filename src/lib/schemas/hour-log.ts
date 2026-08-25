@@ -32,9 +32,14 @@ const endAfterStartError = {
 // Upper bound on a single log's span. 16h is generous vs the 8 AM–10 PM
 // facility window but catches a date typo that produces a 24h+ span.
 // Zod-only — no DB constraint backs this (unlike endAt > startAt).
-const MAX_DURATION_MS = 16 * 60 * 60 * 1000;
+// 🔴 EXPORTED because a query depends on it, not just a refine. The admin
+// overlap guard bounds its scan with `startAt > windowStart − this`, which is
+// exact ONLY because no log may be longer than this. Raising it here without
+// looking at that query would silently narrow the scan and let a long log slip
+// past the double-pay check.
+export const MAX_HOUR_LOG_DURATION_MS = 16 * 60 * 60 * 1000;
 const underMaxDuration = (v: { startAt: Date; endAt: Date }) =>
-  v.endAt.getTime() - v.startAt.getTime() <= MAX_DURATION_MS;
+  v.endAt.getTime() - v.startAt.getTime() <= MAX_HOUR_LOG_DURATION_MS;
 const underMaxDurationError = {
   message: "That span is over 16 hours — check the start/end (did the date slip?)",
   path: ["endAt"],
@@ -42,6 +47,37 @@ const underMaxDurationError = {
 
 export const createHourLogSchema = z
   .object({ ...hourLogShape, ...createOnlyShape })
+  .refine(endAfterStart, endAfterStartError)
+  .refine(underMaxDuration, underMaxDurationError);
+
+// ADMIN HOUR ENTRY — an admin records hours ON BEHALF OF a coach.
+//
+// 🔴 THE ONE FIELD THAT MAKES THIS A DIFFERENT SCHEMA IS `coachId`, AND IT IS
+// REQUIRED. On every other write path the subject is the session user, so
+// there is nothing to supply and nothing to get wrong. Here the actor (the
+// admin) and the subject (the coach) are different people, and the subject is
+// what lands on `hour_logs.coach_id` — the column every pay read groups by.
+// Making it required rather than an optional override is what forces the
+// server to answer "whose hours are these?" explicitly at the boundary.
+//
+// 📌 DELIBERATELY WITHOUT `createOnlyShape`. `source` and `acknowledgeHold`
+// exist to drive the 1b-security-B held-then-approve gate, which does not run
+// on this path (the gate routes a COACH's odd entry to an admin for a
+// decision; when the admin IS the author there is nobody to route it to).
+// Zod strips undeclared keys, so a caller sending either gets them dropped
+// rather than honoured — which is the intent. Declaring them would instead
+// put two fields on the contract that this path is documented to ignore.
+export const adminLogHourForCoachSchema = z
+  .object({
+    ...hourLogShape,
+    coachId: z.string().min(1, "coachId is required"),
+    // The admin has read the amber decision listing every warning this entry
+    // raised — already paid through, overlapping log — and is going ahead.
+    // Absent and false both mean "not confirmed". The server re-runs both
+    // checks itself regardless, so this only ever unlocks a refusal the
+    // server has independently decided is warranted; it is never evidence.
+    confirmWarnings: z.boolean().optional(),
+  })
   .refine(endAfterStart, endAfterStartError)
   .refine(underMaxDuration, underMaxDurationError);
 
@@ -64,5 +100,8 @@ export const acceptTimeEditSchema = z
   .refine(underMaxDuration, underMaxDurationError);
 
 export type CreateHourLogInput = z.infer<typeof createHourLogSchema>;
+export type AdminLogHourForCoachInput = z.infer<
+  typeof adminLogHourForCoachSchema
+>;
 export type EditHourLogInput = z.infer<typeof editHourLogSchema>;
 export type AcceptTimeEditInput = z.infer<typeof acceptTimeEditSchema>;

@@ -29,6 +29,7 @@ import { StatCard } from "@/app/_components/stat-card";
 import { NeedsReviewCard } from "@/app/admin/_components/needs-review-card";
 import { FiltersForm } from "./_components/filters-form";
 import { HoursClient } from "./_components/hours-client";
+import { LogHoursForCoachButton } from "./_components/log-hours-for-coach-dialog";
 
 // Admin hour-log page. Filterable row-level view of every logged hour —
 // the admin counterpart to the coach-side /coach/hour-log form. All
@@ -77,6 +78,7 @@ export default async function AdminHourLogPage({
     rows,
     coachOptions,
     programOptions,
+    allProgramOptions,
     monthHourLogRows,
     [{ count: programsScheduledToday }],
     reviewItems,
@@ -90,6 +92,16 @@ export default async function AdminHourLogPage({
       .select({ id: programs.id, name: programs.name })
       .from(programs)
       .where(eq(programs.active, true))
+      .orderBy(asc(programs.name)),
+    // EVERY program, active flag included — the "Log hours for a coach" form
+    // is the one surface that must offer RETIRED programs, because recording
+    // hours from months ago against a summer program since switched off is
+    // its ordinary case. Kept as its own query rather than widening the one
+    // above: that list feeds the FILTER bar, where a retired program would be
+    // noise, and reusing it would have silently changed both.
+    db
+      .select({ id: programs.id, name: programs.name, active: programs.active })
+      .from(programs)
       .orderBy(asc(programs.name)),
     // Glance cards 1 + 2: every program hour-log row that STARTS within
     // the current PFA-calendar month. Carries the snapshotted rate so
@@ -291,7 +303,11 @@ export default async function AdminHourLogPage({
         isFiltered={filters.isFiltered}
       />
 
-      <div className="mb-4 flex items-center justify-end">
+      <div className="mb-4 flex items-center justify-end gap-2">
+        <LogHoursForCoachButton
+          coaches={coachOptions}
+          programs={allProgramOptions}
+        />
         <Link
           href={downloadHref}
           prefetch={false}

@@ -22,8 +22,13 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, asc, eq, gte, inArray, lt } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { hourLogs, programs, users } from "@/db/schema";
+
+// Mirrors the alias in `hour-log-fetch.ts` — see the note in the reference
+// query below.
+const enteredBy = alias(users, "entered_by");
 import {
   fetchHourLogRows,
   fetchHourLogRowsWithScheduleNotes,
@@ -132,10 +137,21 @@ async function referenceSingleCoachRows(coachId: string) {
       // real query gains has to be added here deliberately rather than drifting
       // in unnoticed.
       stipendCovered: hourLogs.stipendCovered,
+      // Added with admin hour entry, so the Work Log table can say who wrote a
+      // row as opposed to whose hours it records. Mirrored here for the same
+      // reason as everything above it: the comparison is a DEEP equal, so a
+      // column the real query gains has to be added here deliberately.
+      // ⚠️ The LEFT JOIN below is part of what is being mirrored — its absence
+      // would change the ROW SET, not just the column list, if `created_by`
+      // ever failed to resolve.
+      createdBy: hourLogs.createdBy,
+      createdByName: enteredBy.name,
+      createdByEmail: enteredBy.email,
     })
     .from(hourLogs)
     .innerJoin(users, eq(hourLogs.coachId, users.id))
     .innerJoin(programs, eq(hourLogs.programId, programs.id))
+    .leftJoin(enteredBy, eq(hourLogs.createdBy, enteredBy.id))
     .where(
       and(
         inArray(hourLogs.status, ["posted", "rejected"]),

@@ -29,6 +29,12 @@ function row(overrides: Partial<HourLogFetchRow> = {}): HourLogFetchRow {
     coachId: "coach-a",
     coachName: "Coach A",
     coachEmail: "a@example.com",
+    // Provenance. `createdBy === coachId` is what a coach-logged row looks
+    // like, and is what every row in the product was until an admin could
+    // record hours on a coach's behalf — so it is the honest default here.
+    createdBy: "coach-a",
+    createdByName: "Coach A",
+    createdByEmail: "a@example.com",
     programId: "prog-1",
     programName: "HS Summer Program",
     startAt: at(9),

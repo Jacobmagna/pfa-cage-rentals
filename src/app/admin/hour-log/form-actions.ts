@@ -25,6 +25,7 @@ import {
   ProgramNotFoundError,
 } from "@/lib/errors";
 import type { AdminHourEntryWarning } from "@/lib/admin-hour-entry";
+import type { ScheduleSyncOutcome } from "@/lib/server/admin-entry-schedule-sync";
 import { parsePfaInput } from "@/lib/timezone";
 
 export type SubmittedHourValues = {
@@ -151,7 +152,8 @@ export async function deleteHourAction(id: string): Promise<void> {
 // refusal: an amber decision with a button that goes ahead, not a failure.
 
 export type LogHoursForCoachValues = {
-  coachId: string;
+  /** Every coach ticked on the form, so a re-render re-ticks the same boxes. */
+  coachIds: string[];
   programId: string;
   date: string;
   startTime: string;
@@ -160,7 +162,16 @@ export type LogHoursForCoachValues = {
 };
 
 export type LogHoursForCoachResult =
-  | { ok: true }
+  /**
+   * Written. `notice` is non-null ONLY when the hours were recorded but the
+   * SCHEDULE could not be updated to match — a retired program has no
+   * schedule to add to, or the block write failed after the pay was already
+   * committed. The dialog closes on a plain success and stays open to show a
+   * notice, because "we paid them but the schedule still says no-show" is a
+   * fact an admin has to be told once; a screen that closes on it teaches him
+   * the grid is unreliable.
+   */
+  | { ok: true; notice: string | null }
   /** Something is wrong and the admin must change the form to proceed. */
   | {
       ok: false;
@@ -179,9 +190,21 @@ export type LogHoursForCoachResult =
       values: LogHoursForCoachValues;
     };
 
+/**
+ * The sentence to show when the schedule did not end up matching the hours.
+ * `null` for every outcome that needs no explanation — the block was joined,
+ * created, or already correct — because a notice that fires on success is a
+ * notice people learn to click past.
+ */
+function scheduleNotice(outcome: ScheduleSyncOutcome): string | null {
+  return outcome.kind === "skipped" ? outcome.detail : null;
+}
+
 function snapshotLogHoursValues(formData: FormData): LogHoursForCoachValues {
   return {
-    coachId: formData.get("coachId")?.toString() ?? "",
+    // getAll — the coach picker is a checkbox group now, and `get` would
+    // silently keep only the first person ticked.
+    coachIds: formData.getAll("coachIds").map((v) => v.toString()),
     programId: formData.get("programId")?.toString() ?? "",
     date: formData.get("date")?.toString() ?? "",
     startTime: formData.get("startTime")?.toString() ?? "",
@@ -197,16 +220,16 @@ export async function logHoursForCoachFormAction(
   const values = snapshotLogHoursValues(formData);
   try {
     const base = buildHourInput(formData);
-    await logHourForCoach({
+    const result = await logHourForCoach({
       ...base,
-      coachId: values.coachId,
+      coachIds: values.coachIds,
       // Carried by the "Record these hours anyway" submit button's own
       // name/value — only the CLICKED submit is serialized, so there is no
       // hidden field to leave stale and no way for a plain re-submit to
       // silently inherit a previous confirmation.
       confirmWarnings: formData.get("confirm")?.toString() === "true",
     });
-    return { ok: true };
+    return { ok: true, notice: scheduleNotice(result.schedule) };
   } catch (err) {
     if (err instanceof AdminHourEntryNotConfirmedError) {
       return { ok: false, kind: "decision", warnings: [...err.warnings], values };
@@ -225,14 +248,21 @@ export async function logHoursForCoachFormAction(
     }
     if (err instanceof ZodError) {
       const first = err.issues[0];
+      // 🔴 The coach list's own message is written FOR the admin ("Pick at
+      // least one coach"), so it is shown as-is. Prefixing it with the field
+      // name would print `coachIds:` at a non-technical reader and point him
+      // at a thing on no screen — the F7 defect the stipend review filed.
+      const isCoachList = first?.path[0] === "coachIds";
       return {
         ok: false,
         kind: "error",
         error: {
           code: "VALIDATION",
-          message: first
-            ? `${first.path.join(".")}: ${first.message}`
-            : "Invalid input",
+          message: !first
+            ? "Invalid input"
+            : isCoachList
+              ? first.message
+              : `${first.path.join(".")}: ${first.message}`,
         },
         values,
       };

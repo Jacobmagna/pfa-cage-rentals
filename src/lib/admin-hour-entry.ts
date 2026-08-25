@@ -35,12 +35,42 @@
 import { formatPfaDateMedium, formatPfaTime12h } from "@/lib/timezone";
 
 /**
+ * How long a submit may sit unanswered before the dialog stops pretending it
+ * is still working and says so.
+ *
+ * 🔴 LIVES HERE, NOT IN THE DIALOG. The dialog is a client component and
+ * importing it drags Next and next-auth into any plain node process, so a
+ * test could not read the number without duplicating it — and a duplicated
+ * threshold drifts the day somebody tunes the real one, leaving a test
+ * asserting against a value the product no longer uses. Same reason the
+ * wording below lives here rather than in the JSX.
+ *
+ * Well past a normal round trip (the write plus the schedule sync is a
+ * handful of queries) so a merely slow save never trips it.
+ */
+export const SLOW_SUBMIT_MS = 12_000;
+
+/**
  * One thing the admin is told before the write, with the sentence already
  * built. `kind` is stable so a caller can branch (an icon, a test) without
  * matching on prose.
+ *
+ * 🔴 `coachId` IS WHAT MAKES THIS SAFE TO SHOW FOR SEVERAL COACHES AT ONCE.
+ * One submit can now record the same shift for a whole crew, so a list of
+ * warnings can contain two entries of the same `kind` belonging to different
+ * people. The message names the coach in prose, but prose is not an
+ * identifier: the caller needs a stable key to render the list and a test
+ * needs to assert WHOSE warning fired, neither of which can be recovered
+ * from a sentence. Without it, React would key two overlapping-log warnings
+ * identically and quietly drop one — and the coach whose warning vanished is
+ * the one about to be paid twice.
  */
 export type AdminHourEntryWarning = {
   kind: "already_paid_through" | "overlapping_log";
+  /** The coach this warning is ABOUT — never the admin entering it. */
+  coachId: string;
+  /** That coach's display name, already resolved (name ?? email). */
+  coachLabel: string;
   message: string;
 };
 

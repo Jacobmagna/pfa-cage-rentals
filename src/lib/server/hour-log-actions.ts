@@ -30,7 +30,19 @@
 // captures audit failures so a logging hiccup never loses a logged
 // hour). Same shape as the session create path.
 
-import { and, desc, eq, gt, gte, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  or,
+} from "drizzle-orm";
 import { db } from "@/db";
 import {
   coachPayments,
@@ -76,6 +88,7 @@ import {
 import { formatPfaTime12h, pfaDayStart } from "@/lib/timezone";
 import { recordStipendEarning } from "@/lib/stipend/earnings";
 import { safeLogAudit } from "./audit-helpers";
+import { syncScheduleForAdminEntry } from "./admin-entry-schedule-sync";
 
 // DESIGN-1: the (coach, program) pay mode + rates now live on a SINGLE
 // program_rate_overrides row, fetched ONCE per log (in logHourInternal)
@@ -843,6 +856,8 @@ async function collectAdminHourEntryWarnings(
   if (overlaps.length > 0) {
     warnings.push({
       kind: "overlapping_log",
+      coachId: subject.id,
+      coachLabel: subject.label,
       message: overlappingLogMessage(subject.label, overlaps),
     });
   }
@@ -895,6 +910,8 @@ async function collectAdminHourEntryWarnings(
   if (finding) {
     warnings.push({
       kind: "already_paid_through",
+      coachId: subject.id,
+      coachLabel: subject.label,
       message: paidThroughMessage(subject.label, window.startAt, finding),
     });
   }
@@ -923,11 +940,23 @@ async function collectAdminHourEntryWarnings(
  * Any day of any month is enterable here, which is the point.
  *
  * ── THE ORDER OF THE CHECKS IS THE DESIGN ────────────────────────────────
- *  1. The subject must be a live account — refused outright, never confirmable.
- *  2. Everything money-consequential is collected and shown as ONE amber
- *     decision the admin confirms.
- *  3. Only then does the shared core run, and it prices the log through the
- *     exact resolvers a coach's own log goes through.
+ *  1. Every subject must be a live account — refused outright, never
+ *     confirmable.
+ *  2. Everything money-consequential, FOR EVERY COACH, is collected and shown
+ *     as ONE amber decision the admin confirms once.
+ *  3. Only then does the shared core run, once per coach, and it prices each
+ *     log through the exact resolvers a coach's own log goes through.
+ *  4. Last, and only after the pay is safely written, the schedule is pointed
+ *     at what was recorded.
+ *
+ * ── 🔴 WHY ALL THE WARNINGS ARE COLLECTED BEFORE ANY ROW IS WRITTEN ──────
+ * Recording one shift is ONE decision by the operator, so it gets one
+ * decision screen. Checking-then-writing coach by coach would show the admin
+ * a warning about the third coach AFTER the first two had already been paid,
+ * leaving him to answer "record them anyway?" about a batch that is already
+ * half-committed — and there is no transaction to roll back into, so his only
+ * honest answer would be "I don't know what happened". Everything that could
+ * refuse runs first; then the writes run with nothing left to refuse them.
  */
 export async function logHourForCoachInternal(
   actor: AuthedSession["user"],
@@ -935,8 +964,16 @@ export async function logHourForCoachInternal(
 ) {
   const parsed = adminLogHourForCoachSchema.parse(input);
 
-  // The subject lands on `coach_id`, the column every pay read groups by, so
-  // it is resolved against the database rather than trusted from the form.
+  // Deduped, order preserved. The same coach twice is a slip (a double-click
+  // on a checkbox list), and the unique index would absorb it silently — but
+  // it would also make the second pass raise an overlap warning against the
+  // row the FIRST pass had just written, telling the admin his own entry
+  // double-pays somebody. Removed here rather than explained there.
+  const coachIds = [...new Set(parsed.coachIds)];
+
+  // Each subject lands on a `coach_id`, the column every pay read groups by,
+  // so they are resolved against the database rather than trusted from the
+  // form.
   //
   // 📌 ROLE IS DELIBERATELY NOT FILTERED, unlike the coach pickers. Admins
   // genuinely have work logs in this system — Mark has one — and `hour_logs
@@ -944,32 +981,66 @@ export async function logHourForCoachInternal(
   // `role = 'coach'` here would refuse a real, already-existing case.
   // Soft-deleted accounts ARE refused: a payable log against a deleted user is
   // money owed to nobody, on no coach's statement, reachable by no UI.
-  const [subject] = await db
+  const subjectRows = await db
     .select({ id: users.id, name: users.name, email: users.email })
     .from(users)
-    .where(and(eq(users.id, parsed.coachId), isNull(users.deletedAt)))
-    .limit(1);
-  if (!subject) throw new HourLogSubjectNotFoundError(parsed.coachId);
+    .where(and(inArray(users.id, coachIds), isNull(users.deletedAt)));
 
-  const label = subject.name ?? subject.email;
+  const byId = new Map(subjectRows.map((r) => [r.id, r] as const));
+  // 🔴 REFUSE THE WHOLE BATCH IF ANY ONE OF THEM IS UNRESOLVABLE, rather than
+  // recording the coaches that did resolve. A missing subject means the form
+  // and the database disagree about who exists, and quietly paying three of
+  // four coaches — with the fourth's absence visible nowhere — is a worse
+  // outcome than an error the admin can act on.
+  const missing = coachIds.find((id) => !byId.has(id));
+  if (missing) throw new HourLogSubjectNotFoundError(missing);
+
+  const subjects = coachIds.map((id) => {
+    const row = byId.get(id)!;
+    return { id: row.id, label: row.name ?? row.email };
+  });
 
   // 🔴 RE-RUN SERVER-SIDE, ALWAYS. The dialog shows these warnings before the
   // admin confirms, but the dialog is not the control: a stale render, a
   // second tab, or a direct RPC call would otherwise walk straight past them.
   // `confirmWarnings` unlocks only a refusal the server has just independently
   // decided is warranted — it is permission, never evidence.
-  const warnings = await collectAdminHourEntryWarnings(
-    { id: subject.id, label },
-    { programId: parsed.programId, startAt: parsed.startAt, endAt: parsed.endAt },
-  );
+  const warnings: AdminHourEntryWarning[] = [];
+  for (const subject of subjects) {
+    warnings.push(
+      ...(await collectAdminHourEntryWarnings(subject, {
+        programId: parsed.programId,
+        startAt: parsed.startAt,
+        endAt: parsed.endAt,
+      })),
+    );
+  }
   if (warnings.length > 0 && parsed.confirmWarnings !== true) {
     throw new AdminHourEntryNotConfirmedError(warnings);
   }
 
-  return writeHourLogInternal(
-    { actor, subjectCoachId: subject.id, via: "admin_for_coach" },
-    parsed,
-  );
+  const logs = [];
+  for (const subject of subjects) {
+    logs.push(
+      await writeHourLogInternal(
+        { actor, subjectCoachId: subject.id, via: "admin_for_coach" },
+        parsed,
+      ),
+    );
+  }
+
+  // ── The schedule, LAST and non-fatally. ──
+  // The pay is written by this point and cannot be un-written (neon-http has
+  // no transactions), so this reports failure rather than raising it. See
+  // `admin-entry-schedule-sync.ts`.
+  const schedule = await syncScheduleForAdminEntry(actor, {
+    programId: parsed.programId,
+    startAt: parsed.startAt,
+    endAt: parsed.endAt,
+    coachIds: subjects.map((s) => s.id),
+  });
+
+  return { logs, schedule };
 }
 
 // Admin-only edit of an existing hour-log row. Mirrors

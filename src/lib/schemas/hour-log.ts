@@ -52,13 +52,14 @@ export const createHourLogSchema = z
 
 // ADMIN HOUR ENTRY — an admin records hours ON BEHALF OF a coach.
 //
-// 🔴 THE ONE FIELD THAT MAKES THIS A DIFFERENT SCHEMA IS `coachId`, AND IT IS
-// REQUIRED. On every other write path the subject is the session user, so
-// there is nothing to supply and nothing to get wrong. Here the actor (the
-// admin) and the subject (the coach) are different people, and the subject is
-// what lands on `hour_logs.coach_id` — the column every pay read groups by.
-// Making it required rather than an optional override is what forces the
-// server to answer "whose hours are these?" explicitly at the boundary.
+// 🔴 THE ONE FIELD THAT MAKES THIS A DIFFERENT SCHEMA IS `coachIds`, AND IT
+// IS REQUIRED AND NON-EMPTY. On every other write path the subject is the
+// session user, so there is nothing to supply and nothing to get wrong. Here
+// the actor (the admin) and the subjects (the coaches) are different people,
+// and each subject lands on a `hour_logs.coach_id` — the column every pay
+// read groups by. Making it required rather than an optional override is what
+// forces the server to answer "whose hours are these?" explicitly at the
+// boundary.
 //
 // 📌 DELIBERATELY WITHOUT `createOnlyShape`. `source` and `acknowledgeHold`
 // exist to drive the 1b-security-B held-then-approve gate, which does not run
@@ -70,7 +71,21 @@ export const createHourLogSchema = z
 export const adminLogHourForCoachSchema = z
   .object({
     ...hourLogShape,
-    coachId: z.string().min(1, "coachId is required"),
+    // 🔴 A LIST, BECAUSE A SHIFT IS ROUTINELY WORKED BY MORE THAN ONE PERSON.
+    //
+    // This was a single `coachId` when the feature shipped, and the first
+    // real use on production was a block with TWO coaches on it — the admin
+    // had to run the dialog twice, and between the two runs the schedule sat
+    // in a half-recorded state that reads exactly like a mistake. Recording
+    // one shift is ONE decision by the operator, so it should be one submit,
+    // one set of warnings, and one confirmation.
+    //
+    // `.min(1)` rather than a nullable: "hours worked by nobody" is not a
+    // state this form can express, and an empty array reaching the write loop
+    // would silently succeed having recorded nothing at all.
+    coachIds: z
+      .array(z.string().min(1, "coachId is required"))
+      .min(1, "Pick at least one coach"),
     // The admin has read the amber decision listing every warning this entry
     // raised — already paid through, overlapping log — and is going ahead.
     // Absent and false both mean "not confirmed". The server re-runs both

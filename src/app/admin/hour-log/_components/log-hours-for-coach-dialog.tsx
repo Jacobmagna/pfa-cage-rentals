@@ -7,6 +7,14 @@
 // coach's hours but could not make them, so work a coach never logged could
 // never be paid.
 //
+// ── IT RECORDS ONE SHIFT FOR AS MANY COACHES AS WORKED IT ────────────────
+// The coach picker is a checkbox group, not a select. Recording a shift is
+// ONE decision by the operator, and a two-coach shift used to mean running
+// this dialog twice — with the schedule sitting half-recorded in between,
+// looking exactly like something had gone wrong. One submit now writes one
+// separate, separately-priced row per coach, raises ONE set of warnings
+// naming whoever they are about, and takes ONE confirmation.
+//
 // ── 🔴 THE FORM IS MOUNTED ONLY WHILE THE DIALOG IS OPEN ─────────────────
 // `useActionState` lives in the inner component, which is conditionally
 // rendered, so closing the dialog UNMOUNTS the failure state rather than
@@ -48,7 +56,7 @@ export type LogHoursProgramOption = {
   active: boolean;
 };
 
-const INITIAL_STATE: LogHoursForCoachResult = { ok: true };
+const INITIAL_STATE: LogHoursForCoachResult = { ok: true, notice: null };
 
 export function LogHoursForCoachDialog({
   open,
@@ -127,7 +135,13 @@ function LogHoursForCoachForm({
   // of "an action has completed", and `state.ok` narrows it to a successful
   // one. No latch, no dependence on how fast the server answered.
   useEffect(() => {
-    if (state !== INITIAL_STATE && state.ok) onClose();
+    // 🔴 A NOTICE HOLDS THE DIALOG OPEN. The hours are written either way, but
+    // a notice means the SCHEDULE did not end up matching them (a retired
+    // program has no schedule to add to; the block write failed after the pay
+    // was committed). Closing on that would leave the admin looking at a grid
+    // that still says nobody worked, with nothing anywhere having said why —
+    // and his reasonable response is to enter the hours again.
+    if (state !== INITIAL_STATE && state.ok && state.notice === null) onClose();
   }, [state, onClose]);
 
   const values = state.ok ? null : state.values;
@@ -149,11 +163,20 @@ function LogHoursForCoachForm({
   // controlled for no benefit and reverted the admin's choice on every
   // re-render — a control that looks like it does something and does not
   // (rule 27). Deleted rather than repaired.
+  // 🔴 KEYED ON COACH *AND* KIND. One submit can now warn about several
+  // coaches, and two of those warnings are routinely the same `kind` — so a
+  // key built from kinds alone would be identical for "Alpha overlaps" and
+  // "Alpha and Bravo both overlap", and the form would NOT remount between
+  // them. It would then re-render in place with every field snapped back to
+  // its mount-time value, leaving the admin reading a warning above a form
+  // that had lost his input.
   const formKey = state.ok
     ? "fresh"
     : state.kind === "error"
       ? `err-${state.error.code}`
-      : `decide-${state.warnings.map((w) => w.kind).join("|")}`;
+      : `decide-${state.warnings
+          .map((w) => `${w.coachId}:${w.kind}`)
+          .join("|")}`;
 
   return (
     <form action={formAction} key={formKey} className="space-y-5 p-6">
@@ -166,8 +189,8 @@ function LogHoursForCoachForm({
             Log hours for a coach
           </h2>
           <p className="text-xs text-fg-subtle mt-1">
-            Records the hours as worked and pays them straight away — the coach
-            does not need to do anything.
+            Records the hours as worked and pays them straight away — the
+            coaches don&apos;t need to do anything.
           </p>
         </div>
         <button
@@ -180,6 +203,22 @@ function LogHoursForCoachForm({
         </button>
       </div>
 
+      {state.ok && state.notice !== null ? (
+        <div
+          role="status"
+          className="rounded-md border border-line bg-surface-2 px-3 py-3 text-xs text-fg space-y-3"
+        >
+          <p>{state.notice}</p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-line bg-surface hover:border-line-strong h-8 px-3 text-xs font-medium transition-colors"
+          >
+            Done
+          </button>
+        </div>
+      ) : null}
+
       {!state.ok && state.kind === "error" ? (
         <div
           role="alert"
@@ -190,22 +229,51 @@ function LogHoursForCoachForm({
       ) : null}
 
       <div className="space-y-3">
-        <Field label="Coach">
-          <select
-            name="coachId"
-            required
-            aria-label="Coach to log hours for"
-            defaultValue={values?.coachId ?? ""}
-            className={selectStyles}
-          >
-            <option value="">Select a coach…</option>
-            {coaches.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name ?? c.email}
-              </option>
-            ))}
-          </select>
-        </Field>
+        {/*
+          🔴 A CHECKBOX GROUP, NOT A SELECT — one shift is routinely worked by
+          more than one person.
+
+          With a single select, recording a two-coach shift meant running this
+          dialog twice, and between the two runs the schedule sat half-recorded
+          in a state that reads exactly like something went wrong. That is what
+          happened the first morning this feature was used on production.
+
+          Every box carries the SAME name, so the browser submits one value per
+          ticked coach and `formData.getAll` reads the set. No hidden companion
+          input is needed here (unlike the stipend checkbox, which has to tell
+          "unticked" apart from "the form never asked"): an empty list is a
+          real, meaningful answer — nobody was picked — and the schema refuses
+          it with a sentence written for the admin.
+        */}
+        <fieldset>
+          <legend className="text-xs uppercase tracking-wider text-fg-muted mb-1.5">
+            Coaches who worked it
+          </legend>
+          <div className="max-h-44 overflow-y-auto rounded-md border border-line bg-page divide-y divide-line/60">
+            {coaches.map((c) => {
+              const label = c.name ?? c.email;
+              return (
+                <label
+                  key={c.id}
+                  className="flex items-center gap-2.5 px-3 py-2 text-sm cursor-pointer hover:bg-surface-2 transition-colors"
+                >
+                  <input
+                    type="checkbox"
+                    name="coachIds"
+                    value={c.id}
+                    defaultChecked={values?.coachIds?.includes(c.id) ?? false}
+                    className="h-4 w-4 rounded border-line accent-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+                  />
+                  <span>{label}</span>
+                </label>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-fg-subtle mt-1.5">
+            Tick everyone who worked this shift — each one is recorded and paid
+            separately.
+          </p>
+        </fieldset>
 
         <Field label="Program">
           {/*
@@ -293,8 +361,12 @@ function LogHoursForCoachForm({
             />
             <div className="space-y-2">
               <p className="font-medium">Before this is recorded</p>
+              {/* Keyed by coach AND kind: with several coaches in one submit
+                  two warnings can share a kind, and a duplicate React key
+                  drops one of them — the dropped coach being the one about to
+                  be paid twice. */}
               {state.warnings.map((w) => (
-                <p key={w.kind}>{w.message}</p>
+                <p key={`${w.coachId}:${w.kind}`}>{w.message}</p>
               ))}
             </div>
           </div>

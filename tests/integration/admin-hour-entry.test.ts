@@ -118,6 +118,37 @@ async function logsFor(programId: string) {
     .where(eq(hourLogs.programId, programId));
 }
 
+/**
+ * The SINGLE-COACH shape every test below was written against.
+ *
+ * `logHourForCoachInternal` now takes `coachIds` and returns
+ * `{ logs, schedule }`, because one shift is routinely worked by more than
+ * one person and recording it should be one submit. These tests are about
+ * what happens to ONE coach's row — pricing, provenance, the held-then-post
+ * rules, the guards — and none of that changed, so they keep asserting on a
+ * single row through this adapter rather than being rewritten to index into
+ * an array. Multi-coach behaviour has its own file
+ * (`admin-hour-entry-multi-coach.test.ts`).
+ */
+async function logOneForCoach(
+  actor: FixtureUsers["admin"],
+  input: {
+    coachId: string;
+    programId: string;
+    startAt: Date;
+    endAt: Date;
+    note?: string | null;
+    confirmWarnings?: boolean;
+  },
+) {
+  const { coachId, ...rest } = input;
+  const result = await logHourForCoachInternal(actor, {
+    ...rest,
+    coachIds: [coachId],
+  });
+  return result.logs[0];
+}
+
 beforeAll(async () => {
   fixtures = await ensureFixtureUsers();
   admin = fixtures.admin;
@@ -137,13 +168,19 @@ afterEach(async () => {
       .delete(hourLogs)
       .where(inArray(hourLogs.programId, createdProgramIds));
   }
-  if (createdBlockIds.length > 0) {
+  // 🔴 BY PROGRAM, NOT BY TRACKED ID. Recording hours now points the
+  // SCHEDULE at what was recorded, so an admin entry can CREATE a block this
+  // file never asked for and therefore never tracked. Deleting only the
+  // tracked ids leaves those behind, and `program_schedule_blocks.program_id`
+  // has no cascade — so the program delete below dies with a 23503 and takes
+  // every test around it with it. That is rule 20's second half: when a
+  // module starts writing rows your teardown did not create, the teardown has
+  // to be scoped to the same thing the writes are.
+  if (createdProgramIds.length > 0) {
     await db
       .delete(programScheduleBlocks)
-      .where(inArray(programScheduleBlocks.id, createdBlockIds));
+      .where(inArray(programScheduleBlocks.programId, createdProgramIds));
     createdBlockIds.length = 0;
-  }
-  if (createdProgramIds.length > 0) {
     await db.delete(programs).where(inArray(programs.id, createdProgramIds));
     createdProgramIds.length = 0;
   }
@@ -156,7 +193,7 @@ describe("an admin records hours a coach never logged", () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
     const day = nextDay();
 
-    const row = await logHourForCoachInternal(admin, {
+    const row = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
@@ -176,7 +213,7 @@ describe("an admin records hours a coach never logged", () => {
   it("leaves createdBy DIFFERENT from coachId, which is what marks it admin-entered", async () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
     const day = nextDay();
-    const row = await logHourForCoachInternal(admin, {
+    const row = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
@@ -207,7 +244,7 @@ describe("an admin records hours a coach never logged", () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
     const day = nextDay();
 
-    const adminRow = await logHourForCoachInternal(admin, {
+    const adminRow = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
@@ -232,7 +269,7 @@ describe("an admin records hours a coach never logged", () => {
   it("stamps the row reviewed, by the admin", async () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
     const day = nextDay();
-    const row = await logHourForCoachInternal(admin, {
+    const row = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
@@ -247,7 +284,7 @@ describe("an admin records hours a coach never logged", () => {
   // remember is on the coach's one-tap confirm cards.
   it("accepts a date months in the past", async () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
-    const row = await logHourForCoachInternal(admin, {
+    const row = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at("2029-01-04", "09:00"),
@@ -259,7 +296,7 @@ describe("an admin records hours a coach never logged", () => {
   it("records the ADMIN as the audit actor, not the coach", async () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
     const day = nextDay();
-    const row = await logHourForCoachInternal(admin, {
+    const row = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
@@ -307,7 +344,7 @@ describe("pay resolves from the SUBJECT, never from the admin typing it in", () 
       ratePer30MinCents: 5000,
     });
 
-    const row = await logHourForCoachInternal(admin, {
+    const row = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
@@ -321,7 +358,7 @@ describe("pay resolves from the SUBJECT, never from the admin typing it in", () 
   it("falls back to the program default when the coach has no override", async () => {
     const program = await createProgram({ defaultRatePer30MinCents: 3000 });
     const day = nextDay();
-    const row = await logHourForCoachInternal(admin, {
+    const row = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
@@ -341,7 +378,7 @@ describe("pay resolves from the SUBJECT, never from the admin typing it in", () 
       perSessionRateCents: 7500,
     });
 
-    const row = await logHourForCoachInternal(admin, {
+    const row = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
@@ -385,7 +422,7 @@ describe("pay resolves from the SUBJECT, never from the admin typing it in", () 
     });
 
     // Different windows only because an identical one is a true duplicate.
-    const byAdmin = await logHourForCoachInternal(admin, {
+    const byAdmin = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "09:00"),
@@ -411,7 +448,7 @@ describe("pay resolves from the SUBJECT, never from the admin typing it in", () 
   it("records $0 loudly when nothing supplies a rate", async () => {
     const program = await createProgram({ defaultRatePer30MinCents: null });
     const day = nextDay();
-    const row = await logHourForCoachInternal(admin, {
+    const row = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
@@ -446,7 +483,7 @@ describe("stipend coverage on an admin-entered log", () => {
     const period = payPeriodFor(start);
     await giveStipend(coach.id, period.fromDate, 250_000);
 
-    const row = await logHourForCoachInternal(admin, {
+    const row = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: start,
@@ -479,7 +516,7 @@ describe("stipend coverage on an admin-entered log", () => {
       defaultRatePer30MinCents: 3000,
     });
     const day = nextDay();
-    const row = await logHourForCoachInternal(admin, {
+    const row = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
@@ -498,7 +535,7 @@ describe("stipend coverage on an admin-entered log", () => {
     const period = payPeriodFor(start);
     await giveStipend(coach.id, period.fromDate, 100_000);
 
-    await logHourForCoachInternal(admin, {
+    await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: start,
@@ -528,13 +565,13 @@ describe("the double-pay guards", () => {
       endAt: at(day, "14:00"),
     };
 
-    const first = await logHourForCoachInternal(admin, args);
+    const first = await logOneForCoach(admin, args);
     // 🔴 confirmWarnings is deliberately NOT passed: an exact duplicate must
     // not raise an overlap warning at all, because the unique index already
     // makes it a no-op. Warning here would be a true-sounding reason attached
     // to a case that cannot happen, and confirming through a false warning is
     // how an admin learns to confirm through a real one.
-    const second = await logHourForCoachInternal(admin, args);
+    const second = await logOneForCoach(admin, args);
 
     expect(second!.id).toBe(first!.id);
     expect(await logsFor(program.id)).toHaveLength(1);
@@ -554,7 +591,7 @@ describe("the double-pay guards", () => {
     });
     expect(held!.status).toBe("held");
 
-    const upgraded = await logHourForCoachInternal(admin, {
+    const upgraded = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       ...window,
@@ -574,7 +611,7 @@ describe("the double-pay guards", () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
     const day = nextDay();
 
-    await logHourForCoachInternal(admin, {
+    await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
@@ -583,7 +620,7 @@ describe("the double-pay guards", () => {
 
     let thrown: unknown;
     try {
-      await logHourForCoachInternal(admin, {
+      await logOneForCoach(admin, {
         coachId: coach.id,
         programId: program.id,
         startAt: at(day, "10:00"),
@@ -603,14 +640,14 @@ describe("the double-pay guards", () => {
   it("writes the overlapping entry once the admin confirms", async () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
     const day = nextDay();
-    await logHourForCoachInternal(admin, {
+    await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
       endAt: at(day, "15:00"),
     });
 
-    const second = await logHourForCoachInternal(admin, {
+    const second = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
@@ -627,7 +664,7 @@ describe("the double-pay guards", () => {
     const two = await createProgram({ defaultRatePer30MinCents: 1500 });
     const day = nextDay();
 
-    await logHourForCoachInternal(admin, {
+    await logOneForCoach(admin, {
       coachId: coach.id,
       programId: one.id,
       startAt: at(day, "10:00"),
@@ -635,7 +672,7 @@ describe("the double-pay guards", () => {
     });
 
     await expect(
-      logHourForCoachInternal(admin, {
+      logOneForCoach(admin, {
         coachId: coach.id,
         programId: two.id,
         startAt: at(day, "12:00"),
@@ -651,14 +688,14 @@ describe("the double-pay guards", () => {
   it("does not warn when a shift starts exactly where another ended", async () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
     const day = nextDay();
-    await logHourForCoachInternal(admin, {
+    await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
       endAt: at(day, "15:00"),
     });
 
-    const second = await logHourForCoachInternal(admin, {
+    const second = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "15:00"),
@@ -675,7 +712,7 @@ describe("the double-pay guards", () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
     const day = nextDay();
 
-    const first = await logHourForCoachInternal(admin, {
+    const first = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
@@ -686,7 +723,7 @@ describe("the double-pay guards", () => {
       .set({ status: "rejected" })
       .where(eq(hourLogs.id, first!.id));
 
-    const second = await logHourForCoachInternal(admin, {
+    const second = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "11:00"),
@@ -701,14 +738,14 @@ describe("the double-pay guards", () => {
   it("DOES warn about the same overlap when the log is still posted", async () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
     const day = nextDay();
-    await logHourForCoachInternal(admin, {
+    await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
       endAt: at(day, "15:00"),
     });
     await expect(
-      logHourForCoachInternal(admin, {
+      logOneForCoach(admin, {
         coachId: coach.id,
         programId: program.id,
         startAt: at(day, "11:00"),
@@ -729,7 +766,7 @@ describe("the double-pay guards", () => {
       acknowledgeHold: true,
     });
     await expect(
-      logHourForCoachInternal(admin, {
+      logOneForCoach(admin, {
         coachId: coach.id,
         programId: program.id,
         startAt: at(day, "11:00"),
@@ -742,14 +779,14 @@ describe("the double-pay guards", () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
     const day = nextDay();
 
-    await logHourForCoachInternal(admin, {
+    await logOneForCoach(admin, {
       coachId: fixtures.flaggedCoach.id,
       programId: program.id,
       startAt: at(day, "10:00"),
       endAt: at(day, "15:00"),
     });
 
-    const row = await logHourForCoachInternal(admin, {
+    const row = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "11:00"),
@@ -784,7 +821,7 @@ describe("the already-paid-through decision", () => {
 
   async function enter(confirm = false) {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
-    return logHourForCoachInternal(admin, {
+    return logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(WORK_DAY, "10:00"),
@@ -866,7 +903,7 @@ describe("the already-paid-through decision", () => {
   it("returns BOTH warnings together when both apply", async () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
     await recordPayout({ coversThrough: at("2029-01-31", "00:00") });
-    await logHourForCoachInternal(admin, {
+    await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(WORK_DAY, "10:00"),
@@ -876,7 +913,7 @@ describe("the already-paid-through decision", () => {
 
     let thrown: unknown;
     try {
-      await logHourForCoachInternal(admin, {
+      await logOneForCoach(admin, {
         coachId: coach.id,
         programId: program.id,
         startAt: at(WORK_DAY, "10:00"),
@@ -900,7 +937,7 @@ describe("the subject must be a live account", () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
     const day = nextDay();
     await expect(
-      logHourForCoachInternal(admin, {
+      logOneForCoach(admin, {
         coachId: "not-a-real-user-id",
         programId: program.id,
         startAt: at(day, "10:00"),
@@ -918,7 +955,7 @@ describe("the subject must be a live account", () => {
       .where(eq(users.id, fixtures.flaggedCoach.id));
     try {
       await expect(
-        logHourForCoachInternal(admin, {
+        logOneForCoach(admin, {
           coachId: fixtures.flaggedCoach.id,
           programId: program.id,
           startAt: at(day, "10:00"),
@@ -933,11 +970,32 @@ describe("the subject must be a live account", () => {
     }
   });
 
-  it("rejects a missing coachId at the schema boundary", async () => {
+  // Calls the REAL entry point, not the single-coach adapter above — the
+  // point is that the schema refuses an entry that names nobody, and an
+  // adapter that supplies the field would test the adapter instead.
+  it("rejects an entry naming no coach at the schema boundary", async () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });
     const day = nextDay();
     await expect(
       logHourForCoachInternal(admin, {
+        programId: program.id,
+        startAt: at(day, "10:00"),
+        endAt: at(day, "12:00"),
+      }),
+    ).rejects.toBeInstanceOf(ZodError);
+  });
+
+  // The control for it: an EMPTY list is not "no field", and it is the
+  // shape a checkbox form actually submits when nothing is ticked. Without
+  // this, `.min(1)` could be deleted and only the missing-field test would
+  // notice — which it would not, because absence and emptiness are
+  // different failures.
+  it("rejects an EMPTY coach list at the schema boundary", async () => {
+    const program = await createProgram({ defaultRatePer30MinCents: 1500 });
+    const day = nextDay();
+    await expect(
+      logHourForCoachInternal(admin, {
+        coachIds: [],
         programId: program.id,
         startAt: at(day, "10:00"),
         endAt: at(day, "12:00"),
@@ -955,7 +1013,7 @@ describe("a program that has since been retired", () => {
       defaultRatePer30MinCents: 1500,
     });
     const day = nextDay();
-    const row = await logHourForCoachInternal(admin, {
+    const row = await logOneForCoach(admin, {
       coachId: coach.id,
       programId: program.id,
       startAt: at(day, "10:00"),

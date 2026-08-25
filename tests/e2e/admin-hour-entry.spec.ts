@@ -29,6 +29,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../../src/db";
 import {
   hourLogs,
+  programScheduleBlockCoaches,
   programScheduleBlocks,
   programs,
   sessions as authSessions,
@@ -123,6 +124,11 @@ test.afterAll(async () => {
 
 test.beforeEach(async ({ context }) => {
   await db.delete(hourLogs).where(eq(hourLogs.programId, programId));
+  // Recording hours now creates a schedule block when none exists, so each
+  // test has to start from none or the next one joins the previous test's.
+  await db
+    .delete(programScheduleBlocks)
+    .where(eq(programScheduleBlocks.programId, programId));
   await db.execute(
     sql`TRUNCATE TABLE sessions_billing, blocked_times, audit_log RESTART IDENTITY CASCADE`,
   );
@@ -148,7 +154,8 @@ test.beforeEach(async ({ context }) => {
 async function recordHours(
   page: Page,
   opts: {
-    coachName: string;
+    /** Every coach to tick. One entry is the ordinary single-coach case. */
+    coachIds: string[];
     program: string;
     typedDate: string;
     start: string;
@@ -160,9 +167,9 @@ async function recordHours(
   const dialog = page.locator("dialog[open]");
   await expect(dialog).toBeVisible();
 
-  await dialog.locator('select[name="coachId"]').selectOption({
-    label: opts.coachName,
-  });
+  for (const id of opts.coachIds) {
+    await dialog.locator(`input[name="coachIds"][value="${id}"]`).check();
+  }
   await dialog.locator('select[name="programId"]').selectOption({
     label: opts.program,
   });
@@ -192,7 +199,7 @@ test.describe("an admin records hours for two coaches on one block", () => {
 
     // ── COACH A ──────────────────────────────────────────────────────────
     await recordHours(page, {
-      coachName: "E2E Coach Alpha",
+      coachIds: [coachAId],
       program: programName,
       typedDate: day.typed,
       start: "10:00",
@@ -220,7 +227,7 @@ test.describe("an admin records hours for two coaches on one block", () => {
     // window is not a double-pay — it is two people working one shift — so
     // it must go through with no warning and no stall.
     await recordHours(page, {
-      coachName: "E2E Coach Bravo",
+      coachIds: [coachBId],
       program: programName,
       typedDate: day.typed,
       start: "10:00",
@@ -257,7 +264,7 @@ test.describe("an admin records hours for two coaches on one block", () => {
     // A first entry to clash with. 10:00–15:00 for coach A…
     await page.goto("/admin/hour-log");
     await recordHours(page, {
-      coachName: "E2E Coach Alpha",
+      coachIds: [coachAId],
       program: programName,
       typedDate: day.typed,
       start: "10:00",
@@ -269,7 +276,7 @@ test.describe("an admin records hours for two coaches on one block", () => {
     // index cannot see this one — it is the double-pay the warning exists
     // for — so the first submit must be refused with an amber decision.
     await recordHours(page, {
-      coachName: "E2E Coach Alpha",
+      coachIds: [coachAId],
       program: programName,
       typedDate: day.typed,
       start: "10:00",
@@ -293,9 +300,9 @@ test.describe("an admin records hours for two coaches on one block", () => {
     // defaultValue at MOUNT ONLY, and this result remounts the form — a
     // regression here renders the warning above an emptied form, leaving
     // nothing to confirm. Found in the build by looking, not by asserting.
-    await expect(dialog.locator('select[name="coachId"]')).toHaveValue(
-      coachAId,
-    );
+    await expect(
+      dialog.locator(`input[name="coachIds"][value="${coachAId}"]`),
+    ).toBeChecked();
     await expect(dialog.locator('input[name="date"]')).toHaveValue(day.iso);
     await expect(dialog.locator('select[name="endTime"]')).toHaveValue("14:00");
 
@@ -310,6 +317,79 @@ test.describe("an admin records hours for two coaches on one block", () => {
     expect(afterConfirm).toHaveLength(2);
   });
 
+  // 🔴 THE WHOLE POINT OF THE CHANGE: what took two runs of this dialog, with
+  // the schedule sitting half-recorded in between, is now one submit.
+  test("records a whole crew from ONE submit and turns the block green", async ({
+    page,
+  }) => {
+    const day = pastDay(23);
+
+    await page.goto("/admin/hour-log");
+    await recordHours(page, {
+      coachIds: [coachAId, coachBId],
+      program: programName,
+      typedDate: day.typed,
+      start: "10:00",
+      end: "15:00",
+    });
+    await expect(page.locator("dialog[open]")).toBeHidden({ timeout: 15_000 });
+
+    const rows = await db
+      .select()
+      .from(hourLogs)
+      .where(eq(hourLogs.programId, programId));
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((r) => r.coachId))).toEqual(
+      new Set([coachAId, coachBId]),
+    );
+
+    // The schedule now carries a block naming both of them, so the grid shows
+    // the shift instead of leaving it as work that happened nowhere.
+    const blocks = await db
+      .select({ id: programScheduleBlocks.id })
+      .from(programScheduleBlocks)
+      .where(eq(programScheduleBlocks.programId, programId));
+    expect(blocks).toHaveLength(1);
+    const members = await db
+      .select({ coachId: programScheduleBlockCoaches.coachId })
+      .from(programScheduleBlockCoaches)
+      .where(eq(programScheduleBlockCoaches.blockId, blocks[0].id));
+    expect(new Set(members.map((m) => m.coachId))).toEqual(
+      new Set([coachAId, coachBId]),
+    );
+  });
+
+  // Ticking nobody is the state a checkbox group starts in, so it is the
+  // easiest mistake on this form. It must be refused in words the admin can
+  // act on — not with a field name from the schema.
+  test("refuses an entry with no coach ticked, in plain words", async ({
+    page,
+  }) => {
+    const day = pastDay(15);
+
+    await page.goto("/admin/hour-log");
+    await recordHours(page, {
+      coachIds: [],
+      program: programName,
+      typedDate: day.typed,
+      start: "10:00",
+      end: "12:00",
+    });
+
+    const dialog = page.locator("dialog[open]");
+    await expect(dialog.getByRole("alert")).toContainText("Pick at least one", {
+      timeout: 15_000,
+    });
+    // …and it must NOT print the schema's field name at him.
+    await expect(dialog.getByRole("alert")).not.toContainText("coachIds");
+
+    const rows = await db
+      .select()
+      .from(hourLogs)
+      .where(eq(hourLogs.programId, programId));
+    expect(rows).toHaveLength(0);
+  });
+
   // The provenance line is the only thing on screen that distinguishes work
   // an admin typed in from work the coach logged. It had no coverage at all.
   test("shows 'Entered by' on a row the admin created", async ({ page }) => {
@@ -317,7 +397,7 @@ test.describe("an admin records hours for two coaches on one block", () => {
 
     await page.goto("/admin/hour-log");
     await recordHours(page, {
-      coachName: "E2E Coach Alpha",
+      coachIds: [coachAId],
       program: programName,
       typedDate: day.typed,
       start: "09:00",

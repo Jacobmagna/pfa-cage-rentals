@@ -424,3 +424,198 @@ describe("annotateLogs", () => {
     expect(r.l1).toBe("Ana, Ben were scheduled.");
   });
 });
+
+// 0r(1) — `loggedBy`: the structured identity of the coach who ACTUALLY
+// worked a wrong_coach block. It is what the admin "reassign to who worked
+// it" action targets, so these tests exist to stop the button and the
+// sentence above it ever naming two different people.
+describe("reconcileBlocks — loggedBy (the reassign target)", () => {
+  it("wrong_coach carries the logging coach's id AND name", () => {
+    const r = reconcileBlocks(
+      {
+        blocks: [block()],
+        logs: [log({ coachId: "c2", coachName: "Lee" })],
+        now: NOW_DONE,
+      },
+      fmt,
+    );
+    expect(r.b1.coaches[0].status).toBe("wrong_coach");
+    expect(r.b1.coaches[0].loggedBy).toEqual({
+      coachId: "c2",
+      coachName: "Lee",
+    });
+  });
+
+  // The load-bearing property. The banner renders `detail` as prose and the
+  // button targets `loggedBy.coachId`; if those two ever came from different
+  // matches, an admin would click "Lee covered this" and reassign to someone
+  // else entirely. Asserting the NAME appears in the sentence ties them to
+  // one source. (Deliberately not a substring-free assertion — see rule 7:
+  // this is block-scoped to the one coach's own detail string.)
+  it("the reassign target is the SAME coach the detail sentence names", () => {
+    const r = reconcileBlocks(
+      {
+        blocks: [block()],
+        logs: [log({ coachId: "c9", coachName: "Tyler Garcia" })],
+        now: NOW_DONE,
+      },
+      fmt,
+    );
+    const c = r.b1.coaches[0];
+    expect(c.status).toBe("wrong_coach");
+    expect(c.loggedBy).not.toBeNull();
+    expect(c.detail).toBe("Tyler Garcia logged 14:00–15:00 instead of Sam.");
+    expect(c.detail).toContain(c.loggedBy!.coachName);
+  });
+
+  // Every non-wrong_coach status must expose NO target, or the UI could
+  // offer a reassign where there is nothing to reassign. wrong_time is the
+  // one that catches a careless implementation: the scheduled coach DID
+  // log, so a naive "whoever logged" would wrongly return them.
+  it.each([
+    [
+      "logged",
+      [log()],
+      NOW_DONE,
+    ],
+    [
+      "wrong_time",
+      [
+        log({
+          startAt: at("2026-06-01T14:30:00Z"),
+          endAt: at("2026-06-01T15:30:00Z"),
+        }),
+      ],
+      NOW_DONE,
+    ],
+    ["no_show", [], NOW_DONE],
+    ["pending", [], at("2026-06-01T14:30:00Z")],
+  ] as const)("%s exposes no reassign target", (expected, logs, now) => {
+    const r = reconcileBlocks(
+      { blocks: [block()], logs: [...logs], now },
+      fmt,
+    );
+    expect(r.b1.coaches[0].status).toBe(expected);
+    expect(r.b1.coaches[0].loggedBy).toBeNull();
+  });
+
+  // The real Aug 8 shape, at the block level: one scheduled coach, one
+  // substitute, aggregate red. Both the per-coach entry and the target must
+  // survive the aggregate pass.
+  it("the Aug 8 shape — Lucas scheduled, Tyler worked it", () => {
+    const r = reconcileBlocks(
+      {
+        blocks: [
+          block({ scheduledCoachId: "lucas", scheduledCoachName: "Lucas Milone" }),
+        ],
+        logs: [log({ coachId: "tyler", coachName: "Tyler Garcia" })],
+        now: NOW_DONE,
+      },
+      fmt,
+    );
+    expect(r.b1.status).toBe("wrong_coach");
+    expect(r.b1.coaches).toHaveLength(1);
+    expect(r.b1.coaches[0].coachId).toBe("lucas");
+    expect(r.b1.coaches[0].loggedBy).toEqual({
+      coachId: "tyler",
+      coachName: "Tyler Garcia",
+    });
+  });
+});
+
+// 0r(4) — `loggedWindow`: the window a wrong_time block must MOVE to. It is
+// what "Change the schedule to …" writes, so like loggedBy it exists to keep
+// the button, the sentence and the write pointing at one log.
+describe("reconcileBlocks — loggedWindow (the time-match target)", () => {
+  it("wrong_time carries the window the scheduled coach actually logged", () => {
+    const r = reconcileBlocks(
+      {
+        blocks: [block()],
+        logs: [
+          log({
+            startAt: at("2026-06-01T14:00:00Z"),
+            endAt: at("2026-06-01T16:00:00Z"),
+          }),
+        ],
+        now: NOW_DONE,
+      },
+      fmt,
+    );
+    const c = r.b1.coaches[0];
+    expect(c.status).toBe("wrong_time");
+    expect(c.loggedWindow).toEqual({
+      startAt: at("2026-06-01T14:00:00Z"),
+      endAt: at("2026-06-01T16:00:00Z"),
+    });
+    // The target and the prose must describe the same window.
+    expect(c.detail).toContain("14:00–16:00");
+  });
+
+  // The Aug 22 shape: Lucas logged 10:00–1:00 against a scheduled 10:00–3:00.
+  // Short by two hours, same coach — the case reassignment cannot fix.
+  it("the Aug 22 shape — right coach, short window", () => {
+    const r = reconcileBlocks(
+      {
+        blocks: [
+          block({ scheduledCoachId: "lucas", scheduledCoachName: "Lucas Milone" }),
+        ],
+        logs: [
+          log({
+            coachId: "lucas",
+            coachName: "Lucas Milone",
+            startAt: at("2026-06-01T14:00:00Z"),
+            endAt: at("2026-06-01T14:30:00Z"),
+          }),
+        ],
+        now: NOW_DONE,
+      },
+      fmt,
+    );
+    const c = r.b1.coaches[0];
+    expect(c.status).toBe("wrong_time");
+    // Nobody to reassign to — the coach is right.
+    expect(c.loggedBy).toBeNull();
+    expect(c.loggedWindow).toEqual({
+      startAt: at("2026-06-01T14:00:00Z"),
+      endAt: at("2026-06-01T14:30:00Z"),
+    });
+  });
+
+  // Every other status must expose NO window, or the UI would offer to move
+  // a block to a time nobody logged. wrong_coach is the one that catches a
+  // careless implementation: a log DOES exist, it is just someone else's.
+  it.each([
+    ["logged", [log()], NOW_DONE],
+    ["wrong_coach", [log({ coachId: "c2", coachName: "Lee" })], NOW_DONE],
+    ["no_show", [], NOW_DONE],
+    ["pending", [], at("2026-06-01T14:30:00Z")],
+  ] as const)("%s exposes no time-match target", (expected, logs, now) => {
+    const r = reconcileBlocks(
+      { blocks: [block()], logs: [...logs], now },
+      fmt,
+    );
+    expect(r.b1.coaches[0].status).toBe(expected);
+    expect(r.b1.coaches[0].loggedWindow).toBeNull();
+  });
+
+  // A within-tolerance log is `logged`, so a time-match can never be offered
+  // for a block whose window would not actually move. This is the property
+  // the action's no-op guard leans on.
+  it("a 15-min-off log is `logged`, so no move is ever offered", () => {
+    const r = reconcileBlocks(
+      {
+        blocks: [block()],
+        logs: [
+          log({
+            startAt: at("2026-06-01T14:15:00Z"),
+            endAt: at("2026-06-01T15:15:00Z"),
+          }),
+        ],
+        now: NOW_DONE,
+      },
+      fmt,
+    );
+    expect(r.b1.coaches[0].status).toBe("logged");
+    expect(r.b1.coaches[0].loggedWindow).toBeNull();
+  });
+});

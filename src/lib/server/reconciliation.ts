@@ -62,6 +62,25 @@ export type CoachReconciliation = {
   coachName: string;
   status: BlockStatus;
   detail: string;
+  // 0r(1): the coach who ACTUALLY logged this block's window, populated
+  // ONLY for `wrong_coach` — it is the very log `detail` names in prose,
+  // re-exposed as ids so an admin "reassign to who worked it" action can
+  // target it without re-deriving the match (and so the button can never
+  // disagree with the sentence above it). null for every other status.
+  //
+  // REQUIRED, not optional, deliberately: every construction site below
+  // must state it, so a future status added to this pass cannot silently
+  // inherit a stale target (discipline rule 16 — let the compiler audit).
+  loggedBy: ReconCoach | null;
+  // 0r(4): the window this coach ACTUALLY logged, populated ONLY for
+  // `wrong_time` — the same log `detail` quotes in prose. It is what the
+  // "match the schedule to what happened" action moves the block to, so
+  // deriving it here (rather than re-matching at the action) is what keeps
+  // the button, the sentence and the write in agreement. null otherwise.
+  //
+  // REQUIRED for the same reason as `loggedBy` above: the compiler, not a
+  // grep, enumerates the sites that must state it (rule 16).
+  loggedWindow: { startAt: Date; endAt: Date } | null;
 };
 
 export type BlockReconciliation = {
@@ -164,6 +183,8 @@ export function reconcileBlocks(
           coachName: c.coachName,
           status: "logged",
           detail: `On schedule — ${s} logged ${formatTime(m.startAt)}–${formatTime(m.endAt)}.`,
+          loggedBy: null,
+          loggedWindow: null,
         };
       }
 
@@ -175,6 +196,12 @@ export function reconcileBlocks(
           coachName: c.coachName,
           status: "wrong_time",
           detail: `${s} logged ${formatTime(x.startAt)}–${formatTime(x.endAt)} instead of the scheduled ${formatTime(b.startAt)}–${formatTime(b.endAt)}.`,
+          // The scheduled coach DID log — the time is wrong, not the
+          // person — so there is nobody to REASSIGN to. The resolution for
+          // this state is to move the BLOCK to the window below.
+          loggedBy: null,
+          // Same `x` the sentence above quotes — one source, two renderings.
+          loggedWindow: { startAt: x.startAt, endAt: x.endAt },
         };
       }
 
@@ -186,6 +213,10 @@ export function reconcileBlocks(
           coachName: c.coachName,
           status: "wrong_coach",
           detail: `${o.coachName} logged ${formatTime(o.startAt)}–${formatTime(o.endAt)} instead of ${s}.`,
+          // Same `o` the sentence above names — one source, two renderings.
+          loggedBy: { coachId: o.coachId, coachName: o.coachName },
+          // Not a time problem: the scheduled coach logged nothing at all.
+          loggedWindow: null,
         };
       }
 
@@ -196,6 +227,8 @@ export function reconcileBlocks(
           coachName: c.coachName,
           status: "no_show",
           detail: `${s} didn't log anything for this block.`,
+          loggedBy: null,
+          loggedWindow: null,
         };
       }
       return {
@@ -203,6 +236,8 @@ export function reconcileBlocks(
         coachName: c.coachName,
         status: "pending",
         detail: "Scheduled window hasn't closed yet.",
+        loggedBy: null,
+        loggedWindow: null,
       };
     });
 

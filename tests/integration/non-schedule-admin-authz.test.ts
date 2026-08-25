@@ -48,6 +48,38 @@ describe("admin-only actions still reject a flagged (scheduleAdmin) coach", () =
     await expect(approveSessionRemoval("any-request-id")).rejects.toThrow();
   });
 
+  // 0r(1): the substitute reassign MUTATES THE SCHEDULE, which is exactly
+  // what scheduleAdmin was widened to allow — so it is the most plausible
+  // place for the widening to over-reach. It is deliberately admin-only:
+  // it reads posted hour-logs (pay records) to decide whether the move is
+  // allowed, and block membership drives the no-show derivation. It also
+  // renders only on /admin/hour-log/schedule, which is itself
+  // requireRole("admin") — so the gate matches its surface.
+  it("reassignBlockToLoggedCoach (schedule + pay-adjacent) rejects the flagged coach", async () => {
+    mockAsFlaggedCoach();
+    const { reassignBlockToLoggedCoach } = await import(
+      "@/app/admin/hour-log/actions"
+    );
+    // 🔴 A bare .rejects.toThrow() would pass for the WRONG REASON here: a
+    // bogus block id throws ProgramScheduleBlockNotFoundError too, so the
+    // test would stay green even if the gate were loosened to
+    // requireScheduleAccess. Assert on WHICH error: authz must reject
+    // BEFORE any DB lookup, so reaching the block query at all is a
+    // failure. (Discipline rule 21 — two conditions returning the same
+    // answer leaves neither under test.)
+    const { ProgramScheduleBlockNotFoundError } = await import("@/lib/errors");
+    const err = await reassignBlockToLoggedCoach({
+      blockId: "any-block-id",
+      fromCoachId: "any-from",
+      toCoachId: "any-to",
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).not.toBeNull();
+    expect(err).not.toBeInstanceOf(ProgramScheduleBlockNotFoundError);
+  });
+
   it("recordPayment (money) rejects the flagged coach", async () => {
     mockAsFlaggedCoach();
     const { recordPayment } = await import("@/app/admin/payments/actions");

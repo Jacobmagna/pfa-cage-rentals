@@ -378,6 +378,72 @@ export class InvalidHandoffTargetError extends Error {
   }
 }
 
+// 0r(1) — admin substitute reassign: the coach being reassigned TO has no
+// posted hour-log overlapping this block's program + window, so there is no
+// evidence they worked it. This is the guard that keeps "reassign to who
+// actually worked it" from becoming an unaudited way to move a shift onto a
+// coach who never showed. Refusing is always correct here: the admin can
+// still change the coach through the normal block edit, which does not claim
+// the reassignment is backed by a log.
+export class CoachDidNotLogBlockError extends Error {
+  readonly code = "COACH_DID_NOT_LOG_BLOCK" as const;
+  constructor(
+    public readonly blockId: string,
+    public readonly coachId: string,
+  ) {
+    super(
+      `Coach ${coachId} has no posted hour-log covering block ${blockId}`,
+    );
+    this.name = "CoachDidNotLogBlockError";
+  }
+}
+
+// 0r(1) — admin substitute reassign: the SCHEDULED coach already has a
+// posted log covering this block, so the block is not a `wrong_coach` case
+// at all (it reconciles as logged or wrong_time). Reassigning would hand
+// away a shift its own coach demonstrably worked.
+export class ScheduledCoachAlreadyLoggedError extends Error {
+  readonly code = "SCHEDULED_COACH_ALREADY_LOGGED" as const;
+  constructor(
+    public readonly blockId: string,
+    public readonly coachId: string,
+  ) {
+    super(
+      `Scheduled coach ${coachId} already logged block ${blockId}`,
+    );
+    this.name = "ScheduledCoachAlreadyLoggedError";
+  }
+}
+
+// 0r(4) — "match the schedule to what happened": the block does not actually
+// reconcile as `wrong_time` for this coach, so there is nothing to correct.
+// Re-derived from the engine at action time rather than trusted from the
+// client, so this also fires when the caller is working from a stale render
+// (someone else already fixed it, or the coach edited their log meanwhile).
+export class BlockNotWrongTimeError extends Error {
+  readonly code = "BLOCK_NOT_WRONG_TIME" as const;
+  constructor(
+    public readonly blockId: string,
+    public readonly coachId: string,
+  ) {
+    super(`Block ${blockId} does not reconcile as wrong_time for ${coachId}`);
+    this.name = "BlockNotWrongTimeError";
+  }
+}
+
+// 0r(4) — refused on a block with MORE THAN ONE scheduled coach. Moving the
+// block's window to match one coach's log silently re-reconciles it for
+// every other coach on it — a coach who logged the ORIGINAL window would
+// flip from `logged` to `wrong_time` as a side effect of fixing someone
+// else. The admin edits the block by hand in that case.
+export class MultiCoachBlockTimeMatchError extends Error {
+  readonly code = "MULTI_COACH_BLOCK_TIME_MATCH" as const;
+  constructor(public readonly blockId: string) {
+    super(`Block ${blockId} has multiple scheduled coaches`);
+    this.name = "MultiCoachBlockTimeMatchError";
+  }
+}
+
 // BLOCK-RECUR: edit/cancel referenced a blocked_times_series id that doesn't
 // exist (stale client row or a bogus RPC call). Mirrors
 // ProgramScheduleSeriesNotFoundError.

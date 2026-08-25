@@ -15,18 +15,30 @@
 // `block-handoff-actions.ts` (the flagged "sleeper" that could silently move a
 // coach's stipend) out of scope entirely.
 //
-// ── 🔴 THE THREE POSTED MOMENTS ──────────────────────────────────────────
-// All three are in `hour-log-actions.ts`, and MISSING ONE MEANS A COACH IS
+// ── 🔴 THE FIVE POSTED MOMENTS ───────────────────────────────────────────
+// All five are in `hour-log-actions.ts`, and MISSING ONE MEANS A COACH IS
 // SILENTLY NOT PAID:
-//   1. `logHourInternal` — the INSERT, when the log is clean and takes the
-//      schema's `posted` default.
-//   2. `logHourInternal` — the HELD → POSTED auto-upgrade on conflict, when a
-//      clean re-confirm arrives for a window already sitting held.
+//   1. `writeHourLogInternal` — the INSERT, when the log is clean and takes
+//      the schema's `posted` default.
+//   2. `writeHourLogInternal` — the HELD → POSTED upgrade on conflict, when a
+//      write carrying approval authority arrives for a window already held.
 //   3. `approveHeldHourLogInternal` — an admin approving a held log.
+//   4. `updateHourInternal` — a time EDIT can move a posted log into a
+//      different pay period, and an edit is not a post.
+//   5. `acceptNeedsReviewLogInternal` — same, via the accept-with-correction
+//      path. (4) and (5) were added by the §14.7 adversarial review.
 // ⚠️ (2) is easy to miss reading the file: it is an UPDATE inside the
 // duplicate-conflict branch of the INSERT path, a long way from either of the
 // other two. The census that found it: one `insert(hourLogs)` site in `src`,
 // and exactly two literal `status: "posted"` writers.
+//
+// 📌 AN ADMIN RECORDING HOURS FOR A COACH ADDED NO SIXTH MOMENT, and that is
+// worth stating because the obvious expectation is that it would. It is a new
+// posted moment in the business sense, but not a new CALL SITE: it runs
+// `writeHourLogInternal`, so it earns through (1) and (2) above. There was
+// nothing to remember, and so nowhere for it to be forgotten. A second insert
+// path written alongside the first is the shape that would have needed a
+// sixth call — which is the argument for the shared core, stated in money.
 //
 // ── Idempotent by DATABASE CONSTRAINT, not by application logic ───────────
 // `UNIQUE (coach_id, period_key)` turns "one logged hour and forty logged

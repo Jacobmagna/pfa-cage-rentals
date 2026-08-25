@@ -16,12 +16,15 @@
 // case a stale program id surfaces.
 
 import { ZodError } from "zod";
-import { deleteHour, updateHour } from "./actions";
+import { deleteHour, logHourForCoach, updateHour } from "./actions";
 import {
+  AdminHourEntryNotConfirmedError,
   HourLogNotFoundError,
+  HourLogSubjectNotFoundError,
   ProgramInactiveError,
   ProgramNotFoundError,
 } from "@/lib/errors";
+import type { AdminHourEntryWarning } from "@/lib/admin-hour-entry";
 import { parsePfaInput } from "@/lib/timezone";
 
 export type SubmittedHourValues = {
@@ -129,4 +132,112 @@ export async function updateHourFormAction(
 // Revalidation happens inside the public deleteHour action.
 export async function deleteHourAction(id: string): Promise<void> {
   await deleteHour(id);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ADMIN HOUR ENTRY — "Log hours for a coach"
+// ─────────────────────────────────────────────────────────────────────────
+//
+// Same shape as the edit wrapper above (snapshot the values, build the schema
+// input, translate typed errors) with ONE addition that carries the whole
+// design: a result can come back as a DECISION rather than an error.
+//
+// 🔴 WHY A DECISION IS NOT AN ERROR. `AdminHourEntryNotConfirmedError` means
+// the entry is probably fine and the admin should see something first — an
+// overlapping log, or a period already paid out. Rendering that in the red
+// error banner would teach him that the save is broken, and he would either
+// stop using the feature or learn to ignore red banners on a payroll screen.
+// It is the same distinction the stipend card draws for the §12.4 back-pay
+// refusal: an amber decision with a button that goes ahead, not a failure.
+
+export type LogHoursForCoachValues = {
+  coachId: string;
+  programId: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  note: string;
+};
+
+export type LogHoursForCoachResult =
+  | { ok: true }
+  /** Something is wrong and the admin must change the form to proceed. */
+  | {
+      ok: false;
+      kind: "error";
+      error: { code: string; message: string };
+      values: LogHoursForCoachValues;
+    }
+  /**
+   * Nothing is wrong; there is something the admin should know before this
+   * is written. Re-submitting with `confirm=true` goes ahead.
+   */
+  | {
+      ok: false;
+      kind: "decision";
+      warnings: AdminHourEntryWarning[];
+      values: LogHoursForCoachValues;
+    };
+
+function snapshotLogHoursValues(formData: FormData): LogHoursForCoachValues {
+  return {
+    coachId: formData.get("coachId")?.toString() ?? "",
+    programId: formData.get("programId")?.toString() ?? "",
+    date: formData.get("date")?.toString() ?? "",
+    startTime: formData.get("startTime")?.toString() ?? "",
+    endTime: formData.get("endTime")?.toString() ?? "",
+    note: formData.get("note")?.toString() ?? "",
+  };
+}
+
+export async function logHoursForCoachFormAction(
+  _prev: LogHoursForCoachResult,
+  formData: FormData,
+): Promise<LogHoursForCoachResult> {
+  const values = snapshotLogHoursValues(formData);
+  try {
+    const base = buildHourInput(formData);
+    await logHourForCoach({
+      ...base,
+      coachId: values.coachId,
+      // Carried by the "Record these hours anyway" submit button's own
+      // name/value — only the CLICKED submit is serialized, so there is no
+      // hidden field to leave stale and no way for a plain re-submit to
+      // silently inherit a previous confirmation.
+      confirmWarnings: formData.get("confirm")?.toString() === "true",
+    });
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof AdminHourEntryNotConfirmedError) {
+      return { ok: false, kind: "decision", warnings: [...err.warnings], values };
+    }
+    if (
+      err instanceof HourLogSubjectNotFoundError ||
+      err instanceof ProgramNotFoundError ||
+      err instanceof ProgramInactiveError
+    ) {
+      return {
+        ok: false,
+        kind: "error",
+        error: { code: err.code, message: err.message },
+        values,
+      };
+    }
+    if (err instanceof ZodError) {
+      const first = err.issues[0];
+      return {
+        ok: false,
+        kind: "error",
+        error: {
+          code: "VALIDATION",
+          message: first
+            ? `${first.path.join(".")}: ${first.message}`
+            : "Invalid input",
+        },
+        values,
+      };
+    }
+    // Unknown — let Next.js error boundary + Sentry handle it.
+    throw err;
+  }
 }

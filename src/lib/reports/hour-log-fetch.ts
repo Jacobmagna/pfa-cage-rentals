@@ -10,6 +10,7 @@
 // by coach name then start so the table reads grouped-by-coach.
 
 import { and, asc, eq, gt, gte, inArray, lt, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
   hourLogs,
@@ -28,6 +29,12 @@ import {
 import { formatPfaTime12h } from "@/lib/timezone";
 import type { HourLogWorkbookRow } from "./hour-log-excel";
 import type { NormalizedHourLogFilters } from "./hour-log-filters";
+
+// `users` a second time, for the person who WROTE the row as opposed to the
+// coach it belongs to. Aliased because both sides of that distinction are the
+// same table, and conflating them is the exact confusion this column exists to
+// resolve.
+const enteredBy = alias(users, "entered_by");
 
 // The admin Work Log fetch carries the per-log review decision so the table
 // can badge rejected rows. These columns aren't part of the downloadable
@@ -53,6 +60,18 @@ export type HourLogFetchRow = HourLogWorkbookRow & {
    * Both are NULLABLE: a pre-rate log carries neither and pays $0.
    */
   ratePer30MinCents: number | null;
+  /**
+   * 🔴 WHO ENTERED THIS ROW, as opposed to whose hours it records. Equal to
+   * `coachId` for everything a coach logged themselves — which was every row
+   * in the product until an admin could record hours on a coach's behalf.
+   * When they differ, the table says so: a payable row somebody else created
+   * is a fact a person reading a payroll screen is entitled to see without
+   * opening a dialog, and a marker that lives only in the database is a
+   * marker nobody checks.
+   */
+  createdBy: string;
+  createdByName: string | null;
+  createdByEmail: string | null;
   /**
    * 🔴 The log's own write-time snapshot: a stipend covered this work, so it
    * pays $0 BY DECISION rather than for want of a rate. Every rate cell must
@@ -117,10 +136,23 @@ export async function fetchHourLogRows(
       ratePer30MinCents: hourLogs.ratePer30MinCents,
       stipendCovered: hourLogs.stipendCovered,
       perSessionRateCents: hourLogs.perSessionRateCents,
+      // 🔴 PROVENANCE. `created_by` is who WROTE the row; `coach_id` is whose
+      // hours it records. They were identical on every row in the product's
+      // history, because the only insert path stamped both from the session —
+      // so `createdBy !== coachId` means "an admin entered this on the coach's
+      // behalf", with no migration and no historical false positives.
+      createdBy: hourLogs.createdBy,
+      // LEFT-joined through an alias so a row is never dropped for want of a
+      // creator. `created_by` is NOT NULL with an FK, so the join always
+      // matches today — an inner join would be correct and would also mean a
+      // future data repair could silently remove rows from a payroll table.
+      createdByName: enteredBy.name,
+      createdByEmail: enteredBy.email,
     })
     .from(hourLogs)
     .innerJoin(users, eq(hourLogs.coachId, users.id))
     .innerJoin(programs, eq(hourLogs.programId, programs.id))
+    .leftJoin(enteredBy, eq(hourLogs.createdBy, enteredBy.id))
     .where(and(...conditions))
     .orderBy(asc(users.name), asc(hourLogs.startAt));
 

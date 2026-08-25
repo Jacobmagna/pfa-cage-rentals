@@ -33,6 +33,15 @@ export type HourRow = {
   // decided no, won't count. decisionReason is the coach-visible reject note.
   status: "posted" | "held" | "rejected";
   decisionReason: string | null;
+  // 🔴 WHO WROTE THE ROW, as opposed to whose hours it records. Equal to
+  // `coachId` for anything a coach logged themselves — which was every row in
+  // the product until an admin could record hours on a coach's behalf. When
+  // they differ the table says so, because "somebody else created this payable
+  // row" is a fact a person reading a payroll screen should not have to open a
+  // dialog to find.
+  createdBy: string;
+  createdByName: string | null;
+  createdByEmail: string | null;
 };
 
 export type ProgramOption = {
@@ -198,6 +207,12 @@ export function HoursClient({
                   >
                     <td className="px-4 py-3 text-sm text-fg">
                       {row.coachName ?? row.coachEmail}
+                      {row.createdBy !== row.coachId ? (
+                        <span className="block text-[11px] text-fg-subtle">
+                          Entered by{" "}
+                          {row.createdByName ?? row.createdByEmail ?? "an admin"}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-sm text-fg-muted">
                       {row.programName}

@@ -1201,6 +1201,13 @@ describe("agreement with the shipped Work hours tab (SPEC §10)", () => {
       coachId: "alex",
       coachName: "Alex Milone",
       coachEmail: "alex@example.com",
+      // Provenance. `createdBy === coachId` is what a coach-logged row looks
+      // like, and is what every row in the product was until an admin could
+      // record hours on a coach's behalf — so it is the honest default here.
+      // A fixture for an ADMIN-entered row sets a different `createdBy`.
+      createdBy: "alex",
+      createdByName: "Alex Milone",
+      createdByEmail: "alex@example.com",
       programId: "prog-1",
       programName: "HS Summer Program",
       startAt: at("2026-07-06", "09:00"),
@@ -1568,6 +1575,13 @@ describe("the WORK account's rate labels and slots are unchanged", () => {
       coachId: "alex",
       coachName: "Alex Milone",
       coachEmail: "alex@example.com",
+      // Provenance. `createdBy === coachId` is what a coach-logged row looks
+      // like, and is what every row in the product was until an admin could
+      // record hours on a coach's behalf — so it is the honest default here.
+      // A fixture for an ADMIN-entered row sets a different `createdBy`.
+      createdBy: "alex",
+      createdByName: "Alex Milone",
+      createdByEmail: "alex@example.com",
       programId: "prog-1",
       programName: "HS Summer Program",
       startAt: at("2026-07-06", "09:00"),
@@ -1774,6 +1788,13 @@ describe("🔴 stipend labelling, through buildWorkReport → chargesFromWorkDet
       coachId: "c1",
       coachName: "Nick Milone",
       coachEmail: "nick@example.com",
+      // Provenance. `createdBy === coachId` is what a coach-logged row looks
+      // like, and is what every row in the product was until an admin could
+      // record hours on a coach's behalf — so it is the honest default here.
+      // A fixture for an ADMIN-entered row sets a different `createdBy`.
+      createdBy: "c1",
+      createdByName: "Nick Milone",
+      createdByEmail: "nick@example.com",
       programId: "p1",
       programName: "Manager Work",
       startAt: sep3(9),
@@ -2043,6 +2064,9 @@ describe("🔴 stipend period bucketing — overlap, not containment", () => {
         startAt: day, endAt: end, note: null, scheduleNote: null,
         status: "posted", decisionReason: null, ratePer30MinCents: 1500,
         perSessionRateCents: null,
+        // Coach-logged: createdBy === coachId, as every row was before the
+        // admin entry path existed.
+        createdBy: "c1", createdByName: "Nick Milone", createdByEmail: "n@x.com",
       },
     ];
     const work = buildWorkReport(rows);

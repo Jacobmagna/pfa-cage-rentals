@@ -4,14 +4,24 @@
 // as a parameter, so exposing it would let anyone forge an admin
 // identity.
 //
-// The public coach-side server action in
-// src/app/coach/hour-log/actions.ts wraps this with requireSession().
+// TWO public wrappers reach the create path, and they gate differently:
+//   • src/app/coach/hour-log/actions.ts  → requireSession()      → logHourInternal
+//   • src/app/admin/hour-log/actions.ts  → requireRole("admin")  → logHourForCoachInternal
+//
+// 🔴 ONE WRITER, TWO ENTRY POINTS. Both wrappers run the SAME
+// `writeHourLogInternal`, parameterised by a `HourLogAuthor` that separates
+// WHO is writing from WHOSE hours are being written. That separation is the
+// safety property: pricing, the duplicate rule and the stipend trigger all
+// live in one body, so identical work cannot price differently depending on
+// who typed it, an admin entry cannot acquire a second duplicate rule, and the
+// stipend earns without anyone having to remember to make it.
 //
 // Pipeline (mirrors createSessionInternal):
 //   1. Zod-parse                        — createHourLogSchema
 //   2. Program lookup + active check    — business invariant. Any coach
 //      may log against any active program (DEC-29), so there's no
-//      per-coach program-access gate here.
+//      per-coach program-access gate here. The active check is coach-side
+//      only; an admin recording historical hours may name a retired program.
 //   3. Insert, then audit (sequential)  — see "Atomicity" below
 //
 // Atomicity: neon-http is stateless HTTP and does NOT support
@@ -20,9 +30,10 @@
 // captures audit failures so a logging hiccup never loses a logged
 // hour). Same shape as the session create path.
 
-import { and, desc, eq, gt, gte, isNull, lt, lte, or } from "drizzle-orm";
+import { and, desc, eq, gt, gte, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  coachPayments,
   coachStipends,
   hourLogs,
   programRateOverrides,
@@ -35,24 +46,34 @@ import { type AuthedSession } from "@/lib/authz";
 import { workPayForLog } from "@/lib/billing";
 import { payPeriodFor } from "@/lib/pay-period";
 import {
+  AdminHourEntryNotConfirmedError,
   DuplicateHourLogError,
   HeldHourLogNotFoundError,
   HeldLogReviewRequiredError,
   HourLogNotFoundError,
+  HourLogSubjectNotFoundError,
   ProgramInactiveError,
   ProgramNotFoundError,
   RejectReasonRequiredError,
 } from "@/lib/errors";
 import {
+  adminLogHourForCoachSchema,
   createHourLogSchema,
   editHourLogSchema,
+  MAX_HOUR_LOG_DURATION_MS,
 } from "@/lib/schemas/hour-log";
+import {
+  findOverlappingLogs,
+  overlappingLogMessage,
+  type AdminHourEntryWarning,
+} from "@/lib/admin-hour-entry";
+import { findPayoutCovering, paidThroughMessage } from "@/lib/paid-through";
 import {
   classifyManualLog,
   matchLogToBlock,
   type ReconBlock,
 } from "@/lib/server/reconciliation";
-import { formatPfaTime12h } from "@/lib/timezone";
+import { formatPfaTime12h, pfaDayStart } from "@/lib/timezone";
 import { recordStipendEarning } from "@/lib/stipend/earnings";
 import { safeLogAudit } from "./audit-helpers";
 
@@ -301,10 +322,77 @@ export function resolveRateSourceKind(
   return "none";
 }
 
-export async function logHourInternal(
-  actor: AuthedSession["user"],
-  input: unknown,
-) {
+/**
+ * WHO is writing an hour log, and WHOSE hours it records.
+ *
+ * 🔴 THESE WERE THE SAME PERSON ON EVERY PATH THE PRODUCT HAD UNTIL NOW, which
+ * is exactly why `logHourInternal` could stamp `actor.id` into eight different
+ * places and stay correct: the rate override it looks up, the stipend window
+ * it resolves, the schedule blocks it classifies against, the row's
+ * `coach_id`, the row's `created_by`, the duplicate re-select, the audit
+ * actor, and the stipend earning's actor. An admin recording a coach's hours
+ * breaks that identity, and every one of those eight sites has to be told
+ * which of the two people it meant.
+ *
+ * Making `subjectCoachId` a REQUIRED field rather than an optional override is
+ * the whole point — the compiler enumerates the sites, a grep does not. That
+ * is the same instrument that found the stipend's 61 pricing call sites, two
+ * of which were in untracked tooling nobody would have grepped.
+ */
+type HourLogAuthor = {
+  /**
+   * The signed-in user performing the write. Stamped on `created_by` and on
+   * every audit row, and NEVER on `coach_id`.
+   */
+  actor: AuthedSession["user"];
+  /**
+   * WHOSE hours these are. Stamped on `coach_id` — the column every pay read
+   * groups by — and the identity used to resolve the rate override, the
+   * stipend amount, and the schedule blocks the log is classified against.
+   */
+  subjectCoachId: string;
+  /**
+   * 🔴 WHICH ENTRY PATH THIS IS. Not a label: it decides three behaviours, and
+   * each one is a deliberate difference rather than a shortcut.
+   *
+   *  - `coach_self` — a coach logging their own hours. The 1b-security-B
+   *    held-then-approve anomaly gate RUNS, an inactive program is refused,
+   *    and the row is left unreviewed so the needs-review queue can see it.
+   *
+   *  - `admin_for_coach` — an admin recording a coach's hours. The anomaly
+   *    gate does NOT run: it exists to route a COACH's odd entry to an admin
+   *    for a decision, and when the admin IS the author the routing is
+   *    circular and the decision has already been made. An inactive program is
+   *    accepted, because work done in June against a program retired in August
+   *    still happened and still has to be payable. And the row is stamped
+   *    reviewed, for the same reason the gate is skipped — putting an admin's
+   *    own entry into the admin's own review queue asks him to check his own
+   *    typing.
+   */
+  via: "coach_self" | "admin_for_coach";
+};
+
+/**
+ * The one function that writes a new `hour_logs` row. Both entry points — a
+ * coach logging their own hours and an admin recording a coach's — run this
+ * exact code, and that is a safety property rather than tidiness:
+ *
+ *  - **Pricing cannot fork.** The rate snapshot, the per-session snapshot and
+ *    `stipend_covered` are resolved here, once, by the same three resolvers.
+ *    Identical work therefore cannot price differently depending on who typed
+ *    it in.
+ *  - **The duplicate rule cannot fork.** `onConflictDoNothing` plus the
+ *    held → posted upgrade below is the ONLY duplicate handling in the
+ *    product. A second implementation for admins is the most likely way this
+ *    feature would have produced a double-pay.
+ *  - **The stipend trigger does not gain a call site.** An admin entry is a
+ *    new posted moment, and it earns because it runs the same two
+ *    `recordStipendEarning` calls the coach path already runs. Nothing had to
+ *    be remembered; there is nowhere for it to be forgotten.
+ */
+async function writeHourLogInternal(author: HourLogAuthor, input: unknown) {
+  const { actor, subjectCoachId } = author;
+  const isAdminEntry = author.via === "admin_for_coach";
   const parsed = createHourLogSchema.parse(input);
 
   const [program] = await db
@@ -313,18 +401,30 @@ export async function logHourInternal(
     .where(eq(programs.id, parsed.programId))
     .limit(1);
   if (!program) throw new ProgramNotFoundError(parsed.programId);
-  if (!program.active) {
+  // 🔴 THE ACTIVE CHECK IS COACH-SIDE ONLY, AND THAT IS THE POINT OF THE
+  // ADMIN PATH. It guards the CREATE path where a coach picks a program from a
+  // live list — nobody should be able to start logging against something
+  // retired. An admin recording historical hours is the opposite case: the
+  // headline scenario for this feature is a coach who left in July whose last
+  // three shifts were never logged, and the summer program they worked has
+  // since been switched off. Refusing would mean deactivate-log-reactivate as
+  // a routine workaround, which makes the program pickable by every coach in
+  // between — a worse outcome reached by a stricter-looking rule.
+  if (!program.active && !isAdminEntry) {
     throw new ProgramInactiveError(program.id, program.name);
   }
 
   // DESIGN-1: fetch the (coach, program) override row ONCE — its payMode
   // decides BOTH pay snapshots below. Per-program now, not coach-wide.
+  // 🔴 Keyed on the SUBJECT, never the actor: the rate that applies is the
+  // one the coach who did the work holds, not the one the admin typing it in
+  // happens to have.
   const [override] = await db
     .select()
     .from(programRateOverrides)
     .where(
       and(
-        eq(programRateOverrides.coachId, actor.id),
+        eq(programRateOverrides.coachId, subjectCoachId),
         eq(programRateOverrides.programId, parsed.programId),
       ),
     )
@@ -335,9 +435,12 @@ export async function logHourInternal(
   // $0: the coach's half-month stipend is the pay for it.
   //
   // ⚠️ Keyed on the LOG's own `startAt`, never on "now" — backdating a log into
-  // an earlier period must resolve that period's stipend, not today's.
+  // an earlier period must resolve that period's stipend, not today's. That
+  // was already true for a coach backdating their own log; it matters far more
+  // here, because backdating is the admin path's ordinary case rather than its
+  // edge case.
   const stipendAmountCents = await fetchStipendAmountCentsForPeriod(
-    actor.id,
+    subjectCoachId,
     parsed.startAt,
   );
   const stipendCovered = resolveStipendCovered(program, stipendAmountCents);
@@ -345,6 +448,19 @@ export async function logHourInternal(
   // Stamp the resolved HOURLY pay rate as a snapshot (cents per 30-min
   // slot), mirroring sessions_billing. May be null when neither the
   // override nor the program sets a rate → $0 pay; reads treat null as 0.
+  //
+  // 📌 RESOLVED AT TODAY'S CONFIGURATION, INCLUDING FOR A BACKDATED ENTRY, and
+  // that is deliberate rather than an oversight. `program_rate_overrides
+  // .effective_from` is documented in the schema as a RE-PRICING INSTRUCTION,
+  // not a resolution rule (rate-effective-dating SPEC §4): no resolver
+  // consults it, on any path. Retroactive corrections are made explicitly
+  // through `rate-reprice.ts`, which re-runs these same resolvers over a date
+  // range. Teaching THIS path to resolve as-of the log's date would create
+  // exactly the fork the shared core exists to prevent — an admin-entered
+  // June log priced differently from the coach-entered June log beside it.
+  // ⚠️ The operational consequence, worth knowing rather than coding around:
+  // hours backdated into a window that has already been re-priced land at
+  // today's rate. Re-running the re-price for that window is the remedy.
   const ratePer30MinCents = resolveRateCentsForProgram(
     override,
     program,
@@ -356,7 +472,7 @@ export async function logHourInternal(
   // positive amount; otherwise null = hourly basis (the ratePer30MinCents
   // snapshot above applies). Snapshotted alongside the hourly rate so a
   // later mode change never re-rates this log. Applies to ALL insert paths
-  // (coach self-log, schedule-confirm auto-confirm, held).
+  // (coach self-log, schedule-confirm auto-confirm, held, admin entry).
   const perSessionRateCents = resolvePerSessionRateCents(
     override,
     program,
@@ -373,19 +489,27 @@ export async function logHourInternal(
     stipendCovered,
   );
 
-  // 1b security B — held-then-approve gate. Runs for EVERY source. The
-  // `source` flag (client-supplied) must NOT be able to bypass this check:
+  // 1b security B — held-then-approve gate. Runs for EVERY coach-side source.
+  // The `source` flag (client-supplied) must NOT be able to bypass this check:
   // a forged source:"schedule-confirm" with no matching block would
   // otherwise post immediately as payable (P0 payroll-fraud). Instead we
-  // ALWAYS fetch the actor's scheduled MEMBER blocks overlapping the log
+  // ALWAYS fetch the SUBJECT's scheduled MEMBER blocks overlapping the log
   // window (same join as the coach history page) and classify the log.
   // A clean log posts as today — this is exactly what the trusted
   // auto-confirm hotlink sends (the block's EXACT start/end/program), so it
   // still posts instantly. An anomalous log is either held (coach
   // acknowledged) or refused with a thrown error the form turns into a
   // "send for approval / go back and edit" warning.
+  //
+  // 🔴 SKIPPED ENTIRELY ON THE ADMIN PATH — see `HourLogAuthor.via`. The gate's
+  // job is to get a second person to look at an odd entry, and on that path
+  // the second person is the one entering it. Note what this does NOT skip:
+  // the admin path runs its own guards BEFORE reaching here (an overlapping
+  // existing log, and a period already paid out), which are the checks that
+  // actually protect money. Skipping a review step is safe only because those
+  // exist — see `logHourForCoachInternal`.
   let heldReason: "unscheduled" | "wrong_time" | "over_logged" | null = null;
-  {
+  if (!isAdminEntry) {
     const blockRows = await db
       .select({
         id: programScheduleBlocks.id,
@@ -400,28 +524,28 @@ export async function logHourInternal(
       )
       .where(
         and(
-          eq(programScheduleBlockCoaches.coachId, actor.id),
+          eq(programScheduleBlockCoaches.coachId, subjectCoachId),
           // Half-open overlap with the log window.
           lt(programScheduleBlocks.startAt, parsed.endAt),
           gte(programScheduleBlocks.endAt, parsed.startAt),
         ),
       );
-    // ReconBlock[] — all blocks are the actor's own (coachId = actor.id),
-    // so the in-set checks inside the classifier are satisfied implicitly.
-    // Names are unused by classifyManualLog, so pass "".
+    // ReconBlock[] — all blocks are the subject's own, so the in-set checks
+    // inside the classifier are satisfied implicitly. Names are unused by
+    // classifyManualLog, so pass "".
     const blocks: ReconBlock[] = blockRows.map((b) => ({
       id: b.id,
       programId: b.programId,
-      scheduledCoachId: actor.id,
+      scheduledCoachId: subjectCoachId,
       scheduledCoachName: "",
-      coaches: [{ coachId: actor.id, coachName: "" }],
+      coaches: [{ coachId: subjectCoachId, coachName: "" }],
       startAt: b.startAt,
       endAt: b.endAt,
     }));
 
     const anomaly = classifyManualLog(
       {
-        coachId: actor.id,
+        coachId: subjectCoachId,
         programId: parsed.programId,
         startAt: parsed.startAt,
         endAt: parsed.endAt,
@@ -439,6 +563,30 @@ export async function logHourInternal(
     }
   }
 
+  // 🔴 AN ADMIN ENTRY IS STAMPED REVIEWED AT INSERT, AND THIS IS COUPLED TO
+  // THE GUARDS ABOVE — do not separate them.
+  //
+  // `fetchNeedsReviewItems` surfaces any posted log with a null `reviewed_at`
+  // that is unscheduled, double-logged, or off its block's times. An admin
+  // recording work that never had a schedule block produces an `unscheduled`
+  // row every single time, which would put the admin's own typing into the
+  // admin's own queue — and a queue that fills with self-generated items is a
+  // queue people stop reading, which is rule 38 arriving from the other
+  // direction.
+  //
+  // ⚠️ WHAT THIS SUPPRESSES, STATED OUT LOUD: the `double_logged` alert. That
+  // is acceptable ONLY because `logHourForCoachInternal` refuses an
+  // overlapping entry outright unless the admin confirms it, which catches the
+  // same money defect BEFORE the row is written rather than after. If that
+  // guard is ever removed, this stamp must go with it — otherwise a partial
+  // overlap would be written silently and reported nowhere.
+  // 📌 `wrong_time` is NOT suppressed in any meaningful sense: it still paints
+  // the block red on /admin/hour-log/schedule, which is the surface that
+  // carries the one-click resolution for it.
+  const reviewStamp = isAdminEntry
+    ? { reviewedAt: new Date(), reviewedBy: actor.id }
+    : {};
+
   // Idempotent insert: the hour_logs_coach_program_start_end_unique index
   // (mig 0029) makes an exact (coach, program, start, end) a true duplicate.
   // onConflictDoNothing means a double-confirm/double-tap (or a race between
@@ -448,7 +596,7 @@ export async function logHourInternal(
   const [inserted] = await db
     .insert(hourLogs)
     .values({
-      coachId: actor.id,
+      coachId: subjectCoachId,
       programId: parsed.programId,
       startAt: parsed.startAt,
       endAt: parsed.endAt,
@@ -460,9 +608,19 @@ export async function logHourInternal(
       // DECISION, not a missing rate. Read by every display so a covered row
       // says "Covered by stipend" instead of "No rate" beside real hours.
       stipendCovered,
+      // 🔴 THE ACTOR, NOT THE SUBJECT — and this is the whole provenance
+      // story. Until the admin path existed, every row in the product had
+      // `created_by = coach_id`, because the only insert stamped both from
+      // the session. So `created_by <> coach_id` now means, unambiguously and
+      // with no historical false positives, "an admin entered this on the
+      // coach's behalf". That is why this feature needed no migration and no
+      // new column: the marker was already there, waiting for the two values
+      // to differ.
       createdBy: actor.id,
+      ...reviewStamp,
       // A clean/auto-confirm log omits status → relies on the "posted"
-      // default. Only the held branch stamps status + heldReason.
+      // default. Only the held branch stamps status + heldReason, and the
+      // admin path can never reach it.
       ...(heldReason !== null
         ? { status: "held" as const, heldReason }
         : {}),
@@ -486,7 +644,7 @@ export async function logHourInternal(
       .from(hourLogs)
       .where(
         and(
-          eq(hourLogs.coachId, actor.id),
+          eq(hourLogs.coachId, subjectCoachId),
           eq(hourLogs.programId, parsed.programId),
           eq(hourLogs.startAt, parsed.startAt),
           eq(hourLogs.endAt, parsed.endAt),
@@ -494,16 +652,32 @@ export async function logHourInternal(
       )
       .limit(1);
 
-    // Held → posted auto-upgrade: if the existing row is stuck "held"
-    // (awaiting admin approval, unpaid, excluded from counts) AND the
-    // current attempt is itself CLEAN (heldReason === null → it matched a
-    // scheduled block cleanly), treat this confirm as the approval. We
-    // mirror approveHeldHourLogInternal exactly: flip status → "posted" and
-    // stamp reviewedAt/reviewedBy so the row also leaves the needs-review
-    // queue, plus clear the stale heldReason. We do NOT downgrade an
-    // already-"posted" row, and we never auto-approve when the current
-    // attempt is itself anomalous (heldReason !== null) — that stays held.
-    if (existing && existing.status === "held" && heldReason === null) {
+    // 🔴 WHETHER THIS WRITE CARRIES THE AUTHORITY TO APPROVE A HELD ROW.
+    //
+    // Stated as a named condition rather than reusing `heldReason === null`,
+    // even though the two agree on both paths today. On the admin path
+    // `heldReason` is null because the classifier never ran, so leaning on it
+    // would make an approval — a payroll decision — depend on the incidental
+    // initial value of an unrelated variable. A future edit that gave
+    // `heldReason` a default, or ran the classifier for reporting, would flip
+    // an approval rule with nothing in the diff suggesting it had.
+    //
+    //  - coach: only a CLEAN re-confirm approves, i.e. one that matched a
+    //    scheduled block. An anomalous attempt leaves the row held, which is
+    //    the entire point of the gate.
+    //  - admin: always. Mark entering the hours IS the approval — that is
+    //    decision 3 of the feature, and refusing here would leave him looking
+    //    at a held row he cannot clear by doing the obvious thing.
+    const approvesHeldDuplicate = isAdminEntry || heldReason === null;
+
+    // Held → posted upgrade: if the existing row is stuck "held" (awaiting
+    // admin approval, unpaid, excluded from counts) AND this write carries
+    // approval authority, treat it as the approval. We mirror
+    // approveHeldHourLogInternal exactly: flip status → "posted" and stamp
+    // reviewedAt/reviewedBy so the row also leaves the needs-review queue,
+    // plus clear the stale heldReason. We do NOT downgrade an already-"posted"
+    // row.
+    if (existing && existing.status === "held" && approvesHeldDuplicate) {
       const [upgraded] = await db
         .update(hourLogs)
         .set({
@@ -569,6 +743,233 @@ export async function logHourInternal(
     });
   }
   return inserted;
+}
+
+/**
+ * A coach logs their OWN hours. The subject is the actor — which is what every
+ * hour log in the product was until the admin path below existed.
+ */
+export async function logHourInternal(
+  actor: AuthedSession["user"],
+  input: unknown,
+) {
+  return writeHourLogInternal(
+    { actor, subjectCoachId: actor.id, via: "coach_self" },
+    input,
+  );
+}
+
+/**
+ * Every warning this entry raises, in the order the admin should read them:
+ * the money consequence first, the bookkeeping consequence second.
+ *
+ * Returns an empty array when there is nothing to say, which is the ordinary
+ * case — a first-time entry for a recent shift raises nothing at all.
+ */
+async function collectAdminHourEntryWarnings(
+  subject: { id: string; label: string },
+  window: { programId: string; startAt: Date; endAt: Date },
+): Promise<AdminHourEntryWarning[]> {
+  const warnings: AdminHourEntryWarning[] = [];
+
+  // ── 1. Does an existing log of this coach's already cover these hours? ──
+  //
+  // 🔴 THE MOST EXPENSIVE MISTAKE THIS FEATURE MAKES REACHABLE. The unique
+  // index catches an EXACT (coach, program, start, end) repeat and nothing
+  // else, so a coach who logged 10:00–3:00 and an admin who types 10:00–2:00
+  // produce two payable rows for the same hours — both legal by every
+  // constraint in the database.
+  //
+  // The scan is bounded by `startAt > windowStart − MAX_HOUR_LOG_DURATION_MS`,
+  // which is EXACT rather than approximate: no log may be longer than that, so
+  // any log starting earlier than the bound has already ended before this
+  // window opens and cannot overlap it. It rides the existing
+  // `hour_logs_coach_start_idx`. The overlap PREDICATE itself is deliberately
+  // NOT in the SQL — it lives once, in the pure module, where it is tested
+  // against the endpoint cases, rather than being written a second time here
+  // in a dialect where an off-by-one is invisible.
+  const overlapScanFrom = new Date(
+    window.startAt.getTime() - MAX_HOUR_LOG_DURATION_MS,
+  );
+  const nearbyRows = await db
+    .select({
+      id: hourLogs.id,
+      programId: hourLogs.programId,
+      programName: programs.name,
+      startAt: hourLogs.startAt,
+      endAt: hourLogs.endAt,
+      status: hourLogs.status,
+    })
+    .from(hourLogs)
+    .innerJoin(programs, eq(hourLogs.programId, programs.id))
+    .where(
+      and(
+        eq(hourLogs.coachId, subject.id),
+        // `rejected` rows are excluded from every pay/report/accountability
+        // read, so one cannot be double-paid and must not raise a warning.
+        or(eq(hourLogs.status, "posted"), eq(hourLogs.status, "held")),
+        gt(hourLogs.startAt, overlapScanFrom),
+        lt(hourLogs.startAt, window.endAt),
+      ),
+    );
+
+  const overlaps = findOverlappingLogs(
+    window,
+    nearbyRows
+      // 🔴 AN EXACT MATCH IS NOT A DOUBLE-PAY, SO IT MUST NOT WARN LIKE ONE.
+      // Same program, same start, same end is precisely what the unique index
+      // and the conflict branch below handle: a posted twin makes the write a
+      // graceful no-op, and a held twin is upgraded to posted. Warning "this
+      // pays them twice" over a case the database structurally prevents is a
+      // true-sounding reason attached to the wrong situation, and an admin who
+      // confirms through one false warning confirms through the next real one.
+      .filter(
+        (r) =>
+          !(
+            r.programId === window.programId &&
+            r.startAt.getTime() === window.startAt.getTime() &&
+            r.endAt.getTime() === window.endAt.getTime()
+          ),
+      )
+      .map((r) => ({
+        id: r.id,
+        programName: r.programName,
+        startAt: r.startAt,
+        endAt: r.endAt,
+        // Narrowed from the column's three-value enum by the query above.
+        status: r.status as "posted" | "held",
+      })),
+  );
+  if (overlaps.length > 0) {
+    warnings.push({
+      kind: "overlapping_log",
+      message: overlappingLogMessage(subject.label, overlaps),
+    });
+  }
+
+  // ── 2. Has this coach already been paid for the day these hours fall on? ──
+  //
+  // Every tagged PFA→coach payout for the coach is fetched and the DECISION is
+  // made in the pure module, rather than filtering by `covers_through` in SQL.
+  // That keeps one implementation of the boundary rule — which is inclusive of
+  // the named day, and is the case most likely to be got wrong — in the place
+  // where it is unit-tested. The row count is tiny (the entire production
+  // table held 20 rows across all coaches when this was written).
+  //
+  // A NULL `covers_through` is untagged money: it makes no claim about any
+  // day, so it is excluded at the query rather than guessed at from `paid_at`
+  // (payment-statement SPEC §4 — that guess is what the column exists to
+  // prevent).
+  const payoutRows = await db
+    .select({
+      id: coachPayments.id,
+      amountCents: coachPayments.amountCents,
+      paidAt: coachPayments.paidAt,
+      coversThrough: coachPayments.coversThrough,
+      status: coachPayments.status,
+    })
+    .from(coachPayments)
+    .where(
+      and(
+        eq(coachPayments.coachId, subject.id),
+        eq(coachPayments.direction, "pfa_to_coach"),
+        isNull(coachPayments.deletedAt),
+        isNotNull(coachPayments.coversThrough),
+      ),
+    );
+
+  const finding = findPayoutCovering(
+    // PFA-midnight of the log's own date. The guard is about the DAY the work
+    // happened; comparing a 6 PM start against a midnight coverage date would
+    // spare every log written after 00:00.
+    pfaDayStart(window.startAt),
+    payoutRows.map((r) => ({
+      id: r.id,
+      amountCents: r.amountCents,
+      paidAt: r.paidAt,
+      // Non-null by the isNotNull filter above; the column type cannot say so.
+      coversThrough: r.coversThrough as Date,
+      status: r.status,
+    })),
+  );
+  if (finding) {
+    warnings.push({
+      kind: "already_paid_through",
+      message: paidThroughMessage(subject.label, window.startAt, finding),
+    });
+  }
+
+  return warnings;
+}
+
+/**
+ * 🔴 AN ADMIN RECORDS HOURS ON A COACH'S BEHALF.
+ *
+ * THE GAP THIS CLOSES. Before this existed there was exactly ONE
+ * `insert(hourLogs)` site in `src`, reachable only from
+ * `src/app/coach/hour-log/actions.ts`, which stamps `coach_id` from the authed
+ * session — so ONLY A COACH COULD CREATE THEIR OWN HOUR LOG. An admin could
+ * edit one and delete one, but could not make one. A coach who quit, lost
+ * access, or simply would not log took their unlogged pay with them, and no
+ * admin action anywhere could put it back. Pay derives from `hour_logs`, so
+ * putting the right coach on the SCHEDULE instead produces no pay at all,
+ * silently, while looking handled.
+ *
+ * Posts immediately: the admin entering the hours IS the approval.
+ *
+ * No date limit, deliberately — and note there was never one to remove. The
+ * 14-day bound people remember is `LOOKBACK_MS` on the coach's one-tap confirm
+ * CARDS; the manual coach form has only "end after start" and "≤ 16 hours".
+ * Any day of any month is enterable here, which is the point.
+ *
+ * ── THE ORDER OF THE CHECKS IS THE DESIGN ────────────────────────────────
+ *  1. The subject must be a live account — refused outright, never confirmable.
+ *  2. Everything money-consequential is collected and shown as ONE amber
+ *     decision the admin confirms.
+ *  3. Only then does the shared core run, and it prices the log through the
+ *     exact resolvers a coach's own log goes through.
+ */
+export async function logHourForCoachInternal(
+  actor: AuthedSession["user"],
+  input: unknown,
+) {
+  const parsed = adminLogHourForCoachSchema.parse(input);
+
+  // The subject lands on `coach_id`, the column every pay read groups by, so
+  // it is resolved against the database rather than trusted from the form.
+  //
+  // 📌 ROLE IS DELIBERATELY NOT FILTERED, unlike the coach pickers. Admins
+  // genuinely have work logs in this system — Mark has one — and `hour_logs
+  // .coach_id` references `users`, not a coach-only view. Filtering to
+  // `role = 'coach'` here would refuse a real, already-existing case.
+  // Soft-deleted accounts ARE refused: a payable log against a deleted user is
+  // money owed to nobody, on no coach's statement, reachable by no UI.
+  const [subject] = await db
+    .select({ id: users.id, name: users.name, email: users.email })
+    .from(users)
+    .where(and(eq(users.id, parsed.coachId), isNull(users.deletedAt)))
+    .limit(1);
+  if (!subject) throw new HourLogSubjectNotFoundError(parsed.coachId);
+
+  const label = subject.name ?? subject.email;
+
+  // 🔴 RE-RUN SERVER-SIDE, ALWAYS. The dialog shows these warnings before the
+  // admin confirms, but the dialog is not the control: a stale render, a
+  // second tab, or a direct RPC call would otherwise walk straight past them.
+  // `confirmWarnings` unlocks only a refusal the server has just independently
+  // decided is warranted — it is permission, never evidence.
+  const warnings = await collectAdminHourEntryWarnings(
+    { id: subject.id, label },
+    { programId: parsed.programId, startAt: parsed.startAt, endAt: parsed.endAt },
+  );
+  if (warnings.length > 0 && parsed.confirmWarnings !== true) {
+    throw new AdminHourEntryNotConfirmedError(warnings);
+  }
+
+  return writeHourLogInternal(
+    { actor, subjectCoachId: subject.id, via: "admin_for_coach" },
+    parsed,
+  );
 }
 
 // Admin-only edit of an existing hour-log row. Mirrors

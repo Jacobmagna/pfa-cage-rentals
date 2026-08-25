@@ -104,13 +104,19 @@ afterEach(async () => {
       .delete(hourLogs)
       .where(inArray(hourLogs.programId, createdProgramIds));
   }
-  if (createdBlockIds.length > 0) {
+  // 🔴 BY PROGRAM, NOT BY TRACKED ID — rule 47. Approving a held log now
+  // SYNCS THE SCHEDULE, so this suite's approvals create blocks it never
+  // asked for and never tracked. `program_schedule_blocks.program_id` has no
+  // cascade, so an untracked block fails the program delete below with a
+  // 23503 that takes down every test around it — 18 of them, reading exactly
+  // like a broad regression in the stipend code, with not one real defect
+  // among them. `createdBlockIds` is still cleared so the tracking stays
+  // honest; it is simply no longer what the delete is keyed on.
+  if (createdProgramIds.length > 0) {
     await db
       .delete(programScheduleBlocks)
-      .where(inArray(programScheduleBlocks.id, createdBlockIds));
+      .where(inArray(programScheduleBlocks.programId, createdProgramIds));
     createdBlockIds.length = 0;
-  }
-  if (createdProgramIds.length > 0) {
     await db.delete(programs).where(inArray(programs.id, createdProgramIds));
     createdProgramIds.length = 0;
   }

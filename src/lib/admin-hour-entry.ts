@@ -35,6 +35,22 @@
 import { formatPfaDateMedium, formatPfaTime12h } from "@/lib/timezone";
 
 /**
+ * How long a submit may sit unanswered before the dialog stops pretending it
+ * is still working and says so.
+ *
+ * 🔴 LIVES HERE, NOT IN THE DIALOG. The dialog is a client component and
+ * importing it drags Next and next-auth into any plain node process, so a
+ * test could not read the number without duplicating it — and a duplicated
+ * threshold drifts the day somebody tunes the real one, leaving a test
+ * asserting against a value the product no longer uses. Same reason the
+ * wording below lives here rather than in the JSX.
+ *
+ * Well past a normal round trip (the write plus the schedule sync is a
+ * handful of queries) so a merely slow save never trips it.
+ */
+export const SLOW_SUBMIT_MS = 12_000;
+
+/**
  * One thing the admin is told before the write, with the sentence already
  * built. `kind` is stable so a caller can branch (an icon, a test) without
  * matching on prose.

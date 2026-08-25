@@ -43,6 +43,7 @@ import {
 } from "../form-actions";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
+import { SLOW_SUBMIT_MS } from "@/lib/admin-hour-entry";
 
 export type LogHoursCoachOption = {
   id: string;
@@ -144,6 +145,39 @@ function LogHoursForCoachForm({
     if (state !== INITIAL_STATE && state.ok && state.notice === null) onClose();
   }, [state, onClose]);
 
+  // 🔴 A SUBMIT THAT NEVER COMES BACK MUST STILL SAY SOMETHING.
+  //
+  // On 2026-08-25 this dialog sat on "Recording…" indefinitely on production.
+  // Every path that FAILS is handled — a thrown action reaches the /admin
+  // error boundary, a refusal comes back as a banner — so a permanent spinner
+  // is the one shape left: a request that never returns at all. `neon-http`
+  // is a plain stateless fetch with no timeout of its own, and this repo has
+  // now recorded that driver misbehaving four separate times.
+  //
+  // There is no honest way to say "it failed" here, because it may well have
+  // succeeded — the row can be written and the response lost. So this does
+  // not cancel, retry, or guess. It tells the admin what is and is not known
+  // and points him at the one place that can answer it. An alert with no
+  // terminal state is what teaches people to ignore the colour, or to reach
+  // for the only button that looks like it might help (rule 38); on this
+  // screen that button is "submit again", and re-entering hours nobody can
+  // confirm were written is the one action that risks paying twice.
+  // 📌 The reset lives in the CLEANUP, not in an early return. Calling
+  // setState synchronously in the effect body triggers a cascading render and
+  // the lint rule that forbids it; the cleanup runs at exactly the moment
+  // that matters anyway — when `pending` flips back to false, i.e. when this
+  // submit ended — so the notice clears itself and the next submit starts
+  // from a clean slate rather than inheriting the last one's spinner.
+  const [slowSubmit, setSlowSubmit] = useState(false);
+  useEffect(() => {
+    if (!pending) return;
+    const timer = setTimeout(() => setSlowSubmit(true), SLOW_SUBMIT_MS);
+    return () => {
+      clearTimeout(timer);
+      setSlowSubmit(false);
+    };
+  }, [pending]);
+
   const values = state.ok ? null : state.values;
   const activePrograms = programs.filter((p) => p.active);
   const retiredPrograms = programs.filter((p) => !p.active);
@@ -202,6 +236,22 @@ function LogHoursForCoachForm({
           <X className="h-4 w-4" />
         </button>
       </div>
+
+      {pending && slowSubmit ? (
+        <div
+          role="status"
+          className="rounded-md border border-warning/40 bg-warning/10 px-3 py-3 text-xs text-fg space-y-2"
+        >
+          <p className="font-medium">This is taking longer than it should</p>
+          <p>
+            The hours may already have been recorded — the connection has not
+            come back to confirm it either way.{" "}
+            <strong>Do not enter them again from here.</strong> Close this,
+            check the work log for the coaches and date you just entered, and
+            only re-enter what is genuinely missing.
+          </p>
+        </div>
+      ) : null}
 
       {state.ok && state.notice !== null ? (
         <div

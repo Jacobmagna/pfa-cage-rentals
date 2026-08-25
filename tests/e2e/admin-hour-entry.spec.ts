@@ -27,6 +27,10 @@ import { test, expect, type Page } from "@playwright/test";
 import { randomBytes } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../../src/db";
+// The dialog's own threshold, imported rather than duplicated — a local copy
+// would drift the day somebody tunes the real one and the test would start
+// asserting against a number the product no longer uses.
+import { SLOW_SUBMIT_MS } from "../../src/lib/admin-hour-entry";
 import {
   hourLogs,
   programScheduleBlockCoaches,
@@ -388,6 +392,73 @@ test.describe("an admin records hours for two coaches on one block", () => {
       .from(hourLogs)
       .where(eq(hourLogs.programId, programId));
     expect(rows).toHaveLength(0);
+  });
+
+  // 🔴 THE PRODUCTION SYMPTOM ITSELF: a submit that never comes back.
+  //
+  // Reproduced by holding the server action's POST open, which is what a hung
+  // `neon-http` request looks like from the browser. Every FAILING path is
+  // already handled — a throw reaches the /admin error boundary — so an
+  // endless spinner can only be a request that never returns, and that is the
+  // shape Mark hit. The dialog must say so rather than spinning forever on a
+  // screen that writes payroll.
+  test("says something when a submit never comes back", async ({ page }) => {
+    // The notice waits SLOW_SUBMIT_MS (12s), so this test needs longer than
+    // the 30s default to load, submit, and wait it out.
+    test.setTimeout(90_000);
+    const day = pastDay(13);
+
+    await page.goto("/admin/hour-log");
+
+    // Hold the POST — and ONLY the POST; the page's own GETs must still load.
+    await page.route("**/admin/hour-log**", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, SLOW_SUBMIT_MS + 6_000));
+      await route.abort();
+    });
+
+    await recordHours(page, {
+      coachIds: [coachAId],
+      program: programName,
+      typedDate: day.typed,
+      start: "10:00",
+      end: "12:00",
+    });
+
+    const dialog = page.locator("dialog[open]");
+    await expect(
+      dialog.getByText("This is taking longer than it should"),
+    ).toBeVisible({ timeout: SLOW_SUBMIT_MS + 5_000 });
+
+    // 🔴 The words matter as much as the box. It must NOT claim the save
+    // failed — the row may well have been written and only the answer lost —
+    // and it must steer him away from the one action that could double-pay.
+    await expect(dialog).toContainText("Do not enter them again");
+    await expect(dialog).toContainText("may already have been recorded");
+  });
+
+  // The control for the test above: a NORMAL submit must never show it.
+  // Without this, the notice could fire on every save and the test above
+  // would still pass — and an admin who sees "this is taking too long" on a
+  // save that worked learns to ignore it.
+  test("does not show the slow notice on an ordinary save", async ({ page }) => {
+    const day = pastDay(11);
+
+    await page.goto("/admin/hour-log");
+    await recordHours(page, {
+      coachIds: [coachAId],
+      program: programName,
+      typedDate: day.typed,
+      start: "10:00",
+      end: "12:00",
+    });
+    await expect(page.locator("dialog[open]")).toBeHidden({ timeout: 15_000 });
+    await expect(
+      page.getByText("This is taking longer than it should"),
+    ).toBeHidden();
   });
 
   // The provenance line is the only thing on screen that distinguishes work

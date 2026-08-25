@@ -72,6 +72,9 @@ export function HeldDetailsDialog({
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [approveError, setApproveError] = useState<string | null>(null);
+  // Neutral, NOT an error: the hours were recorded either way. Kept in
+  // its own state so it can never borrow the danger styling below.
+  const [approveNotice, setApproveNotice] = useState<string | null>(null);
   const [isLoading, startLoad] = useTransition();
   const [isPending, startApprove] = useTransition();
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -141,15 +144,23 @@ export function HeldDetailsDialog({
       startTime === formatPfaTime(log.startAt) &&
       endTime === formatPfaTime(log.endAt);
     setApproveError(null);
+    setApproveNotice(null);
     startApprove(async () => {
       try {
-        if (unchanged) {
-          await approveHeldHourLog(logId);
-        } else {
-          await approveHeldHourLog(logId, {
-            startAt: start.toISOString(),
-            endAt: end.toISOString(),
-          });
+        const result = unchanged
+          ? await approveHeldHourLog(logId)
+          : await approveHeldHourLog(logId, {
+              startAt: start.toISOString(),
+              endAt: end.toISOString(),
+            });
+        // 🔴 A NOTICE HOLDS THE DIALOG OPEN, and closing on it would be the
+        // defect. The log IS approved and payable by this point; the notice
+        // exists only to say the SCHEDULE was left alone and why. Closing
+        // would file that sentence where nobody ever sees it, and the block
+        // would stay red for a reason the admin was never told.
+        if (result.notice) {
+          setApproveNotice(result.notice);
+          return;
         }
         onClose();
       } catch (err) {
@@ -398,6 +409,9 @@ export function HeldDetailsDialog({
                   <p className="mt-3 text-xs text-danger">
                     End must be after start.
                   </p>
+                ) : null}
+                {approveNotice ? (
+                  <p className="mt-3 text-xs text-fg-muted">{approveNotice}</p>
                 ) : null}
                 {approveError ? (
                   <p className="mt-3 text-xs text-danger">{approveError}</p>

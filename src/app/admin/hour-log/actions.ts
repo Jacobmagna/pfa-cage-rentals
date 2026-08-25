@@ -31,6 +31,7 @@ import {
   matchBlockToLoggedTimesInternal,
   reassignBlockToLoggedCoachInternal,
 } from "@/lib/server/block-recon-actions";
+import { scheduleSyncNotice } from "@/lib/server/recorded-work-schedule-sync";
 import {
   acceptNeedsReviewLogInternal,
   approveHeldHourLogInternal,
@@ -160,7 +161,9 @@ export async function approveHeldHourLog(
   const parsed = edit ? acceptTimeEditSchema.parse(edit) : undefined;
   const result = await approveHeldHourLogInternal(session.user, id, parsed);
   revalidateHourLogSurfaces();
-  return result;
+  // Only the schedule NOTICE crosses back to the client. The log row itself
+  // was never read by any caller, and approving is not a read surface.
+  return { notice: scheduleSyncNotice(result.schedule) };
 }
 
 // 1b security B — read-only detail for the admin held-log "Details +
@@ -191,7 +194,7 @@ export async function acceptNeedsReviewLog(
   const parsed = edit ? acceptTimeEditSchema.parse(edit) : undefined;
   const result = await acceptNeedsReviewLogInternal(session.user, id, parsed);
   revalidateHourLogSurfaces();
-  return result;
+  return { notice: scheduleSyncNotice(result.schedule) };
 }
 
 // Admin REJECT of a needs-review hour log: flips to 'rejected' (excluded from

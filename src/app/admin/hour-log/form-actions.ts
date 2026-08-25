@@ -25,7 +25,7 @@ import {
   ProgramNotFoundError,
 } from "@/lib/errors";
 import type { AdminHourEntryWarning } from "@/lib/admin-hour-entry";
-import type { ScheduleSyncOutcome } from "@/lib/server/admin-entry-schedule-sync";
+import { scheduleSyncNotice } from "@/lib/server/recorded-work-schedule-sync";
 import { parsePfaInput } from "@/lib/timezone";
 
 export type SubmittedHourValues = {
@@ -190,16 +190,6 @@ export type LogHoursForCoachResult =
       values: LogHoursForCoachValues;
     };
 
-/**
- * The sentence to show when the schedule did not end up matching the hours.
- * `null` for every outcome that needs no explanation — the block was joined,
- * created, or already correct — because a notice that fires on success is a
- * notice people learn to click past.
- */
-function scheduleNotice(outcome: ScheduleSyncOutcome): string | null {
-  return outcome.kind === "skipped" ? outcome.detail : null;
-}
-
 function snapshotLogHoursValues(formData: FormData): LogHoursForCoachValues {
   return {
     // getAll — the coach picker is a checkbox group now, and `get` would
@@ -229,7 +219,7 @@ export async function logHoursForCoachFormAction(
       // silently inherit a previous confirmation.
       confirmWarnings: formData.get("confirm")?.toString() === "true",
     });
-    return { ok: true, notice: scheduleNotice(result.schedule) };
+    return { ok: true, notice: scheduleSyncNotice(result.schedule) };
   } catch (err) {
     if (err instanceof AdminHourEntryNotConfirmedError) {
       return { ok: false, kind: "decision", warnings: [...err.warnings], values };

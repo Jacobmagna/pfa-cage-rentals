@@ -48,16 +48,22 @@ describe("admin-only actions still reject a flagged (scheduleAdmin) coach", () =
     await expect(approveSessionRemoval("any-request-id")).rejects.toThrow();
   });
 
-  // 0r(1): the substitute reassign MUTATES THE SCHEDULE, which is exactly
+  // 0r(4): the wrong_time resolution MUTATES THE SCHEDULE, which is exactly
   // what scheduleAdmin was widened to allow — so it is the most plausible
   // place for the widening to over-reach. It is deliberately admin-only:
-  // it reads posted hour-logs (pay records) to decide whether the move is
-  // allowed, and block membership drives the no-show derivation. It also
-  // renders only on /admin/hour-log/schedule, which is itself
-  // requireRole("admin") — so the gate matches its surface.
-  it("reassignBlockToLoggedCoach (schedule + pay-adjacent) rejects the flagged coach", async () => {
+  // it reads posted hour-logs (pay records) to decide the target window, and
+  // it moves the linked cage occupancy with the block. It also renders only
+  // on /admin/hour-log/schedule, which is itself requireRole("admin") — so
+  // the gate matches its surface.
+  //
+  // 📌 This test covered `reassignBlockToLoggedCoach` until 2026-08-25 and
+  // was REPOINTED, not deleted, when that action was retired — it is the
+  // only authz coverage either of these two siblings has ever had, and
+  // deleting it with its subject would have quietly left the surviving
+  // schedule-mutating action ungated by any test.
+  it("matchBlockToLoggedTimes (schedule + pay-adjacent) rejects the flagged coach", async () => {
     mockAsFlaggedCoach();
-    const { reassignBlockToLoggedCoach } = await import(
+    const { matchBlockToLoggedTimes } = await import(
       "@/app/admin/hour-log/actions"
     );
     // 🔴 A bare .rejects.toThrow() would pass for the WRONG REASON here: a
@@ -68,10 +74,9 @@ describe("admin-only actions still reject a flagged (scheduleAdmin) coach", () =
     // failure. (Discipline rule 21 — two conditions returning the same
     // answer leaves neither under test.)
     const { ProgramScheduleBlockNotFoundError } = await import("@/lib/errors");
-    const err = await reassignBlockToLoggedCoach({
+    const err = await matchBlockToLoggedTimes({
       blockId: "any-block-id",
-      fromCoachId: "any-from",
-      toCoachId: "any-to",
+      coachId: "any-coach",
     }).then(
       () => null,
       (e: unknown) => e,

@@ -1,35 +1,21 @@
-// 0r — admin RECONCILIATION-RESOLUTION input schemas.
+// 0r — admin RECONCILIATION-RESOLUTION input schema.
 //
-// Two red states the engine derives live and nothing could previously clear:
-// `wrong_coach` (someone else worked it) and `wrong_time` (the right coach,
-// a different window). Both resolutions share one idea — MAKE THE SCHEDULE
-// MATCH WHAT ACTUALLY HAPPENED — so the status then goes green through the
-// ordinary engine with no stored "resolved" state to drift.
+// `wrong_time` (the right coach, a different window) is derived live by the
+// engine and nothing could previously clear it. The resolution MAKES THE
+// SCHEDULE MATCH WHAT ACTUALLY HAPPENED, so the status then goes green
+// through the ordinary engine with no stored "resolved" state to drift.
 //
-// Unlike the coach-side hand-off (`block-handoff.ts`), where the acting
-// coach is always the session user and therefore never client-supplied,
-// this action is taken by an ADMIN about two OTHER people — so both coach
-// ids arrive from the client and both are validated here before any DB
-// work. The action layer re-derives everything that matters (membership,
-// and whether `toCoachId` actually logged the block) from the database;
+// 📌 `reassignBlockToLoggedCoachSchema` lived here until 2026-08-25 and was
+// removed with the reassign action — see `block-recon-actions.ts`'s header
+// for why. `wrong_coach` is now resolved by approving the covering coach's
+// log, which JOINS him to the block rather than swapping membership.
+//
+// This action is taken by an ADMIN about another person, so the coach id
+// arrives from the client and is validated here before any DB work. The
+// action layer re-derives everything that matters from the database;
 // nothing on this object is trusted as evidence.
 
 import { z } from "zod";
-
-export const reassignBlockToLoggedCoachSchema = z.object({
-  blockId: z.string().min(1),
-  // The scheduled coach who did NOT work it (the one currently rendering
-  // red). Sent explicitly rather than inferred from the block's primary so
-  // a multi-coach block reassigns the intended membership row.
-  fromCoachId: z.string().min(1),
-  // The coach who actually logged the work — the reconciliation engine's
-  // `loggedBy.coachId` for this block.
-  toCoachId: z.string().min(1),
-});
-
-export type ReassignBlockToLoggedCoachInput = z.infer<
-  typeof reassignBlockToLoggedCoachSchema
->;
 
 // 0r(4) — "match the schedule to what happened" for a `wrong_time` block.
 //

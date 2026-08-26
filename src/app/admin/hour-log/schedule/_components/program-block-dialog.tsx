@@ -27,7 +27,6 @@ import {
   Plus,
   Repeat,
   Trash2,
-  UserCheck,
   X,
 } from "lucide-react";
 import {
@@ -47,7 +46,6 @@ import type {
 } from "@/lib/server/reconciliation";
 import {
   matchBlockToLoggedTimes,
-  reassignBlockToLoggedCoach,
 } from "@/app/admin/hour-log/actions";
 import {
   formatPfaDate,
@@ -187,97 +185,24 @@ function reconBannerStyles(status: BlockReconciliation["status"]): string {
   }
 }
 
-// 0r(1) — the resolution path for `wrong_coach`, rendered INSIDE the red
-// banner that states the problem.
+// 📌 THE `wrong_coach` RESOLUTION BUTTON WAS RETIRED HERE ON 2026-08-25.
+// "<coach> covered this — reassign" moved the block's membership from the
+// scheduled coach to the one who actually logged it — by ADDING the
+// substitute and REMOVING the scheduled coach.
 //
-// Before this, `wrong_coach` and `wrong_time` were the only red states an
-// admin could not clear: both are derived live by `reconcileBlocks`, and
-// only `no_show` and `cancelled` had resolvers. A substitution handled
-// perfectly stayed red forever and looked exactly like a coach who never
-// showed — which trains people either to ignore the colour or to reach for
-// a destructive action (deleting the log) because it is the only button
-// that looks like it might help.
+// 🔴 Approving a coach's own log now JOINS him to the block
+// (`recorded-work-schedule-sync.ts`), so `wrong_coach` no longer arises from
+// the ordinary flow and this button no longer rendered. Where it still could
+// fire, its removal half deleted the scheduled coach — and with him his
+// `no_show`, which is the accountability record. Somebody else covering a
+// shift does not stop the scheduled coach having missed it (Jacob,
+// 2026-08-25). An admin who genuinely wants to change who is scheduled uses
+// Edit below, which removes nobody by surprise.
 //
-// The button reassigns THIS occurrence to the coach who actually logged it.
-// It carries no judgement of its own: the target is `loggedBy`, the very log
-// the sentence above it names, and the server independently re-verifies that
-// coach has a posted log covering the block before moving anything. On
-// success the block reconciles as `logged` through the ordinary engine and
-// the banner turns green on the revalidated render — no stored state.
-//
-// It renders ONLY when `loggedBy` is set, which the engine populates only
-// for `wrong_coach`. `wrong_time` deliberately has no target (the scheduled
-// coach DID log; the time is what disagrees) and so shows no button — that
-// case is still unresolvable and is open item 0r(3).
-function ReassignToLoggedCoachButton({
-  blockId,
-  fromCoachId,
-  loggedBy,
-  onSuccess,
-}: {
-  blockId: string;
-  fromCoachId: string;
-  loggedBy: NonNullable<CoachReconciliation["loggedBy"]>;
-  onSuccess: () => void;
-}) {
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-
-  const handleClick = () => {
-    setError(null);
-    startTransition(async () => {
-      try {
-        await reassignBlockToLoggedCoach({
-          blockId,
-          fromCoachId,
-          toCoachId: loggedBy.coachId,
-        });
-        // 🔴 Close on success, and the reason is not tidiness. The dialog is
-        // opened with a SNAPSHOT of the block (grid `DialogState` holds
-        // `block`, captured on click) while the banner reads reconciliation
-        // LIVE from `statuses`. So after a successful reassign the banner
-        // correctly flips to "On schedule — Tyler logged …" while the COACH
-        // row beside it still reads the coach we just moved the block AWAY
-        // from — two contradictory facts on one screen, with the stale one
-        // looking authoritative because it sits in the detail list.
-        // Observed on screen; assertions were green throughout.
-        // Closing lands the admin on the grid, which re-rendered from the
-        // revalidated data and shows the bar green under the NEW coach's
-        // name. Deliberately not "derive editInitial from live blocks": that
-        // prop also seeds the edit FORM, and making it change underneath an
-        // open form would reset a half-typed edit.
-        onSuccess();
-      } catch {
-        // Server actions redact thrown detail in production, so show a
-        // message that says what to do next rather than what broke.
-        setError(
-          "Couldn't reassign this shift. Refresh and try again, or change the coach with Edit.",
-        );
-      }
-    });
-  };
-
-  return (
-    <span className="mt-2 block">
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={pending}
-        className="inline-flex items-center gap-1.5 rounded-md border border-current/30 bg-surface px-2.5 h-7 text-[11px] font-semibold hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
-      >
-        <UserCheck className="h-3.5 w-3.5" aria-hidden="true" />
-        {pending
-          ? "Reassigning…"
-          : `${loggedBy.coachName} covered this — reassign`}
-      </button>
-      {error ? (
-        <span role="alert" className="mt-1 block text-[11px]">
-          {error}
-        </span>
-      ) : null}
-    </span>
-  );
-}
+// `CoachReconciliation.loggedBy` is KEPT even though nothing renders it now:
+// it is the structured twin of the sentence the banner prints, a test pins
+// that the two agree, and it is what any future "covered by <coach>" display
+// would read.
 
 // 0r(4) — the resolution path for `wrong_time`, the sibling of the reassign
 // button above and the same idea: MAKE THE SCHEDULE MATCH WHAT HAPPENED.
@@ -377,14 +302,6 @@ function ReconBanner({
               {c.coachName} · {RECON_STATUS_LABELS[c.status]}
             </span>
             <span className="block mt-0.5">{c.detail}</span>
-            {blockId && c.loggedBy ? (
-              <ReassignToLoggedCoachButton
-                blockId={blockId}
-                fromCoachId={c.coachId}
-                loggedBy={c.loggedBy}
-                onSuccess={onResolved}
-              />
-            ) : null}
             {/* 0r(4) is deliberately absent here: moving the block's window
                 re-reconciles it for every OTHER coach on a shared block, so
                 the action refuses multi-coach blocks. Rendering a button
@@ -409,14 +326,6 @@ function ReconBanner({
         {RECON_STATUS_LABELS[reconciliation.status]}
       </span>
       <span className="block mt-0.5">{reconciliation.detail}</span>
-      {blockId && only?.loggedBy ? (
-        <ReassignToLoggedCoachButton
-          blockId={blockId}
-          fromCoachId={only.coachId}
-          loggedBy={only.loggedBy}
-          onSuccess={onResolved}
-        />
-      ) : null}
       {blockId && only?.loggedWindow ? (
         <MatchScheduleToLoggedButton
           blockId={blockId}

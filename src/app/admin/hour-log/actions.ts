@@ -27,10 +27,7 @@ import {
   resolveCancellationInternal,
   resolveNoShowInternal,
 } from "@/lib/server/block-flag-actions";
-import {
-  matchBlockToLoggedTimesInternal,
-  reassignBlockToLoggedCoachInternal,
-} from "@/lib/server/block-recon-actions";
+import { matchBlockToLoggedTimesInternal } from "@/lib/server/block-recon-actions";
 import { scheduleSyncNotice } from "@/lib/server/recorded-work-schedule-sync";
 import {
   acceptNeedsReviewLogInternal,
@@ -103,25 +100,6 @@ export async function resolveCancellation(flagId: string) {
 export async function resolveNoShow(blockId: string, coachId: string) {
   const session = await requireRole("admin");
   const result = await resolveNoShowInternal(session.user, blockId, coachId);
-  revalidateHourLogSurfaces();
-  return result;
-}
-
-// 0r(1) — SUBSTITUTE REASSIGN: move one block occurrence from the scheduled
-// coach who did not work it to the coach who actually logged it, clearing a
-// `wrong_coach` state that no action could previously resolve. The internal
-// action refuses unless the recipient already has a posted log covering the
-// block, so this can never invent a shift for a coach who did not work.
-//
-// Reconciliation is derived, so the red clears on the next render with no
-// stored state — which is exactly why the revalidate set matters here.
-export async function reassignBlockToLoggedCoach(input: {
-  blockId: string;
-  fromCoachId: string;
-  toCoachId: string;
-}) {
-  const session = await requireRole("admin");
-  const result = await reassignBlockToLoggedCoachInternal(session.user, input);
   revalidateHourLogSurfaces();
   return result;
 }

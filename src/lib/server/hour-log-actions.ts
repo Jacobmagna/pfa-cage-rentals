@@ -88,7 +88,7 @@ import {
 import { formatPfaTime12h, pfaDayStart } from "@/lib/timezone";
 import { recordStipendEarning } from "@/lib/stipend/earnings";
 import { safeLogAudit } from "./audit-helpers";
-import { syncScheduleForAdminEntry } from "./admin-entry-schedule-sync";
+import { syncScheduleToRecordedWork } from "./recorded-work-schedule-sync";
 
 // DESIGN-1: the (coach, program) pay mode + rates now live on a SINGLE
 // program_rate_overrides row, fetched ONCE per log (in logHourInternal)
@@ -1032,8 +1032,8 @@ export async function logHourForCoachInternal(
   // ── The schedule, LAST and non-fatally. ──
   // The pay is written by this point and cannot be un-written (neon-http has
   // no transactions), so this reports failure rather than raising it. See
-  // `admin-entry-schedule-sync.ts`.
-  const schedule = await syncScheduleForAdminEntry(actor, {
+  // `recorded-work-schedule-sync.ts`.
+  const schedule = await syncScheduleToRecordedWork(actor, {
     programId: parsed.programId,
     startAt: parsed.startAt,
     endAt: parsed.endAt,
@@ -1226,7 +1226,7 @@ export async function approveHeldHourLogInternal(
     after: updated as unknown as Record<string, unknown>,
   });
 
-  // 🔴 POSTED MOMENT 3 of 3 — an admin approving a held log.
+  // 🔴 POSTED MOMENT 3 of 5 — an admin approving a held log.
   // ⚠️ `updated.startAt` deliberately, NOT `existing.startAt`: an approval may
   // carry a time EDIT, and the edited time is what decides the pay period.
   // Approving a September log in October must earn a SEPTEMBER stipend — the
@@ -1239,7 +1239,33 @@ export async function approveHeldHourLogInternal(
     stipendCovered: updated.stipendCovered,
     resolveAmountCents: fetchStipendAmountCentsForPeriod,
   });
-  return updated;
+
+  // ── The schedule, LAST and non-fatally. ──
+  // 🔴 THIS IS THE HALF OF MARK'S ASK THE ADMIN-ENTRY SYNC DID NOT COVER.
+  // A coach who covers somebody else's shift and logs it HIMSELF is held as
+  // `unscheduled`; before this, approving that log posted the pay and left
+  // the block reading `wrong_coach` forever, because the coach who actually
+  // worked it was still not a member of it. Approving is the admin
+  // authorising the work, so it is the right moment to put him on it.
+  //
+  // ⚠️ This does NOT make the block green, and must not be described as
+  // though it does — the coach who was scheduled and never logged still
+  // reads `no_show`, on the tile and on their accountability record. See
+  // `recorded-work-schedule-sync.ts`.
+  //
+  // Non-fatal for the same reason as every other call site: the pay is
+  // written by this point and cannot be un-written, so a schedule failure is
+  // REPORTED, never raised. `updated`, not `existing`, so an approval that
+  // carried a time edit matches the block against the window it actually
+  // approved.
+  const schedule = await syncScheduleToRecordedWork(actor, {
+    programId: updated.programId,
+    startAt: updated.startAt,
+    endAt: updated.endAt,
+    coachIds: [updated.coachId],
+  });
+
+  return { log: updated, schedule };
 }
 
 // 1b security B — admin REJECT of a held manual log. DELETEs the row (the
@@ -1322,8 +1348,12 @@ export async function acceptNeedsReviewLogInternal(
   // Idempotent — already accepted (posted + reviewed), keep the original
   // reviewer/timestamp and return unchanged. Skipped when an edit is present:
   // the admin may be correcting times even on an already-reviewed log.
+  //
+  // `schedule: null` means THE SYNC DID NOT RUN, which is deliberately a
+  // different fact from `{ kind: "unchanged" }` (it ran and found nothing to
+  // do). Nothing happened here, so there is nothing to tell the admin.
   if (!edit && existing.status === "posted" && existing.reviewedAt) {
-    return existing;
+    return { log: existing, schedule: null };
   }
 
   let updated;
@@ -1375,7 +1405,28 @@ export async function acceptNeedsReviewLogInternal(
       resolveAmountCents: fetchStipendAmountCentsForPeriod,
     });
   }
-  return updated;
+  // ── The schedule, LAST and non-fatally. ──
+  // The sibling of the approval path above. A log reaches this queue already
+  // POSTED, so the case here is a log that went anomalous AFTER it posted —
+  // most often because the block it matched was edited or deleted out from
+  // under it. Accepting it is the admin saying the work stands, so the
+  // schedule should say so too.
+  //
+  // 🔴 GATED ON `posted` for the same reason the stipend call above is: a
+  // REJECTED log is not payable and is not evidence that anybody worked, so
+  // it must never put a coach onto a block. Anything other than posted gets
+  // `null` — the sync did not run.
+  const schedule =
+    updated.status === "posted"
+      ? await syncScheduleToRecordedWork(actor, {
+          programId: updated.programId,
+          startAt: updated.startAt,
+          endAt: updated.endAt,
+          coachIds: [updated.coachId],
+        })
+      : null;
+
+  return { log: updated, schedule };
 }
 
 // Admin REJECTS a needs-review hour log: it is NOT deleted (the coach must

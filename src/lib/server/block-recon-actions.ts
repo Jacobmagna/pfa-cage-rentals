@@ -1,49 +1,52 @@
-// 0r(1) — ADMIN substitute-coach reassign: "Tyler covered this — reassign".
+// 0r(4) — ADMIN "Change the schedule to <the logged window>", the resolution
+// for a `wrong_time` block.
 //
 // THE PROBLEM THIS SOLVES. `programBlockCoachFlags.kind` has exactly two
-// values, `no_show` and `cancelled`, and each has a resolver. `wrong_coach`
-// and `wrong_time` have neither — they are DERIVED live by `reconcileBlocks`
-// on every render, so no admin action could clear them. A substitution that
-// was handled perfectly (the substitute logs it, the admin approves it and
-// deletes the scheduled coach's log) stayed red forever and was visually
-// indistinguishable from a coach who never showed up. Real case: Lucas
-// Milone scheduled Front Desk Sat Aug 8 10:00–3:00, Tyler Garcia worked it.
+// values, `no_show` and `cancelled`, and each has a resolver. `wrong_time` is
+// DERIVED live by `reconcileBlocks` on every render, so no admin action could
+// clear it: a coach scheduled 10:00–3:00 who actually worked 10:00–1:00 left
+// the block red forever, indistinguishable from a coach who never showed.
 //
-// WHY REASSIGNMENT RATHER THAN A THIRD FLAG KIND. A `wrong_coach` block is
-// not a problem needing an acknowledgement — it is a schedule that no longer
-// matches what happened. Moving the block's membership to the coach who
-// actually worked it makes the schedule TRUE, and the status then goes green
-// through the ordinary engine: Tyler is in the coach set, his log is within
-// tolerance, `reconcileBlocks` returns `logged`. No new enum value, no
-// migration, no stored state to drift, and nothing new for a future reader
-// to keep in sync. A third flag kind would instead have added a second,
-// parallel notion of "resolved" alongside a status that still said red.
+// WHY MOVE THE BLOCK RATHER THAN ADD A THIRD FLAG KIND. A `wrong_time` block
+// is not a problem needing an acknowledgement — it is a schedule that no
+// longer matches what happened. Moving the block's window to the times the
+// coach actually logged makes the schedule TRUE, and the status then goes
+// green through the ordinary engine. No new enum value, no migration, no
+// stored state to drift.
 //
-// 🔴 THE LOAD-BEARING GUARD. This action will ONLY move a block to a coach
-// who already has a POSTED hour-log overlapping that block's program and
-// window. Without that check this would be an unaudited way to move a shift
-// onto any coach at all — including one who never worked, whose pay follows
-// membership on the no-show derivation. The reassignment is therefore never
-// the admin's claim about what happened; it is the system agreeing with a
-// log the coach already wrote. An admin who genuinely wants to change who is
-// scheduled uses the normal block edit, which makes no such claim.
+// 🔴 THE WRITE IS DELEGATED TO `updateProgramScheduleBlockInternal`, and that
+// is the only correct way to move a block: it re-checks the linked CAGE
+// occupancy is free at the new window and moves the `blocked_times` rows with
+// it. A bare row update would leave the cage booked at the old time — a
+// silent double-book.
 //
-// Pay is NOT touched and cannot move: pay derives from `hour_logs`, and this
-// action writes only block membership. Tyler is already being paid for the
-// log he wrote; Lucas has no log to lose.
+// ── 📌 THE REASSIGN ACTION THAT USED TO LIVE HERE WAS RETIRED 2026-08-25 ──
+// `reassignBlockToLoggedCoachInternal` — the "<coach> covered this — reassign"
+// button — moved a `wrong_coach` block's membership from the scheduled coach
+// to the one who actually logged it, by ADDING the substitute and REMOVING
+// the scheduled coach.
+//
+// 🔴 IT WAS RETIRED BECAUSE ITS REMOVAL HALF BECAME WRONG. Approving a
+// coach's own log now joins him to the block automatically
+// (`recorded-work-schedule-sync.ts`), so `wrong_coach` no longer arises from
+// the ordinary flow and the button no longer rendered. Where it still could
+// fire it DELETED THE SCHEDULED COACH — and deleting him deletes his
+// `no_show`, which is the accountability record. Jacob's rule (2026-08-25):
+// somebody else covering a shift does not stop the scheduled coach having
+// missed it. The button's only remaining behaviour was to erase that.
+//
+// ▶ An admin who genuinely wants to change who is scheduled uses the block's
+// ordinary EDIT, which removes nobody by surprise — the retired button's own
+// error copy already pointed there. ▶ rule 27: do not carry a button whose
+// only job has been automated.
 //
 // Lives outside any "use server" file (same reason as block-flag-actions.ts
 // and block-handoff-actions.ts): it takes the actor as a parameter, so
 // exposing it directly as RPC would let a caller forge an admin identity.
 // The requireRole("admin")-gated wrapper is in
 // src/app/admin/hour-log/actions.ts.
-//
-// neon-http is stateless HTTP with no transactions, so the membership swap
-// is a sequence ordered add → repoint-primary → remove, exactly as
-// reassignOwnBlockInternal does it: a mid-sequence failure can leave the
-// block with BOTH coaches briefly, but never with none.
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
   hourLogs,
@@ -52,193 +55,17 @@ import {
   users,
 } from "@/db/schema";
 import { type AuthedSession } from "@/lib/authz";
-import { isLogScheduled } from "@/lib/coach-hour-log";
 import {
   BlockNotWrongTimeError,
-  CoachDidNotLogBlockError,
-  InvalidHandoffTargetError,
   MultiCoachBlockTimeMatchError,
   NotAssignedToBlockError,
   ProgramScheduleBlockNotFoundError,
-  ScheduledCoachAlreadyLoggedError,
 } from "@/lib/errors";
-import {
-  matchBlockToLoggedTimesSchema,
-  reassignBlockToLoggedCoachSchema,
-} from "@/lib/schemas/block-recon";
+import { matchBlockToLoggedTimesSchema } from "@/lib/schemas/block-recon";
 import { reconcileBlocks } from "./reconciliation";
 import { updateProgramScheduleBlockInternal } from "./program-schedule-actions";
-import { safeLogAudit } from "./audit-helpers";
 
 type Actor = AuthedSession["user"];
-
-/**
- * True iff `coachId` has a POSTED hour-log for `block.programId` whose
- * window overlaps the block's. Deliberately reuses `isLogScheduled` — the
- * same programId + half-open-overlap predicate the reconciliation engine
- * and the coach confirm list use — so "did this coach work it?" cannot be
- * answered one way here and another way by the banner that offered the
- * button.
- *
- * `posted` only: a held log is explicitly NOT payable and not counted
- * anywhere, so it is not evidence that the work happened.
- */
-async function hasPostedLogCoveringBlock(
-  coachId: string,
-  block: { programId: string; startAt: Date; endAt: Date },
-): Promise<boolean> {
-  const logs = await db
-    .select({
-      programId: hourLogs.programId,
-      startAt: hourLogs.startAt,
-      endAt: hourLogs.endAt,
-    })
-    .from(hourLogs)
-    .where(
-      and(
-        eq(hourLogs.coachId, coachId),
-        eq(hourLogs.programId, block.programId),
-        eq(hourLogs.status, "posted"),
-      ),
-    );
-
-  return isLogScheduled(
-    {
-      programId: block.programId,
-      startMs: block.startAt.getTime(),
-      endMs: block.endAt.getTime(),
-    },
-    logs.map((l) => ({
-      programId: l.programId,
-      startMs: l.startAt.getTime(),
-      endMs: l.endAt.getTime(),
-    })),
-  );
-}
-
-/**
- * Reassigns ONE block occurrence from the scheduled coach who did not work
- * it to the coach who did. Asserts, in order: the block exists · `from` is
- * a member · `to` is a different active coach · `to` has a posted log
- * covering the block · `from` does NOT. Then swaps membership and audits.
- *
- * Touches only this occurrence — a recurring series is unaffected, matching
- * the block dialog's existing single-occurrence-vs-series separation.
- */
-export async function reassignBlockToLoggedCoachInternal(
-  actor: Actor,
-  input: unknown,
-) {
-  const { blockId, fromCoachId, toCoachId } =
-    reassignBlockToLoggedCoachSchema.parse(input);
-
-  if (fromCoachId === toCoachId) {
-    throw new InvalidHandoffTargetError(toCoachId);
-  }
-
-  const [block] = await db
-    .select({
-      id: programScheduleBlocks.id,
-      programId: programScheduleBlocks.programId,
-      scheduledCoachId: programScheduleBlocks.scheduledCoachId,
-      startAt: programScheduleBlocks.startAt,
-      endAt: programScheduleBlocks.endAt,
-    })
-    .from(programScheduleBlocks)
-    .where(eq(programScheduleBlocks.id, blockId))
-    .limit(1);
-  if (!block) throw new ProgramScheduleBlockNotFoundError(blockId);
-
-  // `from` must actually be scheduled here, or there is no membership row
-  // to move and the caller is working from a stale render.
-  const [membership] = await db
-    .select({ coachId: programScheduleBlockCoaches.coachId })
-    .from(programScheduleBlockCoaches)
-    .where(
-      and(
-        eq(programScheduleBlockCoaches.blockId, blockId),
-        eq(programScheduleBlockCoaches.coachId, fromCoachId),
-      ),
-    )
-    .limit(1);
-  if (!membership) throw new NotAssignedToBlockError(blockId, fromCoachId);
-
-  // `to` must be an active, non-deleted coach. Admins are not valid
-  // targets, matching the coach-side hand-off picker.
-  const [recipient] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(
-      and(
-        eq(users.id, toCoachId),
-        eq(users.role, "coach"),
-        isNull(users.deletedAt),
-      ),
-    )
-    .limit(1);
-  if (!recipient) throw new InvalidHandoffTargetError(toCoachId);
-
-  // 🔴 The guard that makes this action safe — see the module header.
-  if (!(await hasPostedLogCoveringBlock(toCoachId, block))) {
-    throw new CoachDidNotLogBlockError(blockId, toCoachId);
-  }
-
-  // And the converse: if the scheduled coach DID log it, this block is not
-  // a wrong_coach case, and reassigning would take a shift away from the
-  // coach who can prove they worked it.
-  if (await hasPostedLogCoveringBlock(fromCoachId, block)) {
-    throw new ScheduledCoachAlreadyLoggedError(blockId, fromCoachId);
-  }
-
-  const wasPrimary = block.scheduledCoachId === fromCoachId;
-
-  // 1. Add the recipient (idempotent on the composite PK).
-  await db
-    .insert(programScheduleBlockCoaches)
-    .values({ blockId, coachId: toCoachId })
-    .onConflictDoNothing({
-      target: [
-        programScheduleBlockCoaches.blockId,
-        programScheduleBlockCoaches.coachId,
-      ],
-    });
-
-  // 2. Repoint the primary if the departing coach held it, so the grid
-  //    label and the reconciliation agree.
-  if (wasPrimary) {
-    await db
-      .update(programScheduleBlocks)
-      .set({ scheduledCoachId: toCoachId })
-      .where(eq(programScheduleBlocks.id, blockId));
-  }
-
-  // 3. Remove the departing coach.
-  await db
-    .delete(programScheduleBlockCoaches)
-    .where(
-      and(
-        eq(programScheduleBlockCoaches.blockId, blockId),
-        eq(programScheduleBlockCoaches.coachId, fromCoachId),
-      ),
-    );
-
-  await safeLogAudit(db, {
-    actorUserId: actor.id,
-    entityType: "program_schedule_block",
-    entityId: blockId,
-    action: "update",
-    before: {
-      substituteReassignFromCoachId: fromCoachId,
-      scheduledCoachId: block.scheduledCoachId,
-    },
-    after: {
-      substituteReassignToCoachId: toCoachId,
-      scheduledCoachId: wasPrimary ? toCoachId : block.scheduledCoachId,
-    },
-  });
-
-  return { blockId, fromCoachId, toCoachId };
-}
 
 /**
  * Loads a block, its scheduled coaches and every log overlapping its
@@ -335,9 +162,10 @@ async function reconcileOneBlock(blockId: string, coachId: string) {
  * window onto the times the scheduled coach actually logged, after which it
  * reconciles as `logged` through the ordinary engine.
  *
- * WHY MOVING THE BLOCK, RATHER THAN A THIRD FLAG KIND. It is the same choice
- * the substitute reassign makes one function up: the schedule is a PLAN, the
- * log is the RECORD, and when they disagree the record wins. Correcting the
+ * WHY MOVING THE BLOCK, RATHER THAN A THIRD FLAG KIND. The schedule is a
+ * PLAN, the log is the RECORD, and when they disagree the record wins.
+ * (The retired substitute reassign — see the module header — made the same
+ * choice for `wrong_coach`, by a different means.) Correcting the
  * plan needs no new enum value, no migration, and leaves no stored "resolved"
  * marker that can drift out of sync with a status still painting red. The
  * original scheduled window is not lost — `updateProgramScheduleBlockInternal`

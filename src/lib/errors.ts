@@ -383,43 +383,6 @@ export class InvalidHandoffTargetError extends Error {
   }
 }
 
-// 0r(1) — admin substitute reassign: the coach being reassigned TO has no
-// posted hour-log overlapping this block's program + window, so there is no
-// evidence they worked it. This is the guard that keeps "reassign to who
-// actually worked it" from becoming an unaudited way to move a shift onto a
-// coach who never showed. Refusing is always correct here: the admin can
-// still change the coach through the normal block edit, which does not claim
-// the reassignment is backed by a log.
-export class CoachDidNotLogBlockError extends Error {
-  readonly code = "COACH_DID_NOT_LOG_BLOCK" as const;
-  constructor(
-    public readonly blockId: string,
-    public readonly coachId: string,
-  ) {
-    super(
-      `Coach ${coachId} has no posted hour-log covering block ${blockId}`,
-    );
-    this.name = "CoachDidNotLogBlockError";
-  }
-}
-
-// 0r(1) — admin substitute reassign: the SCHEDULED coach already has a
-// posted log covering this block, so the block is not a `wrong_coach` case
-// at all (it reconciles as logged or wrong_time). Reassigning would hand
-// away a shift its own coach demonstrably worked.
-export class ScheduledCoachAlreadyLoggedError extends Error {
-  readonly code = "SCHEDULED_COACH_ALREADY_LOGGED" as const;
-  constructor(
-    public readonly blockId: string,
-    public readonly coachId: string,
-  ) {
-    super(
-      `Scheduled coach ${coachId} already logged block ${blockId}`,
-    );
-    this.name = "ScheduledCoachAlreadyLoggedError";
-  }
-}
-
 // 0r(4) — "match the schedule to what happened": the block does not actually
 // reconcile as `wrong_time` for this coach, so there is nothing to correct.
 // Re-derived from the engine at action time rather than trusted from the

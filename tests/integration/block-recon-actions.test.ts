@@ -27,19 +27,13 @@ import {
   users,
 } from "@/db/schema";
 import { createProgramScheduleBlockInternal } from "@/lib/server/program-schedule-actions";
-import {
-  matchBlockToLoggedTimesInternal,
-  reassignBlockToLoggedCoachInternal,
-} from "@/lib/server/block-recon-actions";
+import { matchBlockToLoggedTimesInternal } from "@/lib/server/block-recon-actions";
 import { reconcileBlocks } from "@/lib/server/reconciliation";
 import {
   BlockNotWrongTimeError,
-  CoachDidNotLogBlockError,
   MultiCoachBlockTimeMatchError,
-  InvalidHandoffTargetError,
   NotAssignedToBlockError,
   ProgramScheduleBlockNotFoundError,
-  ScheduledCoachAlreadyLoggedError,
 } from "@/lib/errors";
 import {
   ensureFixtureUsers,
@@ -132,22 +126,6 @@ async function createBlock(opts: {
   });
   createdBlockIds.push(block.id);
   return { id: block.id, scheduledCoachId: block.scheduledCoachId };
-}
-
-async function blockCoachIds(blockId: string): Promise<string[]> {
-  const rows = await db
-    .select({ coachId: programScheduleBlockCoaches.coachId })
-    .from(programScheduleBlockCoaches)
-    .where(eq(programScheduleBlockCoaches.blockId, blockId));
-  return rows.map((r) => r.coachId).sort();
-}
-
-async function primaryCoachId(blockId: string): Promise<string | null> {
-  const [row] = await db
-    .select({ scheduledCoachId: programScheduleBlocks.scheduledCoachId })
-    .from(programScheduleBlocks)
-    .where(eq(programScheduleBlocks.id, blockId));
-  return row?.scheduledCoachId ?? null;
 }
 
 async function insertLog(
@@ -249,335 +227,19 @@ async function reconcileOne(blockId: string, programId: string) {
   );
 }
 
-describe("reassignBlockToLoggedCoachInternal — the happy path", () => {
-  it("moves membership to the coach who logged it and repoints the primary", async () => {
-    const { scheduled, substitute, block } = await aug8Setup();
-    expect(block.scheduledCoachId).toBe(scheduled.id);
-
-    const result = await reassignBlockToLoggedCoachInternal(adminActor(), {
-      blockId: block.id,
-      fromCoachId: scheduled.id,
-      toCoachId: substitute.id,
-    });
-
-    expect(result).toEqual({
-      blockId: block.id,
-      fromCoachId: scheduled.id,
-      toCoachId: substitute.id,
-    });
-    expect(await blockCoachIds(block.id)).toEqual([substitute.id]);
-    expect(await primaryCoachId(block.id)).toBe(substitute.id);
-  });
-
-  it("writes an audit row naming both coaches", async () => {
-    const { scheduled, substitute, block } = await aug8Setup();
-    await reassignBlockToLoggedCoachInternal(adminActor(), {
-      blockId: block.id,
-      fromCoachId: scheduled.id,
-      toCoachId: substitute.id,
-    });
-
-    // Assert the ROW EXISTS rather than assuming the write succeeded —
-    // safeLogAudit swallows failures (discipline rule 28).
-    const rows = await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.entityId, block.id));
-    const update = rows.find((r) => r.action === "update");
-    expect(update).toBeDefined();
-    expect(update!.actorUserId).toBe(fixtures.admin.id);
-    const diff = update!.diff as {
-      before: Record<string, unknown>;
-      after: Record<string, unknown>;
-    };
-    expect(diff.before.substituteReassignFromCoachId).toBe(scheduled.id);
-    expect(diff.after.substituteReassignToCoachId).toBe(substitute.id);
-    expect(diff.after.scheduledCoachId).toBe(substitute.id);
-  });
-
-  it("does NOT touch the hour log — pay cannot move", async () => {
-    const { scheduled, substitute, block, logId } = await aug8Setup();
-    const [before] = await db
-      .select()
-      .from(hourLogs)
-      .where(eq(hourLogs.id, logId));
-
-    await reassignBlockToLoggedCoachInternal(adminActor(), {
-      blockId: block.id,
-      fromCoachId: scheduled.id,
-      toCoachId: substitute.id,
-    });
-
-    const [after] = await db
-      .select()
-      .from(hourLogs)
-      .where(eq(hourLogs.id, logId));
-    // Byte-for-byte: pay derives from this row, so anything changing here
-    // would be a pay change smuggled in by a scheduling action.
-    expect(after).toEqual(before);
-  });
-
-  it("moves only the named coach on a multi-coach block", async () => {
-    const program = await createProgram();
-    const scheduled = await createCoach();
-    const bystander = await createCoach();
-    const substitute = await createCoach();
-    const startAt = daysFromNowAt(-2, 17);
-    const endAt = daysFromNowAt(-2, 20);
-    const block = await createBlock({
-      programId: program.id,
-      coachIds: [scheduled.id, bystander.id],
-      startAt,
-      endAt,
-    });
-    await insertLog(substitute.id, program.id, startAt, endAt);
-
-    await reassignBlockToLoggedCoachInternal(adminActor(), {
-      blockId: block.id,
-      fromCoachId: scheduled.id,
-      toCoachId: substitute.id,
-    });
-
-    expect(await blockCoachIds(block.id)).toEqual(
-      [bystander.id, substitute.id].sort(),
-    );
-  });
-});
-
-describe("reassignBlockToLoggedCoachInternal — the guards", () => {
-  // THE load-bearing guard. Without it this action is an unaudited way to
-  // move a shift onto a coach who never worked, and the no-show derivation
-  // follows membership.
-  it("refuses when the target has NO log covering the block", async () => {
-    const program = await createProgram();
-    const scheduled = await createCoach();
-    const stranger = await createCoach();
-    const block = await createBlock({
-      programId: program.id,
-      coachIds: [scheduled.id],
-      startAt: daysFromNowAt(-2, 17),
-      endAt: daysFromNowAt(-2, 20),
-    });
-
-    await expect(
-      reassignBlockToLoggedCoachInternal(adminActor(), {
-        blockId: block.id,
-        fromCoachId: scheduled.id,
-        toCoachId: stranger.id,
-      }),
-    ).rejects.toBeInstanceOf(CoachDidNotLogBlockError);
-    // Membership untouched by the refusal.
-    expect(await blockCoachIds(block.id)).toEqual([scheduled.id]);
-  });
-
-  it("refuses when the target's log is HELD, not posted", async () => {
-    const program = await createProgram();
-    const scheduled = await createCoach();
-    const substitute = await createCoach();
-    const startAt = daysFromNowAt(-2, 17);
-    const endAt = daysFromNowAt(-2, 20);
-    const block = await createBlock({
-      programId: program.id,
-      coachIds: [scheduled.id],
-      startAt,
-      endAt,
-    });
-    // A held log is explicitly not payable and not counted anywhere, so it
-    // is not evidence the work happened.
-    await insertLog(substitute.id, program.id, startAt, endAt, "held");
-
-    await expect(
-      reassignBlockToLoggedCoachInternal(adminActor(), {
-        blockId: block.id,
-        fromCoachId: scheduled.id,
-        toCoachId: substitute.id,
-      }),
-    ).rejects.toBeInstanceOf(CoachDidNotLogBlockError);
-  });
-
-  it("refuses when the target's log is for a DIFFERENT program", async () => {
-    const program = await createProgram();
-    const otherProgram = await createProgram();
-    const scheduled = await createCoach();
-    const substitute = await createCoach();
-    const startAt = daysFromNowAt(-2, 17);
-    const endAt = daysFromNowAt(-2, 20);
-    const block = await createBlock({
-      programId: program.id,
-      coachIds: [scheduled.id],
-      startAt,
-      endAt,
-    });
-    await insertLog(substitute.id, otherProgram.id, startAt, endAt);
-
-    await expect(
-      reassignBlockToLoggedCoachInternal(adminActor(), {
-        blockId: block.id,
-        fromCoachId: scheduled.id,
-        toCoachId: substitute.id,
-      }),
-    ).rejects.toBeInstanceOf(CoachDidNotLogBlockError);
-  });
-
-  it("refuses when the target's log does not OVERLAP the block window", async () => {
-    const program = await createProgram();
-    const scheduled = await createCoach();
-    const substitute = await createCoach();
-    const block = await createBlock({
-      programId: program.id,
-      coachIds: [scheduled.id],
-      startAt: daysFromNowAt(-2, 17),
-      endAt: daysFromNowAt(-2, 20),
-    });
-    // Same day, hours later — no overlap.
-    await insertLog(
-      substitute.id,
-      program.id,
-      daysFromNowAt(-2, 21),
-      daysFromNowAt(-2, 23),
-    );
-
-    await expect(
-      reassignBlockToLoggedCoachInternal(adminActor(), {
-        blockId: block.id,
-        fromCoachId: scheduled.id,
-        toCoachId: substitute.id,
-      }),
-    ).rejects.toBeInstanceOf(CoachDidNotLogBlockError);
-  });
-
-  // The converse guard: if the scheduled coach demonstrably worked it, this
-  // is not a wrong_coach case and reassigning would take the shift away.
-  it("refuses when the SCHEDULED coach also logged the block", async () => {
-    const { scheduled, substitute, block, program, startAt, endAt } =
-      await aug8Setup();
-    await insertLog(scheduled.id, program.id, startAt, endAt);
-
-    await expect(
-      reassignBlockToLoggedCoachInternal(adminActor(), {
-        blockId: block.id,
-        fromCoachId: scheduled.id,
-        toCoachId: substitute.id,
-      }),
-    ).rejects.toBeInstanceOf(ScheduledCoachAlreadyLoggedError);
-    expect(await blockCoachIds(block.id)).toEqual([scheduled.id]);
-  });
-
-  it("refuses when `from` is not scheduled on the block", async () => {
-    const { substitute, block } = await aug8Setup();
-    const outsider = await createCoach();
-
-    await expect(
-      reassignBlockToLoggedCoachInternal(adminActor(), {
-        blockId: block.id,
-        fromCoachId: outsider.id,
-        toCoachId: substitute.id,
-      }),
-    ).rejects.toBeInstanceOf(NotAssignedToBlockError);
-  });
-
-  it("refuses a soft-deleted recipient", async () => {
-    const program = await createProgram();
-    const scheduled = await createCoach();
-    const deleted = await createCoach({ deleted: true });
-    const startAt = daysFromNowAt(-2, 17);
-    const endAt = daysFromNowAt(-2, 20);
-    const block = await createBlock({
-      programId: program.id,
-      coachIds: [scheduled.id],
-      startAt,
-      endAt,
-    });
-    await insertLog(deleted.id, program.id, startAt, endAt);
-
-    await expect(
-      reassignBlockToLoggedCoachInternal(adminActor(), {
-        blockId: block.id,
-        fromCoachId: scheduled.id,
-        toCoachId: deleted.id,
-      }),
-    ).rejects.toBeInstanceOf(InvalidHandoffTargetError);
-  });
-
-  it("refuses an ADMIN recipient", async () => {
-    const program = await createProgram();
-    const scheduled = await createCoach();
-    const adminUser = await createCoach({ role: "admin" });
-    const startAt = daysFromNowAt(-2, 17);
-    const endAt = daysFromNowAt(-2, 20);
-    const block = await createBlock({
-      programId: program.id,
-      coachIds: [scheduled.id],
-      startAt,
-      endAt,
-    });
-    await insertLog(adminUser.id, program.id, startAt, endAt);
-
-    await expect(
-      reassignBlockToLoggedCoachInternal(adminActor(), {
-        blockId: block.id,
-        fromCoachId: scheduled.id,
-        toCoachId: adminUser.id,
-      }),
-    ).rejects.toBeInstanceOf(InvalidHandoffTargetError);
-  });
-
-  it("refuses reassigning a coach to themselves", async () => {
-    const { scheduled, block } = await aug8Setup();
-    await expect(
-      reassignBlockToLoggedCoachInternal(adminActor(), {
-        blockId: block.id,
-        fromCoachId: scheduled.id,
-        toCoachId: scheduled.id,
-      }),
-    ).rejects.toBeInstanceOf(InvalidHandoffTargetError);
-  });
-
-  it("refuses an unknown block", async () => {
-    const { scheduled, substitute } = await aug8Setup();
-    await expect(
-      reassignBlockToLoggedCoachInternal(adminActor(), {
-        blockId: "00000000-0000-0000-0000-000000000000",
-        fromCoachId: scheduled.id,
-        toCoachId: substitute.id,
-      }),
-    ).rejects.toBeInstanceOf(ProgramScheduleBlockNotFoundError);
-  });
-});
-
-// Rule 26: enter at the TOP of the pipeline. Everything above proves the
-// membership table changed; only this proves the RED ACTUALLY CLEARS, which
-// is the entire point of the feature.
-describe("reassignBlockToLoggedCoachInternal — the status actually goes green", () => {
-
-  it("red before, green after — and the reassign target is the substitute", async () => {
-    const { program, scheduled, substitute, block } = await aug8Setup();
-
-    const before = await reconcileOne(block.id, program.id);
-    expect(before[block.id].status).toBe("wrong_coach");
-    // The button's target, straight off the engine.
-    expect(before[block.id].coaches[0].loggedBy).toEqual({
-      coachId: substitute.id,
-      coachName: "Tyler Garcia",
-    });
-
-    await reassignBlockToLoggedCoachInternal(adminActor(), {
-      blockId: block.id,
-      fromCoachId: scheduled.id,
-      toCoachId: substitute.id,
-    });
-
-    const after = await reconcileOne(block.id, program.id);
-    expect(after[block.id].status).toBe("logged");
-    expect(after[block.id].coaches[0].loggedBy).toBeNull();
-    expect(after[block.id].detail).toContain("On schedule");
-  });
-});
+// 📌 THE REASSIGN TESTS (three describes, ~325 lines) WERE REMOVED WITH THE
+// ACTION ON 2026-08-25. They covered `reassignBlockToLoggedCoachInternal` —
+// the happy path, its guards, and that the status actually went green. The
+// action was retired because approving a coach's own log now JOINS him to
+// the block, so `wrong_coach` no longer arises from the ordinary flow, and
+// the action's removal half deleted the scheduled coach along with his
+// `no_show`. ▶ `block-recon-actions.ts`'s header, and
+// `schedule-follows-approved-work.test.ts` for what replaced the behaviour.
 
 // 0r(4) — "match the schedule to what happened", the wrong_time resolution.
 // The live case it was built for: Lucas, Sat Aug 22, logged 10:00–1:00
-// against a scheduled 10:00–3:00. Right coach, wrong window — the state
-// reassignment cannot fix.
+// against a scheduled 10:00–3:00. Right coach, wrong window — so there is
+// nobody to hand it to; the block moves instead.
 describe("matchBlockToLoggedTimesInternal", () => {
   // Scheduled 17:00–22:00 UTC, coach logged 17:00–20:00 — three hours short,
   // well outside the ±15-min tolerance.

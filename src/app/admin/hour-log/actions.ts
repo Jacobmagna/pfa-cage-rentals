@@ -27,10 +27,8 @@ import {
   resolveCancellationInternal,
   resolveNoShowInternal,
 } from "@/lib/server/block-flag-actions";
-import {
-  matchBlockToLoggedTimesInternal,
-  reassignBlockToLoggedCoachInternal,
-} from "@/lib/server/block-recon-actions";
+import { matchBlockToLoggedTimesInternal } from "@/lib/server/block-recon-actions";
+import { scheduleSyncNotice } from "@/lib/server/recorded-work-schedule-sync";
 import {
   acceptNeedsReviewLogInternal,
   approveHeldHourLogInternal,
@@ -106,25 +104,6 @@ export async function resolveNoShow(blockId: string, coachId: string) {
   return result;
 }
 
-// 0r(1) — SUBSTITUTE REASSIGN: move one block occurrence from the scheduled
-// coach who did not work it to the coach who actually logged it, clearing a
-// `wrong_coach` state that no action could previously resolve. The internal
-// action refuses unless the recipient already has a posted log covering the
-// block, so this can never invent a shift for a coach who did not work.
-//
-// Reconciliation is derived, so the red clears on the next render with no
-// stored state — which is exactly why the revalidate set matters here.
-export async function reassignBlockToLoggedCoach(input: {
-  blockId: string;
-  fromCoachId: string;
-  toCoachId: string;
-}) {
-  const session = await requireRole("admin");
-  const result = await reassignBlockToLoggedCoachInternal(session.user, input);
-  revalidateHourLogSurfaces();
-  return result;
-}
-
 // 0r(4) — MATCH THE SCHEDULE TO WHAT HAPPENED: move a `wrong_time` block's
 // window onto the times the scheduled coach actually logged. The internal
 // action re-derives the target window by running the reconciliation engine
@@ -160,7 +139,9 @@ export async function approveHeldHourLog(
   const parsed = edit ? acceptTimeEditSchema.parse(edit) : undefined;
   const result = await approveHeldHourLogInternal(session.user, id, parsed);
   revalidateHourLogSurfaces();
-  return result;
+  // Only the schedule NOTICE crosses back to the client. The log row itself
+  // was never read by any caller, and approving is not a read surface.
+  return { notice: scheduleSyncNotice(result.schedule) };
 }
 
 // 1b security B — read-only detail for the admin held-log "Details +
@@ -191,7 +172,7 @@ export async function acceptNeedsReviewLog(
   const parsed = edit ? acceptTimeEditSchema.parse(edit) : undefined;
   const result = await acceptNeedsReviewLogInternal(session.user, id, parsed);
   revalidateHourLogSurfaces();
-  return result;
+  return { notice: scheduleSyncNotice(result.schedule) };
 }
 
 // Admin REJECT of a needs-review hour log: flips to 'rejected' (excluded from

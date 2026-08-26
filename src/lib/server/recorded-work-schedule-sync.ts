@@ -1,11 +1,35 @@
-// ADMIN HOUR ENTRY → THE SCHEDULE. Making the grid show work an admin
-// recorded, rather than leaving it red for a shift everybody knows happened.
+// RECORDED WORK → THE SCHEDULE. Making the grid show work that actually
+// happened, rather than leaving it red for a shift everybody knows about.
+//
+// ── THE TWO WAYS WORK BECOMES RECORDED, AND WHY BOTH RUN THIS ──────────
+// Mark asked for the schedule to agree with the work log "once hours are
+// posted or logged ON EITHER END". There are exactly two ends, and an admin
+// authorises both of them:
+//   • an admin RECORDS hours for a coach (`logHourForCoachInternal`); or
+//   • a coach logs their own hours, the 1b-security-B gate HOLDS it as
+//     anomalous, and an admin APPROVES it (`approveHeldHourLogInternal`, and
+//     `acceptNeedsReviewLogInternal` for a log that went anomalous after it
+//     had already posted).
+//
+// 🔴 THE COACH'S OWN WRITE IS DELIBERATELY NOT ONE OF THEM. Syncing at the
+// moment a coach saves would let a coach put themselves onto a schedule
+// block by typing — the exact authority the held-then-approve gate exists to
+// withhold. The admin's approval IS the authorisation, so the sync runs
+// there and nowhere earlier.
 //
 // ── WHAT THIS DOES, AND THE ONE THING IT DELIBERATELY WILL NOT DO ────────
-// When an admin records hours for a coach:
+// When work is recorded:
 //   • a scheduled block of the same program overlapping that window gains
-//     the coach as a scheduled member, so the block reconciles GREEN and
-//     names everybody who actually worked it;
+//     the coach as a scheduled member, so the block names everybody who
+//     actually worked it;
+//     🔴 IT DOES NOT MAKE THE BLOCK GREEN, and that is the point. Adding
+//     Tyler does not clear Lucas: `reconcileBlocks` judges each member
+//     SEPARATELY and the block-level bar is red if ANY of them has a
+//     problem, so a coach who was scheduled and never logged still reads
+//     `no_show` — on the tile and on their accountability record — with
+//     the coach who covered reading `logged` beside them. What it does
+//     remove is `wrong_coach`, which by definition means "somebody NOT on
+//     this block logged it" and stops being true the moment they are;
 //   • if there is NO such block, one is created from the entry itself, so
 //     work that was never planned still appears on the schedule.
 //
@@ -63,6 +87,28 @@ export type ScheduleSyncOutcome =
       reason: "retired_program" | "not_schedulable" | "failed";
       detail: string;
     };
+
+/**
+ * The sentence to show an admin when the schedule did NOT end up matching
+ * the work — and `null` for every outcome that needs no explanation.
+ *
+ * 🔴 ONLY `skipped` produces a sentence. A notice that also fires on success
+ * is a notice people learn to click past, and this one has to survive being
+ * read on the day it matters. `null` in, `null` out: the sync not RUNNING is
+ * not something to report either.
+ *
+ * ⚠️ Whatever renders this must not style it as an ERROR. Every skip message
+ * begins by saying the hours were recorded and will be paid, because they
+ * were; an admin who reads it as a failure will try again, and re-entering
+ * is the one action on these screens that can double-pay (▶ discipline rule
+ * 46).
+ */
+export function scheduleSyncNotice(
+  outcome: ScheduleSyncOutcome | null,
+): string | null {
+  if (outcome === null) return null;
+  return outcome.kind === "skipped" ? outcome.detail : null;
+}
 
 /**
  * Every block of this program whose window overlaps the entry, shaped for
@@ -168,12 +214,17 @@ async function schedulableAmong(ids: string[]): Promise<string[]> {
 }
 
 /**
- * Point the schedule at what an admin just recorded.
+ * Point the schedule at work an admin has just authorised — either by
+ * recording it, or by approving what a coach recorded.
  *
  * `coachIds` are the subjects whose hours were written — already resolved,
  * already deduped, and already known to exist.
+ *
+ * 🔴 `actor` is the ADMIN, never the coach. On the approval path the coach
+ * wrote the hours but the admin authorised the schedule change, and the
+ * audit row has to name whoever could have refused it.
  */
-export async function syncScheduleForAdminEntry(
+export async function syncScheduleToRecordedWork(
   actor: AuthedSession["user"],
   entry: {
     programId: string;

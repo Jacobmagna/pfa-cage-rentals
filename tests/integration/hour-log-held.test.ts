@@ -195,8 +195,8 @@ describe("logHourInternal held-then-approve gate", () => {
     expect(held.status).toBe("held");
 
     const approved = await approveHeldHourLogInternal(fixtures.admin, held.id);
-    expect(approved.status).toBe("posted");
-    expect(approved.reviewedAt).not.toBeNull();
+    expect(approved.log.status).toBe("posted");
+    expect(approved.log.reviewedAt).not.toBeNull();
 
     const [row] = await db
       .select()
@@ -328,7 +328,7 @@ describe("approveHeldHourLogInternal with an edit", () => {
       startAt: newStart,
       endAt: newEnd,
     });
-    expect(approved.status).toBe("posted");
+    expect(approved.log.status).toBe("posted");
 
     const [row] = await db
       .select()

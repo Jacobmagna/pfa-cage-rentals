@@ -19,12 +19,13 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { blockedTimes, sessionsBilling, users } from "@/db/schema";
+import { blockedTimes, resources, sessionsBilling, users } from "@/db/schema";
 import { pfaWallClockToUtc } from "@/lib/timezone";
 import { computeDisplayWindow, type DisplayWindow } from "@/lib/display/window";
 import {
   DISPLAY_UNNAMED_COACH_LABEL,
   fetchDisplaySchedule,
+  fetchDisplayScheduleRows,
 } from "@/lib/server/display-schedule";
 import {
   ensureFixtureUsers,
@@ -215,6 +216,94 @@ describe("🔴 PII — the fields that must never reach a public page", () => {
     expect(Object.keys(result.resources[0]).sort()).toEqual(
       ["id", "name", "sortOrder", "type"].sort(),
     );
+  });
+});
+
+describe("🔴 PII — the SQL projection itself, asserted separately from the mapping", () => {
+  // 🔴 THIS BLOCK EXISTS BECAUSE A MUTATION SWEEP PROVED THE TESTS ABOVE WERE
+  // NOT WATCHING IT. Putting `note: sessionsBilling.note` back into the
+  // SELECT broke nothing: `fetchDisplaySchedule` rebuilds each session as an
+  // explicit object, so the mapping silently dropped the leaked column again.
+  // Two layers of defence, and every test was pointed at the second one.
+  //
+  // These assert the FIRST layer — the projection — by reading the rows
+  // before any mapping happens. Same idea as discipline rule 26: at least one
+  // test has to enter at the TOP of the pipeline.
+  it("the session projection never selects note or email", async () => {
+    await seedSession({
+      resourceId: cage1.id,
+      coachId: fixtures.coach.id,
+      start: "14:00",
+      end: "15:00",
+      note: NOTE_SENTINEL,
+    });
+
+    const rows = await fetchDisplayScheduleRows(WINDOW);
+
+    expect(rows.sessions).toHaveLength(1);
+    expect(Object.keys(rows.sessions[0]).sort()).toEqual(
+      ["coachName", "endAt", "id", "isGroupSession", "resourceId", "startAt"].sort(),
+    );
+    expect(JSON.stringify(rows)).not.toContain(NOTE_SENTINEL);
+    expect(JSON.stringify(rows)).not.toContain("@pfa.invalid");
+  });
+
+  it("the block projection never selects reason", async () => {
+    await seedBlock({
+      resourceId: cage1.id,
+      start: "14:00",
+      end: "15:00",
+      reason: REASON_SENTINEL,
+    });
+
+    const rows = await fetchDisplayScheduleRows(WINDOW);
+
+    expect(rows.blocks).toHaveLength(1);
+    expect(Object.keys(rows.blocks[0]).sort()).toEqual(
+      ["endAt", "id", "resourceId", "startAt"].sort(),
+    );
+    expect(JSON.stringify(rows)).not.toContain(REASON_SENTINEL);
+  });
+});
+
+describe("retired equipment stays off the wall", () => {
+  it("excludes an INACTIVE resource and its sessions", async () => {
+    // 🔴 ALSO ADDED BECAUSE A MUTATION SURVIVED. Deleting the
+    // `WHERE active = true` filter broke no test, because the seeded dev
+    // branch happens to contain no inactive resources — the guard was
+    // untestable rather than untested (discipline rule 27: ask which).
+    // A decommissioned cage still rendering on the facility TV is a real
+    // outcome, so the fixture now makes it reachable.
+    const [retired] = await db
+      .insert(resources)
+      .values({
+        name: "SENTINEL Retired Cage",
+        type: "cage",
+        sortOrder: 9999,
+        active: false,
+      })
+      .returning({ id: resources.id });
+
+    try {
+      await seedSession({
+        resourceId: retired.id,
+        coachId: fixtures.coach.id,
+        start: "14:00",
+        end: "15:00",
+      });
+
+      const result = await fetchDisplaySchedule(WINDOW);
+
+      expect(result.resources.map((r) => r.id)).not.toContain(retired.id);
+      expect(JSON.stringify(result)).not.toContain("SENTINEL Retired Cage");
+
+      // Positive control: an ACTIVE resource is present in the same call, so
+      // this is not passing because the query returned nothing at all.
+      expect(result.resources.map((r) => r.id)).toContain(cage1.id);
+    } finally {
+      await db.delete(sessionsBilling).where(eq(sessionsBilling.resourceId, retired.id));
+      await db.delete(resources).where(eq(resources.id, retired.id));
+    }
   });
 });
 

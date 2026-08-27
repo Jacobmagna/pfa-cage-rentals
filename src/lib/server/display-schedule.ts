@@ -82,6 +82,35 @@ export type DisplaySchedule = {
 };
 
 /**
+ * The rows exactly as the three queries project them, before any mapping.
+ *
+ * 🔴 THIS IS EXPORTED SO THE PROJECTION CAN BE TESTED ON ITS OWN, AND THAT
+ * SPLIT WAS FORCED BY A MUTATION SWEEP. The sentinel tests originally
+ * asserted only on `fetchDisplaySchedule`'s return value — and putting
+ * `note: sessionsBilling.note` back into the SELECT broke NOTHING, because
+ * the mapping below rebuilds each session as an explicit object and silently
+ * dropped it again. The tests were guarding the MAP while this file's header
+ * claimed the PROJECTION was the boundary; two defences, one of them
+ * unverified, and no way to tell which was load-bearing.
+ *
+ * Now both are asserted independently: key-set tests run against these raw
+ * rows, sentinel tests run against the mapped result. Either one regressing
+ * fails a named test.
+ */
+export type DisplayScheduleRows = {
+  resources: DisplayResource[];
+  sessions: {
+    id: string;
+    resourceId: string;
+    startAt: Date;
+    endAt: Date;
+    coachName: string | null;
+    isGroupSession: boolean;
+  }[];
+  blocks: DisplayBlock[];
+};
+
+/**
  * Everything the display needs for one rolling window.
  *
  * Resources are unfiltered by type on purpose: Mark asked for the whole
@@ -94,9 +123,9 @@ export type DisplaySchedule = {
  * does not want it on the screen. Reading only the three tables below is what
  * keeps that true structurally rather than by remembering to.
  */
-export async function fetchDisplaySchedule(
+export async function fetchDisplayScheduleRows(
   win: DisplayWindow,
-): Promise<DisplaySchedule> {
+): Promise<DisplayScheduleRows> {
   // Half-open OVERLAP, not containment on startAt. `/master/schedule` filters
   // `startAt >= dayStart AND startAt < dayEnd`, which is fine for a whole day
   // and WRONG for a four-hour window: it drops the session that is in
@@ -154,9 +183,20 @@ export async function fetchDisplaySchedule(
       .orderBy(asc(blockedTimes.startAt)),
   ]);
 
+  return { resources: resourceRows, sessions: sessionRows, blocks: blockRows };
+}
+
+/**
+ * What the page renders. Adds exactly one thing to the raw rows: a coach
+ * NAME becomes a coach LABEL that is always safe to print.
+ */
+export async function fetchDisplaySchedule(
+  win: DisplayWindow,
+): Promise<DisplaySchedule> {
+  const rows = await fetchDisplayScheduleRows(win);
   return {
-    resources: resourceRows,
-    sessions: sessionRows.map((r) => ({
+    resources: rows.resources,
+    sessions: rows.sessions.map((r) => ({
       id: r.id,
       resourceId: r.resourceId,
       startAt: r.startAt,
@@ -166,6 +206,6 @@ export async function fetchDisplaySchedule(
       coachLabel: r.coachName ?? DISPLAY_UNNAMED_COACH_LABEL,
       isGroupSession: r.isGroupSession,
     })),
-    blocks: blockRows,
+    blocks: rows.blocks,
   };
 }

@@ -99,16 +99,40 @@ describe("computeDisplayWindow — the edges of the operating day", () => {
 
   it("never renders past closing time", () => {
     // 8:00 PM + a 4h window would run to midnight; it must stop at 10 PM.
+    // ⚠️ Note this passes on the START clamp alone — see the next test for
+    // why that matters.
     const w = win("20:00");
     expect(formatPfaTime(w.endAt)).toBe("22:00");
   });
 
-  it("collapses onto the operating day when the window is longer than it", () => {
-    // 8 AM–10 PM is 14 hours, so this cannot happen today — but the clamp
-    // must not produce a negative-length window if the hours ever widen.
-    const w = win("14:00", DISPLAY_MAX_HOURS);
-    expect(w.startAt.getTime()).toBeLessThan(w.endAt.getTime());
-    expect(w.slotCount).toBeGreaterThan(0);
+  it("clamps the END even when the start clamp cannot save it", () => {
+    // 🔴 THIS TEST EXISTS BECAUSE A MUTATION SURVIVED. Deleting the
+    // `Math.min(close, ...)` on endAt broke NO test: with a window shorter
+    // than the 14-hour operating day, pinning the START to `close - span`
+    // already guarantees the end lands on closing time, so the end clamp
+    // never got a chance to run. It was a decoy, not defence-in-depth
+    // (maintenance discipline rule 27).
+    //
+    // A window LONGER than the operating day is the only shape that reaches
+    // it: the start pins to opening instead, and nothing else stops the end
+    // from running into the small hours. `parseDisplayHours` cannot produce
+    // this today (DISPLAY_MAX_HOURS is 8), but computeDisplayWindow is
+    // exported and takes `hours` directly, and the guard is what keeps it
+    // honest if the bounds are ever widened.
+    const w = computeDisplayWindow(at("14:00"), 20);
+    expect(formatPfaTime(w.startAt)).toBe("08:00");
+    expect(formatPfaTime(w.endAt)).toBe("22:00");
+    expect(w.slotCount).toBe(28); // the whole operating day, and no more
+  });
+
+  it("never produces a zero- or negative-length window", () => {
+    for (const hours of [DISPLAY_MIN_HOURS, DISPLAY_DEFAULT_HOURS, DISPLAY_MAX_HOURS, 20]) {
+      for (const t of ["05:00", "08:00", "14:00", "21:59", "23:59"]) {
+        const w = computeDisplayWindow(at(t), hours);
+        expect(w.endAt.getTime()).toBeGreaterThan(w.startAt.getTime());
+        expect(w.slotCount).toBeGreaterThan(0);
+      }
+    }
   });
 });
 

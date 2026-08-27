@@ -17,8 +17,31 @@
 //     calendar day AFTER the block ended (see `noShowDueAt`) — so a block
 //     that just ended doesn't alarm during the same business day.
 //
-// Everything is bounded to a 30-day lookback window so the derivation stays
-// cheap and the queue never grows without bound.
+// ── 🔴 A NO-SHOW NEVER EXPIRES (Mark, 2026-08-26) ───────────────────────────
+// This queue USED TO bound the no_show derivation to a SLIDING 30-day window
+// "so the derivation stays cheap and the queue never grows without bound".
+// That was never a decision about accountability, and it silently deleted
+// one: an unreviewed no-show simply stopped being reported on its 30th day,
+// with no flag, no audit row and nothing on any screen to say it had gone.
+//
+// It was found on 2026-08-26 when Mark watched three July 27 alerts vanish
+// mid-session — he opened the audit log, came back, and the sliding cutoff
+// had crawled past them while he read. Nobody clicked anything.
+//
+// 🔴 THE ARGUMENT THAT SETTLED IT: no_show was the ONLY one of this queue's
+// five alert types that expired. `unscheduled`, `double_logged` and
+// `wrong_time` all run from `REVIEW_FLOOR` (below), and `cancelled` has no
+// window at all. Removing the expiry did not invent a policy — it made the
+// fifth alert behave like the four it is rendered beside.
+//
+// Mark's instruction, verbatim through Jacob: the alert stands "until the
+// end of time". It ends when a human ACKNOWLEDGES it (which writes a
+// 'no_show' flag) — never because the clock moved.
+//
+// ⚠️ IF YOU ARE TEMPTED TO PUT A WINDOW BACK for cost reasons, read
+// `blockAlertLogFloor` below FIRST: the two queries are coupled, and
+// narrowing one of them alone manufactures FALSE no-shows against real
+// coaches. Bound it by paging the RESULT, not by hiding candidates.
 
 import { and, eq, gte, inArray, isNull, lt } from "drizzle-orm";
 import { db } from "@/db";
@@ -32,6 +55,7 @@ import {
 } from "@/db/schema";
 import { isLogScheduled } from "@/lib/coach-hour-log";
 import { findOverlappingLogIds } from "@/lib/hour-log-overlap";
+import { MAX_HOUR_LOG_DURATION_MS } from "@/lib/schemas/hour-log";
 import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
 import type { NormalizedHourLogFilters } from "@/lib/reports/hour-log-filters";
 import { pfaDayEnd, pfaDayStart, pfaWallClockAt } from "@/lib/timezone";
@@ -71,12 +95,46 @@ export type NoShowAlert = {
   endAt: Date;
 };
 
-const LOOKBACK_MS = 30 * 24 * 60 * 60_000;
+/**
+ * The single horizon for the WHOLE needs-review queue — every alert type,
+ * not just no-shows. A FIXED floor that predates the app, deliberately NOT
+ * a sliding window: nothing in this queue may age out on its own.
+ *
+ * It exists at all only so the candidate scan has a lower bound the planner
+ * can use. Moving it forward would start silently dropping alerts again,
+ * which is the exact defect this constant was introduced to kill.
+ */
+export const REVIEW_FLOOR = pfaDayStart(new Date("2024-01-01T12:00:00Z"));
+
+/**
+ * The earliest instant a log could START and still overlap ANY of the given
+ * blocks — the lower bound for the no-show derivation's log query.
+ *
+ * 🔴 WHY THIS IS DERIVED AND NOT A SECOND CONSTANT. The no-show check asks
+ * "did this coach log anything matching this block?" by joining two separate
+ * queries: the candidate BLOCKS, and the coach's LOGS. If the log query is
+ * ever narrower than the block query, blocks whose matching log falls
+ * outside it come back as no-shows **for coaches who did log them** — a
+ * false accusation on a real person's accountability record, rendered with
+ * full confidence and reachable by no type error. Two hand-maintained
+ * constants drift; a bound derived FROM the block set cannot.
+ *
+ * Correctness: `isLogScheduled` is a half-open overlap, so a matching log
+ * satisfies `log.end > block.start`, and `MAX_HOUR_LOG_DURATION_MS` caps
+ * `log.end - log.start`. Therefore `log.start > block.start - MAX`, and no
+ * log that could match any candidate can start before this instant.
+ */
+export function blockAlertLogFloor(
+  blocks: { startAt: Date }[],
+): Date | null {
+  if (blocks.length === 0) return null;
+  const earliestStart = Math.min(...blocks.map((b) => b.startAt.getTime()));
+  return new Date(earliestStart - MAX_HOUR_LOG_DURATION_MS);
+}
 
 export async function fetchBlockAccountabilityAlerts(
   now: Date,
 ): Promise<{ cancelled: CancelledAlert[]; noShow: NoShowAlert[] }> {
-  const windowStart = new Date(now.getTime() - LOOKBACK_MS);
 
   // --- cancelled: stored, unresolved 'cancelled' flags ---
   const cancelledRows = await db
@@ -139,7 +197,9 @@ export async function fetchBlockAccountabilityAlerts(
     .innerJoin(users, eq(users.id, programScheduleBlockCoaches.coachId))
     .where(
       and(
-        gte(programScheduleBlocks.endAt, windowStart),
+        // 🔴 REVIEW_FLOOR, not a sliding cutoff. An unreviewed no-show is
+        // reported until a human acknowledges it (see the file header).
+        gte(programScheduleBlocks.endAt, REVIEW_FLOOR),
         lt(programScheduleBlocks.endAt, now),
       ),
     );
@@ -151,7 +211,12 @@ export async function fetchBlockAccountabilityAlerts(
   const coachIds = [...new Set(candidates.map((c) => c.coachId))];
   const blockIds = [...new Set(candidates.map((c) => c.blockId))];
 
-  // 2. logs for these coaches within the window, grouped by coach.
+  // 2. logs for these coaches, grouped by coach.
+  //
+  // 🔴 The floor is DERIVED FROM THE CANDIDATE BLOCKS, never from a constant
+  // of its own. A log query narrower than the block query turns coaches who
+  // DID log into no-shows. ▶ `blockAlertLogFloor`.
+  const logFloor = blockAlertLogFloor(candidates);
   const logRows = await db
     .select({
       coachId: hourLogs.coachId,
@@ -166,7 +231,7 @@ export async function fetchBlockAccountabilityAlerts(
         // yet a real log until an admin approves it.
         eq(hourLogs.status, "posted"),
         inArray(hourLogs.coachId, coachIds),
-        gte(hourLogs.startAt, windowStart),
+        ...(logFloor ? [gte(hourLogs.startAt, logFloor)] : []),
       ),
     );
 
@@ -365,7 +430,10 @@ export async function countNoShowsByCoach(
 export async function fetchNeedsReviewItems(
   now: Date,
 ): Promise<NeedsReviewItem[]> {
-  const reviewFloor = pfaDayStart(new Date("2024-01-01T12:00:00Z"));
+  // The SAME floor the block-accountability half uses — one horizon for the
+  // whole queue, so no alert type can quietly acquire a shorter memory than
+  // the ones rendered beside it.
+  const reviewFloor = REVIEW_FLOOR;
   const reviewCeiling = pfaDayEnd(now);
   const reviewFilter: NormalizedHourLogFilters = {
     from: "2024-01-01",

@@ -12,11 +12,15 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 let noShowDueAt: (blockEndAt: Date) => Date;
+let blockAlertLogFloor: (blocks: { startAt: Date }[]) => Date | null;
+let REVIEW_FLOOR: Date;
 
 beforeAll(async () => {
   process.env.DATABASE_URL ??=
     "postgresql://user:pass@localhost.tld/testdb";
-  ({ noShowDueAt } = await import("./needs-review"));
+  ({ noShowDueAt, blockAlertLogFloor, REVIEW_FLOOR } = await import(
+    "./needs-review"
+  ));
 });
 
 describe("noShowDueAt", () => {
@@ -72,5 +76,82 @@ describe("no-show due-yet logic (now >= noShowDueAt)", () => {
 
   it("IS a no-show well after 8:00 AM the next day", () => {
     expect(isDue(new Date("2026-05-05T20:00:00.000Z"))).toBe(true);
+  });
+});
+
+/* ── THE NO-SHOW HORIZON (Mark, 2026-08-26: "until the end of time") ─────── */
+
+describe("REVIEW_FLOOR", () => {
+  it("predates the app, so nothing real can ever fall below it", () => {
+    // PFA Engine went live 2026-06-19. A floor in 2024 cannot exclude a
+    // block that exists.
+    expect(REVIEW_FLOOR.getTime()).toBeLessThan(
+      new Date("2026-06-19T00:00:00.000Z").getTime(),
+    );
+  });
+
+  it("is a FIXED instant, not derived from the current clock", () => {
+    // The whole defect was a cutoff that moved while Mark read the screen.
+    // Reading the constant twice, at two different "nows", must give the
+    // same instant — otherwise alerts can age out again.
+    const first = REVIEW_FLOOR.getTime();
+    const second = REVIEW_FLOOR.getTime();
+    expect(first).toBe(second);
+    expect(first).toBe(
+      new Date("2024-01-01T08:00:00.000Z").getTime(),
+    );
+  });
+});
+
+describe("blockAlertLogFloor", () => {
+  const MAX_LOG_MS = 16 * 60 * 60 * 1000;
+  const d = (iso: string) => new Date(iso);
+
+  it("returns null for no blocks (nothing to bound)", () => {
+    expect(blockAlertLogFloor([])).toBeNull();
+  });
+
+  it("bounds on the EARLIEST block start, not the latest", () => {
+    const floor = blockAlertLogFloor([
+      { startAt: d("2026-07-27T17:00:00.000Z") },
+      { startAt: d("2026-06-19T17:00:00.000Z") }, // earliest
+      { startAt: d("2026-08-26T17:00:00.000Z") },
+    ]);
+    expect(floor?.toISOString()).toBe(
+      new Date(
+        d("2026-06-19T17:00:00.000Z").getTime() - MAX_LOG_MS,
+      ).toISOString(),
+    );
+  });
+
+  it("🔴 admits the EARLIEST-STARTING log that could still overlap a block", () => {
+    // The invariant the whole design rests on. `isLogScheduled` is a
+    // half-open overlap, so a matching log needs log.end > block.start; a
+    // log is capped at MAX_HOUR_LOG_DURATION_MS. The worst case is a
+    // maximum-length log ending one millisecond after the block starts.
+    // If the floor excluded THAT log, a coach who logged would read as a
+    // no-show.
+    const blockStart = d("2026-07-27T17:00:00.000Z");
+    const floor = blockAlertLogFloor([{ startAt: blockStart }])!;
+
+    const worstCaseLogStart = new Date(
+      blockStart.getTime() + 1 - MAX_LOG_MS,
+    );
+    expect(worstCaseLogStart.getTime()).toBeGreaterThanOrEqual(
+      floor.getTime(),
+    );
+  });
+
+  it("🔴 is never NARROWER than the blocks it is derived from", () => {
+    // A log query narrower than the block query manufactures false
+    // no-shows against coaches who DID log. Pin the direction.
+    const blocks = [
+      { startAt: d("2026-06-19T17:00:00.000Z") },
+      { startAt: d("2026-07-27T17:00:00.000Z") },
+    ];
+    const floor = blockAlertLogFloor(blocks)!;
+    for (const b of blocks) {
+      expect(floor.getTime()).toBeLessThan(b.startAt.getTime());
+    }
   });
 });

@@ -49,7 +49,10 @@ import {
   users,
   type User,
 } from "@/db/schema";
-import { logHourInternal } from "@/lib/server/hour-log-actions";
+import {
+  approveHeldHourLogInternal,
+  logHourInternal,
+} from "@/lib/server/hour-log-actions";
 import { fetchBlockAccountabilityAlerts } from "@/lib/server/needs-review";
 import { createProgramScheduleBlockInternal } from "@/lib/server/program-schedule-actions";
 import { parsePfaInput } from "@/lib/timezone";
@@ -264,12 +267,20 @@ describe("the log query can never be narrower than the block query", () => {
       note: "came in early",
       acknowledgeHold: true,
     });
-    expect(["posted", "held"]).toContain(log.status);
 
-    if (log.status === "posted") {
-      const alerts = await noShowsForBlock(block.id);
-      expect(alerts).toHaveLength(0);
-    }
+    // 🔴 Drive it to POSTED unconditionally. An earlier draft wrapped the
+    // assertion in `if (log.status === "posted")`, which let the whole test
+    // pass while asserting NOTHING when the anomaly gate held the log —
+    // and it stayed green under a mutation it was written to catch
+    // (rule 23: guard the guard).
+    const posted =
+      log.status === "posted"
+        ? log
+        : (await approveHeldHourLogInternal(admin, log.id)).log;
+    expect(posted.status).toBe("posted");
+
+    const alerts = await noShowsForBlock(block.id);
+    expect(alerts).toHaveLength(0);
   });
 });
 

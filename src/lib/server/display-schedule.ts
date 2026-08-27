@@ -9,9 +9,33 @@
 // call. So nothing structural stops a field from reaching the public internet;
 // the only thing that stops it is the projection list below.
 //
-// 🔴 THREE FIELDS MUST NEVER BE SELECTED HERE, and "not rendered" is NOT the
-// same as "not sent" — a value that reaches a server component reaches the
-// serialized RSC payload in the page source, whether or not any JSX prints it:
+// 🔴 THREE FIELDS MUST NEVER BE SELECTED HERE.
+//
+// ⚠️ FIRST, A CORRECTION TO THE OBVIOUS VERSION OF THIS WARNING, because the
+// obvious version is WRONG and was measured rather than reasoned about
+// (2026-08-27). It is tempting to write "not rendered is not not-sent — any
+// value reaching a server component lands in the RSC payload". That is FALSE
+// as stated, and shipping it would be a confident-sounding claim a future
+// reader would trust. What was actually probed, by injecting a sentinel and
+// reading the served bytes:
+//
+//   · a value passed to a SERVER component and never rendered does NOT reach
+//     the page source. Server components render on the server; only their
+//     OUTPUT is sent.
+//   · a value passed to a CLIENT component and never rendered DOES reach the
+//     page source, serialized into the RSC payload. Confirmed with a literal
+//     probe string on StaleGuard's props.
+//
+// 🔴 SO THE REAL HAZARD IS SHARPER AND EASIER TO TRIP OVER: today `DisplayGrid`
+// is a server component, so an extra column here would be caught by the
+// mapping and never shipped. THE DAY SOMEBODY ADDS `"use client"` TO IT — for
+// an animation, a marquee, a ticking clock — every prop it receives becomes
+// serialized, and any field riding along in this projection is published.
+// That is a one-line change in a different file, made for an unrelated
+// reason, by someone who will not read this comment. The projection is
+// narrow so that change stays safe.
+//
+// The three fields, and why each one matters:
 //
 //   · sessionsBilling.note   — free text. `/master/schedule` puts it in a
 //     `title` attribute. A tooltip is invisible on a TV (no mouse) and fully

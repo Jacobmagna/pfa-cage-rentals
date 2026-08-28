@@ -47,6 +47,23 @@ const TYPE_ACCENT: Record<string, string> = {
   weight_room: "#FB923C",
 };
 
+/** Blocked-out time.
+ *
+ *  🔴 RED, AND LOUD, BY REQUEST (Mark via Jacob, 2026-08-27). This was
+ *  `bg-neutral-800` — dark grey on a near-black background — and on the actual
+ *  wall it was effectively invisible: a cage that is unavailable read as a cage
+ *  that is FREE, which is the one thing a booking screen must never do. Found by
+ *  looking at a photograph of the screen, not by any assertion (rule 8).
+ *
+ *  ⚠️ Deliberately NOT the app's `--danger` (#B01818): that token is tuned for
+ *  near-black text on warm off-white and goes muddy against #0A0A0A, the same
+ *  reason the three accents above are re-picked rather than imported.
+ *
+ *  ⚠️ Chosen to stay separable from the weight-room accent (#FB923C) — the two
+ *  can appear in the same row, so "red" has to be unmistakably not-orange.
+ *  White text on this is 4.84:1, which clears AA for text this size. */
+const BLOCKED_FILL = "#DC2626";
+
 // 🔴 NO FIXED ROW HEIGHT. The grid fills the viewport and the rows divide
 // whatever is left, because a TV does not scroll: with a fixed height, the
 // tenth resource simply falls off the bottom of the wall and is invisible.
@@ -197,7 +214,8 @@ function RowFragment({
             startAt={block.startAt}
             endAt={block.endAt}
             win={win}
-            className="bg-neutral-800 text-neutral-400"
+            className="text-white"
+            style={{ backgroundColor: BLOCKED_FILL }}
             label="Blocked"
           />
         ))}
@@ -254,7 +272,7 @@ function Bar({
 
   return (
     <div
-      className={`absolute inset-y-1 flex flex-col justify-center overflow-hidden px-4 ${
+      className={`absolute inset-y-1 flex items-center gap-3 overflow-hidden px-4 ${
         cutLeft ? "" : "rounded-l-lg"
       } ${cutRight ? "" : "rounded-r-lg"} ${className ?? ""}`}
       style={{
@@ -263,9 +281,26 @@ function Bar({
         ...style,
       }}
     >
-      <span className="truncate text-3xl font-bold leading-tight">{label}</span>
+      {/* 🔴 ONE LINE, NOT TWO, AND THAT IS A CORRECTNESS FIX RATHER THAN A
+          STYLE PREFERENCE. The sublabel used to sit UNDER the name in a
+          flex-col. Rows have no fixed height — they divide whatever vertical
+          space is left after the header (see the note above RowFragment) — so
+          once enough resources are configured the row is shorter than the two
+          stacked lines, and `justify-center` + `overflow-hidden` crops the
+          pair from BOTH ends: the name loses its descenders and "Group" is
+          sheared off, the two reading as one smeared line. Photographed on the
+          real screen 2026-08-27 (rule 8 again — no assertion could see it).
+
+          A single row cannot do that at ANY row height, which is the point:
+          the fix is structural, not a tuned font size that breaks again the
+          next time Mark adds a cage. `min-w-0` is what lets the name actually
+          truncate inside a flex row, and the marker is `shrink-0` so the thing
+          that gets shortened is the long name, never the one-word tag. */}
+      <span className="min-w-0 truncate text-3xl font-bold leading-tight">{label}</span>
       {sublabel ? (
-        <span className="truncate text-xl font-semibold opacity-70">{sublabel}</span>
+        <span className="shrink-0 rounded-md bg-black/20 px-2.5 py-0.5 text-xl font-semibold leading-none">
+          {sublabel}
+        </span>
       ) : null}
     </div>
   );

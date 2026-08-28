@@ -102,3 +102,56 @@ export async function checkMagicLinkRateLimit(
     return { allowed: true };
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DISPLAY UNLOCK (/video) — added 2026-08-27
+//
+// 🔴 THIS ONE FAILS CLOSED, AND IT IS THE ONLY LIMITER HERE THAT DOES. Read
+// the long note above on the magic-link limiter: it fails OPEN because a
+// rate limiter that bricks sign-in when Upstash hiccups is worse than no
+// limiter — an outage during a staff onboarding surge would lock out every
+// coach at once.
+//
+// The display gate has the OPPOSITE risk profile, for one specific reason:
+// a television that is already unlocked carries a year-long cookie and NEVER
+// REACHES THIS CODE. Only a fresh unlock does. So failing closed cannot blank
+// the wall — the worst case is that somebody standing at the TV during an
+// Upstash outage cannot log a NEW screen in, which is a minor inconvenience,
+// while failing open would hand an attacker unlimited guesses at a password
+// that is deliberately short enough to type on a remote
+// (DISPLAY_PASSWORD_MIN_LENGTH is 8, and that is a compromise with a TV
+// keyboard, not a security opinion).
+//
+// 10 per hour per IP: generous for a human who fat-fingered it on an on-screen
+// keyboard three times, useless for a script.
+let cachedDisplayLimit: Ratelimit | undefined;
+
+function getDisplayUnlockLimit(): Ratelimit {
+  if (!cachedDisplayLimit) {
+    cachedRedis ??= Redis.fromEnv();
+    cachedDisplayLimit = new Ratelimit({
+      redis: cachedRedis,
+      limiter: Ratelimit.slidingWindow(10, "1 h"),
+      prefix: "rl:display-unlock:ip",
+      analytics: false,
+    });
+  }
+  return cachedDisplayLimit;
+}
+
+/**
+ * Guards the /video password box. `true` = this attempt may proceed.
+ *
+ * 🔴 FAILS CLOSED on any error (see the note above). An unconfigured Upstash
+ * in local dev therefore refuses the unlock — which is correct and is why the
+ * QA harness drives the cookie path directly rather than the password box.
+ */
+export async function checkDisplayUnlockRateLimit(ip: string): Promise<boolean> {
+  try {
+    const res = await getDisplayUnlockLimit().limit(ip);
+    return res.success;
+  } catch (err) {
+    Sentry.captureException(err, { tags: { ratelimit: "display_unlock_failed_closed" } });
+    return false;
+  }
+}

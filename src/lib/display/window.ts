@@ -27,8 +27,33 @@ export const DISPLAY_LOOKBACK_MINUTES = 30;
 /** Grid column size. Matches the admin schedule grid's 30-minute slots. */
 export const DISPLAY_SLOT_MINUTES = 30;
 
-/** Window length when `?hours=` is absent or unusable. */
-export const DISPLAY_DEFAULT_HOURS = 4;
+/**
+ * Window length when `?hours=` is absent or unusable.
+ *
+ * 🔴 THREE, NOT FOUR, AND THE REASON IS MEASURED RATHER THAN PREFERRED
+ * (2026-08-27, Jacob's call). The original 4 was chosen before anyone had
+ * seen this board loaded with real traffic, and PFA's real traffic is mostly
+ * $22 THIRTY-MINUTE cage rentals — which is the narrowest bar the grid can
+ * draw, one single slot wide.
+ *
+ * Measured on a 1920px screen, a 30-minute bar's usable text room is the slot
+ * minus its `px-4`:
+ *
+ *     hours=2 → 396px slot / 364px text → 0 of 9 real coach names truncate
+ *     hours=3 → 264px slot / 232px text → 1 of 9 ("Serena Rodriguez", 260px)
+ *     hours=4 → 198px slot / 166px text → 7 of 9 truncate
+ *
+ * At 4 the board was clipping seven names out of nine on the facility's most
+ * common booking — "Alex Milone" misses by 6px, "Nick Milone" by 7. A default
+ * that truncates the majority of a real day is the wrong default, and the one
+ * name that fit cleanly ("Dave Lusk") is short enough to be unrepresentative.
+ *
+ * ⚠️ DO NOT "FIX" A FUTURE VERSION OF THIS BY SHRINKING THE FONT. Legibility
+ * from across the room is the only requirement Mark actually stated; trading
+ * it for more columns inverts the feature. If more hours are ever needed, the
+ * answer is `?hours=` on the URL — which is exactly why that knob exists.
+ */
+export const DISPLAY_DEFAULT_HOURS = 3;
 
 /**
  * Bounds on `?hours=`. The floor stops someone rendering a useless sliver;

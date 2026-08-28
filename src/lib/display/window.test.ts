@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { formatPfaTime, pfaWallClockToUtc } from "@/lib/timezone";
 import {
+  DISPLAY_CLOSE_HOUR,
   DISPLAY_DEFAULT_HOURS,
   DISPLAY_MAX_HOURS,
   DISPLAY_MIN_HOURS,
+  DISPLAY_OPEN_HOUR,
   computeDisplayWindow,
   overlapsWindow,
   parseDisplayHours,
@@ -20,6 +22,14 @@ const DAY = "2026-08-27";
 const at = (time: string) => pfaWallClockToUtc(DAY, time);
 const win = (time: string, hours = DISPLAY_DEFAULT_HOURS) =>
   computeDisplayWindow(at(time), hours);
+
+/** `14` → `"14:00"`. Lets a clamp test DERIVE its expected boundary from the
+ *  constants instead of restating today's value of DISPLAY_DEFAULT_HOURS.
+ *  🔴 Three tests below hardcoded 4-hour arithmetic ("12:00", "18:00",
+ *  "17:00–19:00") and all three broke when the default moved 4 → 3 on
+ *  2026-08-27 — none of them was ABOUT the default. A test that restates a
+ *  constant it does not own fails for a reason unrelated to what it checks. */
+const hhmm = (hour: number) => `${String(hour).padStart(2, "0")}:00`;
 
 describe("computeDisplayWindow — Mark's three stated cases", () => {
   // These three are lifted verbatim from the voice memo and are the whole
@@ -83,8 +93,10 @@ describe("computeDisplayWindow — the edges of the operating day", () => {
   // closed.
   it("pins to opening time before the facility opens", () => {
     const w = win("06:00");
-    expect(formatPfaTime(w.startAt)).toBe("08:00");
-    expect(formatPfaTime(w.endAt)).toBe("12:00");
+    expect(formatPfaTime(w.startAt)).toBe(hhmm(DISPLAY_OPEN_HOUR));
+    // Derived, not restated: this test is about the OPENING clamp, so it must
+    // not fail because the window LENGTH changed underneath it.
+    expect(formatPfaTime(w.endAt)).toBe(hhmm(DISPLAY_OPEN_HOUR + DISPLAY_DEFAULT_HOURS));
   });
 
   it("never starts before opening even at the exact open hour", () => {
@@ -93,8 +105,10 @@ describe("computeDisplayWindow — the edges of the operating day", () => {
 
   it("pins to the last full window of the day after closing", () => {
     const w = win("23:00");
-    expect(formatPfaTime(w.startAt)).toBe("18:00");
-    expect(formatPfaTime(w.endAt)).toBe("22:00");
+    // Same reasoning as the opening clamp: the END is the fact under test and
+    // is a real constant; the START is `close − the window length`, derived.
+    expect(formatPfaTime(w.startAt)).toBe(hhmm(DISPLAY_CLOSE_HOUR - DISPLAY_DEFAULT_HOURS));
+    expect(formatPfaTime(w.endAt)).toBe(hhmm(DISPLAY_CLOSE_HOUR));
   });
 
   it("never renders past closing time", () => {
@@ -161,7 +175,11 @@ describe("parseDisplayHours", () => {
 });
 
 describe("overlapsWindow — and why containment would be a defect", () => {
-  const w = win("14:00"); // 13:30 → 17:30
+  // Starts 13:30 (14:00 minus the 30-minute lookback, floored to a slot) and
+  // runs DISPLAY_DEFAULT_HOURS forward. ⚠️ This comment used to assert
+  // "13:30 → 17:30", which stopped being true when the default moved to 3 —
+  // the kind of stale claim that reads as verified (maintenance rule 25).
+  const w = win("14:00");
 
   it("keeps a session already in progress when the window opens", () => {
     // 🔴 THE ONE THAT MATTERS. A session running 1:00–3:00 PM is the single
@@ -181,7 +199,25 @@ describe("overlapsWindow — and why containment would be a defect", () => {
   });
 
   it("keeps a session that runs off the right-hand edge", () => {
-    expect(overlapsWindow(at("17:00"), at("19:00"), w)).toBe(true);
+    // 🔴 STRADDLES THE EDGE BY CONSTRUCTION. This hardcoded 17:00–19:00, which
+    // only straddled the right edge while the window happened to end at 17:30.
+    // At a 3-hour default it ends 16:30, so the old fixture sat ENTIRELY past
+    // the window and `overlapsWindow` correctly returned false — a green-to-red
+    // flip that looked like a regression in the predicate and was not.
+    const startsInside = new Date(w.endAt.getTime() - 30 * 60_000);
+    const endsOutside = new Date(w.endAt.getTime() + 90 * 60_000);
+    expect(overlapsWindow(startsInside, endsOutside, w)).toBe(true);
+
+    // The control: pushed fully past the end, it must NOT overlap — otherwise
+    // the assertion above would pass against a predicate that returns true for
+    // everything (rule 21 — a negative needs a positive beside it).
+    expect(
+      overlapsWindow(
+        new Date(w.endAt.getTime() + 30 * 60_000),
+        new Date(w.endAt.getTime() + 90 * 60_000),
+        w,
+      ),
+    ).toBe(false);
   });
 
   it("keeps a session wholly inside", () => {

@@ -47,22 +47,38 @@ const TYPE_ACCENT: Record<string, string> = {
   weight_room: "#FB923C",
 };
 
-/** Blocked-out time.
+/** Blocked-out time: a red OUTLINE, not a red slab.
  *
- *  🔴 RED, AND LOUD, BY REQUEST (Mark via Jacob, 2026-08-27). This was
- *  `bg-neutral-800` — dark grey on a near-black background — and on the actual
- *  wall it was effectively invisible: a cage that is unavailable read as a cage
- *  that is FREE, which is the one thing a booking screen must never do. Found by
- *  looking at a photograph of the screen, not by any assertion (rule 8).
+ *  🔴 THE HISTORY MATTERS, BECAUSE THIS IS THE SECOND TIME THIS HAS MOVED.
+ *  It began as `bg-neutral-800` — dark grey on near-black — and on the actual
+ *  wall it was effectively invisible: an unavailable cage read as a FREE one,
+ *  the single thing a booking screen must never do. Found by looking at a
+ *  photograph, not by an assertion (rule 8). It was then made a loud solid red
+ *  fill (#DC2626) to fix exactly that.
  *
- *  ⚠️ Deliberately NOT the app's `--danger` (#B01818): that token is tuned for
- *  near-black text on warm off-white and goes muddy against #0A0A0A, the same
- *  reason the three accents above are re-picked rather than imported.
+ *  🔴 WHY GOING BACK TO A LIGHTER TREATMENT IS SAFE NOW, AND WOULD NOT HAVE
+ *  BEEN THEN. Requested 2026-08-30 (Mark's wife via Jacob) together with the
+ *  change that gives these bars a real LABEL. That pairing is the whole
+ *  argument: the original failure was an EMPTY dark shape reading as empty
+ *  space, and a bar carrying a program name in bright red is not empty. The
+ *  outline is doing less work than it used to because the text now shares it.
  *
- *  ⚠️ Chosen to stay separable from the weight-room accent (#FB923C) — the two
- *  can appear in the same row, so "red" has to be unmistakably not-orange.
- *  White text on this is 4.84:1, which clears AA for text this size. */
-const BLOCKED_FILL = "#DC2626";
+ *  ⚠️ IF THE LABEL EVER GOES AWAY, THIS MUST GO BACK TO A SOLID FILL. An
+ *  outlined bar with no text in it is the 2026-08-27 bug again.
+ *
+ *  ⚠️ The wash is a deliberate hedge, not decoration: at 14% the interior is
+ *  still plainly "not empty" from across the room while reading as an outline
+ *  rather than a slab. Delete it and the bars are pure outline — Mark's or his
+ *  wife's to call once they have seen it on the wall.
+ *
+ *  ⚠️ The BORDER keeps #DC2626 — the established red, deliberately not the
+ *  app's muddy `--danger` (#B01818) and deliberately separable from the
+ *  weight-room accent (#FB923C). The TEXT is lifted to #F87171 because #DC2626
+ *  on #0A0A0A is only 4.10:1; #F87171 is 7.15:1 and survives being read from
+ *  across a room. */
+const BLOCKED_OUTLINE = "#DC2626";
+const BLOCKED_WASH = "rgba(220, 38, 38, 0.14)";
+const BLOCKED_TEXT = "#F87171";
 
 // 🔴 NO FIXED ROW HEIGHT. The grid fills the viewport and the rows divide
 // whatever is left, because a TV does not scroll: with a fixed height, the
@@ -214,9 +230,12 @@ function RowFragment({
             startAt={block.startAt}
             endAt={block.endAt}
             win={win}
-            className="text-white"
-            style={{ backgroundColor: BLOCKED_FILL }}
-            label="Blocked"
+            style={{
+              backgroundColor: BLOCKED_WASH,
+              border: `2px solid ${BLOCKED_OUTLINE}`,
+              color: BLOCKED_TEXT,
+            }}
+            label={block.label}
           />
         ))}
 

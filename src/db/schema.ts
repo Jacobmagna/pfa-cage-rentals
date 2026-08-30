@@ -941,6 +941,20 @@ export const programs = pgTable("programs", {
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
   name: text("name").notNull().unique(),
+  // 🔴 THE TV WALL SCREEN ONLY. Nothing else in the product reads this.
+  //
+  // Program names are written to be unambiguous in the admin UI ("HS Program
+  // Hitting"), which is correct there and too long for a 30-minute bar on the
+  // facility display — the same truncation measurement that moved
+  // DISPLAY_DEFAULT_HOURS from 4 to 3 (src/lib/display/window.ts).
+  //
+  // A SEPARATE COLUMN RATHER THAN A SHORTER `name`, deliberately: `name` is
+  // unique-constrained and is what coaches, reports and pay screens read, so
+  // shortening it to fit a television would change every one of those
+  // surfaces to fix a rendering problem on one. NULL means "no short form
+  // set" and the display falls back to `name`, so this is inert until an
+  // admin fills it in and safe to leave empty forever.
+  displayName: text("display_name"),
   // DORMANT: the session cap moved to athlete_programs.cap — these two
   // columns are unused (the Programs form/actions no longer read/write
   // them), kept to avoid a destructive migration. A future cleanup

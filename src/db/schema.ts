@@ -592,6 +592,25 @@ export const blockedTimes = pgTable(
     startAt: timestamp("start_at", { mode: "date" }).notNull(),
     endAt: timestamp("end_at", { mode: "date" }).notNull(),
     reason: text("reason").notNull(),
+    // 🔴 A COSMETIC TAG, AND DELIBERATELY NOT `program_schedule_block_id`
+    // BELOW. Requested 2026-08-30 (Mark's wife via Jacob): when an admin
+    // blocks the grid by hand she wants to say WHICH program it is for, so the
+    // facility TV board can name the bar instead of reading "Blocked".
+    //
+    // IT MUST NOT REUSE THE OCCUPANCY LINK. `program_schedule_block_id` means
+    // "a scheduled program owns this slot" and is load-bearing for coach
+    // scheduling, hour logs, no-show derivation and PAY. Pointing a
+    // hand-entered block at a program schedule block to get a nicer label
+    // would inject a phantom scheduled block into all of that. This column is
+    // read by exactly one place — src/lib/server/display-schedule.ts — and by
+    // nothing that computes money or attendance. Jacob's requirement verbatim:
+    // "it doesn't do anything work and pay wise, it is just visual".
+    //
+    // NO ON DELETE RULE ON PURPOSE: deactivating a program is the normal path
+    // (the picker only offers active ones) and must not delete or mutate
+    // blocks. Deleting a program row outright is not something the product
+    // does; if it ever is, that action owns clearing this first.
+    displayProgramId: text("display_program_id").references(() => programs.id),
     // QA10 W3.3: when a scheduled program OCCUPIES this resource, the
     // blocked_time is linked to the owning program block. ON DELETE CASCADE
     // so cancelling/regenerating the program block clears its occupancy.

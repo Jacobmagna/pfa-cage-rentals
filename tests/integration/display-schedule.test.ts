@@ -170,6 +170,39 @@ async function seedProgramBlock(opts: {
   });
 }
 
+/**
+ * A HAND-ENTERED block carrying only the cosmetic program tag — no
+ * program_schedule_block, so nothing about pay or attendance is involved.
+ * This is the shape an admin creates from the master schedule's Block form.
+ */
+async function seedTaggedBlock(opts: {
+  resourceId: string;
+  start: string;
+  end: string;
+  programName: string;
+  programDisplayName?: string | null;
+  reason: string;
+}) {
+  const [program] = await db
+    .insert(programs)
+    .values({
+      name: opts.programName,
+      displayName: opts.programDisplayName ?? null,
+    })
+    .returning({ id: programs.id });
+  seededProgramIds.push(program.id);
+
+  await db.insert(blockedTimes).values({
+    resourceId: opts.resourceId,
+    startAt: at(opts.start),
+    endAt: at(opts.end),
+    reason: opts.reason,
+    displayProgramId: program.id,
+    createdBy: fixtures.admin.id,
+  });
+  return program.id;
+}
+
 async function cleanupSeededPrograms() {
   if (seededProgramIds.length === 0) return;
   // Children first: program_schedule_blocks.program_id has no ON DELETE rule,
@@ -331,7 +364,16 @@ describe("🔴 PII — the SQL projection itself, asserted separately from the m
     // programName / programDisplayName are the ONLY columns the program joins
     // are allowed to add. `reason` is still not among them.
     expect(Object.keys(rows.blocks[0]).sort()).toEqual(
-      ["endAt", "id", "programDisplayName", "programName", "resourceId", "startAt"].sort(),
+      [
+        "endAt",
+        "id",
+        "programDisplayName",
+        "programName",
+        "resourceId",
+        "startAt",
+        "tagDisplayName",
+        "tagName",
+      ].sort(),
     );
     expect(JSON.stringify(rows)).not.toContain(REASON_SENTINEL);
   });
@@ -396,6 +438,87 @@ describe("blocked bars say WHAT is blocking them", () => {
     expect(result.blocks).toHaveLength(1);
     expect(result.blocks[0].label).toBe(DISPLAY_BLOCKED_LABEL);
     expect(JSON.stringify(result)).not.toContain(REASON_SENTINEL);
+  });
+
+  // ── the COSMETIC tag an admin picks in the Block form ──────────────────
+  // These are hand-entered blocks with NO program_schedule_block. Nothing here
+  // touches scheduling, hours or pay — the tag exists so the wall can name the
+  // bar instead of reading "Blocked".
+
+  it("a hand-entered block TAGGED with a program shows its short name", async () => {
+    await seedTaggedBlock({
+      resourceId: cage1.id,
+      start: "14:00",
+      end: "15:00",
+      programName: "HS Summer Program-Hitting",
+      programDisplayName: "Hitting Program",
+      reason: REASON_SENTINEL,
+    });
+
+    const result = await fetchDisplaySchedule(WINDOW);
+
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].label).toBe("Hitting Program");
+    expect(JSON.stringify(result)).not.toContain(REASON_SENTINEL);
+  });
+
+  it("a tagged block falls back to the full program name with no short form", async () => {
+    await seedTaggedBlock({
+      resourceId: cage1.id,
+      start: "14:00",
+      end: "15:00",
+      programName: "Youth Summer Camp",
+      programDisplayName: null,
+      reason: REASON_SENTINEL,
+    });
+
+    const result = await fetchDisplaySchedule(WINDOW);
+
+    expect(result.blocks[0].label).toBe("Youth Summer Camp");
+  });
+
+  // 🔴 REAL OCCUPANCY OUTRANKS THE COSMETIC TAG, and this is the test that
+  // pins the precedence. If a scheduled program owns the slot, that is what
+  // the slot IS; a tag someone also set cannot rename it. Reversing the ??
+  // chain in the mapping turns this red.
+  it("a program-linked block ignores a cosmetic tag set on the same row", async () => {
+    const [tagProgram] = await db
+      .insert(programs)
+      .values({ name: "Tag That Must Lose", displayName: "TAG LOSES" })
+      .returning({ id: programs.id });
+    seededProgramIds.push(tagProgram.id);
+
+    const [realProgram] = await db
+      .insert(programs)
+      .values({ name: "Real Occupancy", displayName: "REAL WINS" })
+      .returning({ id: programs.id });
+    seededProgramIds.push(realProgram.id);
+
+    const [scheduleBlock] = await db
+      .insert(programScheduleBlocks)
+      .values({
+        programId: realProgram.id,
+        startAt: at("14:00"),
+        endAt: at("15:00"),
+        createdBy: fixtures.admin.id,
+      })
+      .returning({ id: programScheduleBlocks.id });
+
+    await db.insert(blockedTimes).values({
+      resourceId: cage1.id,
+      startAt: at("14:00"),
+      endAt: at("15:00"),
+      reason: REASON_SENTINEL,
+      programScheduleBlockId: scheduleBlock.id,
+      displayProgramId: tagProgram.id,
+      createdBy: fixtures.admin.id,
+    });
+
+    const result = await fetchDisplaySchedule(WINDOW);
+
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].label).toBe("REAL WINS");
+    expect(JSON.stringify(result)).not.toContain("TAG LOSES");
   });
 
   it("shows both kinds side by side without losing either", async () => {

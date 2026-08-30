@@ -25,6 +25,8 @@ export type BlockFormValues = {
   startTime: string;
   endTime: string;
   reason: string;
+  /** Program id, or "" for none. Display-only tag. */
+  displayProgramId: string;
 };
 
 export type BlockActionResult =
@@ -42,6 +44,7 @@ function snapshot(formData: FormData): BlockFormValues {
     startTime: formData.get("startTime")?.toString() ?? "",
     endTime: formData.get("endTime")?.toString() ?? "",
     reason: formData.get("reason")?.toString() ?? "",
+    displayProgramId: formData.get("displayProgramId")?.toString() ?? "",
   };
 }
 
@@ -57,6 +60,10 @@ function buildInput(formData: FormData) {
     startAt: parsePfaInput(dateStr, startStr),
     endAt: parsePfaInput(dateStr, endStr),
     reason: formData.get("reason")?.toString().trim() ?? "",
+    // "" from the "No program" option means CLEAR the tag, so it is sent as
+    // an explicit null rather than omitted — `undefined` would mean "leave it
+    // alone" and an admin could never remove a tag they set by mistake.
+    displayProgramId: formData.get("displayProgramId")?.toString() || null,
   };
 }
 

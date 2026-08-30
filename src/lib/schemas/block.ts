@@ -8,6 +8,11 @@
 
 import { z } from "zod";
 
+// A COSMETIC program tag. Optional everywhere, and null-able rather than just
+// absent so the edit form can CLEAR one that was set by mistake — `undefined`
+// means "don't touch this column", `null` means "remove the tag".
+const displayProgramId = z.string().min(1).nullish();
+
 export const createBlockSchema = z.object({
   resourceId: z.string().min(1, "resourceId is required"),
   startAt: z.coerce.date(),
@@ -16,6 +21,7 @@ export const createBlockSchema = z.object({
     .string()
     .min(1, "Reason is required")
     .max(120, "Reason is at most 120 characters"),
+  displayProgramId,
 });
 
 // Same partial pattern as updateSessionSchema — every field optional,
@@ -41,6 +47,7 @@ export const createBlocksBatchSchema = z.object({
     .string()
     .min(1, "Reason is required")
     .max(120, "Reason is at most 120 characters"),
+  displayProgramId,
 });
 
 export type CreateBlocksBatchInput = z.infer<typeof createBlocksBatchSchema>;
@@ -72,6 +79,7 @@ const blockSeriesShape = {
     .string()
     .min(1, "Reason is required")
     .max(120, "Reason is at most 120 characters"),
+  displayProgramId,
   daysOfWeek: z
     .array(z.number().int().min(0).max(6))
     .min(1, "Pick at least one weekday"),

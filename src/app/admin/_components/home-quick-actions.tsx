@@ -90,6 +90,7 @@ export function HomeQuickActions({
         open={cageOpen}
         onClose={() => setCageOpen(false)}
         coaches={cageCoaches}
+        programs={programs}
         resources={cageResources}
         prefill={null}
         defaultTab={cageTab}

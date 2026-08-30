@@ -2,6 +2,7 @@ import { and, asc, eq, gte, lt } from "drizzle-orm";
 import { db } from "@/db";
 import {
   blockedTimes,
+  programs,
   resources,
   sessionsBilling,
   users,
@@ -37,7 +38,7 @@ export default async function AdminSchedulePage({
   const dayStart = pfaDayStart(selectedDate);
   const dayEnd = pfaDayEnd(selectedDate);
 
-  const [activeResources, sessionRows, blockRows, coachRows] = await Promise.all([
+  const [activeResources, sessionRows, blockRows, coachRows, programRows] = await Promise.all([
     db
       .select({
         id: resources.id,
@@ -79,6 +80,14 @@ export default async function AdminSchedulePage({
         ),
       ),
     listActiveCoaches(),
+    // ACTIVE ONLY. The block dialog's program tag is a picker, so an archived
+    // program must not be offerable — existing blocks that already point at
+    // one keep their tag, they just cannot be re-picked.
+    db
+      .select({ id: programs.id, name: programs.name })
+      .from(programs)
+      .where(eq(programs.active, true))
+      .orderBy(asc(programs.name)),
   ]);
 
   const sessions = sessionRows.map((r) => ({
@@ -99,6 +108,9 @@ export default async function AdminSchedulePage({
     endAt: b.endAt,
     reason: b.reason,
     seriesId: b.seriesId,
+    // So the edit dialog can pre-select an existing tag rather than silently
+    // dropping it the next time someone opens the block.
+    displayProgramId: b.displayProgramId,
   }));
 
   const dateLabel = formatPfaDateLong(selectedDate);
@@ -134,6 +146,7 @@ export default async function AdminSchedulePage({
         sessions={sessions}
         blocks={blocks}
         coaches={coachRows}
+        programs={programRows}
         selectedDate={selectedDate}
       />
 

@@ -150,6 +150,10 @@ export async function createBlockInternal(
         startAt: parsed.startAt,
         endAt: parsed.endAt,
         reason: parsed.reason,
+        // Cosmetic tag only — see the column comment in db/schema.ts. Never
+        // programScheduleBlockId: a hand-entered block must not look like
+        // scheduled program occupancy to pay or attendance.
+        displayProgramId: parsed.displayProgramId ?? null,
         createdBy: actor.id,
       })
       .returning();
@@ -229,6 +233,11 @@ export async function updateBlockInternal(
         ...(parsed.startAt !== undefined && { startAt: parsed.startAt }),
         ...(parsed.endAt !== undefined && { endAt: parsed.endAt }),
         ...(parsed.reason !== undefined && { reason: parsed.reason }),
+        // `undefined` leaves the tag alone; an explicit null CLEARS it, which
+        // is how the edit form removes a tag set by mistake.
+        ...(parsed.displayProgramId !== undefined && {
+          displayProgramId: parsed.displayProgramId,
+        }),
       })
       .where(eq(blockedTimes.id, id))
       .returning();

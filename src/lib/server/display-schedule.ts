@@ -59,6 +59,7 @@
 // screen in a room the public walks through — or something worse.
 
 import { and, asc, eq, gt, lt } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
   blockedTimes,
@@ -70,6 +71,19 @@ import {
 } from "@/db/schema";
 import type { ResourceType } from "@/lib/billing";
 import type { DisplayWindow } from "@/lib/display/window";
+
+/**
+ * The SAME programs table joined a second time, for the cosmetic tag an admin
+ * picks when blocking the grid by hand (`blocked_times.display_program_id`).
+ *
+ * 🔴 IT IS A SEPARATE JOIN BECAUSE THE TWO ARE DIFFERENT FACTS. The first
+ * join answers "a scheduled program OWNS this slot" — real occupancy that pay
+ * and attendance also read. This one answers "a human said this block is for
+ * that program" and is read nowhere else in the product. Collapsing them into
+ * one join would make a cosmetic label indistinguishable from scheduled
+ * occupancy at the point where the difference matters most.
+ */
+const taggedProgram = alias(programs, "tagged_program");
 
 /**
  * What a session with no coach name renders as.
@@ -170,6 +184,8 @@ export type DisplayScheduleRows = {
     // program, which is what the fallback in the mapping keys off.
     programName: string | null;
     programDisplayName: string | null;
+    tagName: string | null;
+    tagDisplayName: string | null;
   }[];
 };
 
@@ -256,6 +272,10 @@ export async function fetchDisplayScheduleRows(
         endAt: blockedTimes.endAt,
         programName: programs.name,
         programDisplayName: programs.displayName,
+        // The hand-picked tag. Still not `reason` — this is a program id an
+        // admin chose from a fixed list, not free text anyone can type.
+        tagName: taggedProgram.name,
+        tagDisplayName: taggedProgram.displayName,
       })
       .from(blockedTimes)
       .leftJoin(
@@ -263,6 +283,7 @@ export async function fetchDisplayScheduleRows(
         eq(blockedTimes.programScheduleBlockId, programScheduleBlocks.id),
       )
       .leftJoin(programs, eq(programScheduleBlocks.programId, programs.id))
+      .leftJoin(taggedProgram, eq(blockedTimes.displayProgramId, taggedProgram.id))
       .where(overlapsBlock)
       .orderBy(asc(blockedTimes.startAt)),
   ]);
@@ -300,7 +321,16 @@ export async function fetchDisplaySchedule(
       // an empty-string short name is not silently skipped over; an empty
       // label is a data problem worth seeing on the wall rather than one to
       // paper over here.
-      label: r.programDisplayName ?? r.programName ?? DISPLAY_BLOCKED_LABEL,
+      // Order matters. REAL OCCUPANCY WINS over the cosmetic tag: if a
+      // scheduled program owns the slot, that is what the slot IS, and a tag
+      // someone also set cannot overrule it. The tag only ever fills the gap
+      // where the answer would otherwise be the generic "Blocked".
+      label:
+        r.programDisplayName ??
+        r.programName ??
+        r.tagDisplayName ??
+        r.tagName ??
+        DISPLAY_BLOCKED_LABEL,
     })),
   };
 }

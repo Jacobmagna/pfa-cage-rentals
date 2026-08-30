@@ -22,6 +22,7 @@ import type {
   ResourceOption,
 } from "@/app/admin/sessions/_components/sessions-client";
 import { createBlockSeries, createBlocksBatch } from "../actions";
+import type { ProgramOption } from "./schedule-grid";
 import { CagePicker } from "./cage-picker";
 import { RepeatsUntilPresets } from "./repeats-until-presets";
 import { BlockSkipReport } from "./block-skip-report";
@@ -186,6 +187,7 @@ export function ScheduleCreateDialog({
   onClose,
   coaches,
   resources,
+  programs,
   prefill,
   defaultTab = "session",
 }: {
@@ -193,6 +195,8 @@ export function ScheduleCreateDialog({
   onClose: () => void;
   coaches: CoachOption[];
   resources: ResourceOption[];
+  /** ACTIVE programs only — the Block tab's display-only tag picker. */
+  programs: ProgramOption[];
   prefill: CreatePrefill | null;
   /**
    * Which tab to land on when the dialog opens. The paint flow uses
@@ -292,6 +296,7 @@ export function ScheduleCreateDialog({
       startTime: prefill ? toTimeInput(prefill.startAt) : "09:00",
       endTime: prefill ? toTimeInput(prefill.endAt) : "10:00",
       reason: "",
+      displayProgramId: "",
     }),
     [prefill],
   );
@@ -380,6 +385,7 @@ export function ScheduleCreateDialog({
           <BlockTab
             defaults={blockDefaults}
             resources={resources}
+            programs={programs}
             onCancel={onClose}
           />
         )}
@@ -773,6 +779,8 @@ type BlockDefaults = {
   startTime: string;
   endTime: string;
   reason: string;
+  /** Program id, or "" for none. Display-only — see db/schema.ts. */
+  displayProgramId: string;
 };
 
 type BlockFieldInitial = Omit<BlockDefaults, "resourceId">;
@@ -783,6 +791,7 @@ type BlockFieldValues = {
   startTime: string;
   endTime: string;
   reason: string;
+  displayProgramId: string;
   repeats: boolean;
   frequency: "weekly" | "monthly";
   interval: number;
@@ -798,10 +807,12 @@ type BlockFieldsHandle = {
 function BlockTab({
   defaults,
   resources,
+  programs,
   onCancel,
 }: {
   defaults: BlockDefaults;
   resources: ResourceOption[];
+  programs: ProgramOption[];
   onCancel: () => void;
 }) {
   // Selected resources (multi). Seeded from the clicked cell's resource.
@@ -853,6 +864,7 @@ function BlockTab({
     startTime: defaults.startTime,
     endTime: defaults.endTime,
     reason: defaults.reason,
+    displayProgramId: defaults.displayProgramId,
   };
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -928,12 +940,14 @@ function BlockTab({
                 endsOn: v.endsOn,
                 frequency: v.frequency,
                 interval: v.interval,
+                displayProgramId: v.displayProgramId || null,
               })
             : await createBlocksBatch({
                 resourceIds: op.resourceIds,
                 startAt: parsePfaInput(v.date, v.startTime),
                 endAt: parsePfaInput(v.date, v.endTime),
                 reason: v.reason.trim(),
+                displayProgramId: v.displayProgramId || null,
               });
           created += res.created;
           skippedRentals.push(...res.skippedRentals);
@@ -994,6 +1008,7 @@ function BlockTab({
                     startTime: v.startTime,
                     endTime: v.endTime,
                     reason: v.reason,
+                    displayProgramId: v.displayProgramId,
                   });
                 }
               }
@@ -1027,6 +1042,7 @@ function BlockTab({
                   fieldRefs.current[r.id] = h;
                 }}
                 initial={carry ?? fieldsInitial}
+                programs={programs}
               />
             </div>
           ))}
@@ -1037,6 +1053,7 @@ function BlockTab({
             fieldRefs.current.unified = h;
           }}
           initial={fieldsInitial}
+          programs={programs}
         />
       )}
 
@@ -1074,13 +1091,16 @@ function BlockTab({
 // internally and exposes getValues()/validate() via ref so the parent can
 // collect every sub-form on a single Save. Rendered once (unified) or N times
 // (independent, one per cage). The resource itself is chosen in CagePicker.
-const BlockFields = forwardRef<BlockFieldsHandle, { initial: BlockFieldInitial }>(
-  function BlockFields({ initial }, ref) {
+const BlockFields = forwardRef<
+  BlockFieldsHandle,
+  { initial: BlockFieldInitial; programs: ProgramOption[] }
+>(function BlockFields({ initial, programs }, ref) {
     const [live, setLive] = useState({
       date: initial.date,
       startTime: initial.startTime,
       endTime: initial.endTime,
       reason: initial.reason,
+      displayProgramId: initial.displayProgramId,
     });
     const [repeats, setRepeats] = useState(false);
     const [freqKind, setFreqKind] = useState<FrequencyKind>("weekly");
@@ -1126,6 +1146,7 @@ const BlockFields = forwardRef<BlockFieldsHandle, { initial: BlockFieldInitial }
             startTime: live.startTime,
             endTime: live.endTime,
             reason: live.reason,
+            displayProgramId: live.displayProgramId,
             repeats,
             frequency,
             interval,
@@ -1194,6 +1215,32 @@ const BlockFields = forwardRef<BlockFieldsHandle, { initial: BlockFieldInitial }
             placeholder="What's this block for?"
             className={inputStyles}
           />
+        </Field>
+
+        {/* 🔴 THE HINT IS THE FEATURE, NOT DECORATION. This picker looks exactly
+            like the ones that DO schedule work, so without saying otherwise the
+            obvious reading is that tagging a block puts a program on the
+            schedule and pays someone for it. It does not: it writes one
+            display-only column that only the facility TV board reads. Jacob was
+            explicit that the form must say so in words. */}
+        <Field
+          label="Program (optional)"
+          hint="Tagging only. The block shows this program's name on the facility TV instead of just 'Blocked'. It does NOT schedule a coach, create hours, or affect anyone's pay."
+        >
+          <select
+            value={live.displayProgramId}
+            onChange={(e) =>
+              setLive((p) => ({ ...p, displayProgramId: e.target.value }))
+            }
+            className={selectStyles}
+          >
+            <option value="">No program — shows as &quot;Blocked&quot;</option>
+            {programs.map((prog) => (
+              <option key={prog.id} value={prog.id}>
+                {prog.name}
+              </option>
+            ))}
+          </select>
         </Field>
 
         <label className="flex items-center gap-2.5 pt-1 cursor-pointer select-none">

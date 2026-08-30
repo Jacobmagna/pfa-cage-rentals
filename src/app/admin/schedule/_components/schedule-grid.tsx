@@ -66,12 +66,18 @@ export type ScheduleSession = {
   isGroupSession: boolean;
 };
 
+/** One ACTIVE program, for the Block forms' cosmetic tag picker. */
+export type ProgramOption = { id: string; name: string };
+
 export type ScheduleBlock = {
   id: string;
   resourceId: string;
   startAt: Date;
   endAt: Date;
   reason: string;
+  // COSMETIC TAG. Display-only: it names the bar on the facility TV board and
+  // does nothing for scheduling, hours or pay. See db/schema.ts.
+  displayProgramId?: string | null;
   // BLOCK-RECUR: set when this block is an occurrence of a recurring series
   // (drives the "recurring" chip + series actions in the edit dialog).
   seriesId?: string | null;
@@ -117,12 +123,15 @@ export function ScheduleGrid({
   sessions,
   blocks,
   coaches,
+  programs,
   selectedDate,
 }: {
   resources: ScheduleResource[];
   sessions: ScheduleSession[];
   blocks: ScheduleBlock[];
   coaches: CoachOption[];
+  /** ACTIVE programs only — the cosmetic tag picker in the Block forms. */
+  programs: ProgramOption[];
   selectedDate: Date;
 }) {
   const [dialog, setDialog] = useState<DialogState>({ kind: "closed" });
@@ -658,6 +667,7 @@ export function ScheduleGrid({
           onClose={close}
           coaches={coaches}
           resources={sessionResourceOptions}
+          programs={programs}
           prefill={dialog.kind === "create" ? dialog.prefill : null}
           defaultTab={
             dialog.kind === "create" ? dialog.defaultTab ?? "session" : "session"
@@ -677,6 +687,7 @@ export function ScheduleGrid({
           open={dialog.kind === "edit-block"}
           onClose={close}
           resources={sessionResourceOptions}
+          programs={programs}
           initial={
             dialog.kind === "edit-block"
               ? {
@@ -686,6 +697,7 @@ export function ScheduleGrid({
                   endAt: dialog.block.endAt,
                   reason: dialog.block.reason,
                   seriesId: dialog.block.seriesId ?? null,
+                  displayProgramId: dialog.block.displayProgramId ?? null,
                 }
               : undefined
           }

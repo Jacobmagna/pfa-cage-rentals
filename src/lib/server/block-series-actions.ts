@@ -330,6 +330,8 @@ export async function createBlockSeriesInternal(
         startAt: r.startAt,
         endAt: r.endAt,
         reason: parsed.reason,
+        // Cosmetic tag, carried onto every occurrence of the series.
+        displayProgramId: parsed.displayProgramId ?? null,
         seriesId: series.id,
         createdBy: actor.id,
       })),
@@ -426,6 +428,7 @@ export async function createBlocksBatchInternal(
           startAt: r.startAt,
           endAt: r.endAt,
           reason: parsed.reason,
+          displayProgramId: parsed.displayProgramId ?? null,
           createdBy: actor.id,
         })),
       )
@@ -549,6 +552,7 @@ export async function editBlockSeriesInternal(
           startAt: r.startAt,
           endAt: r.endAt,
           reason: parsed.reason,
+          displayProgramId: parsed.displayProgramId ?? null,
           seriesId,
           createdBy: actor.id,
         })),

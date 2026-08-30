@@ -678,6 +678,7 @@ export function EditableMasterSchedule({
         open={dialog.kind === "cage"}
         onClose={close}
         coaches={cageCoaches}
+        programs={programs}
         resources={cageResources}
         prefill={dialog.kind === "cage" ? dialog.prefill : null}
         defaultTab="session"
@@ -712,6 +713,7 @@ export function EditableMasterSchedule({
         open={dialog.kind === "edit-block" && editBlock !== null}
         onClose={close}
         resources={cageResources}
+        programs={programs}
         initial={editBlock ?? undefined}
       />
 

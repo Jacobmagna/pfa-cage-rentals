@@ -40,6 +40,7 @@ import {
   formatPfaTime12h,
 } from "@/lib/timezone";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
+import type { ProgramOption } from "./schedule-grid";
 import { CagePicker } from "./cage-picker";
 import { RepeatsUntilPresets } from "./repeats-until-presets";
 import { BlockSkipReport } from "./block-skip-report";
@@ -87,6 +88,8 @@ export type BlockEditInitialValues = {
   startAt: Date;
   endAt: Date;
   reason: string;
+  // COSMETIC tag — names the bar on the facility TV board and nothing else.
+  displayProgramId?: string | null;
   // BLOCK-RECUR: set when this block is an occurrence of a recurring series.
   seriesId?: string | null;
 };
@@ -101,11 +104,14 @@ export function BlockEditDialog({
   open,
   onClose,
   resources,
+  programs,
   initial,
 }: {
   open: boolean;
   onClose: () => void;
   resources: ResourceOption[];
+  /** ACTIVE programs only. An archived one stays on the block but is unpickable. */
+  programs: ProgramOption[];
   initial?: BlockEditInitialValues;
 }) {
   const router = useRouter();
@@ -220,6 +226,7 @@ export function BlockEditDialog({
         startTime: toTimeInput(initial.startAt),
         endTime: toTimeInput(initial.endAt),
         reason: initial.reason,
+        displayProgramId: initial.displayProgramId ?? "",
       };
     }
     return {
@@ -228,6 +235,7 @@ export function BlockEditDialog({
       startTime: "09:00",
       endTime: "10:00",
       reason: "",
+      displayProgramId: "",
     };
   }, [initial, state]);
 
@@ -507,6 +515,27 @@ export function BlockEditDialog({
               defaultValue={defaults.reason}
               className={inputStyles}
             />
+          </Field>
+
+          {/* Same wording as the create dialog on purpose — this control looks
+              like the ones that DO schedule work, so it has to say plainly that
+              it does not. See db/schema.ts on display_program_id. */}
+          <Field
+            label="Program (optional)"
+            hint="Tagging only. The block shows this program's name on the facility TV instead of just 'Blocked'. It does NOT schedule a coach, create hours, or affect anyone's pay."
+          >
+            <select
+              name="displayProgramId"
+              defaultValue={defaults.displayProgramId}
+              className={selectStyles}
+            >
+              <option value="">No program — shows as &quot;Blocked&quot;</option>
+              {programs.map((prog) => (
+                <option key={prog.id} value={prog.id}>
+                  {prog.name}
+                </option>
+              ))}
+            </select>
           </Field>
         </div>
 

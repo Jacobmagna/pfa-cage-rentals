@@ -351,6 +351,13 @@
       "when": 1788110543340,
       "tag": "0057_sleepy_newton_destine",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1788110543341,
+      "tag": "0058_short_display_names",
+      "breakpoints": true
     }
   ]
 }

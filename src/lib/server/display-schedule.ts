@@ -60,7 +60,14 @@
 
 import { and, asc, eq, gt, lt } from "drizzle-orm";
 import { db } from "@/db";
-import { blockedTimes, resources, sessionsBilling, users } from "@/db/schema";
+import {
+  blockedTimes,
+  programScheduleBlocks,
+  programs,
+  resources,
+  sessionsBilling,
+  users,
+} from "@/db/schema";
 import type { ResourceType } from "@/lib/billing";
 import type { DisplayWindow } from "@/lib/display/window";
 
@@ -74,6 +81,22 @@ import type { DisplayWindow } from "@/lib/display/window";
  * tests. The cage is booked; that is all the screen needs to say.
  */
 export const DISPLAY_UNNAMED_COACH_LABEL = "Reserved";
+
+/**
+ * What a block with no program behind it renders as.
+ *
+ * 🔴 THIS IS THE SAFE FALLBACK AND IT MUST NEVER BECOME `reason`. A blocked
+ * row carries `programScheduleBlockId` only when a scheduled PROGRAM occupies
+ * the resource; an admin blocking the grid by hand leaves it NULL, and the
+ * only text such a row has is the free-form `reason` field — the field this
+ * file's header singles out because nothing stops someone typing
+ * "bday party - Jake" into it. A minor's name must not reach the wall, so a
+ * hand-entered block stays generic no matter what was typed.
+ *
+ * Confirmed with Jacob 2026-08-30: hand-entered blocks are the minority, and
+ * the named ones are exactly the program-linked rows this resolves.
+ */
+export const DISPLAY_BLOCKED_LABEL = "Blocked";
 
 export type DisplayResource = {
   id: string;
@@ -97,6 +120,13 @@ export type DisplayBlock = {
   resourceId: string;
   startAt: Date;
   endAt: Date;
+  /**
+   * Already resolved to a safe label — callers never see `reason`, and there
+   * is no code path that can put it here. Mirrors `coachLabel` on
+   * DisplaySession for the same reason: one place turns raw columns into
+   * something printable.
+   */
+  label: string;
 };
 
 export type DisplaySchedule = {
@@ -131,7 +161,16 @@ export type DisplayScheduleRows = {
     coachName: string | null;
     isGroupSession: boolean;
   }[];
-  blocks: DisplayBlock[];
+  blocks: {
+    id: string;
+    resourceId: string;
+    startAt: Date;
+    endAt: Date;
+    // Both NULL for a hand-entered block: the LEFT JOINs below find no
+    // program, which is what the fallback in the mapping keys off.
+    programName: string | null;
+    programDisplayName: string | null;
+  }[];
 };
 
 /**
@@ -195,14 +234,35 @@ export async function fetchDisplayScheduleRows(
     // NOTE: no `reason`, and NOT a bare `.select()`. An explicit projection
     // is what stops the next column added to `blocked_times` from landing on
     // a public page without anyone deciding it should.
+    //
+    // 🔴 THE TWO JOINS ARE WHAT MAKE A NAMED BLOCK POSSIBLE WITHOUT `reason`.
+    // Mark's wife asked for the blocked bars to say what is blocking them
+    // rather than just "Blocked" (2026-08-30). The ONLY safe source for that
+    // is the program the block belongs to: `programs.name` is admin-curated
+    // and unique-constrained, where `reason` is free text a coach types per
+    // block. So the label is resolved through the program chain, and a block
+    // with no program keeps the generic label.
+    //
+    // Both joins are LEFT, not INNER, and that is load-bearing: a hand-entered
+    // block has a NULL `programScheduleBlockId`, and an INNER join would drop
+    // it from the query entirely — an unavailable cage would render as FREE,
+    // the exact failure the red bar was introduced to fix. Proven by mutation:
+    // flipping either join turns six tests red.
     db
       .select({
         id: blockedTimes.id,
         resourceId: blockedTimes.resourceId,
         startAt: blockedTimes.startAt,
         endAt: blockedTimes.endAt,
+        programName: programs.name,
+        programDisplayName: programs.displayName,
       })
       .from(blockedTimes)
+      .leftJoin(
+        programScheduleBlocks,
+        eq(blockedTimes.programScheduleBlockId, programScheduleBlocks.id),
+      )
+      .leftJoin(programs, eq(programScheduleBlocks.programId, programs.id))
       .where(overlapsBlock)
       .orderBy(asc(blockedTimes.startAt)),
   ]);
@@ -230,6 +290,17 @@ export async function fetchDisplaySchedule(
       coachLabel: r.coachName ?? DISPLAY_UNNAMED_COACH_LABEL,
       isGroupSession: r.isGroupSession,
     })),
-    blocks: rows.blocks,
+    blocks: rows.blocks.map((r) => ({
+      id: r.id,
+      resourceId: r.resourceId,
+      startAt: r.startAt,
+      endAt: r.endAt,
+      // Short form first, then the full program name, then the generic
+      // fallback. The `??` chain — not `||` — so a program deliberately given
+      // an empty-string short name is not silently skipped over; an empty
+      // label is a data problem worth seeing on the wall rather than one to
+      // paper over here.
+      label: r.programDisplayName ?? r.programName ?? DISPLAY_BLOCKED_LABEL,
+    })),
   };
 }

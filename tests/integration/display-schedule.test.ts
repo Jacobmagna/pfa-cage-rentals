@@ -17,12 +17,20 @@
 // tables rather than scoping to its own rows.
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { blockedTimes, resources, sessionsBilling, users } from "@/db/schema";
+import {
+  blockedTimes,
+  programScheduleBlocks,
+  programs,
+  resources,
+  sessionsBilling,
+  users,
+} from "@/db/schema";
 import { pfaWallClockToUtc } from "@/lib/timezone";
 import { computeDisplayWindow, type DisplayWindow } from "@/lib/display/window";
 import {
+  DISPLAY_BLOCKED_LABEL,
   DISPLAY_UNNAMED_COACH_LABEL,
   fetchDisplaySchedule,
   fetchDisplayScheduleRows,
@@ -113,12 +121,73 @@ afterAll(async () => {
   await db.delete(users).where(eq(users.email, NAMELESS_COACH_EMAIL));
 });
 
+/**
+ * A block that a scheduled PROGRAM owns, which is the only kind that can carry
+ * a name onto the wall.
+ *
+ * 🔴 THESE ROWS ARE NOT COVERED BY `truncateMutables`, which clears
+ * `blocked_times` but not `programs` or `program_schedule_blocks`. Left behind,
+ * a program row would collide on the next run — `programs.name` is UNIQUE — and
+ * the failure would look like a flake rather than a leak. Every id is tracked
+ * and deleted in afterEach below, children first.
+ */
+const seededProgramIds: string[] = [];
+
+async function seedProgramBlock(opts: {
+  resourceId: string;
+  start: string;
+  end: string;
+  programName: string;
+  programDisplayName?: string | null;
+  reason: string;
+}) {
+  const [program] = await db
+    .insert(programs)
+    .values({
+      name: opts.programName,
+      displayName: opts.programDisplayName ?? null,
+    })
+    .returning({ id: programs.id });
+  seededProgramIds.push(program.id);
+
+  const [scheduleBlock] = await db
+    .insert(programScheduleBlocks)
+    .values({
+      programId: program.id,
+      startAt: at(opts.start),
+      endAt: at(opts.end),
+      createdBy: fixtures.admin.id,
+    })
+    .returning({ id: programScheduleBlocks.id });
+
+  await db.insert(blockedTimes).values({
+    resourceId: opts.resourceId,
+    startAt: at(opts.start),
+    endAt: at(opts.end),
+    reason: opts.reason,
+    programScheduleBlockId: scheduleBlock.id,
+    createdBy: fixtures.admin.id,
+  });
+}
+
+async function cleanupSeededPrograms() {
+  if (seededProgramIds.length === 0) return;
+  // Children first: program_schedule_blocks.program_id has no ON DELETE rule,
+  // so deleting the program first would be a foreign-key violation.
+  await db
+    .delete(programScheduleBlocks)
+    .where(inArray(programScheduleBlocks.programId, seededProgramIds));
+  await db.delete(programs).where(inArray(programs.id, seededProgramIds));
+  seededProgramIds.length = 0;
+}
+
 beforeEach(async () => {
   await truncateMutables();
 });
 
 afterEach(async () => {
   await truncateMutables();
+  await cleanupSeededPrograms();
 });
 
 describe("🔴 PII — the fields that must never reach a public page", () => {
@@ -211,7 +280,7 @@ describe("🔴 PII — the fields that must never reach a public page", () => {
       ["coachLabel", "endAt", "id", "isGroupSession", "resourceId", "startAt"].sort(),
     );
     expect(Object.keys(result.blocks[0]).sort()).toEqual(
-      ["endAt", "id", "resourceId", "startAt"].sort(),
+      ["endAt", "id", "label", "resourceId", "startAt"].sort(),
     );
     expect(Object.keys(result.resources[0]).sort()).toEqual(
       ["id", "name", "sortOrder", "type"].sort(),
@@ -259,10 +328,99 @@ describe("🔴 PII — the SQL projection itself, asserted separately from the m
     const rows = await fetchDisplayScheduleRows(WINDOW);
 
     expect(rows.blocks).toHaveLength(1);
+    // programName / programDisplayName are the ONLY columns the program joins
+    // are allowed to add. `reason` is still not among them.
     expect(Object.keys(rows.blocks[0]).sort()).toEqual(
-      ["endAt", "id", "resourceId", "startAt"].sort(),
+      ["endAt", "id", "programDisplayName", "programName", "resourceId", "startAt"].sort(),
     );
     expect(JSON.stringify(rows)).not.toContain(REASON_SENTINEL);
+  });
+});
+
+describe("blocked bars say WHAT is blocking them", () => {
+  // Requested 2026-08-30 (Mark's wife via Jacob): the bars used to read
+  // "Blocked" and now carry the program's name. The safety line is that the
+  // name comes from `programs`, never from `blocked_times.reason`.
+
+  it("shows the program's SHORT display name when one is set", async () => {
+    await seedProgramBlock({
+      resourceId: cage1.id,
+      start: "14:00",
+      end: "15:00",
+      programName: "High School Program — Hitting",
+      programDisplayName: "HS Hitting",
+      reason: REASON_SENTINEL,
+    });
+
+    const result = await fetchDisplaySchedule(WINDOW);
+
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].label).toBe("HS Hitting");
+    // The long name is not on the wall either — the short form REPLACES it.
+    expect(JSON.stringify(result)).not.toContain("High School Program");
+    expect(JSON.stringify(result)).not.toContain(REASON_SENTINEL);
+  });
+
+  it("falls back to the full program name when no short name is set", async () => {
+    await seedProgramBlock({
+      resourceId: cage1.id,
+      start: "14:00",
+      end: "15:00",
+      programName: "Bullpen Development",
+      programDisplayName: null,
+      reason: REASON_SENTINEL,
+    });
+
+    const result = await fetchDisplaySchedule(WINDOW);
+
+    expect(result.blocks[0].label).toBe("Bullpen Development");
+    expect(JSON.stringify(result)).not.toContain(REASON_SENTINEL);
+  });
+
+  // 🔴 THIS IS THE REGRESSION TEST FOR THE JOIN TYPE, AND IT IS THE MOST
+  // IMPORTANT ONE IN THIS BLOCK. A hand-entered block has a NULL
+  // program_schedule_block_id. If either join is ever "tidied" from LEFT to
+  // INNER, this row vanishes from the query — and a cage that is UNAVAILABLE
+  // renders as FREE, which is the exact failure the red bar exists to prevent.
+  // It fails on the length assertion before it ever reaches the label.
+  it("keeps a hand-entered block on the board, labelled generically", async () => {
+    await seedBlock({
+      resourceId: cage1.id,
+      start: "14:00",
+      end: "15:00",
+      reason: REASON_SENTINEL,
+    });
+
+    const result = await fetchDisplaySchedule(WINDOW);
+
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].label).toBe(DISPLAY_BLOCKED_LABEL);
+    expect(JSON.stringify(result)).not.toContain(REASON_SENTINEL);
+  });
+
+  it("shows both kinds side by side without losing either", async () => {
+    await seedProgramBlock({
+      resourceId: cage1.id,
+      start: "14:00",
+      end: "15:00",
+      programName: "Travel Ball Infield",
+      programDisplayName: "Travel INF",
+      reason: REASON_SENTINEL,
+    });
+    await seedBlock({
+      resourceId: bullpen1.id,
+      start: "14:00",
+      end: "15:00",
+      reason: REASON_SENTINEL,
+    });
+
+    const result = await fetchDisplaySchedule(WINDOW);
+
+    expect(result.blocks).toHaveLength(2);
+    expect(result.blocks.map((b) => b.label).sort()).toEqual(
+      [DISPLAY_BLOCKED_LABEL, "Travel INF"].sort(),
+    );
+    expect(JSON.stringify(result)).not.toContain(REASON_SENTINEL);
   });
 });
 

@@ -36,6 +36,9 @@ import {
   createProgramScheduleSeriesInternal,
   editProgramScheduleSeriesInternal,
 } from "@/lib/server/program-schedule-series-actions";
+// The per-DATE edit in the preservation suite goes through the same action
+// the admin dialog calls, so those tests exercise the real path.
+import { updateProgramScheduleBlockInternal } from "@/lib/server/program-schedule-actions";
 import {
   BlockOverlapError,
   NotASeriesOccurrenceError,
@@ -670,6 +673,268 @@ describe("series occupies cage resources (W3.3)", () => {
     expect(linkedAfter.length).toBe(linkedBefore.length);
     for (const l of linkedAfter) {
       expect(l.resourceId).toBe(cage1.id);
+    }
+  });
+});
+
+// ── PER-DATE COACH ASSIGNMENTS SURVIVE A WHOLE-SERIES EDIT ────────────────
+// The defect Nick Milone reported 2026-09-24: the series said one coach, he
+// put a different coach on ONE date, and the next series-wide edit silently
+// put the original coach back. He redid it three times and reported the app
+// "won't sync". Rule: the regenerate leaves an individually-assigned date on
+// its own coaches unless the operator explicitly asks otherwise.
+//
+// Every per-date change below goes through updateProgramScheduleBlockInternal
+// — the action the admin dialog actually calls — rather than an INSERT, so
+// these prove the real path and not a fixture (rule 33).
+describe("editProgramScheduleSeriesInternal — per-date coach preservation", () => {
+  // Builds a 4-Monday series on `seriesCoach`, then hand-assigns the SECOND
+  // Monday (2099-01-12) to `dayCoach`, exactly as an admin would.
+  async function seriesWithOneHandAssignedDate() {
+    const program = await createProgram(true);
+    const seriesCoach = await createCoach();
+    const dayCoach = await createCoach();
+    const nextCoach = await createCoach();
+
+    const { series } = await trackedCreate(fixtures.admin, {
+      programId: program.id,
+      scheduledCoachIds: [seriesCoach.id],
+      daysOfWeek: [1],
+      startTime: "09:00",
+      endTime: "10:00",
+      startsOn: FUTURE_START,
+      endsOn: FUTURE_END,
+    });
+
+    const blocks = await blocksForSeries(series.id);
+    const target = blocks.find(
+      (b) => formatPfaDate(b.startAt) === "2099-01-12",
+    )!;
+    await updateProgramScheduleBlockInternal(fixtures.admin, target.id, {
+      scheduledCoachIds: [dayCoach.id],
+    });
+
+    return { program, series, seriesCoach, dayCoach, nextCoach };
+  }
+
+  // Coach set for every occurrence, keyed by date, read back from the DB.
+  async function coachesByDate(seriesId: string) {
+    const blocks = await blocksForSeries(seriesId);
+    const out: Record<string, { members: string[]; primary: string | null }> =
+      {};
+    for (const b of blocks) {
+      out[formatPfaDate(b.startAt)] = {
+        members: (await blockCoachIds(b.id)).sort(),
+        primary: b.scheduledCoachId,
+      };
+    }
+    return out;
+  }
+
+  it("keeps the hand-assigned coach and moves every other date", async () => {
+    const { program, series, dayCoach, nextCoach } =
+      await seriesWithOneHandAssignedDate();
+
+    const result = await editProgramScheduleSeriesInternal(
+      fixtures.admin,
+      series.id,
+      {
+        programId: program.id,
+        scheduledCoachIds: [nextCoach.id],
+        daysOfWeek: [1],
+        startTime: "09:00",
+        endTime: "10:00",
+        startsOn: FUTURE_START,
+        endsOn: FUTURE_END,
+      },
+    );
+
+    expect(result.preservedCoachCount).toBe(1);
+    expect(result.preservedCoachDates).toEqual(["2099-01-12"]);
+
+    const byDate = await coachesByDate(series.id);
+    // The hand-assigned Monday is untouched — members AND primary.
+    expect(byDate["2099-01-12"]!.members).toEqual([dayCoach.id]);
+    expect(byDate["2099-01-12"]!.primary).toBe(dayCoach.id);
+    // Every other Monday took the new series coach.
+    for (const date of ["2099-01-05", "2099-01-19", "2099-01-26"]) {
+      expect(byDate[date]!.members).toEqual([nextCoach.id]);
+      expect(byDate[date]!.primary).toBe(nextCoach.id);
+    }
+  });
+
+  it("overwrites the hand-assigned date when applyCoachesToAll is set", async () => {
+    const { program, series, nextCoach } = await seriesWithOneHandAssignedDate();
+
+    const result = await editProgramScheduleSeriesInternal(
+      fixtures.admin,
+      series.id,
+      {
+        programId: program.id,
+        scheduledCoachIds: [nextCoach.id],
+        daysOfWeek: [1],
+        startTime: "09:00",
+        endTime: "10:00",
+        startsOn: FUTURE_START,
+        endsOn: FUTURE_END,
+        applyCoachesToAll: true,
+      },
+    );
+
+    expect(result.preservedCoachCount).toBe(0);
+    const byDate = await coachesByDate(series.id);
+    for (const date of [
+      "2099-01-05",
+      "2099-01-12",
+      "2099-01-19",
+      "2099-01-26",
+    ]) {
+      expect(byDate[date]!.members).toEqual([nextCoach.id]);
+      expect(byDate[date]!.primary).toBe(nextCoach.id);
+    }
+  });
+
+  // 🔴 The series time moves in the SAME edit. Matching an occurrence to its
+  // old block by instant would find nothing and preserve nothing, silently.
+  it("still preserves a date whose time-of-day moved with the series", async () => {
+    const { program, series, dayCoach, nextCoach } =
+      await seriesWithOneHandAssignedDate();
+
+    const result = await editProgramScheduleSeriesInternal(
+      fixtures.admin,
+      series.id,
+      {
+        programId: program.id,
+        scheduledCoachIds: [nextCoach.id],
+        daysOfWeek: [1],
+        startTime: "13:00",
+        endTime: "15:00",
+        startsOn: FUTURE_START,
+        endsOn: FUTURE_END,
+      },
+    );
+
+    expect(result.preservedCoachDates).toEqual(["2099-01-12"]);
+    const byDate = await coachesByDate(series.id);
+    expect(byDate["2099-01-12"]!.members).toEqual([dayCoach.id]);
+    // The preserved date still MOVED to the new window — only the coach is
+    // an exception, not the schedule.
+    const blocks = await blocksForSeries(series.id);
+    const moved = blocks.find(
+      (b) => formatPfaDate(b.startAt) === "2099-01-12",
+    )!;
+    expect(moved.startAt).toEqual(pfaWallClockToUtc("2099-01-12", "13:00"));
+  });
+
+  // The guard that is on the ROW COUNT rather than on the series' coach set:
+  // clearing the series to no coach must not strip a preserved date.
+  it("keeps a preserved date's coaches when the series is cleared to none", async () => {
+    const { program, series, dayCoach } = await seriesWithOneHandAssignedDate();
+
+    const result = await editProgramScheduleSeriesInternal(
+      fixtures.admin,
+      series.id,
+      {
+        programId: program.id,
+        scheduledCoachIds: [],
+        daysOfWeek: [1],
+        startTime: "09:00",
+        endTime: "10:00",
+        startsOn: FUTURE_START,
+        endsOn: FUTURE_END,
+      },
+    );
+
+    expect(result.preservedCoachDates).toEqual(["2099-01-12"]);
+    const byDate = await coachesByDate(series.id);
+    expect(byDate["2099-01-12"]!.members).toEqual([dayCoach.id]);
+    expect(byDate["2099-01-12"]!.primary).toBe(dayCoach.id);
+    for (const date of ["2099-01-05", "2099-01-19", "2099-01-26"]) {
+      expect(byDate[date]!.members).toEqual([]);
+      expect(byDate[date]!.primary).toBeNull();
+    }
+  });
+
+  it("preserves which coach was PRIMARY on a multi-coach date", async () => {
+    const program = await createProgram(true);
+    const seriesCoach = await createCoach();
+    const first = await createCoach();
+    const second = await createCoach();
+    const nextCoach = await createCoach();
+
+    const { series } = await trackedCreate(fixtures.admin, {
+      programId: program.id,
+      scheduledCoachIds: [seriesCoach.id],
+      daysOfWeek: [1],
+      startTime: "09:00",
+      endTime: "10:00",
+      startsOn: FUTURE_START,
+      endsOn: FUTURE_END,
+    });
+    const target = (await blocksForSeries(series.id)).find(
+      (b) => formatPfaDate(b.startAt) === "2099-01-12",
+    )!;
+    await updateProgramScheduleBlockInternal(fixtures.admin, target.id, {
+      scheduledCoachIds: [first.id, second.id],
+    });
+
+    await editProgramScheduleSeriesInternal(fixtures.admin, series.id, {
+      programId: program.id,
+      scheduledCoachIds: [nextCoach.id],
+      daysOfWeek: [1],
+      startTime: "09:00",
+      endTime: "10:00",
+      startsOn: FUTURE_START,
+      endsOn: FUTURE_END,
+    });
+
+    const byDate = await coachesByDate(series.id);
+    expect(byDate["2099-01-12"]!.members).toEqual(
+      [first.id, second.id].sort(),
+    );
+    // first was primary before the regenerate and must still be after it —
+    // the primary is the name the grid tile shows.
+    expect(byDate["2099-01-12"]!.primary).toBe(first.id);
+  });
+
+  // The control: with nothing individually assigned, a series edit still
+  // moves EVERY date. Without this, a fix that preserved everything would
+  // pass every assertion above.
+  it("moves every date when none was individually assigned", async () => {
+    const program = await createProgram(true);
+    const seriesCoach = await createCoach();
+    const nextCoach = await createCoach();
+
+    const { series } = await trackedCreate(fixtures.admin, {
+      programId: program.id,
+      scheduledCoachIds: [seriesCoach.id],
+      daysOfWeek: [1],
+      startTime: "09:00",
+      endTime: "10:00",
+      startsOn: FUTURE_START,
+      endsOn: FUTURE_END,
+    });
+
+    const result = await editProgramScheduleSeriesInternal(
+      fixtures.admin,
+      series.id,
+      {
+        programId: program.id,
+        scheduledCoachIds: [nextCoach.id],
+        daysOfWeek: [1],
+        startTime: "09:00",
+        endTime: "10:00",
+        startsOn: FUTURE_START,
+        endsOn: FUTURE_END,
+      },
+    );
+
+    expect(result.preservedCoachCount).toBe(0);
+    expect(result.preservedCoachDates).toEqual([]);
+    const byDate = await coachesByDate(series.id);
+    for (const v of Object.values(byDate)) {
+      expect(v.members).toEqual([nextCoach.id]);
+      expect(v.primary).toBe(nextCoach.id);
     }
   });
 });

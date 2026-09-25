@@ -123,6 +123,19 @@ export const createProgramScheduleSeriesSchema = seriesBase
 // (regenerate future occurrences) reads every field, so they are all
 // required here too — the UI sends the full series definition on save.
 export const editProgramScheduleSeriesSchema = seriesBase
+  .extend({
+    // The escape hatch on the preservation rule in
+    // `schedule-occurrence-coaches.ts`. A series edit normally leaves any
+    // date that was individually re-coached alone; ticking this overwrites
+    // those dates too.
+    //
+    // 📌 A PLAIN BOOLEAN, NOT `z.coerce.boolean()`, DELIBERATELY. Coercion
+    // reads the STRING "false" as `true` (every non-empty string is truthy),
+    // which on this particular flag means silently clobbering the exceptions
+    // an operator deliberately made. The FormData → boolean step is done once,
+    // explicitly, in `buildSeriesInput`.
+    applyCoachesToAll: z.boolean().default(false),
+  })
   .refine((v) => v.startTime < v.endTime, seriesTimeError)
   .refine((v) => v.startsOn <= v.endsOn, seriesDateError);
 

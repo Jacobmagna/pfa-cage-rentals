@@ -88,7 +88,7 @@ function pfaWeekdayIndex(d: Date): number {
 // RECUR-b2: medium label ("Aug 30, 2026") for a "YYYY-MM-DD" series date.
 // Parses at noon PFA-local so the day never shifts across a DST/TZ edge,
 // then reuses the shared medium formatter.
-function formatIsoDateMedium(iso: string): string {
+export function formatIsoDateMedium(iso: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
   return formatPfaDateMedium(parsePfaInput(iso, "12:00"));
 }
@@ -350,10 +350,15 @@ export function ProgramBlockDialog({
   editInitial,
   editSeriesInitial,
   reconciliation,
+  onSeriesSaved,
 }: {
   open: boolean;
   mode: "create" | "edit";
   onClose: () => void;
+  // Fires when a whole-series edit resolves having LEFT some dates on their
+  // own coaches. The dialog closes on success, so the only place that news
+  // can reach the operator is the grid behind it.
+  onSeriesSaved?: (preservedDates: string[]) => void;
   date: Date;
   programs: ProgramOption[];
   coaches: CoachOption[];
@@ -637,6 +642,23 @@ export function ProgramBlockDialog({
       onClose();
     seriesWasPending.current = seriesPending;
   }, [seriesPending, seriesState, open, onClose]);
+
+  // Report a series edit that left some dates on their own coaches.
+  //
+  // 🔴 KEYED ON THE RESULT OBJECT'S IDENTITY, NOT on the pending latch the
+  // close effect above uses. `useActionState` hands back a NEW object only
+  // when an action resolves, so this fires exactly once per submit and
+  // cannot be skipped by the action resolving inside a single React batch
+  // (rule 43). Tying the message to the latch would mean the fast path —
+  // which is the ordinary one — silently drops the notice.
+  const reportedSeriesState = useRef(seriesState);
+  useEffect(() => {
+    if (seriesState === reportedSeriesState.current) return;
+    reportedSeriesState.current = seriesState;
+    if (seriesState.ok && seriesState.preservedCoachDates?.length) {
+      onSeriesSaved?.(seriesState.preservedCoachDates);
+    }
+  }, [seriesState, onSeriesSaved]);
 
   // Native close (Escape, backdrop click).
   useEffect(() => {
@@ -1493,6 +1515,40 @@ export function ProgramBlockDialog({
             <p className="text-[11px] text-fg-subtle mt-1 ml-[1.625rem] leading-snug">
               Unchecked changes only this occurrence.
             </p>
+
+            {/* The escape hatch on the preservation rule
+                (src/lib/schedule-occurrence-coaches.ts). A series edit now
+                leaves any date whose coaches were set by hand alone; this is
+                the only way to say "no, those too".
+
+                🔴 UNCONTROLLED AND DEFAULTING OFF, both deliberately. It is
+                read from FormData and by nothing else, so holding it in
+                React state would be a control that exists only to set itself
+                (rule 43's sibling). And because the form remounts on an
+                errored submit, the reset direction matters: it resets to the
+                SAFE option, so a refusal can never silently arm a
+                destructive one the admin ticked a minute ago. */}
+            {applyToSeries ? (
+              <div className="mt-2.5 ml-[1.625rem] border-t border-line/60 pt-2.5">
+                <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    name="applyCoachesToAll"
+                    value="true"
+                    defaultChecked={false}
+                    className="h-4 w-4 mt-0.5 rounded border-line text-gold accent-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+                  />
+                  <span className="text-sm text-fg">
+                    Also replace coaches on dates changed individually
+                  </span>
+                </label>
+                <p className="text-[11px] text-fg-subtle mt-1 ml-[1.625rem] leading-snug">
+                  Leave this off and any date whose coach was set by hand
+                  keeps that coach. Tick it to put the coaches above on every
+                  date, including those.
+                </p>
+              </div>
+            ) : null}
           </div>
         ) : null}
 

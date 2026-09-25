@@ -43,7 +43,14 @@ export type ProgramScheduleFormValues = {
 };
 
 export type ProgramScheduleActionResult =
-  | { ok: true }
+  | {
+      ok: true;
+      // Set only by the whole-series edit: the dates that kept their own
+      // coach set instead of taking the series'. The dialog reports these
+      // out loud — a preservation nobody mentions is as baffling as the
+      // silent clobbering it replaced, just in the other direction.
+      preservedCoachDates?: string[];
+    }
   | {
       ok: false;
       error: { code: string; message: string };
@@ -146,7 +153,15 @@ function buildSeriesInput(formData: FormData) {
   // (weekly/1) — preserving today's every-week behavior for old callers.
   const frequencyRaw = formData.get("frequency")?.toString().trim();
   const intervalRaw = formData.get("interval")?.toString().trim();
+  // The one FormData → boolean conversion for the preservation escape hatch.
+  // An unchecked checkbox submits NOTHING, so absence is the false case, and
+  // only the two values this form can actually send read as true. Deliberately
+  // not "any non-empty string is true" — that reads the literal "false" as
+  // true, and on this flag being wrong means wiping the per-date coach
+  // assignments an operator made on purpose.
+  const applyAllRaw = formData.get("applyCoachesToAll")?.toString();
   return {
+    applyCoachesToAll: applyAllRaw === "on" || applyAllRaw === "true",
     programId: formData.get("programId")?.toString() ?? "",
     scheduledCoachIds: formData
       .getAll("scheduledCoachIds")
@@ -239,8 +254,11 @@ export async function editProgramScheduleSeriesFormAction(
     };
   }
   try {
-    await editProgramScheduleSeries(seriesId, buildSeriesInput(formData));
-    return { ok: true };
+    const result = await editProgramScheduleSeries(
+      seriesId,
+      buildSeriesInput(formData),
+    );
+    return { ok: true, preservedCoachDates: result.preservedCoachDates };
   } catch (err) {
     return translate(err, values);
   }

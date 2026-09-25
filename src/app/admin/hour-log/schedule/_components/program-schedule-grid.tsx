@@ -41,6 +41,7 @@ import type {
 } from "@/lib/server/reconciliation";
 import {
   ProgramBlockDialog,
+  formatIsoDateMedium,
   type CoachOption,
   type ProgramOption,
   type ResourceOption,
@@ -183,6 +184,13 @@ export function ProgramScheduleGrid({
 }) {
   const [dialog, setDialog] = useState<DialogState>({ kind: "closed" });
   const [dragError, setDragError] = useState<string | null>(null);
+  // Dates a whole-series edit deliberately LEFT on their own coaches. The
+  // dialog closes on success, so this is where the operator finds out — and
+  // they have to find out, or a series edit that skipped three Saturdays is
+  // indistinguishable from one that failed on them.
+  const [preservedCoachDates, setPreservedCoachDates] = useState<
+    string[] | null
+  >(null);
   const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
   const [paint, setPaint] = useState<PaintState>({ kind: "idle" });
   const [, startTransition] = useTransition();
@@ -498,6 +506,30 @@ export function ProgramScheduleGrid({
         </div>
       ) : null}
 
+      {preservedCoachDates && preservedCoachDates.length > 0 ? (
+        <div
+          role="status"
+          className="rounded-md border border-blue/30 bg-blue/10 px-3 py-2 text-xs text-fg flex items-start justify-between gap-2"
+        >
+          <span>
+            Series updated.{" "}
+            {preservedCoachDates.length === 1
+              ? "1 date kept its own coaches"
+              : `${preservedCoachDates.length} dates kept their own coaches`}{" "}
+            ({preservedCoachDates.map(formatIsoDateMedium).join(", ")}). To
+            change those too, edit the series again and tick “Also replace
+            coaches on dates changed individually”.
+          </span>
+          <button
+            type="button"
+            onClick={() => setPreservedCoachDates(null)}
+            className="text-fg-subtle hover:text-fg text-[10px] uppercase tracking-wider shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
       {dragError ? (
         <div
           role="alert"
@@ -675,6 +707,7 @@ export function ProgramScheduleGrid({
 
       <ProgramBlockDialog
         open={dialog.kind !== "closed"}
+        onSeriesSaved={setPreservedCoachDates}
         mode={dialog.kind === "edit" ? "edit" : "create"}
         onClose={close}
         date={selectedDate}

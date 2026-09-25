@@ -44,7 +44,7 @@
 // are what the accountability engine reads. ▶ MAINTENANCE-HANDOFF open item.
 //
 // ── THE ESCAPE HATCH ──────────────────────────────────────────────────────
-// `applyCoachesToAll` restores the old clobbering behaviour for one submit,
+// `applyCoachesToAll` restores the old clobbering behavior for one submit,
 // because "actually, put Mike on EVERY date, including the ones I fiddled
 // with" is a real thing an operator wants and there would otherwise be no way
 // to say it. It is opt-in per save, never sticky: a preserved date is an

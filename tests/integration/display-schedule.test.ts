@@ -450,7 +450,10 @@ describe("blocked bars say WHAT is blocking them", () => {
       resourceId: cage1.id,
       start: "14:00",
       end: "15:00",
-      programName: "HS Summer Program-Hitting",
+      // NOT a name from src/db/seed-programs.ts: CI runs `npm run db:seed`
+      // before this suite, so borrowing a seeded name trips
+      // programs_name_unique (23505) in CI only — green locally, red there.
+      programName: "Tagged Fixture — Hitting",
       programDisplayName: "Hitting Program",
       reason: REASON_SENTINEL,
     });
@@ -467,14 +470,14 @@ describe("blocked bars say WHAT is blocking them", () => {
       resourceId: cage1.id,
       start: "14:00",
       end: "15:00",
-      programName: "Youth Summer Camp",
+      programName: "Tagged Fixture — Youth Camp",
       programDisplayName: null,
       reason: REASON_SENTINEL,
     });
 
     const result = await fetchDisplaySchedule(WINDOW);
 
-    expect(result.blocks[0].label).toBe("Youth Summer Camp");
+    expect(result.blocks[0].label).toBe("Tagged Fixture — Youth Camp");
   });
 
   // 🔴 REAL OCCUPANCY OUTRANKS THE COSMETIC TAG, and this is the test that

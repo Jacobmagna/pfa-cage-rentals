@@ -476,6 +476,14 @@ test.describe("an admin records hours for two coaches on one block", () => {
     });
     await expect(page.locator("dialog[open]")).toBeHidden({ timeout: 15_000 });
 
+    // The Work Log defaults to the CURRENT MONTH, and the shift above is 19
+    // days back — so on the 1st through the 19th of any month the row is in
+    // LAST month and is not on the default view. This test went green on the
+    // day it was written (Aug 25) and failed from the 1st of the next month,
+    // unseen because the E2E job was skipped. Ask for the day itself rather
+    // than relying on what month today happens to be in.
+    await page.goto(`/admin/hour-log?from=${day.iso}&to=${day.iso}`);
+
     await expect(page.getByText(/Entered by/i).first()).toBeVisible();
   });
 });

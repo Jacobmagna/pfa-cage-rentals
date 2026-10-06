@@ -12,6 +12,8 @@ import { requireRole } from "@/lib/authz";
 import { fetchStipendEarningsAllTime } from "@/lib/stipend/fetch";
 import { totalFromSnapshot, workPayForLog } from "@/lib/billing";
 import { netCoachLedgers, type LedgerPayment } from "@/lib/payment-ledger";
+import { normalizeShown, summarizePaymentHistory } from "@/lib/payments/history";
+import { fetchPaymentHistory } from "@/lib/payments/history-fetch";
 import { PaymentsClient, type CoachOption, type RecentPaymentRow } from "./_components/payments-client";
 
 // /admin/payments — TWO-direction coach ledger. Three stacked sections:
@@ -24,8 +26,12 @@ import { PaymentsClient, type CoachOption, type RecentPaymentRow } from "./_comp
 //   2. Pending inbox: coach-self-reported payments awaiting admin
 //      confirmation. Phase P4 will populate this; for launch it
 //      typically renders an empty state.
-//   3. Recent payments: last 100 confirmed + pending entries (each
+//   3. Payment history: confirmed + pending entries, newest first (each
 //      tagged with its direction) with inline edit / delete / confirm.
+//      Paged by `?shown=` in the URL — 100 rows by default, more on request
+//      — and server-rendered at every size. The list always states how many
+//      rows it shows out of how many exist. Rules: src/lib/payments/history.ts;
+//      the read: src/lib/payments/history-fetch.ts.
 //
 // Money direction (QA2 #9): cage rentals are money the coach OWES PFA (a
 // receivable, paid down by coach_to_pfa payments); work hours are money
@@ -46,10 +52,17 @@ import { PaymentsClient, type CoachOption, type RecentPaymentRow } from "./_comp
 // per-month breakdowns) is offline-driven; the app just shows the
 // raw cage-owed − paid math.
 
-const RECENT_LIMIT = 100;
-
-export default async function AdminPaymentsPage() {
+export default async function AdminPaymentsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ shown?: string | string[] }>;
+}) {
   await requireRole("admin");
+
+  // How many history rows to render. The raw param is hostile input and is
+  // never passed to a query — normalizeShown clamps it to 100..2,000.
+  const params = await searchParams;
+  const shown = normalizeShown(params.shown);
 
   // Run everything in parallel — these queries are independent.
   const [
@@ -58,7 +71,7 @@ export default async function AdminPaymentsPage() {
     hourLogRows,
     confirmedPaymentRows,
     pendingPaymentRows,
-    recentRows,
+    paymentHistory,
     stipendEarnings,
   ] = await Promise.all([
     db
@@ -126,29 +139,21 @@ export default async function AdminPaymentsPage() {
         ),
       )
       .orderBy(desc(coachPayments.paidAt)),
-    db
-      .select({
-        id: coachPayments.id,
-        coachId: coachPayments.coachId,
-        coachName: users.name,
-        coachEmail: users.email,
-        amountCents: coachPayments.amountCents,
-        method: coachPayments.method,
-        direction: coachPayments.direction,
-        paidAt: coachPayments.paidAt,
-        // The period the money settles (nullable — "no period stated"). Shown
-        // as its own column so July money that arrived in August reads as July.
-        coversThrough: coachPayments.coversThrough,
-        reference: coachPayments.reference,
-        note: coachPayments.note,
-        status: coachPayments.status,
-        recordedAt: coachPayments.recordedAt,
-      })
-      .from(coachPayments)
-      .innerJoin(users, eq(coachPayments.coachId, users.id))
-      .where(isNull(coachPayments.deletedAt))
-      .orderBy(desc(coachPayments.paidAt))
-      .limit(RECENT_LIMIT),
+    // The history list: the newest `shown` rows plus a count of all of them.
+    //
+    // WHY the row count lives in the URL and not in client state: recording,
+    // editing, deleting or confirming a payment revalidates this page. If
+    // "show more" appended rows into client state, only the first 100 would
+    // refresh and the appended rows would be a stale snapshot — a deleted
+    // payment still on screen, an edited amount showing its old value, on a
+    // money page. With `?shown=` the server renders EVERY visible row from one
+    // query at one freshness, and revalidatePath("/admin/payments") already
+    // covers every `?shown=` variant.
+    //
+    // 🔴 This list is for DISPLAY ONLY. It is limited, so nothing may ever be
+    // summed or derived from it — the balances come from the unlimited
+    // confirmedPaymentRows query above.
+    fetchPaymentHistory(shown),
     // All-time, every coach — matching this page's own scope. Voided earnings
     // are excluded inside the fetch, so no caller can forget to.
     fetchStipendEarningsAllTime(),
@@ -272,7 +277,7 @@ export default async function AdminPaymentsPage() {
     recordedAt: p.recordedAt,
   }));
 
-  const recentPayments: RecentPaymentRow[] = recentRows.map((p) => ({
+  const recentPayments: RecentPaymentRow[] = paymentHistory.rows.map((p) => ({
     id: p.id,
     coachId: p.coachId,
     coachName: p.coachName ?? p.coachEmail,
@@ -286,6 +291,13 @@ export default async function AdminPaymentsPage() {
     status: p.status,
     recordedAt: p.recordedAt,
   }));
+
+  // What the list says about itself (caption, whether there is more to show).
+  const history = summarizePaymentHistory({
+    shown,
+    rowCount: paymentHistory.rows.length,
+    count: paymentHistory.count,
+  });
 
   return (
     <>
@@ -322,6 +334,7 @@ export default async function AdminPaymentsPage() {
         totals={totals}
         pendingPayments={pendingPayments}
         recentPayments={recentPayments}
+        history={{ shown, ...history }}
         coachOptions={coachOptions}
       />
     </>

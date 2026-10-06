@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Check, ClipboardCopy, Pencil, Plus, Trash2 } from "lucide-react";
 import { confirmPayment, deletePayment } from "../actions";
 import { PaymentDialog, type PaymentInitialValues } from "./payment-dialog";
@@ -8,6 +9,11 @@ import { PFA_TIMEZONE } from "@/lib/timezone";
 import { ConfirmDialog } from "@/app/_components/confirm-dialog";
 import { ListSearch } from "@/app/_components/list-search";
 import { nameMatchesQuery } from "@/app/_components/list-search.logic";
+import {
+  paymentHistoryControls,
+  paymentHistoryHref,
+  type PaymentHistoryView,
+} from "@/lib/payments/history";
 
 // Top-level client island for /admin/payments. Owns:
 //   - record/edit dialog open state
@@ -15,7 +21,7 @@ import { nameMatchesQuery } from "@/app/_components/list-search.logic";
 //   - recent row delete transition
 //
 // Three sections render top-to-bottom: balances, pending inbox,
-// recent history. Each is its own subcomponent so the file stays
+// payment history. Each is its own subcomponent so the file stays
 // readable.
 
 export type CoachOption = {
@@ -90,12 +96,14 @@ export function PaymentsClient({
   totals,
   pendingPayments,
   recentPayments,
+  history,
   coachOptions,
 }: {
   balanceRows: BalanceRow[];
   totals: BalanceTotals;
   pendingPayments: PendingPaymentRow[];
   recentPayments: RecentPaymentRow[];
+  history: PaymentHistoryView;
   coachOptions: CoachOption[];
 }) {
   const [dialog, setDialog] = useState<DialogState>({ mode: "closed" });
@@ -198,6 +206,7 @@ export function PaymentsClient({
 
       <RecentTable
         rows={recentPayments}
+        history={history}
         onEdit={openEdit}
         onDelete={onDelete}
         pendingActionId={pendingActionId}
@@ -522,25 +531,62 @@ function PendingInbox({
   );
 }
 
+// The payment history list. `rows` is every row the server rendered for the
+// current `?shown=` count; `history` is what the list says about itself (the
+// caption, and whether there is more to show).
+//
+// "Show more" does NOT fetch rows into client state. It changes `?shown=` and
+// lets the server re-render the whole list, so an edit or delete can never
+// leave a stale row on screen (see the note at the fetch in page.tsx). The
+// navigation runs in a transition, which keeps the current rows on screen
+// until the longer list arrives.
 function RecentTable({
   rows,
+  history,
   onEdit,
   onDelete,
   pendingActionId,
 }: {
   rows: RecentPaymentRow[];
+  history: PaymentHistoryView;
   onEdit: (row: RecentPaymentRow) => void;
   onDelete: (row: RecentPaymentRow) => void;
   pendingActionId: string | null;
 }) {
+  const router = useRouter();
+  // Local to this table on purpose — the delete/confirm transition in
+  // PaymentsClient is a different wait and must not disable these buttons.
+  const [isLoadingMore, startLoadingMore] = useTransition();
+  const [clicked, setClicked] = useState<"more" | "all" | null>(null);
+
+  // Null when everything is already on screen (or the cap was reached).
+  const controls = paymentHistoryControls(history);
+
+  const showUpTo = (which: "more" | "all", shown: number) => {
+    setClicked(which);
+    startLoadingMore(() => {
+      // replace, not push: clicking through the list must not pile up history
+      // entries. scroll: false keeps the reader where they are.
+      router.replace(paymentHistoryHref(shown), { scroll: false });
+    });
+  };
+
+  const moreButtonClass =
+    "inline-flex h-9 items-center justify-center rounded-md border border-line bg-surface-2 px-4 text-sm font-medium text-fg-muted transition-colors hover:border-line-strong hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 disabled:opacity-50 disabled:hover:border-line disabled:hover:text-fg-muted";
+
   return (
     <section aria-labelledby="recent-heading">
       <h2
         id="recent-heading"
-        className="mb-3 text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted"
+        className={`${history.caption ? "mb-1" : "mb-3"} text-[11.5px] font-semibold uppercase tracking-[0.14em] text-fg-muted`}
       >
-        Recent payments
+        Payment history
       </h2>
+      {history.caption ? (
+        <p aria-live="polite" className="mb-3 text-xs text-fg-muted">
+          {history.caption}
+        </p>
+      ) : null}
       {rows.length === 0 ? (
         <div className="rounded-lg border border-line/60 bg-surface/40 px-4 py-10 text-center">
           <p className="text-sm text-fg-muted">
@@ -549,6 +595,7 @@ function RecentTable({
           </p>
         </div>
       ) : (
+        <>
         <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-[var(--shadow-sm)]">
           {/* min-w up from 720px with the added coverage column, so the row
               scrolls horizontally instead of crushing the two date cells. */}
@@ -642,6 +689,33 @@ function RecentTable({
             </tbody>
           </table>
         </div>
+        {controls ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => showUpTo("more", controls.more.shown)}
+              disabled={isLoadingMore}
+              aria-label={controls.more.ariaLabel}
+              className={moreButtonClass}
+            >
+              {isLoadingMore && clicked === "more"
+                ? "Loading…"
+                : controls.more.label}
+            </button>
+            <button
+              type="button"
+              onClick={() => showUpTo("all", controls.all.shown)}
+              disabled={isLoadingMore}
+              aria-label={controls.all.ariaLabel}
+              className={moreButtonClass}
+            >
+              {isLoadingMore && clicked === "all"
+                ? "Loading…"
+                : controls.all.label}
+            </button>
+          </div>
+        ) : null}
+        </>
       )}
     </section>
   );

@@ -44,7 +44,7 @@ export default function Loading() {
         <Skeleton className="h-16 w-full" />
       </div>
 
-      {/* Recent payments */}
+      {/* Payment history */}
       <div>
         <Skeleton className="h-3 w-32 mb-3" />
         <div className="overflow-hidden rounded-lg border border-line">

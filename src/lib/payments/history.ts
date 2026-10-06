@@ -146,6 +146,12 @@ export type PaymentHistoryControls = {
 /**
  * The two buttons under the table, or null when there is nothing more to
  * show. Built here so the client component contains no arithmetic.
+ *
+ * The second button says "Show all (N)" only when the cap can actually
+ * deliver all N rows. Past the cap it reads "Show the 2,000 most recent"
+ * instead: a label that says "all" must show all, and on a money list a
+ * button that promises everything and then stops short is the very defect
+ * this module exists to remove.
  */
 export function paymentHistoryControls(
   summary: Pick<
@@ -156,6 +162,9 @@ export function paymentHistoryControls(
   if (!summary.hasMore) return null;
   const more = formatCount(moreButtonCount(summary));
   const total = formatCount(summary.total);
+  const cap = formatCount(PAYMENT_HISTORY_CAP);
+  // More payments exist than one page may render, so "all" would be untrue.
+  const beyondCap = summary.total > PAYMENT_HISTORY_CAP;
   return {
     more: {
       shown: summary.nextShown,
@@ -165,8 +174,10 @@ export function paymentHistoryControls(
     all: {
       // The numeric cap, which is exactly what `?shown=all` normalizes to.
       shown: PAYMENT_HISTORY_CAP,
-      label: `Show all (${total})`,
-      ariaLabel: `Show all ${total} payments`,
+      label: beyondCap ? `Show the ${cap} most recent` : `Show all (${total})`,
+      ariaLabel: beyondCap
+        ? `Show the ${cap} most recent payments`
+        : `Show all ${total} payments`,
     },
   };
 }

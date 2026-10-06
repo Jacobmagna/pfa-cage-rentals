@@ -266,6 +266,61 @@ describe("summarizePaymentHistory", () => {
       ariaLabel: "Show all 1,234 payments",
     });
   });
+
+  it("total 2,431 at the default — the second button does NOT say 'all', because the cap will cut it short", () => {
+    const s = summarizePaymentHistory({
+      shown: 100,
+      rowCount: 100,
+      count: 2431,
+    });
+    expect(s.total).toBe(2431);
+    expect(s.visible).toBe(100);
+    expect(s.hasMore).toBe(true);
+    const controls = paymentHistoryControls(s);
+    expect(controls?.all).toEqual({
+      shown: 2000,
+      label: "Show the 2,000 most recent",
+      ariaLabel: "Show the 2,000 most recent payments",
+    });
+    expect(controls?.all.shown).toBe(PAYMENT_HISTORY_CAP);
+    expect(controls?.all.label).not.toContain("all");
+    expect(controls?.all.ariaLabel).not.toContain("all");
+    // The first button is unaffected.
+    expect(controls?.more).toEqual({
+      shown: 200,
+      label: "Show 100 more",
+      ariaLabel: "Show 100 more payments",
+    });
+  });
+
+  it("total exactly 2,000 at the default — the cap can deliver every row, so it still says 'all'", () => {
+    const s = summarizePaymentHistory({
+      shown: 100,
+      rowCount: 100,
+      count: 2000,
+    });
+    expect(s.total).toBe(2000);
+    expect(s.visible).toBe(100);
+    expect(s.hasMore).toBe(true);
+    expect(paymentHistoryControls(s)?.all).toEqual({
+      shown: 2000,
+      label: "Show all (2,000)",
+      ariaLabel: "Show all 2,000 payments",
+    });
+  });
+
+  it("total 2,001 — one past the cap is already too many to call 'all'", () => {
+    const s = summarizePaymentHistory({
+      shown: 100,
+      rowCount: 100,
+      count: 2001,
+    });
+    expect(paymentHistoryControls(s)?.all).toEqual({
+      shown: 2000,
+      label: "Show the 2,000 most recent",
+      ariaLabel: "Show the 2,000 most recent payments",
+    });
+  });
 });
 
 describe("paymentHistoryHref", () => {

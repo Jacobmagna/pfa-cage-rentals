@@ -280,7 +280,7 @@ describe("an admin records hours a coach never logged", () => {
   });
 
   // The headline case: a shift from months ago that nobody ever logged. There
-  // was never a date limit on this path to remove — the 14-day bound people
+  // was never a date limit on this path to remove — the 30-day bound people
   // remember is on the coach's one-tap confirm cards.
   it("accepts a date months in the past", async () => {
     const program = await createProgram({ defaultRatePer30MinCents: 1500 });

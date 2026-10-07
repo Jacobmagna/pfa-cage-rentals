@@ -9,9 +9,14 @@
 
 // A scheduled block is "confirmable now" the moment it STARTS and stays
 // confirmable open-ended (until the coach logs or cancels it) — the page
-// bounds the list to a 14-day lookback. Once we're more than 1 hr past a
+// bounds the list to a 30-day lookback. Once we're more than 1 hr past a
 // block's END it's tagged "Overdue" so a coach sees what they still owe.
 export const OVERDUE_AFTER_MS = 60 * 60_000; // 1 hr past end → "Overdue"
+
+// Confirm-list lookback: the coach's started-but-not-future blocks from
+// the last 30 days. Wide enough to surface anything they still owe; the
+// per-row "Overdue" tag distinguishes stale ones.
+export const CONFIRM_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Confirmable from the moment the block STARTS, open-ended (until logged). */
 export function isBlockConfirmable(blockStartMs: number, nowMs: number): boolean {

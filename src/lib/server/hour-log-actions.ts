@@ -935,9 +935,9 @@ async function collectAdminHourEntryWarnings(
  * Posts immediately: the admin entering the hours IS the approval.
  *
  * No date limit, deliberately — and note there was never one to remove. The
- * 14-day bound people remember is `LOOKBACK_MS` on the coach's one-tap confirm
- * CARDS; the manual coach form has only "end after start" and "≤ 16 hours".
- * Any day of any month is enterable here, which is the point.
+ * 30-day bound people remember is `CONFIRM_LOOKBACK_MS` on the coach's one-tap
+ * confirm CARDS; the manual coach form has only "end after start" and "≤ 16
+ * hours". Any day of any month is enterable here, which is the point.
  *
  * ── THE ORDER OF THE CHECKS IS THE DESIGN ────────────────────────────────
  *  1. Every subject must be a live account — refused outright, never

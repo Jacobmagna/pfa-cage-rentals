@@ -53,8 +53,8 @@ let sessionToken: string;
 
 /**
  * A day comfortably in the past — the case the feature exists for, and the
- * one Mark hit: older than the coach's own 14-day confirm window, so an
- * admin entry is the only way the work can ever be paid.
+ * one Mark hit: older than the coach's own confirm window (14 days then, 30
+ * now), so an admin entry was the only way the work could ever be paid.
  */
 function pastDay(daysAgo: number): { iso: string; typed: string } {
   const d = new Date();

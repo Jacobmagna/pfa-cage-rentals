@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CONFIRM_LOOKBACK_MS,
   OVERDUE_AFTER_MS,
   isBlockConfirmable,
   isBlockOverdue,
@@ -52,6 +53,12 @@ describe("isBlockOverdue", () => {
 
   it("uses a 1-hour overdue constant", () => {
     expect(OVERDUE_AFTER_MS).toBe(60 * 60_000);
+  });
+});
+
+describe("CONFIRM_LOOKBACK_MS", () => {
+  it("uses a 30-day confirm-list lookback constant", () => {
+    expect(CONFIRM_LOOKBACK_MS).toBe(30 * 24 * 60 * 60_000);
   });
 });
 

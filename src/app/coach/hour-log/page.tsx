@@ -11,6 +11,7 @@ import {
 } from "@/db/schema";
 import { requireSession } from "@/lib/authz";
 import {
+  CONFIRM_LOOKBACK_MS,
   isBlockConfirmable,
   isBlockOverdue,
   isLogScheduled,
@@ -29,7 +30,7 @@ import {
 // Coach hour-log "Log hours" tab (QA10 W3.7 + W3-polish15). Two stacked
 // sections:
 //   1. Confirm-the-schedule — the coach's scheduled program blocks that
-//      have STARTED within the last 14 days and aren't yet logged or
+//      have STARTED within the last 30 days and aren't yet logged or
 //      cancelled. Each is one tap away from being logged; a block more
 //      than 1 hr past its end is tagged "Overdue". They can also Cancel
 //      a block that didn't happen.
@@ -40,11 +41,6 @@ import {
 // action `logOwnHour` enforces coachId = self regardless of any
 // client-supplied value.
 
-// Confirm-list lookback: the coach's started-but-not-future blocks from
-// the last 14 days. Wide enough to surface anything they still owe; the
-// per-row "Overdue" tag distinguishes stale ones.
-const LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
-
 export default async function CoachHourLogPage() {
   const session = await requireSession();
   const { user } = session;
@@ -52,7 +48,7 @@ export default async function CoachHourLogPage() {
 
   const now = new Date();
   const nowMs = now.getTime();
-  const windowStart = new Date(nowMs - LOOKBACK_MS);
+  const windowStart = new Date(nowMs - CONFIRM_LOOKBACK_MS);
 
   const [
     programOptions,
@@ -94,10 +90,10 @@ export default async function CoachHourLogPage() {
     // they've already logged (overlap + same program via isLogScheduled).
     // NB: bound the LOWER edge on endAt (mirroring the candidate-block filter
     // above, which uses `endAt >= windowStart`). A shift that STARTED just
-    // before the 14-day cutoff but ENDS after it is still a candidate block,
+    // before the 30-day cutoff but ENDS after it is still a candidate block,
     // so its matching log must also be fetched — keying this on startAt would
     // drop that log and make the (already-logged) block reappear on the
-    // confirm list every morning of its 14th day. endAt >= startAt always, so
+    // confirm list every morning of its 30th day. endAt >= startAt always, so
     // this is a strict superset of the old window: it only ever adds matching
     // logs, never hides a block a coach genuinely still owes.
     db

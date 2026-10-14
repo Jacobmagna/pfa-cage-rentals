@@ -293,7 +293,8 @@ export default function CoachGuidePage() {
             <Step>
               Pick how long you need — <Lbl>30 min</Lbl>, <Lbl>1 hr</Lbl>, or a
               custom length (only up to the next taken slot). Add a note if you
-              like.
+              like. The weight room is one hour minimum, so it starts at{" "}
+              <Lbl>1 hr</Lbl>.
             </Step>
             <Step>
               Click <Btn>Schedule</Btn> to confirm. Your slot turns{" "}
@@ -313,6 +314,11 @@ export default function CoachGuidePage() {
             <li>
               When you&apos;ve got them all, click <Btn>Schedule</Btn> to book
               them together.
+            </li>
+            <li>
+              Weight room: pick back-to-back half hours on the same spot. They
+              book as one rental. A single half hour on its own can&apos;t be
+              booked.
             </li>
           </ul>
 

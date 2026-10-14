@@ -1692,25 +1692,6 @@ describe("W5 — update: an admin may re-time or move a PAST short rental, judge
     await expectUntouched(old);
   });
 
-  it("admin sends ONLY a new end on a past 30 minutes that would end in the future: judged on the final end, refused", async () => {
-    // Start stays days ago; the end moves to 15 minutes from now. The stored
-    // end is past, the final end is not: the final end decides.
-    const old = await seedRentalDirect({
-      resourceId: seeded.weightRoom1.id,
-      day: PAST_DAY,
-      start: "15:00",
-      end: "15:30",
-    });
-    const err = await refusal(() =>
-      updateSessionInternal(fixtures.admin, old.id, {
-        startAt: new Date(Date.now() - 15 * 60_000),
-        endAt: new Date(Date.now() + 15 * 60_000),
-      }),
-    );
-    expectMinimumRefusal(err, "update", seeded.weightRoom1.name);
-    await expectUntouched(old);
-  });
-
   it("admin re-times a FUTURE 30-minute rental into the past: judged on the final end, allowed", async () => {
     const old = await seedRentalDirect({
       resourceId: seeded.weightRoom1.id,

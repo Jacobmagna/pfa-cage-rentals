@@ -358,17 +358,31 @@ export async function updateSessionInternal(
   const finalIsGroupSession =
     resource.type === "weight_room" && existing.isGroupSession;
 
-  // Re-stamp ratePer30MinCents only when one of its inputs changed.
-  // Editing time/note leaves the historical rate alone — this honors the
-  // snapshot guarantee: a coach renegotiating their rate doesn't
-  // retroactively rewrite past sessions even if an admin later edits one
-  // of those sessions. When inputs DID change, the rate re-resolves with the
-  // final group status: a group weight-room session whose coach changes
-  // re-resolves the NEW coach's GROUP rate, while a session moved off
-  // weight-room re-bills at the new resource's regular rate (group cleared).
-  const inputsChanged =
-    finalCoachId !== existing.coachId ||
-    finalResourceId !== existing.resourceId;
+  // PRICE ON EDIT. The stored ratePer30MinCents is looked up again ONLY when
+  // the COACH changes or the resource TYPE changes (cage / bullpen /
+  // weight_room). Everything else keeps the rate stamped on the row: a time
+  // or note edit, AND a move to another spot of the SAME kind (Weight Room 1
+  // -> Weight Room 2, Cage 1 -> Cage 2). A move is not a renegotiation. The
+  // rate is a snapshot of what was agreed when the rental was booked, so an
+  // old rental billed at a coach's old rate must not be silently re-priced at
+  // today's rate because it was dragged one column over.
+  //
+  // A coach change or a change of kind does re-price, because the rate the
+  // row carries no longer describes it (it is another coach's rental, or a
+  // different kind of space). It re-resolves with the final group status: a
+  // group weight-room session whose coach changes gets the NEW coach's GROUP
+  // rate, while a session moved off weight-room re-bills at the new
+  // resource's regular rate (group cleared above).
+  //
+  // The stored row's resource is only loaded when the resource id actually
+  // changed; an unchanged id cannot be a change of kind.
+  const coachChanged = finalCoachId !== existing.coachId;
+  let resourceTypeChanged = false;
+  if (finalResourceId !== existing.resourceId) {
+    const previousResource = await getResourceOrThrow(existing.resourceId);
+    resourceTypeChanged = previousResource.type !== resource.type;
+  }
+  const inputsChanged = coachChanged || resourceTypeChanged;
   const nextRate = inputsChanged
     ? await resolveRateCents({
         coachId: finalCoachId,

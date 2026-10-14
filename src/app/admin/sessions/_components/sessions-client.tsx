@@ -87,7 +87,13 @@ export function SessionsClient({
     setDialogOpening((n) => n + 1);
     setDialogState({ mode: "edit", row });
   };
-  const close = () => setDialogState({ mode: "closed" });
+  // The dialog closes the moment a save lands, from inside the save itself
+  // (close-after-save.ts), so the revalidated list may not have arrived yet;
+  // re-pull it on close so the rental shows promptly.
+  const close = () => {
+    setDialogState({ mode: "closed" });
+    router.refresh();
+  };
 
   const onDelete = (row: SessionRow) => {
     setDeleteError(null);

@@ -18,6 +18,7 @@
 // type MARKERS, not decoration — respects the spec's gold-only rule.
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { BlockEditDialog } from "./block-edit-dialog";
 import {
   DndContext,
@@ -188,6 +189,15 @@ export function ScheduleGrid({
   );
 
   const close = () => setDialog({ kind: "closed" });
+  // The two session dialogs (create, edit) close the moment a save lands,
+  // from inside the save itself (close-after-save.ts), so the revalidated
+  // grid may not have arrived yet; re-pull it on close so the rental shows
+  // promptly. BlockEditDialog keeps plain `close`: it refreshes itself.
+  const router = useRouter();
+  const closeAndRefresh = () => {
+    close();
+    router.refresh();
+  };
 
   // Latest-ref pattern: window-level pointer handlers are bound once
   // but need the freshest props/state. The refs sync in a dedicated
@@ -721,7 +731,7 @@ export function ScheduleGrid({
         <ScheduleCreateDialog
           key={createOpening}
           open={dialog.kind === "create"}
-          onClose={close}
+          onClose={closeAndRefresh}
           coaches={coaches}
           resources={sessionResourceOptions}
           programs={programs}
@@ -735,7 +745,7 @@ export function ScheduleGrid({
           key={editOpening}
           open={dialog.kind === "edit-session"}
           mode="edit"
-          onClose={close}
+          onClose={closeAndRefresh}
           coachOptions={coaches}
           resourceOptions={sessionResourceOptions}
           initial={editInitial}

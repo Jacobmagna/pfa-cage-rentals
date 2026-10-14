@@ -18,6 +18,7 @@ import {
   type ActionResult as SessionActionResult,
 } from "@/app/admin/sessions/form-actions";
 import { BATCH_CREATE_FALLBACK } from "@/app/admin/sessions/batch-create-copy";
+import { useCloseAfterOkAction } from "@/app/_components/close-after-save";
 import type {
   CoachOption,
   ResourceOption,
@@ -241,8 +242,18 @@ export function ScheduleCreateDialog({
     if (open && !prevOpen) setTab(defaultTab);
   }
 
-  const [sessionState, sessionAction, sessionPending] = useActionState(
+  // Session tab, single-rental path: the dialog closes from inside the
+  // action, right after the server answers "saved" (see close-after-save.ts
+  // for why: waiting for `pending` to flip back could leave the dialog on
+  // "Saving…" forever on a production build). The batch path closes from its
+  // own await in SessionTab; the Block tab manages its own submit and close.
+  const sessionActionAndClose = useCloseAfterOkAction(
     createSessionFormAction,
+    onClose,
+    open,
+  );
+  const [sessionState, sessionAction, sessionPending] = useActionState(
+    sessionActionAndClose,
     SESSION_INITIAL,
   );
 
@@ -261,21 +272,6 @@ export function ScheduleCreateDialog({
   // created a Block, the next click is plausibly another Block. No
   // reset effect here (eslint react-hooks/set-state-in-effect rule
   // catches that pattern anyway).
-
-  // Auto-close on successful session submit. (The Block tab manages its own
-  // submit + close internally — it's fully client-driven now, no form action.)
-  const wasSessionPending = useRef(false);
-  useEffect(() => {
-    if (
-      wasSessionPending.current &&
-      !sessionPending &&
-      sessionState.ok &&
-      open
-    ) {
-      onClose();
-    }
-    wasSessionPending.current = sessionPending;
-  }, [sessionPending, sessionState, open, onClose]);
 
   // Native close event (Escape, backdrop click).
   useEffect(() => {

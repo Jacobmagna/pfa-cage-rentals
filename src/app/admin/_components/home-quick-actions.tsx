@@ -13,6 +13,7 @@
 import { Plus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { ScheduleCreateDialog } from "@/app/admin/schedule/_components/schedule-create-dialog";
 import type {
   CoachOption as CageCoachOption,
@@ -49,6 +50,7 @@ export function HomeQuickActions({
   // typed values again the next time the dialog was opened.
   const [cageOpening, setCageOpening] = useState(0);
   const [programOpen, setProgramOpen] = useState(false);
+  const router = useRouter();
 
   return (
     <>
@@ -97,7 +99,13 @@ export function HomeQuickActions({
       <ScheduleCreateDialog
         key={cageOpening}
         open={cageOpen}
-        onClose={() => setCageOpen(false)}
+        onClose={() => {
+          setCageOpen(false);
+          // The dialog closes the moment a save lands, from inside the save
+          // itself (close-after-save.ts), so the revalidated Home may not
+          // have arrived yet; re-pull it so the rental shows promptly.
+          router.refresh();
+        }}
         coaches={cageCoaches}
         programs={programs}
         resources={cageResources}

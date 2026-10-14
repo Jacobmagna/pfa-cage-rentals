@@ -19,6 +19,7 @@ import {
   type ActionResult,
 } from "../form-actions";
 import { BATCH_CREATE_FALLBACK } from "@/app/admin/sessions/batch-create-copy";
+import { useCloseAfterOkAction } from "@/app/_components/close-after-save";
 import type { CoachOption, ResourceOption } from "./sessions-client";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
@@ -95,7 +96,15 @@ export function SessionFormDialog({
   const router = useRouter();
   const action =
     mode === "edit" ? updateSessionFormAction : createSessionFormAction;
-  const [state, formAction, pending] = useActionState(action, INITIAL_STATE);
+  // Single-rental path: the dialog closes from inside the action, right after
+  // the server answers "saved" (see close-after-save.ts for why: waiting for
+  // `pending` to flip back could leave the dialog on "Saving…" forever on a
+  // production build). The batch path closes from its own await below.
+  const actionAndClose = useCloseAfterOkAction(action, onClose, open);
+  const [state, formAction, pending] = useActionState(
+    actionAndClose,
+    INITIAL_STATE,
+  );
 
   // Batch-create path state (create mode + N>1 only).
   const [batchPending, startBatchTransition] = useTransition();
@@ -137,16 +146,6 @@ export function SessionFormDialog({
       dialog.close();
     }
   }, [open]);
-
-  // Auto-close after a successful submit (single-slot path). For
-  // batch path, we close in the transition's success branch directly.
-  const wasPending = useRef(false);
-  useEffect(() => {
-    if (wasPending.current && !pending && state.ok && open) {
-      onClose();
-    }
-    wasPending.current = pending;
-  }, [pending, state, open, onClose]);
 
   useEffect(() => {
     const dialog = dialogRef.current;

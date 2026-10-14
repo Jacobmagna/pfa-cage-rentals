@@ -50,6 +50,7 @@ import {
 import { CageSlotBooking } from "./cage-slot-booking";
 import { CageBatchBooking } from "./cage-batch-booking";
 import { CageDayList, type CageDaySlot } from "./cage-day-list";
+import { oneTapNeighborFacts } from "./weight-room-booking.logic";
 import {
   OwnBookingDetail,
   type OwnBookingInfo,
@@ -324,6 +325,17 @@ export function CageCalendar({
         })
       : 0;
   const selectedMaxDurationMin = selectedMaxFreeSlots * 30;
+
+  // The selected slot's two neighbors, for the weight room refusal when
+  // less than an hour is free (is the half hour before free; is either one
+  // the coach's own rental). Same day, same resource.
+  const selectedNeighbors = selected
+    ? oneTapNeighborFacts({
+        slotIndex: selected.slotIndex,
+        totalSlots: SCHEDULE_GRID_SLOTS,
+        stateAt: (i) => slotStateFor(selected.resourceId, i).state,
+      })
+    : { prevSlotFree: false, nextToOwnRental: false };
 
   // 12h start time of the single selected slot, for the sticky bar.
   const selectedStartLabel = selected
@@ -733,6 +745,8 @@ export function CageCalendar({
             selectedDate={selectedDate}
             slotIndex={selected.slotIndex}
             maxDurationMin={selectedMaxDurationMin}
+            prevSlotFree={selectedNeighbors.prevSlotFree}
+            nextToOwnRental={selectedNeighbors.nextToOwnRental}
             onBooked={handleBooked}
             onCancel={() => setFormOpen(false)}
           />

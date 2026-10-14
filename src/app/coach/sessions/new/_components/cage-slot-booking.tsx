@@ -22,6 +22,17 @@
 //
 // Typed server errors (overlap / blocked) are translated to friendly inline
 // copy, mirroring form-actions.ts.
+//
+// WEIGHT ROOM (one hour minimum): the panel opens at 1 hr, offers only
+// "1 hr" and Custom (60 up to maxDurationMin, in 30s), and never splits.
+// When less than an hour is free from the tapped slot it shows a refusal
+// instead of the duration control and the Book button. That refusal is
+// decided HERE, not by the server: a production build strips the message
+// from a thrown server error, so the catch below can only ever show its
+// generic fallback. The server guard is the backstop.
+//
+// No booking is a group session any more: there is no checkbox, and the
+// flag is not sent (the server stores every new booking as non-group).
 
 import { useState, useTransition } from "react";
 import { X } from "lucide-react";
@@ -34,6 +45,11 @@ import {
 } from "@/lib/errors";
 import { SCHEDULE_GRID_FIRST_HOUR } from "@/lib/schedule-grid-utils";
 import { formatPfaTime12h, pfaWallClockAt } from "@/lib/timezone";
+import { WEIGHT_ROOM_MINIMUM_MINUTES } from "@/lib/weight-room-minimum";
+import {
+  clampWeightRoomDuration,
+  oneTapWeightRoomRefusal,
+} from "./weight-room-booking.logic";
 import {
   SessionSlotsList,
   deriveSlots,
@@ -77,6 +93,8 @@ export function CageSlotBooking({
   selectedDate,
   slotIndex,
   maxDurationMin,
+  prevSlotFree,
+  nextToOwnRental,
   onBooked,
   onCancel,
 }: {
@@ -89,6 +107,14 @@ export function CageSlotBooking({
    * selectable/typed duration so a booking can't run into a busy slot.
    */
   maxDurationMin: number;
+  /**
+   * Weight room refusal facts for the displayed day, same resource: the
+   * half hour BEFORE the tapped slot is free (never true for the first
+   * slot of the day), and the half hour before or after is the coach's
+   * own rental. Read only when a weight room has under an hour free.
+   */
+  prevSlotFree: boolean;
+  nextToOwnRental: boolean;
   /** Called after a successful log so the parent can re-fetch + confirm. */
   onBooked: () => void;
   onCancel: () => void;
@@ -97,18 +123,30 @@ export function CageSlotBooking({
   const startAt = pfaWallClockAt(selectedDate, hour, minute);
   const startMs = startAt.getTime();
 
-  // Which duration preset is active. "custom" reveals a free-minutes input.
-  const [mode, setMode] = useState<"30" | "60" | "custom">("30");
-  // The committed duration in minutes (always clamped to [30, maxDurationMin]).
-  const [durationMin, setDurationMin] = useState(30);
-  // Raw text of the custom-minutes input (validated/clamped on blur+submit).
-  const [customText, setCustomText] = useState("30");
-
-  // Booking-level "Group session" flag — only meaningful (and only shown)
-  // when the resource is a weight room. Defaults false; when the resource
-  // isn't a weight room the checkbox is hidden and false is submitted.
+  // A weight room opens at 1 hr and never goes under it; cages and
+  // bullpens open at 30 min as before.
   const isWeightRoom = resource.type === "weight_room";
-  const [isGroupSession, setIsGroupSession] = useState(false);
+  // Less than an hour free from here: a weight room refuses instead.
+  const weightRoomRefused =
+    isWeightRoom && maxDurationMin < WEIGHT_ROOM_MINIMUM_MINUTES;
+  // Clamp a typed/preset length to what this resource allows.
+  const clampFor = (candidate: number) =>
+    isWeightRoom
+      ? clampWeightRoomDuration(candidate, maxDurationMin)
+      : clampDuration(candidate, maxDurationMin);
+  const initialDuration = isWeightRoom
+    ? clampWeightRoomDuration(WEIGHT_ROOM_MINIMUM_MINUTES, maxDurationMin)
+    : 30;
+
+  // Which duration preset is active. "custom" reveals a free-minutes input.
+  const [mode, setMode] = useState<"30" | "60" | "custom">(
+    isWeightRoom ? "60" : "30",
+  );
+  // The committed duration in minutes (always clamped to [30, maxDurationMin];
+  // for a weight room [60, maxDurationMin] in steps of 30).
+  const [durationMin, setDurationMin] = useState(initialDuration);
+  // Raw text of the custom-minutes input (validated/clamped on blur+submit).
+  const [customText, setCustomText] = useState(String(initialDuration));
 
   // Single-note path (one rental).
   const [note, setNote] = useState("");
@@ -126,7 +164,15 @@ export function CageSlotBooking({
   const [prevMax, setPrevMax] = useState(maxDurationMin);
   if (maxDurationMin !== prevMax) {
     setPrevMax(maxDurationMin);
-    if (durationMin > maxDurationMin) {
+    if (isWeightRoom) {
+      // Re-clamp both ways: down when the run shrank, up to the hour when
+      // it grew back past one.
+      const clamped = clampWeightRoomDuration(durationMin, maxDurationMin);
+      if (clamped !== durationMin) {
+        setDurationMin(clamped);
+        setCustomText(String(clamped));
+      }
+    } else if (durationMin > maxDurationMin) {
       const clamped = clampDuration(durationMin, maxDurationMin);
       setDurationMin(clamped);
       setCustomText(String(clamped));
@@ -139,7 +185,7 @@ export function CageSlotBooking({
   const canHour = maxDurationMin >= 60;
 
   const selectPreset = (next: 30 | 60) => {
-    const d = clampDuration(next, maxDurationMin);
+    const d = clampFor(next);
     setMode(next === 30 ? "30" : "60");
     setDurationMin(d);
     setCustomText(String(d));
@@ -155,15 +201,19 @@ export function CageSlotBooking({
 
   const commitCustom = (raw: string) => {
     const parsed = Number.parseInt(raw, 10);
-    const d = clampDuration(Number.isNaN(parsed) ? 30 : parsed, maxDurationMin);
+    const d = Number.isNaN(parsed)
+      ? clampFor(isWeightRoom ? WEIGHT_ROOM_MINIMUM_MINUTES : 30)
+      : clampFor(parsed);
     setDurationMin(d);
     setCustomText(String(d));
     setSplitChecked(false);
   };
 
   // The split checkbox only makes sense for a whole number of 30-min
-  // rentals longer than one slot.
-  const canSplit = durationMin > 30 && durationMin % 30 === 0;
+  // rentals longer than one slot. Never on a weight room: a 30-min rental
+  // there is under the minimum.
+  const canSplit =
+    !isWeightRoom && durationMin > 30 && durationMin % 30 === 0;
   const isSplitting = canSplit && splitChecked;
   const splitCount = isSplitting ? durationMin / 30 : 0;
 
@@ -187,6 +237,9 @@ export function CageSlotBooking({
 
   const handleSubmit = () => {
     setError(null);
+    // The refusal replaces the Book button, so this cannot be reached
+    // from the screen; kept so nothing under an hour is ever sent.
+    if (weightRoomRefused) return;
     startTransition(async () => {
       try {
         if (isSplitting) {
@@ -200,7 +253,6 @@ export function CageSlotBooking({
           );
           await logOwnSessionsBatch({
             resourceId: resource.id,
-            isGroupSession: isWeightRoom && isGroupSession,
             slots: slots.map((s) => ({
               startAt: s.startAt,
               endAt: s.endAt,
@@ -213,7 +265,6 @@ export function CageSlotBooking({
             startAt,
             endAt,
             note: note.trim() || null,
-            isGroupSession: isWeightRoom && isGroupSession,
           });
         }
         onBooked();
@@ -255,64 +306,87 @@ export function CageSlotBooking({
         </div>
       ) : null}
 
-      {/* Duration. 30 always; 1 hr / Custom up to the run of free slots. */}
-      <div className="space-y-1.5">
-        <span className="block text-xs uppercase tracking-wider text-fg-muted">
-          Duration
-        </span>
+      {/* Weight room with under an hour free: the refusal replaces the
+          duration control, the note and the Book button. */}
+      {weightRoomRefused ? (
         <div
-          role="group"
-          aria-label="Rental duration"
-          className="inline-flex rounded-lg border border-line bg-surface p-0.5"
+          role="alert"
+          className="space-y-1 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger"
         >
-          <DurationButton
-            active={mode === "30"}
-            onClick={() => selectPreset(30)}
-            label="30 min"
-          />
-          {canHour ? (
-            <DurationButton
-              active={mode === "60"}
-              onClick={() => selectPreset(60)}
-              label="1 hr"
-            />
+          {oneTapWeightRoomRefusal({
+            resourceName: resource.name,
+            startAt,
+            prevSlotFree,
+            nextToOwnRental,
+          }).map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </div>
+      ) : null}
+
+      {/* Duration. 30 always; 1 hr / Custom up to the run of free slots.
+          Weight room: 1 hr / Custom only, from 60 in steps of 30. */}
+      {!weightRoomRefused ? (
+        <div className="space-y-1.5">
+          <span className="block text-xs uppercase tracking-wider text-fg-muted">
+            Duration
+          </span>
+          <div
+            role="group"
+            aria-label="Rental duration"
+            className="inline-flex rounded-lg border border-line bg-surface p-0.5"
+          >
+            {!isWeightRoom ? (
+              <DurationButton
+                active={mode === "30"}
+                onClick={() => selectPreset(30)}
+                label="30 min"
+              />
+            ) : null}
+            {canHour ? (
+              <DurationButton
+                active={mode === "60"}
+                onClick={() => selectPreset(60)}
+                label="1 hr"
+              />
+            ) : null}
+            {!only30 ? (
+              <DurationButton
+                active={mode === "custom"}
+                onClick={selectCustom}
+                label="Custom"
+              />
+            ) : null}
+          </div>
+
+          {mode === "custom" && !only30 ? (
+            <label className="flex items-center gap-2 pt-1">
+              <span className="text-xs text-fg-muted">Minutes</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={isWeightRoom ? WEIGHT_ROOM_MINIMUM_MINUTES : 30}
+                max={maxDurationMin}
+                step={isWeightRoom ? 30 : 5}
+                value={customText}
+                aria-label="Custom rental length in minutes"
+                onChange={(e) => setCustomText(e.target.value)}
+                onBlur={(e) => commitCustom(e.target.value)}
+                className="w-24 rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle px-3 h-9 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
+              />
+              <span className="text-[11px] text-fg-subtle">
+                up to {maxDurationMin} min
+              </span>
+            </label>
           ) : null}
-          {!only30 ? (
-            <DurationButton
-              active={mode === "custom"}
-              onClick={selectCustom}
-              label="Custom"
-            />
+
+          {only30 ? (
+            <p className="text-[11px] text-fg-subtle">
+              Next slot is busy — 30 min only.
+            </p>
           ) : null}
         </div>
-
-        {mode === "custom" && !only30 ? (
-          <label className="flex items-center gap-2 pt-1">
-            <span className="text-xs text-fg-muted">Minutes</span>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={30}
-              max={maxDurationMin}
-              step={5}
-              value={customText}
-              aria-label="Custom rental length in minutes"
-              onChange={(e) => setCustomText(e.target.value)}
-              onBlur={(e) => commitCustom(e.target.value)}
-              className="w-24 rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle px-3 h-9 text-sm focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
-            />
-            <span className="text-[11px] text-fg-subtle">
-              up to {maxDurationMin} min
-            </span>
-          </label>
-        ) : null}
-
-        {only30 ? (
-          <p className="text-[11px] text-fg-subtle">
-            Next slot is busy — 30 min only.
-          </p>
-        ) : null}
-      </div>
+      ) : null}
 
       {/* Split-into-30s checkbox — only for a whole number of 30-min
           rentals longer than one slot. Default unchecked = one rental. */}
@@ -336,29 +410,8 @@ export function CageSlotBooking({
         </label>
       ) : null}
 
-      {/* Group session — weight-room only. Booking-level; bills at the
-          group weight-room rate. Hidden (and false) for cages/bullpens. */}
-      {isWeightRoom ? (
-        <label className="flex items-start gap-2.5">
-          <input
-            type="checkbox"
-            checked={isGroupSession}
-            onChange={(e) => setIsGroupSession(e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-line-strong text-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
-          />
-          <span className="space-y-0.5">
-            <span className="block text-sm font-medium text-fg">
-              Group session
-            </span>
-            <span className="block text-[11px] text-fg-subtle">
-              Bills at the group weight-room rate.
-            </span>
-          </span>
-        </label>
-      ) : null}
-
       {/* Notes. Split → per-rental notes; otherwise one shared note. */}
-      {isSplitting ? (
+      {weightRoomRefused ? null : isSplitting ? (
         <SessionSlotsList
           slots={splitSlots}
           onChange={setSplitSlots}
@@ -383,18 +436,20 @@ export function CageSlotBooking({
       )}
 
       <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={pending}
-          className="rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-12 px-6 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
-        >
-          {pending
-            ? "Logging…"
-            : isSplitting
-              ? `Book ${splitCount} rentals`
-              : "Book this slot"}
-        </button>
+        {!weightRoomRefused ? (
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={pending}
+            className="rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-12 px-6 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
+          >
+            {pending
+              ? "Logging…"
+              : isSplitting
+                ? `Book ${splitCount} rentals`
+                : "Book this slot"}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onCancel}

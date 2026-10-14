@@ -13,11 +13,12 @@ import { useRouter } from "next/navigation";
 import { Trash2, X } from "lucide-react";
 import {
   createSessionFormAction,
+  createSessionsBatchAction,
   deleteSessionAction,
   updateSessionFormAction,
   type ActionResult,
 } from "../form-actions";
-import { createSessionsBatch } from "../actions";
+import { BATCH_CREATE_FALLBACK } from "@/app/admin/sessions/batch-create-copy";
 import type { CoachOption, ResourceOption } from "./sessions-client";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
@@ -58,8 +59,9 @@ export type SessionFormInitialValues = {
 //
 // In create mode: when the time range covers > 1 slot of the chosen
 // length, the single Note field swaps for a list of N
-// notecards, and submit dispatches to createSessionsBatch (bypassing
-// the form-action layer). Sub-1-slot creates use the original
+// notecards, and submit dispatches to createSessionsBatchAction, which
+// calls the public createSessionsBatch and returns a known refusal as a
+// result (bypassing useActionState). Sub-1-slot creates use the original
 // createSessionFormAction path.
 //
 // WEIGHT ROOM (one hour minimum), create mode only: the whole range is ONE
@@ -291,8 +293,12 @@ export function SessionFormDialog({
 
     setBatchError(null);
     startBatchTransition(async () => {
+      // A known refusal (overlap, block, weight room minimum…) comes back as
+      // a result carrying its real sentence. Anything thrown arrives with its
+      // message stripped on a production build, so a fixed sentence is shown
+      // instead of err.message.
       try {
-        await createSessionsBatch({
+        const result = await createSessionsBatchAction({
           coachId: live.coachId,
           resourceId: live.resourceId,
           slots: slots.map((s) => ({
@@ -301,12 +307,14 @@ export function SessionFormDialog({
             note: s.note.trim() || null,
           })),
         });
+        if (!result.ok) {
+          setBatchError(result.error.message);
+          return;
+        }
         setSlots([]);
         onClose();
-      } catch (err) {
-        setBatchError(
-          err instanceof Error ? err.message : "Batch create failed",
-        );
+      } catch {
+        setBatchError(BATCH_CREATE_FALLBACK);
       }
     });
   };

@@ -14,9 +14,10 @@ import {
 import { X, GripHorizontal } from "lucide-react";
 import {
   createSessionFormAction,
+  createSessionsBatchAction,
   type ActionResult as SessionActionResult,
 } from "@/app/admin/sessions/form-actions";
-import { createSessionsBatch } from "@/app/admin/sessions/actions";
+import { BATCH_CREATE_FALLBACK } from "@/app/admin/sessions/batch-create-copy";
 import type {
   CoachOption,
   ResourceOption,
@@ -561,8 +562,12 @@ function SessionTab({
     if (slotCount === 0 || divisibilityError || slots.length === 0) return;
     setBatchError(null);
     startBatchTransition(async () => {
+      // A known refusal (overlap, block, weight room minimum…) comes back as
+      // a result carrying its real sentence. Anything thrown arrives with its
+      // message stripped on a production build, so a fixed sentence is shown
+      // instead of err.message.
       try {
-        await createSessionsBatch({
+        const result = await createSessionsBatchAction({
           coachId: live.coachId,
           resourceId: live.resourceId,
           slots: slots.map((s) => ({
@@ -571,12 +576,14 @@ function SessionTab({
             note: s.note.trim() || null,
           })),
         });
+        if (!result.ok) {
+          setBatchError(result.error.message);
+          return;
+        }
         setSlots([]);
         onCancel();
-      } catch (err) {
-        setBatchError(
-          err instanceof Error ? err.message : "Batch create failed",
-        );
+      } catch {
+        setBatchError(BATCH_CREATE_FALLBACK);
       }
     });
   };

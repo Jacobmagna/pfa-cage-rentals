@@ -14,6 +14,7 @@
 import { ZodError } from "zod";
 import {
   createSession,
+  createSessionsBatch,
   deleteSession,
   updateSession,
 } from "./actions";
@@ -193,6 +194,32 @@ export async function moveSessionAction(
       endAt: input?.endAt,
     });
     return { ok: true };
+  } catch (err) {
+    return { ok: false, error: translateKnownError(err) };
+  }
+}
+
+export type CreateSessionsBatchResult =
+  | { ok: true; count: number }
+  | { ok: false; error: { code: string; message: string } };
+
+// Multi-slot create on the two admin dialogs (the create dialog's Session
+// tab on the day grid, /master/schedule and admin Home; SessionFormDialog in
+// create mode on Rentals). Same write and same authorization as before — it
+// calls the very same public createSessionsBatch (requireScheduleAccess,
+// then createSessionsBatchInternal). The difference is that a refusal comes
+// back as a RESULT, not a throw: a production build strips the message from
+// a thrown server-action error, so the dialogs could only ever show the
+// framework's "An error occurred in the Server Components render…" sentence
+// (a cage overlap showed it). A known refusal now reaches the screen as its
+// real sentence. Anything else, including the auth redirect, still throws.
+// `count` is the rentals saved (back-to-back weight room slots are one).
+export async function createSessionsBatchAction(
+  input: unknown,
+): Promise<CreateSessionsBatchResult> {
+  try {
+    const saved = await createSessionsBatch(input);
+    return { ok: true, count: saved.length };
   } catch (err) {
     return { ok: false, error: translateKnownError(err) };
   }

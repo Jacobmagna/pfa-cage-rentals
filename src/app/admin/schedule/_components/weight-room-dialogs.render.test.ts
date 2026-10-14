@@ -18,11 +18,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 vi.mock("@/app/admin/sessions/form-actions", () => ({
   createSessionFormAction: vi.fn(),
+  createSessionsBatchAction: vi.fn(),
   updateSessionFormAction: vi.fn(),
   deleteSessionAction: vi.fn(),
-}));
-vi.mock("@/app/admin/sessions/actions", () => ({
-  createSessionsBatch: vi.fn(),
 }));
 vi.mock("@/app/admin/schedule/actions", () => ({
   createBlockSeries: vi.fn(),

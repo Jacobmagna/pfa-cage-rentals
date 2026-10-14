@@ -123,11 +123,18 @@ async function seedBlock(opts: {
 beforeAll(async () => {
   // 🔴 PRE-CLEAN, BEFORE ANYTHING IS SEEDED. A run that is KILLED mid-test
   // never reaches afterEach, and what it leaves behind breaks the next run in
-  // a way that reads like a flake: a fixture program trips
-  // `programs_name_unique` (23505) in the seed helper, and a booking by the
-  // nameless coach blocks deleting that coach below (23503). Mutables first —
-  // a leftover tagged block references its program — then this file's own
-  // programs.
+  // a way that reads like a flake. Each line below was removed in turn against
+  // a simulated killed run (2026-10-13), and this is what each one stops:
+  //
+  //   · truncateMutables — without it the whole file dies right here: the
+  //     leftover booking by the nameless coach blocks deleting that coach
+  //     below (23503), and all 32 tests are skipped.
+  //   · removeFixturePrograms — without it a run of ONE program test (`-t`)
+  //     dies on `programs_name_unique` (23505) in insertFixtureProgram. A run
+  //     of the whole file survives, but only because its first test happens
+  //     to insert no program and afterEach then clears the leftover.
+  //
+  // Mutables first: a leftover tagged block references its program.
   await truncateMutables();
   await removeFixturePrograms();
 

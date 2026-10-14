@@ -13,11 +13,14 @@ import { useRouter } from "next/navigation";
 import { Trash2, X } from "lucide-react";
 import {
   createSessionFormAction,
+  createSessionsBatchAction,
   deleteSessionAction,
   updateSessionFormAction,
   type ActionResult,
 } from "../form-actions";
-import { createSessionsBatch } from "../actions";
+import { BATCH_CREATE_FALLBACK } from "@/app/admin/sessions/batch-create-copy";
+import { useCloseAfterOkAction } from "@/app/_components/close-after-save";
+import { useTickingNow } from "@/app/_components/ticking-now";
 import type { CoachOption, ResourceOption } from "./sessions-client";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
@@ -32,6 +35,10 @@ import {
   formatPfaTime,
   parsePfaInput,
 } from "@/lib/timezone";
+import {
+  weightRoomRangeRefusal,
+  weightRoomRangeStatus,
+} from "@/app/admin/schedule/_components/weight-room-admin.logic";
 
 export type SessionFormInitialValues = {
   id: string;
@@ -54,9 +61,20 @@ export type SessionFormInitialValues = {
 //
 // In create mode: when the time range covers > 1 slot of the chosen
 // length, the single Note field swaps for a list of N
-// notecards, and submit dispatches to createSessionsBatch (bypassing
-// the form-action layer). Sub-1-slot creates use the original
+// notecards, and submit dispatches to createSessionsBatchAction, which
+// calls the public createSessionsBatch and returns a known refusal as a
+// result (bypassing useActionState). Sub-1-slot creates use the original
 // createSessionFormAction path.
+//
+// WEIGHT ROOM (one hour minimum), create mode only: the whole range is ONE
+// rental, never split, always through createSessionFormAction — its
+// server-side translation is what carries the real refusal to the screen on
+// a production build (a batch throw arrives stripped). The slot-length
+// toggle and per-slot notes are hidden; a range under an hour is refused
+// inline and the submit is disabled. Edit mode adds NO check of its own: an
+// old 30-minute weight room rental must stay note-editable and
+// coach-reassignable, and the server decides by comparing values; its
+// refusal arrives through form state.
 
 const INITIAL_STATE: ActionResult = { ok: true };
 
@@ -67,6 +85,7 @@ export function SessionFormDialog({
   coachOptions,
   resourceOptions,
   initial,
+  viewerRole,
 }: {
   open: boolean;
   mode: "create" | "edit";
@@ -74,12 +93,33 @@ export function SessionFormDialog({
   coachOptions: CoachOption[];
   resourceOptions: ResourceOption[];
   initial?: SessionFormInitialValues;
+  /**
+   * The signed-in user's role, from the server page (a Schedule Manager is
+   * "coach"). Create mode only: an admin entering a weight room rental that
+   * is already over is spared the one-hour refusal, as on the server.
+   */
+  viewerRole: "admin" | "coach";
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const router = useRouter();
+  // The browser's "now", read when the dialog mounts (each opening mounts a
+  // fresh dialog) and re-read every 30 s while an admin creates in it, so a
+  // range whose end passes while the dialog is open stops being refused. Only
+  // used for the admin past-rental weight room waiver; the server decides.
+  const browserNow = useTickingNow(
+    open && mode === "create" && viewerRole === "admin",
+  );
   const action =
     mode === "edit" ? updateSessionFormAction : createSessionFormAction;
-  const [state, formAction, pending] = useActionState(action, INITIAL_STATE);
+  // Single-rental path: the dialog closes from inside the action, right after
+  // the server answers "saved" (see close-after-save.ts for why: waiting for
+  // `pending` to flip back could leave the dialog on "Saving…" forever on a
+  // production build). The batch path closes from its own await below.
+  const actionAndClose = useCloseAfterOkAction(action, onClose, open);
+  const [state, formAction, pending] = useActionState(
+    actionAndClose,
+    INITIAL_STATE,
+  );
 
   // Batch-create path state (create mode + N>1 only).
   const [batchPending, startBatchTransition] = useTransition();
@@ -121,16 +161,6 @@ export function SessionFormDialog({
       dialog.close();
     }
   }, [open]);
-
-  // Auto-close after a successful submit (single-slot path). For
-  // batch path, we close in the transition's success branch directly.
-  const wasPending = useRef(false);
-  useEffect(() => {
-    if (wasPending.current && !pending && state.ok && open) {
-      onClose();
-    }
-    wasPending.current = pending;
-  }, [pending, state, open, onClose]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -245,24 +275,47 @@ export function SessionFormDialog({
   }, [live.date, live.startTime, live.endTime, slotLengthMinutes]);
 
   const isCreate = mode === "create";
-  const isMultiSlot = isCreate && slotCount > 1;
+  // Create mode: a weight room range is one rental whatever its length,
+  // never split, never the batch path.
+  const isWeightRoomCreate =
+    isCreate &&
+    resourceOptions.find((r) => r.id === live.resourceId)?.type ===
+      "weight_room";
+  const weightRoom = isWeightRoomCreate
+    ? weightRoomRangeStatus(rangeStart, rangeEnd, {
+        role: viewerRole,
+        now: browserNow,
+      })
+    : null;
+  const weightRoomTooShort = weightRoom?.kind === "too-short";
+  const isMultiSlot = isCreate && !isWeightRoomCreate && slotCount > 1;
 
   const submitLabel = (() => {
     if (pending || batchPending) return "Saving…";
     if (mode === "edit") return "Save changes";
+    if (isWeightRoomCreate) return "Create session";
     if (slotCount > 1) return `Create ${slotCount} sessions`;
     return "Create session";
   })();
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    if (weightRoomTooShort) {
+      // The inline refusal is already on screen; send nothing.
+      e.preventDefault();
+      return;
+    }
     if (!isMultiSlot) return; // let form-action handle it
     e.preventDefault();
     if (slotCount === 0 || divisibilityError || slots.length === 0) return;
 
     setBatchError(null);
     startBatchTransition(async () => {
+      // A known refusal (overlap, block, weight room minimum…) comes back as
+      // a result carrying its real sentence. Anything thrown arrives with its
+      // message stripped on a production build, so a fixed sentence is shown
+      // instead of err.message.
       try {
-        await createSessionsBatch({
+        const result = await createSessionsBatchAction({
           coachId: live.coachId,
           resourceId: live.resourceId,
           slots: slots.map((s) => ({
@@ -271,12 +324,14 @@ export function SessionFormDialog({
             note: s.note.trim() || null,
           })),
         });
+        if (!result.ok) {
+          setBatchError(result.error.message);
+          return;
+        }
         setSlots([]);
         onClose();
-      } catch (err) {
-        setBatchError(
-          err instanceof Error ? err.message : "Batch create failed",
-        );
+      } catch {
+        setBatchError(BATCH_CREATE_FALLBACK);
       }
     });
   };
@@ -432,7 +487,18 @@ export function SessionFormDialog({
             </Field>
           </div>
 
-          {isCreate ? (
+          {/* Weight room: one rental for the whole range, at least an hour. */}
+          {weightRoomTooShort ? (
+            <div
+              role="alert"
+              className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+            >
+              {weightRoomRangeRefusal(rangeStart)}
+            </div>
+          ) : null}
+
+          {/* Not shown for a weight room, which is never split. */}
+          {isCreate && !isWeightRoomCreate ? (
             <Field
               label="Slot length"
               hint="30 min = back-to-back half-hour lessons. 1 hr = full hours."
@@ -444,7 +510,7 @@ export function SessionFormDialog({
             </Field>
           ) : null}
 
-          {isCreate && divisibilityError ? (
+          {isCreate && !isWeightRoomCreate && divisibilityError ? (
             <div
               role="alert"
               className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
@@ -454,7 +520,18 @@ export function SessionFormDialog({
             </div>
           ) : null}
 
-          {isCreate && slotCount > 0 && !divisibilityError ? (
+          {weightRoom?.kind === "ok" ? (
+            <p className="text-xs text-fg-subtle">
+              Will create{" "}
+              <span className="text-fg tnum tabular-nums">1</span> session of{" "}
+              {weightRoom.length}.
+            </p>
+          ) : null}
+
+          {isCreate &&
+          !isWeightRoomCreate &&
+          slotCount > 0 &&
+          !divisibilityError ? (
             <p className="text-xs text-fg-subtle">
               Will create{" "}
               <span className="text-fg tnum tabular-nums">{slotCount}</span>{" "}
@@ -552,6 +629,7 @@ export function SessionFormDialog({
                 pending ||
                 batchPending ||
                 deletePending ||
+                weightRoomTooShort ||
                 (isMultiSlot && (slotCount === 0 || divisibilityError))
               }
               className="rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"

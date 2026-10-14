@@ -32,6 +32,7 @@ export function HomeQuickActions({
   programCoaches,
   programResources,
   selectedDate,
+  viewerRole,
 }: {
   cageCoaches: CageCoachOption[];
   cageResources: CageResourceOption[];
@@ -39,9 +40,17 @@ export function HomeQuickActions({
   programCoaches: ProgramCoachOption[];
   programResources: ProgramResourceOption[];
   selectedDate: Date;
+  /** The signed-in user's role, from the server page. */
+  viewerRole: "admin" | "coach";
 }) {
   const [cageOpen, setCageOpen] = useState(false);
   const [cageTab, setCageTab] = useState<"session" | "block">("session");
+  // Bumped on EVERY opening of the cage dialog (New cage rental, Block cages)
+  // and used as its `key`, so each opening mounts a brand-new dialog. The
+  // dialog's useActionState keeps the last save result while it stays
+  // mounted; without a fresh mount, a refused create showed its error and
+  // typed values again the next time the dialog was opened.
+  const [cageOpening, setCageOpening] = useState(0);
   const [programOpen, setProgramOpen] = useState(false);
 
   return (
@@ -50,6 +59,7 @@ export function HomeQuickActions({
         <button
           type="button"
           onClick={() => {
+            setCageOpening((n) => n + 1);
             setCageTab("session");
             setCageOpen(true);
           }}
@@ -69,6 +79,7 @@ export function HomeQuickActions({
         <button
           type="button"
           onClick={() => {
+            setCageOpening((n) => n + 1);
             setCageTab("block");
             setCageOpen(true);
           }}
@@ -87,6 +98,7 @@ export function HomeQuickActions({
       </div>
 
       <ScheduleCreateDialog
+        key={cageOpening}
         open={cageOpen}
         onClose={() => setCageOpen(false)}
         coaches={cageCoaches}
@@ -94,6 +106,7 @@ export function HomeQuickActions({
         resources={cageResources}
         prefill={null}
         defaultTab={cageTab}
+        viewerRole={viewerRole}
       />
       <ProgramBlockDialog
         open={programOpen}

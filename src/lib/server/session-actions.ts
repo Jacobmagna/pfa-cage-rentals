@@ -12,6 +12,14 @@
 // Pipeline (same for all 3):
 //   1. Zod-parse                           — B1 schemas
 //   2. Resource lookup                     — existence check
+//   2b. Weight room one-hour minimum       — WeightRoomMinimumError, keyed
+//       on the FINAL resource's type (see @/lib/weight-room-minimum). The
+//       batch first joins back-to-back weight room slots into one rental.
+//       Waived ONLY for an ADMIN (actor.role "admin", pinned by the server
+//       from the sign-in; a Schedule Manager is a coach and stays held) when
+//       the rental's FINAL end is at or before the server's now
+//       (isPastRentalAdminWaiver), so a past short rental can be corrected.
+//       In progress or future: held for everyone.
 //   3. Cross-check blocked_times           — block-vs-session app-layer
 //   4. Mutation, then audit (sequential)   — see "Atomicity" below
 //   5. Translate Postgres 23P01 (EXCLUDE)  — friendly SessionOverlapError
@@ -30,6 +38,7 @@
 
 import { and, eq, gt, lt, ne } from "drizzle-orm";
 import * as Sentry from "@sentry/nextjs";
+import { ZodError } from "zod";
 import { db } from "@/db";
 import {
   blockedTimes,
@@ -49,13 +58,21 @@ import {
   ResourceNotFoundError,
   SessionNotFoundError,
   SessionOverlapError,
+  WeightRoomMinimumError,
 } from "@/lib/errors";
 import {
   createSessionBatchSchema,
   createSessionSchema,
   effectiveResourceId,
+  MAX_DURATION_MESSAGE,
+  MAX_DURATION_MS,
   updateSessionSchema,
 } from "@/lib/schemas/session";
+import {
+  isBelowWeightRoomMinimum,
+  isPastRentalAdminWaiver,
+  mergeContiguousWeightRoomSlots,
+} from "@/lib/weight-room-minimum";
 
 // Resolves the per-30-min cents rate to stamp on a new (or edited)
 // session row. Reads the coach's override + the resource-type default
@@ -216,6 +233,22 @@ export async function createSessionInternal(
   const parsed = createSessionSchema.parse(input);
   const resource = await getResourceOrThrow(parsed.resourceId);
 
+  // Weight room one-hour minimum: a new weight room rental is never shorter
+  // than 60 minutes. Cages and bullpens are not checked. An admin entering
+  // one that is already over is waived (isPastRentalAdminWaiver).
+  if (
+    resource.type === "weight_room" &&
+    isBelowWeightRoomMinimum(parsed.startAt, parsed.endAt) &&
+    !isPastRentalAdminWaiver({
+      role: actor.role,
+      startAt: parsed.startAt,
+      endAt: parsed.endAt,
+      now: new Date(),
+    })
+  ) {
+    throw new WeightRoomMinimumError(resource.name, "create");
+  }
+
   const block = await findOverlappingBlock(
     parsed.resourceId,
     parsed.startAt,
@@ -223,18 +256,15 @@ export async function createSessionInternal(
   );
   if (block) throw new BlockedTimeError(resource.name, block.reason);
 
-  // GROUP-RATE (4th tier): the booking-level group flag is only meaningful
-  // for a weight-room slot. Any group flag on a non-weight-room resource is
-  // ignored (the row is stamped is_group_session=false and billed at its
-  // normal rate) — the byte-identical guarantee for every non-weight-room
-  // path.
-  const isGroupSessionForRow =
-    resource.type === "weight_room" && parsed.isGroupSession;
-
+  // GROUP FLAG: a new booking can no longer be a "group session". Whatever
+  // `parsed.isGroupSession` says, the row is stamped is_group_session=false
+  // and billed at the resource's REGULAR rate. The schema still accepts the
+  // field so an old payload that carries it parses; it is simply not read
+  // here. (Old group rentals are not touched by this: updateSessionInternal
+  // takes the flag from the stored row, exactly as it did before.)
   const ratePer30MinCents = await resolveRateCents({
     coachId: parsed.coachId,
     resourceType: resource.type,
-    isGroupSession: isGroupSessionForRow,
   });
 
   let inserted;
@@ -248,7 +278,7 @@ export async function createSessionInternal(
         endAt: parsed.endAt,
         note: parsed.note,
         ratePer30MinCents,
-        isGroupSession: isGroupSessionForRow,
+        isGroupSession: false,
         createdBy: actor.id,
       })
       .returning();
@@ -305,6 +335,41 @@ export async function updateSessionInternal(
 
   const resource = await getResourceOrThrow(finalResourceId);
 
+  // Weight room one-hour minimum: a rental that would END UP on a weight
+  // room, shorter than 60 minutes, cannot have its time or its spot changed.
+  //
+  // 🔴 "Changed" is decided by comparing the final VALUES with the stored
+  // row (times by getTime(), since two Date objects for the same instant are
+  // not ===), NOT by which fields the caller sent. Both edit forms always
+  // resend the resource, the date and both times, so a "was this field
+  // sent?" check would refuse a note-only edit of an old 30-minute rental.
+  // Old short rentals are real (the calendar allowed them before this rule,
+  // and the import still records them) and their note or coach can still be
+  // changed; only re-timing or moving one is refused, until it is an hour.
+  //
+  // Except: an ADMIN may re-time or move one whose FINAL end (after this
+  // edit, not the stored end) is at or before now, so a past half hour
+  // logged at the wrong time can be corrected. Re-timing it into the future
+  // or onto a time still in progress is refused. The rate rule below is not
+  // touched by this: a re-time or a same-kind move keeps the stamped rate.
+  const timeOrSpotChanged =
+    finalStartAt.getTime() !== existing.startAt.getTime() ||
+    finalEndAt.getTime() !== existing.endAt.getTime() ||
+    finalResourceId !== existing.resourceId;
+  if (
+    resource.type === "weight_room" &&
+    isBelowWeightRoomMinimum(finalStartAt, finalEndAt) &&
+    timeOrSpotChanged &&
+    !isPastRentalAdminWaiver({
+      role: actor.role,
+      startAt: finalStartAt,
+      endAt: finalEndAt,
+      now: new Date(),
+    })
+  ) {
+    throw new WeightRoomMinimumError(resource.name, "update");
+  }
+
   const block = await findOverlappingBlock(
     finalResourceId,
     finalStartAt,
@@ -321,17 +386,31 @@ export async function updateSessionInternal(
   const finalIsGroupSession =
     resource.type === "weight_room" && existing.isGroupSession;
 
-  // Re-stamp ratePer30MinCents only when one of its inputs changed.
-  // Editing time/note leaves the historical rate alone — this honors the
-  // snapshot guarantee: a coach renegotiating their rate doesn't
-  // retroactively rewrite past sessions even if an admin later edits one
-  // of those sessions. When inputs DID change, the rate re-resolves with the
-  // final group status: a group weight-room session whose coach changes
-  // re-resolves the NEW coach's GROUP rate, while a session moved off
-  // weight-room re-bills at the new resource's regular rate (group cleared).
-  const inputsChanged =
-    finalCoachId !== existing.coachId ||
-    finalResourceId !== existing.resourceId;
+  // PRICE ON EDIT. The stored ratePer30MinCents is looked up again ONLY when
+  // the COACH changes or the resource TYPE changes (cage / bullpen /
+  // weight_room). Everything else keeps the rate stamped on the row: a time
+  // or note edit, AND a move to another spot of the SAME kind (Weight Room 1
+  // -> Weight Room 2, Cage 1 -> Cage 2). A move is not a renegotiation. The
+  // rate is a snapshot of what was agreed when the rental was booked, so an
+  // old rental billed at a coach's old rate must not be silently re-priced at
+  // today's rate because it was dragged one column over.
+  //
+  // A coach change or a change of kind does re-price, because the rate the
+  // row carries no longer describes it (it is another coach's rental, or a
+  // different kind of space). It re-resolves with the final group status: a
+  // group weight-room session whose coach changes gets the NEW coach's GROUP
+  // rate, while a session moved off weight-room re-bills at the new
+  // resource's regular rate (group cleared above).
+  //
+  // The stored row's resource is only loaded when the resource id actually
+  // changed; an unchanged id cannot be a change of kind.
+  const coachChanged = finalCoachId !== existing.coachId;
+  let resourceTypeChanged = false;
+  if (finalResourceId !== existing.resourceId) {
+    const previousResource = await getResourceOrThrow(existing.resourceId);
+    resourceTypeChanged = previousResource.type !== resource.type;
+  }
+  const inputsChanged = coachChanged || resourceTypeChanged;
   const nextRate = inputsChanged
     ? await resolveRateCents({
         coachId: finalCoachId,
@@ -460,20 +539,32 @@ async function safeRecordCancellation(
  * same batch get the cage rate and the bullpen rate respectively. The
  * rate is resolved ONCE per distinct resource and cached.
  *
+ * WEIGHT ROOM rule: back-to-back slots on the SAME weight room are joined
+ * into ONE rental before anything is checked or saved (3:00-3:30 +
+ * 3:30-4:00 on Weight Room 1 is one one-hour row). Cage and bullpen slots
+ * are never joined: one row per slot, as before. Each ROW that results is
+ * then held to the weight room one-hour minimum. So "rows" below means the
+ * rentals after joining, which can be fewer than the slots sent; the
+ * insert, the returned array and the audit entry all describe rows.
+ *
  * Pipeline:
  *   1. Zod-parse
  *   2. Resolve each distinct effective resource: existence check +
  *      its own rate, cached in a Map.
- *   3. For each slot: cross-check blocked_times AND sessions_billing on
- *      ITS OWN resource, AND every PRIOR slot in this same batch that
- *      shares the same effective resource (so an intra-batch self-overlap
- *      is caught here, not at the DB insert). Slots on DIFFERENT cages at
- *      the same time do NOT collide.
- *   4. Bulk insert (single multi-row INSERT). Audit log a single batch
+ *   3. Join back-to-back weight room slots into rows
+ *      (mergeContiguousWeightRoomSlots), then hold each joined row to the
+ *      schema's 16-hour cap (same ZodError, same sentence).
+ *   4. For each row: the weight room one-hour minimum first; then
+ *      cross-check blocked_times AND sessions_billing on ITS OWN
+ *      resource, AND every PRIOR row in this same batch that shares the
+ *      same effective resource (so an intra-batch self-overlap is caught
+ *      here, not at the DB insert). Rows on DIFFERENT cages at the same
+ *      time do NOT collide.
+ *   5. Bulk insert (single multi-row INSERT). Audit log a single batch
  *      entry with the created ids + their resourceIds.
  *
  * Atomicity caveat: neon-http has no transactions. We pre-validate
- * every slot before inserting any, which shuts the door on the
+ * every row before inserting any, which shuts the door on the
  * common cases (self-overlap, existing conflict). The remaining
  * race window — another mutation lands between pre-check and the
  * bulk insert — is caught by the DB's EXCLUDE constraint and
@@ -496,50 +587,96 @@ export async function createSessionsBatchInternal(
     return rid;
   });
 
-  // GROUP-RATE (4th tier): the group flag is BOOKING-LEVEL — one constant
-  // toggle for the whole batch. It only affects weight-room rows; a
-  // weight-room resource in a group booking resolves the GROUP rate for its
-  // rows, every non-weight-room row is untouched.
-  const bookingIsGroupSession = parsed.isGroupSession;
+  // GROUP FLAG: a new booking can no longer be a "group session". Whatever
+  // `parsed.isGroupSession` says, every row of the batch is stamped
+  // is_group_session=false and billed at its resource's REGULAR rate. The
+  // schema still accepts the field so an old payload that carries it
+  // parses; it is simply not read here.
 
   // For every DISTINCT effective resource: look it up (throws
   // ResourceNotFoundError per missing resource) and resolve ITS rate.
   // Cache both so each row bills at its own resource type's rate. THIS
   // IS THE CORE MONEY FIX.
   //
-  // Rate-cache key correctness: the resolved rate is fully determined by
-  // (resource, groupFlag). Since the group flag is a batch-level constant,
-  // the resource id alone still keys the cache uniquely — a weight-room
-  // resource's cached rate is the GROUP rate exactly when this booking is a
-  // group booking, and the flag never varies within the batch. The
-  // per-resource `isGroupSessionForResource` below folds in the
-  // weight-room-only rule so a group booking of a non-weight-room resource
-  // still caches (and stamps) the regular rate.
+  // Rate-cache key correctness: with no group flag in play, the resolved
+  // rate is fully determined by (coach, resource type), and the coach is
+  // one constant for the whole batch, so the resource id alone keys the
+  // cache uniquely.
   const resourceMap = new Map<
     string,
     { resource: typeof resources.$inferSelect; rate: number }
   >();
   for (const rid of new Set(slotResourceIds)) {
     const resource = await getResourceOrThrow(rid);
-    const isGroupSessionForResource =
-      resource.type === "weight_room" && bookingIsGroupSession;
     const rate = await resolveRateCents({
       coachId: parsed.coachId,
       resourceType: resource.type,
-      isGroupSession: isGroupSessionForResource,
     });
     resourceMap.set(rid, { resource, rate });
   }
 
-  // Pre-validate each slot against ITS OWN effective resource:
+  // Weight room one-hour minimum, step 1: join back-to-back slots on the
+  // same weight room into one rental. From here on the batch works on
+  // `rows` (the rentals that will be saved), never on `parsed.slots` (the
+  // slots that were sent). Cage and bullpen slots come through unchanged,
+  // one row each. A joined row bills at its resource's rate like any other
+  // row: rate times its number of half-hours.
+  const rows = mergeContiguousWeightRoomSlots(
+    parsed.slots.map((s, i) => ({
+      resourceId: slotResourceIds[i],
+      startAt: s.startAt,
+      endAt: s.endAt,
+      note: s.note,
+    })),
+    (rid) => resourceMap.get(rid)!.resource.type === "weight_room",
+  );
+
+  // The 16-hour cap, on the JOINED rows. The schema checked each slot, but
+  // joining happens after it, so two back-to-back 16-hour slots would
+  // otherwise save as one 32-hour row. Refused with the very error the schema
+  // raises for a single slot over the cap (a ZodError with the same
+  // sentence), so every caller's allow-list treats both the same way.
+  // Nothing has been written yet.
+  const overCap = rows.some(
+    (r) => r.endAt.getTime() - r.startAt.getTime() > MAX_DURATION_MS,
+  );
+  if (overCap) {
+    throw new ZodError([
+      { code: "custom", message: MAX_DURATION_MESSAGE, path: ["slots"] },
+    ]);
+  }
+
+  // Pre-validate each row against ITS OWN effective resource:
+  //   (0) the weight room one-hour minimum, first
   //   (a) against any existing block on that resource
   //   (b) against any existing session on that resource
-  //   (c) against every PRIOR slot in this batch ON THE SAME resource
-  //       (cross-cage same-time slots must NOT collide)
-  for (let i = 0; i < parsed.slots.length; i++) {
-    const slot = parsed.slots[i];
-    const rid = slotResourceIds[i];
+  //   (c) against every PRIOR row in this batch ON THE SAME resource
+  //       (cross-cage same-time rows must NOT collide)
+  // Nothing has been written yet, so a refusal here writes nothing: not
+  // the refused row, and not the cage rows that sit beside it.
+  const now = new Date();
+  for (let i = 0; i < rows.length; i++) {
+    const slot = rows[i];
+    const rid = slot.resourceId;
     const { resource } = resourceMap.get(rid)!;
+
+    // Weight room one-hour minimum, step 2: judged on the JOINED row, so
+    // two back-to-back half-hours pass and a half-hour on its own does not.
+    // An admin's joined row that is already over is waived; each row is
+    // judged on its own, so a future lone half hour in the same batch is
+    // still refused (and nothing is written).
+    if (
+      resource.type === "weight_room" &&
+      isBelowWeightRoomMinimum(slot.startAt, slot.endAt) &&
+      !isPastRentalAdminWaiver({
+        role: actor.role,
+        startAt: slot.startAt,
+        endAt: slot.endAt,
+        now,
+      })
+    ) {
+      throw new WeightRoomMinimumError(resource.name, "create");
+    }
 
     const block = await findOverlappingBlock(rid, slot.startAt, slot.endAt);
     if (block) throw new BlockedTimeError(resource.name, block.reason);
@@ -558,13 +695,13 @@ export async function createSessionsBatchInternal(
       );
     }
 
-    // Intra-batch self-overlap: scan earlier slots in the same array,
-    // but ONLY those that share this slot's effective resource. Two
-    // slots on different cages at the same time are fine. O(N^2) but
+    // Intra-batch self-overlap: scan earlier rows in the same array,
+    // but ONLY those that share this row's effective resource. Two
+    // rows on different cages at the same time are fine. O(N^2) but
     // N ≤ 50, so worst case 1,225 comparisons — fine.
     for (let j = 0; j < i; j++) {
-      const prior = parsed.slots[j];
-      if (slotResourceIds[j] !== rid) continue;
+      const prior = rows[j];
+      if (prior.resourceId !== rid) continue;
       if (prior.startAt < slot.endAt && prior.endAt > slot.startAt) {
         throw new SessionOverlapError(
           resource.name,
@@ -580,44 +717,39 @@ export async function createSessionsBatchInternal(
   // .values() and emits one multi-row INSERT, which Postgres treats
   // atomically — either all rows commit or the statement fails, across
   // every cage in the batch. Each row carries its own resourceId + the
-  // rate resolved for that resource's type.
+  // rate resolved for that resource's type. These are the JOINED rows, so
+  // `inserted` (what this function returns and what the audit entry below
+  // counts) is the rentals saved, which can be fewer than the slots sent.
   let inserted;
   try {
     inserted = await db
       .insert(sessionsBilling)
       .values(
-        parsed.slots.map((s, i) => {
-          const { resource } = resourceMap.get(slotResourceIds[i])!;
-          // Per-row group flag: TRUE only for a weight-room slot in a group
-          // booking. Non-weight-room rows are always false, regardless of the
-          // booking-level flag.
-          const isGroupSessionForRow =
-            resource.type === "weight_room" && bookingIsGroupSession;
-          return {
-            coachId: parsed.coachId,
-            resourceId: slotResourceIds[i],
-            startAt: s.startAt,
-            endAt: s.endAt,
-            note: s.note ?? null,
-            ratePer30MinCents: resourceMap.get(slotResourceIds[i])!.rate,
-            isGroupSession: isGroupSessionForRow,
-            createdBy: actor.id,
-          };
-        }),
+        rows.map((row) => ({
+          coachId: parsed.coachId,
+          resourceId: row.resourceId,
+          startAt: row.startAt,
+          endAt: row.endAt,
+          note: row.note ?? null,
+          ratePer30MinCents: resourceMap.get(row.resourceId)!.rate,
+          // Always false: a new booking cannot be a group session.
+          isGroupSession: false,
+          createdBy: actor.id,
+        })),
       )
       .returning();
   } catch (err) {
     if (isExclusionViolation(err)) {
-      // Race with a concurrent booking — one of our slots collided.
+      // Race with a concurrent booking — one of our rows collided.
       // We don't know which one without rescanning, so surface a
-      // generic overlap message scoped to the first slot's resource.
+      // generic overlap message scoped to the first row's resource.
       // The coach can re-check the schedule grid.
-      const firstResource = resourceMap.get(slotResourceIds[0])!.resource;
+      const firstResource = resourceMap.get(rows[0].resourceId)!.resource;
       throw new SessionOverlapError(
         firstResource.name,
         "another booking",
-        parsed.slots[0].startAt,
-        parsed.slots[parsed.slots.length - 1].endAt,
+        rows[0].startAt,
+        rows[rows.length - 1].endAt,
       );
     }
     throw err;

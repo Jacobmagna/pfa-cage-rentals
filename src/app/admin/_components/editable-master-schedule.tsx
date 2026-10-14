@@ -38,7 +38,7 @@ import {
   type PaintOverlay,
   type PaintPointerDown,
 } from "./master-schedule-grid";
-import { updateSession } from "@/app/admin/sessions/actions";
+import { moveSessionAction } from "@/app/admin/sessions/form-actions";
 import { updateProgramScheduleBlock } from "@/app/admin/hour-log/schedule/actions";
 import {
   ScheduleCreateDialog,
@@ -74,6 +74,10 @@ import {
 } from "@/lib/schedule-grid-utils";
 import { assignLanes } from "@/lib/schedule-lanes";
 import { formatPfaTime } from "@/lib/timezone";
+import {
+  emptyCellPrefillMinutes,
+  weightRoomMoveRefusal,
+} from "@/app/admin/schedule/_components/weight-room-admin.logic";
 
 // Drag id prefix (e.g. "session-…" / "program-block-…") → bare entity id, so
 // the grid's draggingId prop (which excludes the dragged item's own footprint
@@ -125,6 +129,7 @@ export function EditableMasterSchedule({
   programEditById,
   seriesById,
   reconciliation,
+  viewerRole,
 }: {
   resources: MasterResourceRow[];
   sessions: MasterSession[];
@@ -142,9 +147,24 @@ export function EditableMasterSchedule({
   programEditById: Record<string, ProgramBlockEditInitial>;
   seriesById: Record<string, SeriesView>;
   reconciliation: Record<string, BlockReconciliation>;
+  /**
+   * The signed-in user's role, from the server page (admin Home, admin
+   * only today). Only an admin gets the past-rental weight room waiver; the
+   * server decides, this only spares an admin a refusal it would not make.
+   */
+  viewerRole: "admin" | "coach";
 }): React.JSX.Element {
   const router = useRouter();
   const [dialog, setDialog] = useState<DialogState>({ kind: "closed" });
+  // Bumped on EVERY cage create opening (a click on an empty cage cell, or a
+  // finished paint on a cage row) and used as the create dialog's `key`, so
+  // each opening mounts a brand-new dialog. The dialog's useActionState keeps
+  // the last save result while it stays mounted, and its Session tab prefers
+  // a refused save's typed values over the new cell's prefill; without a
+  // fresh mount, a refused create on cell A showed A's error and A's typed
+  // values when cell B was clicked next. A refused save inside ONE opening
+  // still keeps the dialog open with what the admin typed.
+  const [cageCreateOpening, setCageCreateOpening] = useState(0);
 
   // #15B drag-to-MOVE. A SINGLE DndContext spans BOTH grid sections even
   // though they have different granularities (cage = 30-min, program = 15-min)
@@ -348,6 +368,7 @@ export function EditableMasterSchedule({
       const startAt = slotStartAt(date, minSlot);
       // maxSlot is inclusive → block runs through the END of slot maxSlot.
       const endAt = slotStartAt(date, maxSlot + 1);
+      setCageCreateOpening((n) => n + 1);
       setDialog({
         kind: "cage",
         prefill: { resourceId: rowId, startAt, endAt },
@@ -493,20 +514,43 @@ export function EditableMasterSchedule({
       ) {
         return;
       }
+      // Weight room one-hour minimum, decided HERE before anything is sent:
+      // a drag keeps the rental's length, so a rental under an hour cannot
+      // land on a weight room, unless an admin drops it on a time already
+      // over. The server guard stays as the backstop.
+      const weightRoomRefusal = weightRoomMoveRefusal({
+        targetIsWeightRoom:
+          resources.find((r) => r.id === dropData.resourceId)?.type ===
+          "weight_room",
+        sourceType: resources.find((r) => r.id === oldResourceId)?.type,
+        startAt: newStart,
+        endAt: newEnd,
+        viewer: { role: viewerRole, now: new Date() },
+      });
+      if (weightRoomRefusal) {
+        showDragError(weightRoomRefusal);
+        return;
+      }
       startTransition(async () => {
         try {
-          await updateSession(dragData.id, {
+          const result = await moveSessionAction(dragData.id, {
             resourceId: dropData.resourceId,
             startAt: newStart,
             endAt: newEnd,
           });
+          if (!result.ok) {
+            // A known refusal (overlap, block, weight room minimum, …) comes
+            // back as a result with its real sentence.
+            showDragError(result.error.message);
+            return;
+          }
           setDragError(null);
           // The bars render purely from server props; without a refresh the
           // dnd-kit transform clears and the moved bar snaps back to its old
           // server-rendered spot until the 30s AutoRefresh poll. Re-pull now.
           router.refresh();
-        } catch (err) {
-          surfaceDragError(err);
+        } catch {
+          surfaceDragError();
         }
       });
       return;
@@ -533,8 +577,8 @@ export function EditableMasterSchedule({
           // position immediately (the transform clears on dragEnd; without a
           // refresh it snaps back until the 30s AutoRefresh poll).
           router.refresh();
-        } catch (err) {
-          surfaceDragError(err);
+        } catch {
+          surfaceDragError();
         }
       });
       return;
@@ -544,15 +588,19 @@ export function EditableMasterSchedule({
     // the bar snaps back automatically when the dnd-kit transform clears.
   };
 
-  // Friendly, auto-dismissing drag-error toast (snap-back is automatic — a
-  // failed action doesn't revalidate, and the transform clears on dragEnd).
-  const surfaceDragError = (err: unknown) => {
-    const message =
-      err instanceof Error && err.message
-        ? err.message
-        : "Couldn't move that. Try a different slot.";
+  // Auto-dismissing drag-error toast (snap-back is automatic — a failed
+  // action doesn't revalidate, and the transform clears on dragEnd).
+  const showDragError = (message: string) => {
     setDragError(message);
     setTimeout(() => setDragError(null), 6_000);
+  };
+
+  // A THROWN drag error (cage rental or program block): network, or an
+  // unknown server error. Always the friendly fallback, never err.message —
+  // a production build replaces that with the framework's "An error occurred
+  // in the Server Components render…" sentence.
+  const surfaceDragError = () => {
+    showDragError("Couldn't move that. Try a different slot.");
   };
 
   const handleEmptyCellClick: EmptyCellClick = ({
@@ -567,8 +615,17 @@ export function EditableMasterSchedule({
     // but its click/drop layer is 30-min (slotIndex 0..27, decoded to the
     // 15-min template via *2).
     if (section === "resource") {
+      // A weight room starts at an hour (its minimum) unless that would run
+      // past the last cell; then 30 min, and the dialog explains the refusal.
+      const minutes = emptyCellPrefillMinutes({
+        isWeightRoom:
+          resources.find((r) => r.id === rowId)?.type === "weight_room",
+        slotIndex,
+        slotCount: SCHEDULE_GRID_SLOTS,
+      });
       const startAt = slotStartAt(selectedDate, slotIndex);
-      const endAt = slotStartAt(selectedDate, slotIndex + 1); // +30 min
+      const endAt = slotStartAt(selectedDate, slotIndex + minutes / 30);
+      setCageCreateOpening((n) => n + 1);
       setDialog({
         kind: "cage",
         prefill: { resourceId: rowId, startAt, endAt },
@@ -587,12 +644,21 @@ export function EditableMasterSchedule({
     }
   };
 
+  // Bumped on EVERY rental Edit opening and used as the rental edit dialog's
+  // `key`, so each opening mounts a brand-new dialog. The dialog's
+  // useActionState keeps the last save result while it stays mounted and
+  // prefers a refused save's typed values over the rental it is handed;
+  // without a fresh mount, a refused edit on rental A showed A's error and
+  // A's typed values when B was opened next, with B's id in the hidden field.
+  const [sessionEditOpening, setSessionEditOpening] = useState(0);
+
   // QA10 W3.9: click an existing bar → open its edit dialog by id. The grid
   // only calls this for bars whose id is present in the matching map (the
   // maps are built from the same rows the grid renders), so a lookup miss is
   // defensive only.
   const handleBlockClick: BlockClick = ({ kind, id }) => {
     if (kind === "session") {
+      setSessionEditOpening((n) => n + 1);
       setDialog({ kind: "edit-session", id });
     } else if (kind === "block") {
       setDialog({ kind: "edit-block", id });
@@ -675,6 +741,7 @@ export function EditableMasterSchedule({
       </DndContext>
 
       <ScheduleCreateDialog
+        key={cageCreateOpening}
         open={dialog.kind === "cage"}
         onClose={close}
         coaches={cageCoaches}
@@ -682,6 +749,7 @@ export function EditableMasterSchedule({
         resources={cageResources}
         prefill={dialog.kind === "cage" ? dialog.prefill : null}
         defaultTab="session"
+        viewerRole={viewerRole}
       />
 
       <ProgramBlockDialog
@@ -701,12 +769,14 @@ export function EditableMasterSchedule({
           dialogs, seeded by id from the enriched maps. router.refresh() on
           close so edits/deletes reflect on the server-rendered Home grid. */}
       <SessionFormDialog
+        key={sessionEditOpening}
         open={dialog.kind === "edit-session" && editSession !== null}
         mode="edit"
         onClose={close}
         coachOptions={cageCoaches}
         resourceOptions={cageResources}
         initial={editSession ?? undefined}
+        viewerRole={viewerRole}
       />
 
       <BlockEditDialog

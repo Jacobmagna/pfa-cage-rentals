@@ -4,8 +4,9 @@
 //   - Click empty cell → unified create dialog (Session/Block tabs)
 //   - Click session → edit dialog
 //   - Click block → confirm + delete
-//   - Drag session block → updateSession with new (resource, startAt)
-//     preserving duration. Touch-friendly via @dnd-kit's TouchSensor.
+//   - Drag session block → moveSessionAction (updateSession) with new
+//     (resource, startAt) preserving duration. Touch-friendly via
+//     @dnd-kit's TouchSensor.
 //
 // Rows = resources, Columns = 30-min slots 8 AM – 10 PM. Sessions
 // and blocks render via CSS Grid `grid-column: start / span N` so a
@@ -29,7 +30,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import type { ResourceType } from "@/lib/billing";
-import { updateSession } from "@/app/admin/sessions/actions";
+import { moveSessionAction } from "@/app/admin/sessions/form-actions";
 import { SessionFormDialog } from "@/app/admin/sessions/_components/session-form-dialog";
 import type {
   CoachOption,
@@ -41,6 +42,10 @@ import {
 } from "./schedule-create-dialog";
 import { pfaHour, pfaMinute, pfaWallClockAt } from "@/lib/timezone";
 import { GroupMark } from "@/app/_components/group-pill";
+import {
+  emptyCellPrefillMinutes,
+  weightRoomMoveRefusal,
+} from "./weight-room-admin.logic";
 
 const FIRST_HOUR = 8;
 const LAST_HOUR = 22;
@@ -127,6 +132,7 @@ export function ScheduleGrid({
   coaches,
   programs,
   selectedDate,
+  viewerRole,
 }: {
   resources: ScheduleResource[];
   sessions: ScheduleSession[];
@@ -135,11 +141,27 @@ export function ScheduleGrid({
   /** ACTIVE programs only — the cosmetic tag picker in the Block forms. */
   programs: ProgramOption[];
   selectedDate: Date;
+  /**
+   * The signed-in user's role, from the server page. This grid is also
+   * /master/schedule, where a Schedule Manager (role "coach") works: only an
+   * admin gets the past-rental weight room waiver. The server decides; this
+   * only spares an admin a refusal the server would not make.
+   */
+  viewerRole: "admin" | "coach";
 }) {
   const [dialog, setDialog] = useState<DialogState>({ kind: "closed" });
   const [dragError, setDragError] = useState<string | null>(null);
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const [paint, setPaint] = useState<PaintState>({ kind: "idle" });
+  // Bumped on EVERY create opening (a click on an empty cell, or a finished
+  // paint) and used as the create dialog's `key`, so each opening mounts a
+  // brand-new dialog. The dialog's useActionState keeps the last save result
+  // while it stays mounted, and its Session tab prefers a refused save's
+  // typed values over the new cell's prefill; without a fresh mount, a
+  // refused create on cell A showed A's error and A's typed values when cell
+  // B was clicked next. A refused save inside ONE opening still keeps the
+  // dialog open with what the admin typed.
+  const [createOpening, setCreateOpening] = useState(0);
   const [, startTransition] = useTransition();
 
   // Holds the pointerdown anchor between pointerdown and the first
@@ -318,6 +340,7 @@ export function ScheduleGrid({
           FIRST_HOUR + Math.floor(endSlotBoundary / 2),
           (endSlotBoundary % 2) * 30,
         );
+        setCreateOpening((n) => n + 1);
         setDialog({
           kind: "create",
           prefill: { resourceId: current.resourceId, startAt, endAt },
@@ -344,14 +367,30 @@ export function ScheduleGrid({
       FIRST_HOUR + Math.floor(slotIdx / 2),
       (slotIdx % 2) * 30,
     );
-    const endAt = new Date(startAt.getTime() + 30 * 60_000);
+    // A weight room starts at an hour (its minimum) unless that would run
+    // past the last cell; then 30 min, and the dialog explains the refusal.
+    const minutes = emptyCellPrefillMinutes({
+      isWeightRoom: resource.type === "weight_room",
+      slotIndex: slotIdx,
+      slotCount: SLOTS,
+    });
+    const endAt = new Date(startAt.getTime() + minutes * 60_000);
+    setCreateOpening((n) => n + 1);
     setDialog({
       kind: "create",
       prefill: { resourceId: resource.id, startAt, endAt },
     });
   };
 
+  // Bumped on EVERY rental Edit opening and used as the edit dialog's `key`,
+  // so each opening mounts a brand-new dialog. The dialog's useActionState
+  // keeps the last save result while it stays mounted and prefers a refused
+  // save's typed values over the rental it is handed; without a fresh mount,
+  // a refused edit on rental A showed A's error and A's typed values when B
+  // was opened next, with B's id in the hidden field.
+  const [editOpening, setEditOpening] = useState(0);
   const openEditSession = (session: ScheduleSession) => {
+    setEditOpening((n) => n + 1);
     setDialog({ kind: "edit-session", session });
   };
 
@@ -389,26 +428,51 @@ export function ScheduleGrid({
       return;
     }
 
+    // The visual snaps back automatically on every refusal below because
+    // nothing is revalidated and the dnd-kit transform clears on dragEnd.
+    const showDragError = (message: string) => {
+      setDragError(message);
+      // Auto-dismiss after 6 seconds.
+      setTimeout(() => setDragError(null), 6_000);
+    };
+
+    // Weight room one-hour minimum, decided HERE before anything is sent: a
+    // drag keeps the rental's length, so a rental under an hour cannot land
+    // on a weight room, unless an admin drops it on a time already over.
+    // The server guard stays as the backstop.
+    const weightRoomRefusal = weightRoomMoveRefusal({
+      targetIsWeightRoom:
+        resources.find((r) => r.id === dropData.resourceId)?.type ===
+        "weight_room",
+      sourceType: resources.find((r) => r.id === oldResourceId)?.type,
+      startAt: newStart,
+      endAt: newEnd,
+      viewer: { role: viewerRole, now: new Date() },
+    });
+    if (weightRoomRefusal) {
+      showDragError(weightRoomRefusal);
+      return;
+    }
+
     startTransition(async () => {
       try {
-        await updateSession(sessionData.sessionId, {
+        const result = await moveSessionAction(sessionData.sessionId, {
           resourceId: dropData.resourceId,
           startAt: newStart,
           endAt: newEnd,
         });
-        setDragError(null);
-      } catch (err) {
-        // SessionOverlapError / BlockedTimeError / others — surface
-        // the friendly message; the visual snaps back automatically
-        // because revalidatePath doesn't re-render on error and the
-        // dnd-kit transform clears on dragEnd.
-        const message =
-          err instanceof Error && err.message
-            ? err.message
-            : "Couldn't move that session. Try a different slot.";
-        setDragError(message);
-        // Auto-dismiss after 6 seconds.
-        setTimeout(() => setDragError(null), 6_000);
+        if (result.ok) {
+          setDragError(null);
+        } else {
+          // A known refusal (overlap, block, weight room minimum, …) comes
+          // back as a result with its real sentence.
+          showDragError(result.error.message);
+        }
+      } catch {
+        // Network, or an unknown server error. Never print err.message: a
+        // production build replaces it with the framework's "An error
+        // occurred in the Server Components render…" sentence.
+        showDragError("Couldn't move that session. Try a different slot.");
       }
     });
   };
@@ -665,6 +729,7 @@ export function ScheduleGrid({
         </div>
 
         <ScheduleCreateDialog
+          key={createOpening}
           open={dialog.kind === "create"}
           onClose={close}
           coaches={coaches}
@@ -674,15 +739,18 @@ export function ScheduleGrid({
           defaultTab={
             dialog.kind === "create" ? dialog.defaultTab ?? "session" : "session"
           }
+          viewerRole={viewerRole}
         />
 
         <SessionFormDialog
+          key={editOpening}
           open={dialog.kind === "edit-session"}
           mode="edit"
           onClose={close}
           coachOptions={coaches}
           resourceOptions={sessionResourceOptions}
           initial={editInitial}
+          viewerRole={viewerRole}
         />
 
         <BlockEditDialog

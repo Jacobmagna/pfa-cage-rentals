@@ -64,9 +64,9 @@ export type RateDefaultsFormValues = {
   bullpenDollars: string;
   weightRoomDollars: string;
   /**
-   * FACILITY-WIDE group weight-room rate as the admin typed it (dollars/HR).
-   * Blank = clear the group rate (fall back to the regular weight-room rate).
-   * Echoed back on error.
+   * FACILITY-WIDE group weight-room rate (dollars/HR) if a payload carries
+   * it. The Settings card no longer sends it, so this is "" in practice,
+   * which clears the stored group rate (see below).
    */
   weightRoomGroupDollars: string;
 };
@@ -129,12 +129,13 @@ export async function updateRateDefaultsFormAction(
       weightRoomDollars: weightRoomHourlyToPer30MinDollars(
         values.weightRoomDollars,
       ),
-      // FACILITY-WIDE group weight-room rate. BLANK is passed through as an
-      // empty string so the internal action CLEARS the column to NULL (the
-      // facility rate must be explicitly clearable back to "use regular
-      // rate"). A provided value converts per HOUR → per-30-min dollars via
-      // the SAME helper as the regular weight-room rate, so displayed $ ==
-      // charged $.
+      // FACILITY-WIDE group weight-room rate. The Settings card no longer
+      // renders a group input (no new booking is a group session), so the
+      // field is ABSENT, reads as "" in snapshotRates, and is passed on as an
+      // empty string: the internal action CLEARS the column to NULL. So one
+      // "Save defaults" clears a stored group rate. A provided value (only an
+      // old or hand-built payload) converts per HOUR → per-30-min dollars via
+      // the SAME helper as the regular weight-room rate.
       weightRoomGroupDollars:
         values.weightRoomGroupDollars.trim() === ""
           ? ""

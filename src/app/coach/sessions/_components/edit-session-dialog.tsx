@@ -7,6 +7,7 @@ import {
   type EditActionResult,
 } from "../form-actions";
 import type { ResourceOption } from "./types";
+import { useCloseAfterOkAction } from "@/app/_components/close-after-save";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
 import { GroupPill } from "@/app/_components/group-pill";
@@ -46,8 +47,17 @@ export function EditSessionDialog({
   isPast?: boolean;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const [state, formAction, pending] = useActionState(
+  // The dialog closes from inside the action, right after the server answers
+  // "saved" (see close-after-save.ts for why: waiting for `pending` to flip
+  // back could leave the dialog on "Saving…" forever on a production build).
+  // A refused save keeps the dialog open with the reason.
+  const actionAndClose = useCloseAfterOkAction(
     updateOwnSessionFormAction,
+    onClose,
+    open,
+  );
+  const [state, formAction, pending] = useActionState(
+    actionAndClose,
     INITIAL_STATE,
   );
 
@@ -61,16 +71,6 @@ export function EditSessionDialog({
       dialog.close();
     }
   }, [open]);
-
-  // Auto-close on a successful save (state.ok && we just submitted).
-  // Tracked via a ref so we only close once per submit cycle.
-  const wasPending = useRef(false);
-  useEffect(() => {
-    if (wasPending.current && !pending && state.ok && open) {
-      onClose();
-    }
-    wasPending.current = pending;
-  }, [pending, state, open, onClose]);
 
   // Pick up Escape / backdrop click via the native close event.
   useEffect(() => {

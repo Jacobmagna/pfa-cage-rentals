@@ -49,6 +49,30 @@ export class BlockedTimeError extends Error {
   }
 }
 
+// Weight room one-hour minimum: a rental on a weight room was about to be
+// created shorter than 60 minutes ("create"), or an existing one was about to
+// be re-timed or moved while shorter than 60 minutes ("update"). Thrown by the
+// three rental write functions in src/lib/server/session-actions.ts before
+// anything is written. The arithmetic lives in @/lib/weight-room-minimum.
+//
+// 📌 The two messages are complete sentences meant for the screen as they
+// are (the form actions return `err.message` to the dialog), which is why
+// they are worded here and not rebuilt from the fields.
+export class WeightRoomMinimumError extends Error {
+  readonly code = "WEIGHT_ROOM_MINIMUM" as const;
+  constructor(
+    public readonly resourceName: string,
+    public readonly context: "create" | "update",
+  ) {
+    super(
+      context === "create"
+        ? `Weight room rentals are one hour minimum. Book at least 1 hour on ${resourceName}.`
+        : "Weight room rentals are one hour minimum. To change the time or spot, make this rental at least 1 hour.",
+    );
+    this.name = "WeightRoomMinimumError";
+  }
+}
+
 export class SessionNotFoundError extends Error {
   readonly code = "SESSION_NOT_FOUND" as const;
   constructor(public readonly sessionId: string) {

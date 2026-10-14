@@ -17,11 +17,22 @@
 //
 // Typed server errors (overlap / blocked / a race) are translated to
 // friendly inline copy, mirroring cage-slot-booking.tsx / form-actions.ts.
+//
+// WEIGHT ROOM (one hour minimum): back-to-back picks on the same weight
+// room save as ONE rental (the server joins them), so the review list, the
+// Book button and the confirmation count rentals SAVED, not taps. A weight
+// room pick that does not make an hour is refused HERE, before anything is
+// sent, with a line naming it: a production build strips the message from
+// a thrown server error, so the catch below can only show its generic
+// fallback. The server guard is the backstop.
+//
+// No booking is a group session any more: no checkbox, flag not sent.
 
 import { useState, useTransition } from "react";
 import { X } from "lucide-react";
 import type { ResourceOption } from "../../_components/types";
 import { logOwnSessionsBatch } from "../../actions";
+import type { SlotState } from "@/lib/coach-calendar";
 import {
   BlockedTimeError,
   ResourceNotFoundError,
@@ -36,6 +47,11 @@ import {
   formatPfaTime12h,
   pfaWallClockToUtc,
 } from "@/lib/timezone";
+import {
+  batchWeightRoomRefusal,
+  countSavedRentals,
+  weightRoomRentalLines,
+} from "./weight-room-booking.logic";
 
 // Friendly translation of the typed batch errors — same intent as
 // form-actions.ts `translate`, inlined for this panel.
@@ -53,6 +69,8 @@ function translateError(err: unknown): string {
 export function CageBatchBooking({
   resources,
   selection,
+  displayedDate,
+  slotStateOnDisplayedDay,
   onBooked,
   onCancel,
 }: {
@@ -64,15 +82,21 @@ export function CageBatchBooking({
    * carries its own day, so no single "selected date" is needed here.
    */
   selection: Set<string>;
-  /** Called after a successful batch log so the parent re-fetches + confirms. */
+  /** The PFA-local day the calendar is showing, "YYYY-MM-DD". */
+  displayedDate: string;
+  /**
+   * State of a slot on the DISPLAYED day only (the calendar has no other
+   * day loaded). Used to suggest a fix for a lone weight room pick.
+   */
+  slotStateOnDisplayedDay: (resourceId: string, slotIndex: number) => SlotState;
+  /**
+   * Called after a successful batch log so the parent re-fetches + confirms.
+   * `count` = rentals saved (rows the server returned), not slots tapped.
+   */
   onBooked: (count: number) => void;
   onCancel: () => void;
 }) {
   const [note, setNote] = useState("");
-  // Booking-level "Group session" flag. Only shown when the selection
-  // includes a weight-room slot; the server applies it only to weight-room
-  // rows. Defaults false.
-  const [isGroupSession, setIsGroupSession] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -86,7 +110,13 @@ export function CageBatchBooking({
     const mm = r.minute === 0 ? "00" : "30";
     const startAt = pfaWallClockToUtc(r.date, `${hh}:${mm}`);
     const endAt = new Date(startAt.getTime() + 30 * 60_000);
-    return { date: r.date, resourceId: r.resourceId, startAt, endAt };
+    return {
+      date: r.date,
+      resourceId: r.resourceId,
+      slotIndex: r.slotIndex,
+      startAt,
+      endAt,
+    };
   });
   const count = rows.length;
   const dayCount = new Set(rows.map((r) => r.date)).size;
@@ -114,23 +144,35 @@ export function CageBatchBooking({
   const resourceName = (id: string) =>
     resources.find((r) => r.id === id)?.name ?? "Unknown";
 
+  const isWeightRoom = (id: string) =>
+    resources.find((r) => r.id === id)?.type === "weight_room";
+
   // Does the current selection include at least one weight-room slot? Only
-  // then does the group-session checkbox make sense (the server ignores the
-  // flag on cages/bullpens either way).
-  const selectionHasWeightRoom = rows.some(
-    (r) =>
-      resources.find((res) => res.id === r.resourceId)?.type ===
-      "weight_room",
-  );
+  // then is the one-hour hint shown.
+  const selectionHasWeightRoom = rows.some((r) => isWeightRoom(r.resourceId));
+
+  // Rentals that will be SAVED: back-to-back weight room picks join into
+  // one; cages and bullpens stay one per slot.
+  const savedCount = countSavedRentals(rows, isWeightRoom);
+
+  // Weight room picks that do not make an hour. Any → refuse up front:
+  // the lines are shown and the Book button is disabled, so nothing is sent.
+  const refusalLines = batchWeightRoomRefusal({
+    rows,
+    isWeightRoom,
+    resourceName,
+    displayedDate,
+    slotState: slotStateOnDisplayedDay,
+  });
+  const refused = refusalLines.length > 0;
 
   const handleSubmit = () => {
     setError(null);
-    if (count === 0) return;
+    if (count === 0 || refused) return;
     const trimmedNote = note.trim() || null;
     startTransition(async () => {
       try {
-        await logOwnSessionsBatch({
-          isGroupSession: selectionHasWeightRoom && isGroupSession,
+        const saved = await logOwnSessionsBatch({
           slots: rows.map((r) => ({
             resourceId: r.resourceId,
             startAt: r.startAt,
@@ -138,7 +180,7 @@ export function CageBatchBooking({
             note: trimmedNote,
           })),
         });
-        onBooked(count);
+        onBooked(saved.length);
       } catch (err) {
         // A race (someone booked one of these first) surfaces as
         // overlap/blocked; the parent re-fetches on the error path.
@@ -151,8 +193,10 @@ export function CageBatchBooking({
     <div className="rounded-xl border border-line bg-surface shadow-[var(--shadow-md)] p-4 sm:p-5 space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-0.5">
+          {/* Rentals that will be saved, the same count as the Book button
+              (back-to-back weight room picks are one rental). */}
           <p className="text-xs uppercase tracking-wider text-fg-muted">
-            Book {count} {count === 1 ? "slot" : "slots"}
+            Book {savedCount} {savedCount === 1 ? "rental" : "rentals"}
           </p>
           {dayCount > 1 || cageCount > 1 ? (
             <p className="text-sm text-fg-muted">
@@ -173,11 +217,26 @@ export function CageBatchBooking({
                     <p className="text-sm font-semibold text-fg">
                       {resourceName(g.resourceId)}
                     </p>
-                    <p className="text-sm text-fg-muted">
-                      {g.starts.map((s) => formatPfaTime12h(s)).join(", ")} —{" "}
-                      {g.starts.length}{" "}
-                      {g.starts.length === 1 ? "rental" : "rentals"} of 30 min
-                    </p>
+                    {isWeightRoom(g.resourceId) ? (
+                      // Weight room: each rental that will be saved, as a
+                      // range with its length.
+                      weightRoomRentalLines(
+                        g.starts.map((s) => ({
+                          startAt: s,
+                          endAt: new Date(s.getTime() + 30 * 60_000),
+                        })),
+                      ).map((line) => (
+                        <p key={line} className="text-sm text-fg-muted">
+                          {line}
+                        </p>
+                      ))
+                    ) : (
+                      <p className="text-sm text-fg-muted">
+                        {g.starts.map((s) => formatPfaTime12h(s)).join(", ")} —{" "}
+                        {g.starts.length}{" "}
+                        {g.starts.length === 1 ? "rental" : "rentals"} of 30 min
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -194,6 +253,26 @@ export function CageBatchBooking({
         </button>
       </div>
 
+      {/* One-hour rule, said once whenever a weight room is picked. */}
+      {selectionHasWeightRoom ? (
+        <p className="text-[11px] text-fg-subtle">
+          Weight room rentals are one hour minimum: pick back-to-back half
+          hours on the same spot.
+        </p>
+      ) : null}
+
+      {/* Lone weight room picks: refused before anything is sent. */}
+      {refused ? (
+        <div
+          role="alert"
+          className="space-y-1 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger"
+        >
+          {refusalLines.map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </div>
+      ) : null}
+
       {error ? (
         <div
           role="alert"
@@ -201,28 +280,6 @@ export function CageBatchBooking({
         >
           {error}
         </div>
-      ) : null}
-
-      {/* Group session — one booking-level toggle, shown only when the
-          selection includes a weight-room slot. Bills those weight-room
-          rows at the group rate; ignored for cages/bullpens. */}
-      {selectionHasWeightRoom ? (
-        <label className="flex items-start gap-2.5">
-          <input
-            type="checkbox"
-            checked={isGroupSession}
-            onChange={(e) => setIsGroupSession(e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-line-strong text-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
-          />
-          <span className="space-y-0.5">
-            <span className="block text-sm font-medium text-fg">
-              Group session
-            </span>
-            <span className="block text-[11px] text-fg-subtle">
-              Bills weight-room slots at the group rate.
-            </span>
-          </span>
-        </label>
       ) : null}
 
       {/* One shared note. */}
@@ -247,12 +304,12 @@ export function CageBatchBooking({
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={pending || count === 0}
+          disabled={pending || count === 0 || refused}
           className="rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-12 px-6 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"
         >
           {pending
             ? "Logging…"
-            : `Book ${count} ${count === 1 ? "slot" : "slots"}`}
+            : `Book ${savedCount} ${savedCount === 1 ? "rental" : "rentals"}`}
         </button>
         <button
           type="button"

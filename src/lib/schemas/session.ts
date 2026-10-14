@@ -23,12 +23,12 @@ const sessionShape = {
   // skips the column when the parsed value is `undefined` and writes
   // when it's `null`. See form-actions.ts buildSessionInput.
   note: z.string().max(500).nullish(),
-  // GROUP-RATE (4th tier): BOOKING-LEVEL flag — only meaningful for a
-  // weight-room slot. Default false so every existing create/edit path is
-  // byte-identical (a slot bills at its regular rate unless the booker
-  // explicitly flags a weight-room group session). createSessionInternal
-  // gates it on the resource type; a group flag on a non-weight-room slot
-  // is ignored.
+  // GROUP-RATE (4th tier): BOOKING-LEVEL flag. KEPT IN THE SHAPE ONLY SO OLD
+  // PAYLOADS STILL PARSE. The server no longer acts on it: a new booking is
+  // always saved is_group_session=false at the regular rate
+  // (createSessionInternal ignores this field), and an edit takes the flag
+  // from the stored row (updateSessionInternal), so old group rentals keep
+  // theirs. Default false.
   isGroupSession: z.boolean().optional().default(false),
 };
 
@@ -38,7 +38,15 @@ const sessionBase = z.object(sessionShape);
 // NOT refined here (the DB CHECK is canonical), but a date typo can
 // still produce a huge span; 16h is generous vs the facility window.
 // Zod-only — no DB constraint backs this max.
-const MAX_DURATION_MS = 16 * 60 * 60 * 1000;
+//
+// Exported (the cap and its sentence) for createSessionsBatchInternal, which
+// joins back-to-back weight room slots AFTER this schema has checked each
+// slot, so it holds the joined row to the same cap with the same message;
+// and for createSessionsBatchAction, which shows that one ZodError as a plain
+// sentence.
+export const MAX_DURATION_MS = 16 * 60 * 60 * 1000;
+export const MAX_DURATION_MESSAGE =
+  "That span is over 16 hours — check the start/end (did the date slip?)";
 const maxDur = (v: { startAt: Date; endAt: Date }) =>
   v.endAt.getTime() - v.startAt.getTime() <= MAX_DURATION_MS;
 // Update/partial case: no-op unless BOTH bounds are present.
@@ -46,7 +54,7 @@ const maxDurPartial = (v: { startAt?: Date; endAt?: Date }) =>
   !(v.startAt && v.endAt) ||
   v.endAt.getTime() - v.startAt.getTime() <= MAX_DURATION_MS;
 const maxDurError = {
-  message: "That span is over 16 hours — check the start/end (did the date slip?)",
+  message: MAX_DURATION_MESSAGE,
   path: ["endAt"],
 };
 
@@ -85,9 +93,9 @@ export const createSessionBatchSchema = z
     // fully supply it.
     resourceId: z.string().min(1).optional(),
     // GROUP-RATE (4th tier): BOOKING-LEVEL flag (one toggle for the whole
-    // batch, NOT per-slot). Only meaningful for weight-room rows; in a mixed
-    // batch, non-weight-room rows ignore it. Default false → byte-identical
-    // to the pre-group batch behavior.
+    // batch, NOT per-slot). KEPT IN THE SHAPE ONLY SO OLD PAYLOADS STILL
+    // PARSE: createSessionsBatchInternal ignores it and saves every row
+    // is_group_session=false at the regular rate. Default false.
     isGroupSession: z.boolean().optional().default(false),
     slots: z
       .array(

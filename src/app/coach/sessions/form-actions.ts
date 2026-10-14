@@ -17,6 +17,7 @@ import {
   ResourceNotFoundError,
   SessionNotFoundError,
   SessionOverlapError,
+  WeightRoomMinimumError,
 } from "@/lib/errors";
 import { parsePfaInput } from "@/lib/timezone";
 
@@ -67,6 +68,7 @@ function translate(err: unknown, values: EditFormValues): EditActionResult {
   if (
     err instanceof SessionOverlapError ||
     err instanceof BlockedTimeError ||
+    err instanceof WeightRoomMinimumError ||
     err instanceof SessionNotFoundError ||
     err instanceof ResourceNotFoundError
   ) {

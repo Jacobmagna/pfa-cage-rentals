@@ -14,9 +14,12 @@ import {
 import { X, GripHorizontal } from "lucide-react";
 import {
   createSessionFormAction,
+  createSessionsBatchAction,
   type ActionResult as SessionActionResult,
 } from "@/app/admin/sessions/form-actions";
-import { createSessionsBatch } from "@/app/admin/sessions/actions";
+import { BATCH_CREATE_FALLBACK } from "@/app/admin/sessions/batch-create-copy";
+import { useCloseAfterOkAction } from "@/app/_components/close-after-save";
+import { useTickingNow } from "@/app/_components/ticking-now";
 import type {
   CoachOption,
   ResourceOption,
@@ -45,6 +48,10 @@ import {
   type SlotInput,
 } from "@/app/_components/session-slots-list";
 import { formatPfaDate, formatPfaTime, parsePfaInput } from "@/lib/timezone";
+import {
+  weightRoomRangeRefusal,
+  weightRoomRangeStatus,
+} from "./weight-room-admin.logic";
 
 // Unified "create on the grid" dialog. Two tabs:
 //   - Session: full session form (coach dropdown + note)
@@ -56,6 +63,13 @@ import { formatPfaDate, formatPfaTime, parsePfaInput } from "@/lib/timezone";
 // Each tab has its own <form action={...}> + useActionState, keyed
 // by a separate state, so switching tabs doesn't carry submit state
 // across.
+//
+// WEIGHT ROOM (one hour minimum), Session tab: the whole range is ONE
+// rental, never split, always through the single-rental form action — its
+// server-side translation is what carries the real refusal to the screen on
+// a production build (a batch throw arrives stripped). The slot-length
+// toggle and per-slot notes are hidden; a range under an hour is refused
+// inline and the submit is disabled. The server stays the backstop.
 
 export type CreatePrefill = {
   resourceId: string;
@@ -190,11 +204,18 @@ export function ScheduleCreateDialog({
   programs,
   prefill,
   defaultTab = "session",
+  viewerRole,
 }: {
   open: boolean;
   onClose: () => void;
   coaches: CoachOption[];
   resources: ResourceOption[];
+  /**
+   * The signed-in user's role, from the server page (a Schedule Manager is
+   * "coach"). Only an admin entering a weight room rental that is already
+   * over is spared the one-hour refusal, as on the server.
+   */
+  viewerRole: "admin" | "coach";
   /** ACTIVE programs only — the Block tab's display-only tag picker. */
   programs: ProgramOption[];
   prefill: CreatePrefill | null;
@@ -229,8 +250,18 @@ export function ScheduleCreateDialog({
     if (open && !prevOpen) setTab(defaultTab);
   }
 
-  const [sessionState, sessionAction, sessionPending] = useActionState(
+  // Session tab, single-rental path: the dialog closes from inside the
+  // action, right after the server answers "saved" (see close-after-save.ts
+  // for why: waiting for `pending` to flip back could leave the dialog on
+  // "Saving…" forever on a production build). The batch path closes from its
+  // own await in SessionTab; the Block tab manages its own submit and close.
+  const sessionActionAndClose = useCloseAfterOkAction(
     createSessionFormAction,
+    onClose,
+    open,
+  );
+  const [sessionState, sessionAction, sessionPending] = useActionState(
+    sessionActionAndClose,
     SESSION_INITIAL,
   );
 
@@ -249,21 +280,6 @@ export function ScheduleCreateDialog({
   // created a Block, the next click is plausibly another Block. No
   // reset effect here (eslint react-hooks/set-state-in-effect rule
   // catches that pattern anyway).
-
-  // Auto-close on successful session submit. (The Block tab manages its own
-  // submit + close internally — it's fully client-driven now, no form action.)
-  const wasSessionPending = useRef(false);
-  useEffect(() => {
-    if (
-      wasSessionPending.current &&
-      !sessionPending &&
-      sessionState.ok &&
-      open
-    ) {
-      onClose();
-    }
-    wasSessionPending.current = sessionPending;
-  }, [sessionPending, sessionState, open, onClose]);
 
   // Native close event (Escape, backdrop click).
   useEffect(() => {
@@ -380,6 +396,8 @@ export function ScheduleCreateDialog({
             coaches={coaches}
             resources={resources}
             onCancel={onClose}
+            viewerRole={viewerRole}
+            open={open}
           />
         ) : (
           <BlockTab
@@ -432,6 +450,8 @@ function SessionTab({
   coaches,
   resources,
   onCancel,
+  viewerRole,
+  open,
 }: {
   action: (formData: FormData) => void;
   state: SessionActionResult;
@@ -447,7 +467,16 @@ function SessionTab({
   coaches: CoachOption[];
   resources: ResourceOption[];
   onCancel: () => void;
+  viewerRole: "admin" | "coach";
+  /** Whether the dialog is open: the clock only ticks while it is. */
+  open: boolean;
 }) {
+  // The browser's "now", read when the tab mounts (each dialog opening mounts
+  // it fresh) and re-read every 30 s while an admin has it open, so a range
+  // whose end passes while the dialog is open stops being refused. Only used
+  // for the admin past-rental weight room waiver; the server decides.
+  const browserNow = useTickingNow(open && viewerRole === "admin");
+
   // Controlled live state for fields that multi-slot math reads from.
   // Re-seeded whenever defaults change (new prefill or post-error).
   const [live, setLive] = useState({
@@ -474,10 +503,6 @@ function SessionTab({
   const [batchPending, startBatchTransition] = useTransition();
   const [batchError, setBatchError] = useState<string | null>(null);
 
-  // Booking-level "Group session" flag — weight-room only. Shown when the
-  // selected resource is a weight room; defaults false and submits false
-  // (via the hidden field + gated batch value) when it isn't.
-  const [isGroupSession, setIsGroupSession] = useState(false);
   const isWeightRoom =
     resources.find((r) => r.id === live.resourceId)?.type === "weight_room";
 
@@ -527,37 +552,58 @@ function SessionTab({
     };
   }, [live.date, live.startTime, live.endTime, slotLengthMinutes]);
 
-  const isMultiSlot = slotCount > 1;
+  // A weight room range is one rental whatever its length: never split,
+  // never the batch path.
+  const weightRoom = isWeightRoom
+    ? weightRoomRangeStatus(rangeStart, rangeEnd, {
+        role: viewerRole,
+        now: browserNow,
+      })
+    : null;
+  const weightRoomTooShort = weightRoom?.kind === "too-short";
+
+  const isMultiSlot = !isWeightRoom && slotCount > 1;
 
   const submitLabel = (() => {
     if (pending || batchPending) return "Saving…";
+    if (isWeightRoom) return "Create session";
     if (slotCount > 1) return `Create ${slotCount} sessions`;
     return "Create session";
   })();
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    if (weightRoomTooShort) {
+      // The inline refusal is already on screen; send nothing.
+      e.preventDefault();
+      return;
+    }
     if (!isMultiSlot) return;
     e.preventDefault();
     if (slotCount === 0 || divisibilityError || slots.length === 0) return;
     setBatchError(null);
     startBatchTransition(async () => {
+      // A known refusal (overlap, block, weight room minimum…) comes back as
+      // a result carrying its real sentence. Anything thrown arrives with its
+      // message stripped on a production build, so a fixed sentence is shown
+      // instead of err.message.
       try {
-        await createSessionsBatch({
+        const result = await createSessionsBatchAction({
           coachId: live.coachId,
           resourceId: live.resourceId,
-          isGroupSession: isWeightRoom && isGroupSession,
           slots: slots.map((s) => ({
             startAt: s.startAt,
             endAt: s.endAt,
             note: s.note.trim() || null,
           })),
         });
+        if (!result.ok) {
+          setBatchError(result.error.message);
+          return;
+        }
         setSlots([]);
         onCancel();
-      } catch (err) {
-        setBatchError(
-          err instanceof Error ? err.message : "Batch create failed",
-        );
+      } catch {
+        setBatchError(BATCH_CREATE_FALLBACK);
       }
     });
   };
@@ -614,17 +660,9 @@ function SessionTab({
           name="resourceId"
           required
           value={live.resourceId}
-          onChange={(e) => {
-            const nextResourceId = e.target.value;
-            setLive((p) => ({ ...p, resourceId: nextResourceId }));
-            // Clear the weight-room-only group flag when switching to a
-            // non-weight-room resource, so it doesn't silently resurrect
-            // (stale checked state) when switching back.
-            const nextIsWeightRoom =
-              resources.find((r) => r.id === nextResourceId)?.type ===
-              "weight_room";
-            if (!nextIsWeightRoom) setIsGroupSession(false);
-          }}
+          onChange={(e) =>
+            setLive((p) => ({ ...p, resourceId: e.target.value }))
+          }
           className={selectStyles}
         >
           <option value="" disabled>
@@ -670,17 +708,30 @@ function SessionTab({
         </Field>
       </div>
 
-      <Field
-        label="Slot length"
-        hint="30 min = back-to-back half-hour lessons. 1 hr = full hours."
-      >
-        <SlotLengthToggle
-          value={slotLengthMinutes}
-          onChange={(v) => setSlotLengthMinutes(v)}
-        />
-      </Field>
+      {/* Weight room: one rental for the whole range, at least an hour. */}
+      {weightRoomTooShort ? (
+        <div
+          role="alert"
+          className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+        >
+          {weightRoomRangeRefusal(rangeStart)}
+        </div>
+      ) : null}
 
-      {divisibilityError ? (
+      {/* Not shown for a weight room, which is never split. */}
+      {!isWeightRoom ? (
+        <Field
+          label="Slot length"
+          hint="30 min = back-to-back half-hour lessons. 1 hr = full hours."
+        >
+          <SlotLengthToggle
+            value={slotLengthMinutes}
+            onChange={(v) => setSlotLengthMinutes(v)}
+          />
+        </Field>
+      ) : null}
+
+      {divisibilityError && !isWeightRoom ? (
         <div
           role="alert"
           className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
@@ -690,40 +741,20 @@ function SessionTab({
         </div>
       ) : null}
 
-      {slotCount > 0 && !divisibilityError ? (
+      {weightRoom?.kind === "ok" ? (
+        <p className="text-xs text-fg-subtle">
+          Will create <span className="text-fg">1</span> session of{" "}
+          {weightRoom.length}.
+        </p>
+      ) : null}
+
+      {!isWeightRoom && slotCount > 0 && !divisibilityError ? (
         <p className="text-xs text-fg-subtle">
           Will create <span className="text-fg">{slotCount}</span>{" "}
           {slotCount === 1 ? "session" : "sessions"} of {slotLengthMinutes} min
           each.
         </p>
       ) : null}
-
-      {/* Group session — weight-room only, booking-level. The hidden input
-          carries the gated value into the single-slot FormData submit (a bare
-          checkbox is absent from FormData when unchecked); the multi-slot
-          batch path reads state directly. When the resource isn't a weight
-          room, "false" is submitted. */}
-      {isWeightRoom ? (
-        <label className="flex items-start gap-2.5">
-          <input
-            type="checkbox"
-            checked={isGroupSession}
-            onChange={(e) => setIsGroupSession(e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-line text-gold focus-visible:ring-2 focus-visible:ring-gold/40"
-          />
-          <span className="text-sm">
-            <span className="font-medium text-fg">Group session</span>
-            <span className="block text-[11px] text-fg-subtle leading-snug">
-              Bills at the group weight-room rate.
-            </span>
-          </span>
-        </label>
-      ) : null}
-      <input
-        type="hidden"
-        name="isGroupSession"
-        value={isWeightRoom && isGroupSession ? "true" : "false"}
-      />
 
       {!isMultiSlot ? (
         <Field label="Note" optional>
@@ -750,7 +781,10 @@ function SessionTab({
         pending={pending || batchPending}
         submitLabel={submitLabel}
         onCancel={onCancel}
-        disabled={isMultiSlot && (slotCount === 0 || divisibilityError)}
+        disabled={
+          weightRoomTooShort ||
+          (isMultiSlot && (slotCount === 0 || divisibilityError))
+        }
       />
     </form>
   );

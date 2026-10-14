@@ -9,15 +9,12 @@ import {
   coachRateOverrides,
   programRateOverrides,
   programs,
+  rateDefaults,
   sessionsBilling,
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/authz";
-import {
-  DEFAULT_RATES_PER_SLOT_CENTS,
-  totalFromSnapshot,
-  type ResourceType,
-} from "@/lib/billing";
+import { totalFromSnapshot, type ResourceType } from "@/lib/billing";
 import { formatPfaDateMedium } from "@/lib/timezone";
 import { CoachNotesCard } from "./_components/notes-card";
 import {
@@ -28,6 +25,7 @@ import {
   RateOverridesCard,
   type RateOverrideRow,
 } from "./_components/rate-overrides-card";
+import { buildRateOverrideRows } from "./rate-override-rows";
 import {
   ProgramRateOverridesCard,
   type ProgramRateOverrideRow,
@@ -85,6 +83,7 @@ export default async function AdminCoachDetailPage({
     programOverrideRows,
     rateAuditRows,
     allProgramRows,
+    rateDefaultRows,
   ] = await Promise.all([
       db
         .select({
@@ -199,6 +198,14 @@ export default async function AdminCoachDetailPage({
       db
         .select({ id: programs.id, name: programs.name })
         .from(programs),
+      // The live default rental rates, for the Rate overrides card: the
+      // same rows billing reads when it prices a new rental.
+      db
+        .select({
+          type: rateDefaults.type,
+          ratePer30MinCents: rateDefaults.ratePer30MinCents,
+        })
+        .from(rateDefaults),
     ]);
 
   const coach = coachResult[0];
@@ -282,12 +289,6 @@ export default async function AdminCoachDetailPage({
         v.effectiveFrom.getTime() > nowForPeriods.getTime(),
     }));
 
-  // Always render one row per resource type; merge in the override
-  // when present. The client component decides save-vs-create based
-  // on whether `override` is null.
-  const overrideByType = new Map(
-    overrideRows.map((o) => [o.resourceType, o]),
-  );
   // Per-coach balance math: same rules as /admin/payments —
   // confirmed payments reduce the owed total, pending stays separate.
   // Reads each session's snapshotted rate directly.
@@ -302,18 +303,15 @@ export default async function AdminCoachDetailPage({
     .filter((p) => p.status === "pending")
     .reduce((sum, p) => sum + p.amountCents, 0);
 
-  const rateRows: RateOverrideRow[] = ALL_RESOURCE_TYPES.map((rt) => {
-    const o = overrideByType.get(rt);
-    return {
-      resourceType: rt,
-      defaultCents: DEFAULT_RATES_PER_SLOT_CENTS[rt],
-      override: o
-        ? { ratePer30MinCents: o.ratePer30MinCents, updatedAt: o.updatedAt }
-        : null,
-      // Weight-room GROUP rate override. Only meaningful for weight_room;
-      // for cage/bullpen it's carried as null and the card ignores it.
-      groupRatePer30MinCents: o?.groupRatePer30MinCents ?? null,
-    };
+  // Always render one row per resource type; merge in the override when
+  // present (the client component decides save-vs-create on whether
+  // `override` is null). Each row's default is the LIVE rate_defaults row
+  // (what billing stamps on a new rental), falling back to the constant
+  // only for a type with no row.
+  const rateRows: RateOverrideRow[] = buildRateOverrideRows({
+    types: ALL_RESOURCE_TYPES,
+    overrides: overrideRows,
+    liveDefaults: rateDefaultRows,
   });
 
   // One row per ACTIVE program; merge in this coach's override when set.

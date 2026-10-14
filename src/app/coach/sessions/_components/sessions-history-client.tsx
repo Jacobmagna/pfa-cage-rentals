@@ -68,6 +68,18 @@ export function SessionsHistoryClient({
 }) {
   const router = useRouter();
   const [editingRow, setEditingRow] = useState<HistoryRow | null>(null);
+  // Bumped on EVERY Edit click and used as the dialog's `key`, so each
+  // opening mounts a brand-new dialog. The dialog's useActionState keeps
+  // the last save result for as long as it stays mounted, and it prefers a
+  // refused save's typed values over the rental it is handed; without a
+  // fresh mount, a refused edit on rental A showed A's error and A's typed
+  // values when B was opened next. A refused save inside ONE opening still
+  // keeps the dialog open with what the coach typed.
+  const [editOpening, setEditOpening] = useState(0);
+  const openEdit = (row: HistoryRow) => {
+    setEditOpening((n) => n + 1);
+    setEditingRow(row);
+  };
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [confirmRow, setConfirmRow] = useState<HistoryRow | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -197,7 +209,7 @@ export function SessionsHistoryClient({
                       only the note can change. */}
                   <button
                     type="button"
-                    onClick={() => setEditingRow(row)}
+                    onClick={() => openEdit(row)}
                     disabled={isPendingDelete}
                     className="inline-flex items-center justify-center h-9 w-9 sm:h-8 sm:w-8 rounded-md text-fg-muted hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors disabled:opacity-40"
                     aria-label="Edit rental"
@@ -264,6 +276,7 @@ export function SessionsHistoryClient({
       ) : null}
 
       <EditSessionDialog
+        key={editOpening}
         open={editingRow !== null}
         onClose={() => setEditingRow(null)}
         resources={resources}

@@ -52,6 +52,16 @@ export async function previewImport(file: ArrayBuffer | Buffer): Promise<Preview
 // the same file from the uploaded buffer (deterministic). Sequential
 // inserts because neon-http has no transactions; overlap violations are
 // caught per-row and reported rather than aborting the batch.
+//
+// 📌 EXEMPT from the weight room one-hour minimum, on purpose. The three
+// live write functions in session-actions.ts refuse a weight room rental
+// shorter than 60 minutes; this one does not, and must not. It records
+// HISTORY from the old schedule workbook, and a 30-minute weight room
+// rental in there is something that really happened and is really owed.
+// Refusing it (or stretching it to an hour) would make the books wrong.
+// The rule is about what can be booked from now on, not about the past.
+// Pinned by tests/integration/weight-room-minimum.test.ts ("a 30-minute
+// weight room row still imports").
 export async function executeCommitPlan(
   actor: AuthedSession["user"],
   file: ArrayBuffer | Buffer,

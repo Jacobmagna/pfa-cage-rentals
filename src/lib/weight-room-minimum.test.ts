@@ -9,6 +9,7 @@ import { totalFromSnapshot } from "@/lib/billing";
 import {
   WEIGHT_ROOM_MINIMUM_MINUTES,
   findLoneWeightRoomPicks,
+  formatRentalLength,
   isBelowWeightRoomMinimum,
   mergeContiguousWeightRoomSlots,
 } from "./weight-room-minimum";
@@ -649,5 +650,22 @@ describe("findLoneWeightRoomPicks", () => {
     const before = JSON.stringify(input);
     findLoneWeightRoomPicks(input, isWeightRoom);
     expect(JSON.stringify(input)).toBe(before);
+  });
+});
+
+describe("formatRentalLength", () => {
+  it("says minutes alone under an hour", () => {
+    expect(formatRentalLength(30)).toBe("30 min");
+    expect(formatRentalLength(45)).toBe("45 min");
+  });
+
+  it("says whole hours alone", () => {
+    expect(formatRentalLength(60)).toBe("1 hr");
+    expect(formatRentalLength(120)).toBe("2 hr");
+  });
+
+  it("says hours and minutes together", () => {
+    expect(formatRentalLength(90)).toBe("1 hr 30 min");
+    expect(formatRentalLength(150)).toBe("2 hr 30 min");
   });
 });

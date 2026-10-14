@@ -158,6 +158,19 @@ export function findLoneWeightRoomPicks(
   );
 }
 
+/**
+ * A rental's length in words: "30 min", "1 hr", "1 hr 30 min". The same
+ * wording My rentals uses. One copy, shared by the coach calendar panels and
+ * the admin screens, so every weight room message says a length the same way.
+ */
+export function formatRentalLength(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours === 0) return `${mins} min`;
+  if (mins === 0) return `${hours} hr`;
+  return `${hours} hr ${mins} min`;
+}
+
 function hasPositiveLength(slot: WeightRoomSlot): boolean {
   return slot.endAt.getTime() > slot.startAt.getTime();
 }

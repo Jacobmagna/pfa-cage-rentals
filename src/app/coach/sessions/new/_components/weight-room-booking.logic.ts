@@ -16,6 +16,7 @@ import type { SlotState } from "@/lib/coach-calendar";
 import {
   WEIGHT_ROOM_MINIMUM_MINUTES,
   findLoneWeightRoomPicks,
+  formatRentalLength,
   isBelowWeightRoomMinimum,
   mergeContiguousWeightRoomSlots,
 } from "@/lib/weight-room-minimum";
@@ -198,8 +199,8 @@ export function weightRoomRentalLines(
         (rental.endAt.getTime() - rental.startAt.getTime()) / 60_000,
       );
       const length = isBelowWeightRoomMinimum(rental.startAt, rental.endAt)
-        ? `${formatLength(minutes)}, not enough`
-        : formatLength(minutes);
+        ? `${formatRentalLength(minutes)}, not enough`
+        : formatRentalLength(minutes);
       return `${formatPfaTime12h(rental.startAt)} – ${formatPfaTime12h(rental.endAt)} (${length})`;
     });
 }
@@ -210,13 +211,4 @@ export function countSavedRentals(
   isWeightRoom: (resourceId: string) => boolean,
 ): number {
   return mergeContiguousWeightRoomSlots(rows, isWeightRoom).length;
-}
-
-// "30 min", "1 hr", "1 hr 30 min" — the same wording My rentals uses.
-function formatLength(minutes: number): string {
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  if (hours === 0) return `${mins} min`;
-  if (mins === 0) return `${hours} hr`;
-  return `${hours} hr ${mins} min`;
 }

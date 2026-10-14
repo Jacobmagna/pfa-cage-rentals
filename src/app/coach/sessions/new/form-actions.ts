@@ -15,6 +15,7 @@ import {
   BlockedTimeError,
   ResourceNotFoundError,
   SessionOverlapError,
+  WeightRoomMinimumError,
 } from "@/lib/errors";
 import { parsePfaInput } from "@/lib/timezone";
 
@@ -65,6 +66,7 @@ function translate(err: unknown, values: CoachFormValues): CoachActionResult {
   if (
     err instanceof SessionOverlapError ||
     err instanceof BlockedTimeError ||
+    err instanceof WeightRoomMinimumError ||
     err instanceof ResourceNotFoundError
   ) {
     return {

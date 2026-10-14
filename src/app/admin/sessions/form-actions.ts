@@ -1,7 +1,8 @@
 "use server";
 
 // Form-action wrappers for the C6 server actions. The raw actions
-// throw typed errors (SessionOverlapError, BlockedTimeError, etc.);
+// throw typed errors (SessionOverlapError, BlockedTimeError,
+// WeightRoomMinimumError, etc.);
 // useActionState wants a stable return shape so the dialog can
 // render error banners without try/catch in the client component.
 //
@@ -25,6 +26,7 @@ import {
   ResourceNotFoundError,
   SessionNotFoundError,
   SessionOverlapError,
+  WeightRoomMinimumError,
 } from "@/lib/errors";
 import { parsePfaInput } from "@/lib/timezone";
 
@@ -75,9 +77,12 @@ function buildSessionInput(formData: FormData) {
     resourceId: formData.get("resourceId")?.toString() ?? "",
     startAt,
     endAt,
-    // Booking-level group-session flag (weight-room only; the server gates it
-    // on resource type). The Session tab submits "true"/"false" via a hidden
-    // field. Defaults false when absent (e.g. the edit path, which omits it).
+    // Booking-level group-session flag. The Session tab still submits
+    // "true"/"false" via a hidden field and it is still passed along here,
+    // but the server no longer acts on it: a new booking is always saved
+    // is_group_session=false at the regular rate (createSessionInternal), and
+    // an edit takes the flag from the stored row (updateSessionInternal).
+    // Defaults false when absent.
     isGroupSession: formData.get("isGroupSession")?.toString() === "true",
     // Send `null` (not undefined) for an empty note so the UPDATE path
     // actually clears the column. updateSessionInternal treats undefined
@@ -96,6 +101,7 @@ function translateError(
   if (
     err instanceof SessionOverlapError ||
     err instanceof BlockedTimeError ||
+    err instanceof WeightRoomMinimumError ||
     err instanceof SessionNotFoundError ||
     err instanceof ResourceNotFoundError
   ) {

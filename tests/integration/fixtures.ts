@@ -109,9 +109,9 @@ export async function ensureFixtureUsers(): Promise<FixtureUsers> {
   return { admin, coach, flaggedCoach };
 }
 
-// Returns the two cages and one bullpen the session tests need.
-// Throws if seed data is missing — the test branch needs `npm run
-// db:seed` to have been run at least once.
+// Returns the two cages, one bullpen and two weight rooms the session
+// tests need. Throws if seed data is missing — the test branch needs
+// `npm run db:seed` to have been run at least once.
 export async function getSeededResources() {
   const all = await db.select().from(resources);
   const cage1 = all.find((r) => r.name === "Cage 1");
@@ -120,14 +120,18 @@ export async function getSeededResources() {
   // GROUP-RATE (4th tier): the group weight-room tests need a weight_room
   // resource. "Weight Room 1" is part of the standard seed (seed-resources.ts).
   const weightRoom1 = all.find((r) => r.name === "Weight Room 1");
-  if (!cage1 || !cage2 || !bullpen1 || !weightRoom1) {
+  // Weight room one-hour minimum: the tests need a SECOND weight room to
+  // prove that slots on two different weight rooms are never joined into
+  // one rental. "Weight Room 2" is part of the same standard seed.
+  const weightRoom2 = all.find((r) => r.name === "Weight Room 2");
+  if (!cage1 || !cage2 || !bullpen1 || !weightRoom1 || !weightRoom2) {
     throw new Error(
       "Seeded resources not found on integration branch. Run " +
         "`INTEGRATION_DATABASE_URL=... npm run db:seed` against the " +
         "integration Neon branch first.",
     );
   }
-  return { cage1, cage2, bullpen1, weightRoom1 };
+  return { cage1, cage2, bullpen1, weightRoom1, weightRoom2 };
 }
 
 // Per-test cleanup. TRUNCATE every mutable test-relevant table in one

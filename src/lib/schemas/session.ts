@@ -23,12 +23,12 @@ const sessionShape = {
   // skips the column when the parsed value is `undefined` and writes
   // when it's `null`. See form-actions.ts buildSessionInput.
   note: z.string().max(500).nullish(),
-  // GROUP-RATE (4th tier): BOOKING-LEVEL flag — only meaningful for a
-  // weight-room slot. Default false so every existing create/edit path is
-  // byte-identical (a slot bills at its regular rate unless the booker
-  // explicitly flags a weight-room group session). createSessionInternal
-  // gates it on the resource type; a group flag on a non-weight-room slot
-  // is ignored.
+  // GROUP-RATE (4th tier): BOOKING-LEVEL flag. KEPT IN THE SHAPE ONLY SO OLD
+  // PAYLOADS STILL PARSE. The server no longer acts on it: a new booking is
+  // always saved is_group_session=false at the regular rate
+  // (createSessionInternal ignores this field), and an edit takes the flag
+  // from the stored row (updateSessionInternal), so old group rentals keep
+  // theirs. Default false.
   isGroupSession: z.boolean().optional().default(false),
 };
 
@@ -85,9 +85,9 @@ export const createSessionBatchSchema = z
     // fully supply it.
     resourceId: z.string().min(1).optional(),
     // GROUP-RATE (4th tier): BOOKING-LEVEL flag (one toggle for the whole
-    // batch, NOT per-slot). Only meaningful for weight-room rows; in a mixed
-    // batch, non-weight-room rows ignore it. Default false → byte-identical
-    // to the pre-group batch behavior.
+    // batch, NOT per-slot). KEPT IN THE SHAPE ONLY SO OLD PAYLOADS STILL
+    // PARSE: createSessionsBatchInternal ignores it and saves every row
+    // is_group_session=false at the regular rate. Default false.
     isGroupSession: z.boolean().optional().default(false),
     slots: z
       .array(

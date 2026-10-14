@@ -363,7 +363,15 @@ export function ScheduleGrid({
     });
   };
 
+  // Bumped on EVERY rental Edit opening and used as the edit dialog's `key`,
+  // so each opening mounts a brand-new dialog. The dialog's useActionState
+  // keeps the last save result while it stays mounted and prefers a refused
+  // save's typed values over the rental it is handed; without a fresh mount,
+  // a refused edit on rental A showed A's error and A's typed values when B
+  // was opened next, with B's id in the hidden field.
+  const [editOpening, setEditOpening] = useState(0);
   const openEditSession = (session: ScheduleSession) => {
+    setEditOpening((n) => n + 1);
     setDialog({ kind: "edit-session", session });
   };
 
@@ -711,6 +719,7 @@ export function ScheduleGrid({
         />
 
         <SessionFormDialog
+          key={editOpening}
           open={dialog.kind === "edit-session"}
           mode="edit"
           onClose={close}

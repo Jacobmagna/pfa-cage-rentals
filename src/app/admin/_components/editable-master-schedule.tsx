@@ -623,12 +623,21 @@ export function EditableMasterSchedule({
     }
   };
 
+  // Bumped on EVERY rental Edit opening and used as the rental edit dialog's
+  // `key`, so each opening mounts a brand-new dialog. The dialog's
+  // useActionState keeps the last save result while it stays mounted and
+  // prefers a refused save's typed values over the rental it is handed;
+  // without a fresh mount, a refused edit on rental A showed A's error and
+  // A's typed values when B was opened next, with B's id in the hidden field.
+  const [sessionEditOpening, setSessionEditOpening] = useState(0);
+
   // QA10 W3.9: click an existing bar → open its edit dialog by id. The grid
   // only calls this for bars whose id is present in the matching map (the
   // maps are built from the same rows the grid renders), so a lookup miss is
   // defensive only.
   const handleBlockClick: BlockClick = ({ kind, id }) => {
     if (kind === "session") {
+      setSessionEditOpening((n) => n + 1);
       setDialog({ kind: "edit-session", id });
     } else if (kind === "block") {
       setDialog({ kind: "edit-block", id });
@@ -737,6 +746,7 @@ export function EditableMasterSchedule({
           dialogs, seeded by id from the enriched maps. router.refresh() on
           close so edits/deletes reflect on the server-rendered Home grid. */}
       <SessionFormDialog
+        key={sessionEditOpening}
         open={dialog.kind === "edit-session" && editSession !== null}
         mode="edit"
         onClose={close}

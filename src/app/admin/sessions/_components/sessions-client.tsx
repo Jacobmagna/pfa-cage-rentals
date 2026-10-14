@@ -70,8 +70,23 @@ export function SessionsClient({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, startTransition] = useTransition();
 
-  const openCreate = () => setDialogState({ mode: "create" });
-  const openEdit = (row: SessionRow) => setDialogState({ mode: "edit", row });
+  // Bumped on EVERY opening (New rental or Edit) and used as the dialog's
+  // `key`, so each opening mounts a brand-new dialog. The dialog's
+  // useActionState keeps the last save result for as long as it stays
+  // mounted, and it prefers a refused save's typed values over the rental it
+  // is handed; without a fresh mount, a refused edit on rental A showed A's
+  // error and A's typed values when B (or New rental) was opened next, with
+  // B's id in the hidden field. A refused save inside ONE opening still keeps
+  // the dialog open with what the admin typed.
+  const [dialogOpening, setDialogOpening] = useState(0);
+  const openCreate = () => {
+    setDialogOpening((n) => n + 1);
+    setDialogState({ mode: "create" });
+  };
+  const openEdit = (row: SessionRow) => {
+    setDialogOpening((n) => n + 1);
+    setDialogState({ mode: "edit", row });
+  };
   const close = () => setDialogState({ mode: "closed" });
 
   const onDelete = (row: SessionRow) => {
@@ -223,6 +238,7 @@ export function SessionsClient({
       )}
 
       <SessionFormDialog
+        key={dialogOpening}
         open={dialogState.mode !== "closed"}
         mode={dialogState.mode === "edit" ? "edit" : "create"}
         onClose={close}

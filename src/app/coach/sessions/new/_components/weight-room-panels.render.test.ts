@@ -144,7 +144,7 @@ describe("one-tap panel, weight room", () => {
     expect(alerts(html)).toEqual([
       [
         "Weight room rentals are one hour minimum, and only 30 minutes is free from 3:00 PM on Weight Room 1.",
-        "It sits next to your own rental. To make that rental longer, edit it on My rentals.",
+        "It sits next to your own rental. If that rental hasn't started yet, you can make it longer on My rentals.",
       ],
     ]);
   });

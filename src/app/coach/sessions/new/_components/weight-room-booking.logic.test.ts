@@ -197,7 +197,7 @@ describe("oneTapWeightRoomRefusal", () => {
       }),
     ).toEqual([
       LINE_1,
-      "It sits next to your own rental. To make that rental longer, edit it on My rentals.",
+      "It sits next to your own rental. If that rental hasn't started yet, you can make it longer on My rentals.",
     ]);
   });
 
@@ -369,7 +369,7 @@ describe("batchWeightRoomRefusal", () => {
       }),
     ).toEqual([
       FIRST_LINE,
-      "Oct 17, 2026, 3:00 PM on Weight Room 1 is a single half hour. Remove it, and edit your rental next to it on My rentals to make it longer.",
+      "Oct 17, 2026, 3:00 PM on Weight Room 1 is a single half hour. Remove it. If your rental next to it hasn't started yet, you can make that one longer on My rentals.",
     ]);
   });
 

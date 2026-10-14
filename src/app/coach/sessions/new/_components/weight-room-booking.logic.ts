@@ -108,7 +108,9 @@ export function oneTapWeightRoomRefusal(args: {
   if (nextToOwnRental) {
     return [
       first,
-      "It sits next to your own rental. To make that rental longer, edit it on My rentals.",
+      // Only "if it hasn't started": My rentals locks the times of a rental
+      // that has already started, and the server refuses that edit too.
+      "It sits next to your own rental. If that rental hasn't started yet, you can make it longer on My rentals.",
     ];
   }
   return [first, "Pick another time."];
@@ -186,7 +188,7 @@ function lonePickSuggestion(args: {
   if (before === "free") return `Add ${beforeTime} too, or remove it.`;
   if (after === "free") return `Add ${afterTime} too, or remove it.`;
   if (before === "own" || after === "own") {
-    return "Remove it, and edit your rental next to it on My rentals to make it longer.";
+    return "Remove it. If your rental next to it hasn't started yet, you can make that one longer on My rentals.";
   }
   return "The half hours next to it are taken, so remove it.";
 }

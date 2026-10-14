@@ -14,6 +14,12 @@
 // transition), so the dialog closes as soon as the save has landed.
 // Diagnosis: maintenance/qa-0ae/stuck-saving/ (reproduced on main too).
 //
+// What it does not fix: the list behind the dialog. In roughly 1 save in 6
+// that list can stay stale until the next click, the same framework stall
+// that used to freeze the dialog. An added router.refresh() on close made
+// that worse (stale 20 s after close in 15 of 32 saves, against 5 of 32
+// without it), so the parents add none.
+//
 // A refused save returns `{ ok: false }` and does not close: the dialog stays
 // open with the typed values and the reason, as before. A thrown error does
 // not close either.

@@ -21,6 +21,17 @@
 // `workPayForLog` — the shared read-side entry point that branches
 // per-session vs hourly off the immutable snapshot. `aggregate.ts` and the
 // "Owed to coaches" card call the same one. Never reimplement it.
+//
+// ── "Not on schedule" (`0q`) ─────────────────────────────────────────────
+// Sept 13 2026: this report showed $900 against $500–600 correct. Coaches had
+// logged hours on schedule blocks that were later DELETED; the logs stayed
+// posted and paid (by design — a delete changes the plan, not the record of
+// work), but a row with NO block rendered exactly like a row that matched its
+// block perfectly, because the reconciliation note is null in both cases. The
+// fetch already computed the difference (`unscheduled`) and this builder
+// dropped it. Each log row now carries `unscheduled` and `reviewed`, and each
+// summary row counts them. The flag is a fact about the SCHEDULE: no total,
+// hours figure or pay figure reads it.
 
 import { programMinutes, workPayForLog } from "@/lib/billing";
 import { payPeriodFor, payPeriodLabel } from "@/lib/pay-period";
@@ -31,6 +42,24 @@ import {
   formatPfaWeekday,
 } from "@/lib/timezone";
 import type { HourLogFetchRow } from "./hour-log-fetch";
+
+/**
+ * 🔴 What `buildWorkReport` takes. `unscheduled` and `reviewedAt` are
+ * REQUIRED, so every caller has to answer "is this row on the schedule?" on
+ * purpose (rule 16 — a required field is a better audit than a grep).
+ *
+ *  - The Work tab and the reports workbook pass the schedule-notes fetch's
+ *    rows, which compute the flag.
+ *  - The printed statement passes `unscheduled: false` EXPLICITLY, with its
+ *    reason beside it (`statement/fetch.ts`, Q1 2026-10-14).
+ *
+ * ⚠️ Never default it (`r.unscheduled ?? false`): that compiles, and silently
+ * reads every row as scheduled — the Sept 13 failure again.
+ */
+export type WorkReportInputRow = HourLogFetchRow & {
+  unscheduled: boolean;
+  reviewedAt: Date | null;
+};
 
 /**
  * Statuses the Work tab reports on. POSTED ONLY, by decision:
@@ -113,6 +142,21 @@ export type WorkDetailRow = {
   payCents: number;
   note: string | null;
   scheduleNote: string | null;
+  /**
+   * 🔴 `0q`: true on a LOG whose coach is on no schedule block of the same
+   * program overlapping it (`isLogScheduled`, via the schedule-notes fetch).
+   * NOT the same as `scheduleNote === null` — that is null both for "no
+   * block at all" and for "matched its block perfectly", which is exactly how
+   * the Sept 13 rows hid. Always false on a stipend row (a stipend is a
+   * period, not a session on the schedule). Never changes `payCents`.
+   */
+  unscheduled: boolean;
+  /**
+   * True only for a POSTED log with `reviewedAt` set — Mark pressed Accept.
+   * Lets an accepted not-on-schedule row render quieter than an unreviewed
+   * one (Q5). Always false on a stipend row.
+   */
+  reviewed: boolean;
 };
 
 export type WorkSummaryRow = {
@@ -123,6 +167,13 @@ export type WorkSummaryRow = {
   entries: number;
   hours: number;
   payCents: number;
+  /**
+   * `0q`: how many of this coach's LOG rows are not on the schedule,
+   * reviewed or not. Rolled up from the same detail rows as everything else.
+   */
+  unscheduledCount: number;
+  /** The part of `unscheduledCount` nobody has reviewed yet. */
+  unscheduledUnreviewedCount: number;
 };
 
 export type WorkReportData = {
@@ -148,7 +199,7 @@ export type WorkReportData = {
  *   existed, which is what lets every existing caller and test stay unchanged.
  */
 export function buildWorkReport(
-  rows: HourLogFetchRow[],
+  rows: WorkReportInputRow[],
   stipendEarnings: StipendEarningRow[] = [],
 ): WorkReportData {
   const detail: WorkDetailRow[] = rows
@@ -179,6 +230,12 @@ export function buildWorkReport(
       }),
       note: r.note,
       scheduleNote: r.scheduleNote,
+      // 🔴 Carried straight through — no default. The input type requires it.
+      unscheduled: r.unscheduled,
+      // Posted AND stamped. The status check is redundant after the filter
+      // above, and is kept so this can never read "accepted" for a rejected
+      // row (rejecting also stamps reviewedAt) if that filter ever widens.
+      reviewed: r.status === "posted" && r.reviewedAt != null,
     }));
 
   // 🔴 Stipend rows join the SAME array the summary and the grand total are
@@ -214,6 +271,9 @@ export function buildWorkReport(
       payCents: e.amountCents,
       note: null,
       scheduleNote: null,
+      // A stipend is a period, not a session on the schedule.
+      unscheduled: false,
+      reviewed: false,
     });
   }
 
@@ -289,12 +349,19 @@ export function buildWorkReport(
         entries: 0,
         hours: 0,
         payCents: 0,
+        unscheduledCount: 0,
+        unscheduledUnreviewedCount: 0,
       };
       summaryMap.set(row.coachId, entry);
     }
     entry.entries += 1;
     entry.hours += row.hours;
     entry.payCents += row.payCents;
+    // `0q`: counts only — nothing above reads the flag.
+    if (row.unscheduled) {
+      entry.unscheduledCount += 1;
+      if (!row.reviewed) entry.unscheduledUnreviewedCount += 1;
+    }
   }
 
   const summary = Array.from(summaryMap.values()).sort((a, b) =>

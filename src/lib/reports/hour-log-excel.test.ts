@@ -10,16 +10,24 @@ import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
 import {
   buildHourLogWorkbook,
-  type HourLogWorkbookRow,
+  type HourLogWorkbookInputRow,
 } from "./hour-log-excel";
 
 // Two coaches, a few rows each, deliberately out of coach + date order
 // so the builder's sort is exercised. Times are UTC instants; the
 // hours math is TZ-independent (endAt − startAt).
-function makeRows(): HourLogWorkbookRow[] {
+function makeRows(): HourLogWorkbookInputRow[] {
   const d = (iso: string) => new Date(iso);
+  // Every row here is POSTED, unreviewed and ON the schedule (0q fields), so
+  // the Schedule column carries only the reconciliation note as before.
+  const onSchedule = {
+    status: "posted" as const,
+    unscheduled: false,
+    reviewedAt: null,
+  };
   return [
     {
+      ...onSchedule,
       id: "h1",
       coachId: "c2",
       coachName: "Bob Coach",
@@ -32,6 +40,7 @@ function makeRows(): HourLogWorkbookRow[] {
       scheduleNote: "Alice Coach was scheduled.",
     },
     {
+      ...onSchedule,
       id: "h2",
       coachId: "c1",
       coachName: "Alice Coach",
@@ -44,6 +53,7 @@ function makeRows(): HourLogWorkbookRow[] {
       scheduleNote: null,
     },
     {
+      ...onSchedule,
       id: "h3",
       coachId: "c1",
       coachName: "Alice Coach",
@@ -232,5 +242,131 @@ describe("buildHourLogWorkbook", () => {
     const wb = await loadWorkbook(buf);
     expect(wb.getWorksheet("Summary")!.rowCount).toBe(1);
     expect(wb.getWorksheet("Detail")!.rowCount).toBe(1);
+  });
+});
+
+/* ── 0q RELEASE 1 — "Not on schedule" in the hour-log workbook ───────────── */
+//
+// The Detail sheet's Schedule column (col 8) used to carry only the
+// reconciliation note, which is null BOTH for a log that matched its block and
+// for a log with no block at all — so a left-behind paid row read blank, like a
+// perfect one (Sept 13 2026). This workbook also lists REJECTED rows, so the
+// rejected variant is pinned too, and a rejected row (which carries
+// `reviewedAt`) must never read "accepted".
+//
+// Read back with `includeEmpty: true` (rule 36); columns found by HEADER TEXT.
+
+describe("🔴 0q — hour-log Detail Schedule column says 'Not on schedule'", () => {
+  const STAMP = new Date("2026-05-12T18:00:00.000Z");
+  let n = 0;
+  function row(
+    coachName: string,
+    over: Partial<HourLogWorkbookInputRow>,
+  ): HourLogWorkbookInputRow {
+    n += 1;
+    return {
+      id: `r${n}`,
+      coachId: coachName,
+      coachName,
+      coachEmail: `${coachName.replace(/\s/g, "").toLowerCase()}@x.com`,
+      programId: "p1",
+      programName: "BB - Fall Travelball - Game",
+      startAt: new Date(`2026-05-0${n}T20:00:00Z`),
+      endAt: new Date(`2026-05-0${n}T22:00:00Z`),
+      note: null,
+      scheduleNote: null,
+      status: "posted",
+      unscheduled: false,
+      reviewedAt: null,
+      ...over,
+    };
+  }
+
+  function fixture(): HourLogWorkbookInputRow[] {
+    n = 0;
+    return [
+      row("A Unreviewed", { unscheduled: true }),
+      row("B Accepted", { unscheduled: true, reviewedAt: STAMP }),
+      row("C Rejected", { unscheduled: true, status: "rejected", reviewedAt: STAMP }),
+      row("D Both", { unscheduled: true, scheduleNote: "Alice Coach was scheduled." }),
+      row("E Clean", {}),
+      row("F CleanWithNote", { scheduleNote: "Scheduled 1:00 PM–2:00 PM" }),
+    ];
+  }
+
+  function rowValues(sheet: ExcelJS.Worksheet, r: number): unknown[] {
+    const out: unknown[] = Array.from({ length: sheet.columnCount }, () => null);
+    sheet.getRow(r).eachCell({ includeEmpty: true }, (cell, c) => {
+      if (c <= out.length) out[c - 1] = cell.value;
+    });
+    return out;
+  }
+
+  async function scheduleByCoach(): Promise<Map<unknown, unknown>> {
+    const buf = await buildHourLogWorkbook(fixture(), {
+      from: "2026-05-01",
+      to: "2026-05-31",
+    });
+    const sheet = (await loadWorkbook(buf)).getWorksheet("Detail")!;
+    const headers = rowValues(sheet, 1);
+    const coach = headers.indexOf("Coach");
+    const schedule = headers.indexOf("Schedule");
+    expect(coach, "Detail header not found: Coach").toBeGreaterThan(-1);
+    // Still column 8 — the layout Mark knows.
+    expect(schedule, "Detail header not found: Schedule").toBe(7);
+    const out = new Map<unknown, unknown>();
+    for (let r = 2; r <= sheet.rowCount; r++) {
+      const v = rowValues(sheet, r);
+      out.set(v[coach], v[schedule] ?? "");
+    }
+    expect(out.size).toBe(6);
+    return out;
+  }
+
+  it("unreviewed posted row → 'Not on schedule'", async () => {
+    expect((await scheduleByCoach()).get("A Unreviewed")).toBe("Not on schedule");
+  });
+
+  it("accepted row → 'Not on schedule · accepted'", async () => {
+    expect((await scheduleByCoach()).get("B Accepted")).toBe(
+      "Not on schedule · accepted",
+    );
+  });
+
+  it("🔴 rejected row (reviewedAt set) → '· rejected', never '· accepted'", async () => {
+    const cells = await scheduleByCoach();
+    expect(cells.get("C Rejected")).toBe("Not on schedule · rejected");
+    expect(String(cells.get("C Rejected"))).not.toContain("accepted");
+    // Control in the same file: the posted+stamped row DOES say accepted.
+    expect(cells.get("B Accepted")).toBe("Not on schedule · accepted");
+  });
+
+  it("label; note when both", async () => {
+    expect((await scheduleByCoach()).get("D Both")).toBe(
+      "Not on schedule; Alice Coach was scheduled.",
+    );
+  });
+
+  it("clean rows keep today's cell — blank, or just the note (control: A is marked)", async () => {
+    const cells = await scheduleByCoach();
+    expect(cells.get("A Unreviewed")).toBe("Not on schedule");
+    expect(cells.get("E Clean")).toBe("");
+    expect(cells.get("F CleanWithNote")).toBe("Scheduled 1:00 PM–2:00 PM");
+  });
+
+  it("hours are unchanged by the flag (Summary sheet, same rows with and without it)", async () => {
+    const read = async (rows: HourLogWorkbookInputRow[]) => {
+      const sheet = (
+        await loadWorkbook(
+          await buildHourLogWorkbook(rows, { from: "2026-05-01", to: "2026-05-31" }),
+        )
+      ).getWorksheet("Summary")!;
+      return Array.from({ length: sheet.rowCount }, (_, k) => rowValues(sheet, k + 1));
+    };
+    const flagged = await read(fixture());
+    const clean = await read(fixture().map((r) => ({ ...r, unscheduled: false })));
+    expect(flagged).toEqual(clean);
+    // Control: the flag DID reach the flagged Detail sheet.
+    expect((await scheduleByCoach()).get("A Unreviewed")).toBe("Not on schedule");
   });
 });

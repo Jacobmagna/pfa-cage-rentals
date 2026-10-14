@@ -7,10 +7,9 @@
 // hardcoded expectation can be updated to match a bug; an identity cannot.
 
 import { describe, expect, it } from "vitest";
-import { buildWorkReport } from "./work-report";
+import { buildWorkReport, type WorkReportInputRow } from "./work-report";
 import type { StipendEarningRow } from "@/lib/stipend/fetch";
 import { coachScopeFromFilters } from "@/lib/stipend/scope";
-import type { HourLogFetchRow } from "./hour-log-fetch";
 
 // 2026-05-01 is PDT (UTC-7), so 16:00 UTC → 09:00 PFA.
 const DAY = "2026-05-01";
@@ -20,8 +19,13 @@ function at(hour: number, minute = 0): Date {
   );
 }
 
-function row(overrides: Partial<HourLogFetchRow> = {}): HourLogFetchRow {
+function row(overrides: Partial<WorkReportInputRow> = {}): WorkReportInputRow {
   return {
+    // An ordinary, ON-SCHEDULE, unreviewed log. The "Not on schedule" cases
+    // (0q) set `unscheduled` / `reviewedAt` explicitly, so a fixture never
+    // claims either by accident.
+    unscheduled: false,
+    reviewedAt: null,
     // Default false: an ordinary log. The stipend-covered cases set it
     // explicitly, so a fixture never claims coverage by accident.
     stipendCovered: false,
@@ -198,7 +202,7 @@ describe("buildWorkReport — summary roll-up", () => {
 describe("buildWorkReport — RECONCILIATION (the reason this module exists)", () => {
   // A mixed, deliberately awkward set: two coaches, fractional durations,
   // an hourly log, a per-session log, an unrated log, and a rejected one.
-  const rows: HourLogFetchRow[] = [
+  const rows: WorkReportInputRow[] = [
     row({ id: "1", coachId: "a", coachName: "Alice", startAt: at(9), endAt: at(10, 30) }),
     row({ id: "2", coachId: "a", coachName: "Alice", startAt: at(11), endAt: at(11, 45), perSessionRateCents: 10000 }),
     row({ id: "3", coachId: "b", coachName: "Bob", startAt: at(9), endAt: at(12), ratePer30MinCents: 2200 }),
@@ -571,5 +575,168 @@ describe("coachScopeFromFilters", () => {
     const scope = coachScopeFromFilters(filterIds);
     scope!.push("c2");
     expect(filterIds).toEqual(["c1"]);
+  });
+});
+
+/* ── 0q RELEASE 1 — "NOT ON SCHEDULE" ON THE PAY REPORT ──────────────────── */
+//
+// Sept 13 2026: the Work tab showed $900 against $500–600 correct, because a
+// log whose block had been DELETED rendered exactly like a log that matched its
+// block perfectly — both had a blank Schedule cell. The flag already existed on
+// the fetch (`fetchHourLogRowsWithScheduleNotes` computes `unscheduled`) and
+// `buildWorkReport` dropped it. These tests pin that it now travels, and that
+// carrying it moves no money.
+
+describe("🔴 0q — buildWorkReport carries the not-on-schedule flag", () => {
+  const STAMP = new Date("2026-05-02T18:00:00.000Z");
+  const SEP_P1_START = new Date("2026-09-01T07:00:00.000Z");
+  const SEP_P1_END = new Date("2026-09-16T07:00:00.000Z");
+
+  function stipend(over: Partial<StipendEarningRow> = {}): StipendEarningRow {
+    return {
+      id: "earn-0q",
+      coachId: "coach-a",
+      coachName: "Coach A",
+      coachEmail: "a@example.com",
+      periodKey: "2026-09-P1",
+      periodStart: SEP_P1_START,
+      periodEndExclusive: SEP_P1_END,
+      amountCents: 250_000,
+      ...over,
+    };
+  }
+
+  it("an unscheduled log → unscheduled: true; a scheduled one → false (same build)", () => {
+    const { detail } = buildWorkReport([
+      row({ id: "off", unscheduled: true }),
+      row({ id: "on", unscheduled: false, startAt: at(11), endAt: at(12) }),
+    ]);
+    const off = detail.find((d) => d.id === "off")!;
+    const on = detail.find((d) => d.id === "on")!;
+    expect(off.unscheduled).toBe(true);
+    expect(on.unscheduled).toBe(false);
+  });
+
+  it("reviewed is true ONLY for a posted log with reviewedAt set", () => {
+    const { detail } = buildWorkReport([
+      row({ id: "accepted", unscheduled: true, reviewedAt: STAMP }),
+      row({
+        id: "unreviewed",
+        unscheduled: true,
+        reviewedAt: null,
+        startAt: at(11),
+        endAt: at(12),
+      }),
+    ]);
+    expect(detail.find((d) => d.id === "accepted")!.reviewed).toBe(true);
+    expect(detail.find((d) => d.id === "unreviewed")!.reviewed).toBe(false);
+  });
+
+  it("a REJECTED unscheduled log never appears (posted only, unchanged) — control: the posted one does", () => {
+    const { detail } = buildWorkReport([
+      row({
+        id: "rejected",
+        status: "rejected",
+        unscheduled: true,
+        reviewedAt: STAMP,
+      }),
+      row({
+        id: "posted",
+        unscheduled: true,
+        startAt: at(11),
+        endAt: at(12),
+      }),
+    ]);
+    expect(detail.map((d) => d.id)).toEqual(["posted"]);
+    expect(detail[0].unscheduled).toBe(true);
+  });
+
+  it("🔴 a stipend row is unscheduled: false and reviewed: false — with an unscheduled log in the same build as the control", () => {
+    const { detail } = buildWorkReport(
+      [row({ id: "off", unscheduled: true, reviewedAt: STAMP })],
+      [stipend()],
+    );
+    const log = detail.find((d) => d.kind === "log")!;
+    const s = detail.find((d) => d.kind === "stipend")!;
+    // Control first: the log in the SAME build is marked and reviewed, so a
+    // false on the stipend is not just "nothing is ever marked".
+    expect(log.unscheduled).toBe(true);
+    expect(log.reviewed).toBe(true);
+    expect(s.unscheduled).toBe(false);
+    expect(s.reviewed).toBe(false);
+  });
+
+  it("summary counts all not-on-schedule rows per coach, and the unreviewed ones separately", () => {
+    const { summary } = buildWorkReport(
+      [
+        // Coach A: two off-schedule (one accepted, one not) + one clean.
+        row({ id: "a1", unscheduled: true, reviewedAt: null }),
+        row({
+          id: "a2",
+          unscheduled: true,
+          reviewedAt: STAMP,
+          startAt: at(11),
+          endAt: at(12),
+        }),
+        row({ id: "a3", unscheduled: false, startAt: at(13), endAt: at(14) }),
+        // Coach B: clean only.
+        row({
+          id: "b1",
+          coachId: "coach-b",
+          coachName: "Coach B",
+          coachEmail: "b@example.com",
+          unscheduled: false,
+        }),
+      ],
+      // A's stipend must not count as an off-schedule row.
+      [stipend()],
+    );
+    const a = summary.find((s) => s.coachId === "coach-a")!;
+    const b = summary.find((s) => s.coachId === "coach-b")!;
+    expect(a.unscheduledCount).toBe(2);
+    expect(a.unscheduledUnreviewedCount).toBe(1);
+    expect(b.unscheduledCount).toBe(0);
+    expect(b.unscheduledUnreviewedCount).toBe(0);
+    // Entries still count every row, stipend included (unchanged).
+    expect(a.entries).toBe(4);
+  });
+
+  it("🔴 the flag moves NO money: same rows, flag flipped → identical totals per coach and overall", () => {
+    const base = [
+      row({ id: "x1", startAt: at(9), endAt: at(10, 30) }),
+      row({
+        id: "x2",
+        startAt: at(11),
+        endAt: at(13),
+        perSessionRateCents: 10_000,
+      }),
+      row({
+        id: "y1",
+        coachId: "coach-b",
+        coachName: "Coach B",
+        coachEmail: "b@example.com",
+        ratePer30MinCents: 2_200,
+      }),
+    ];
+    const clean = buildWorkReport(
+      base.map((r) => ({ ...r, unscheduled: false })),
+      [stipend()],
+    );
+    const flagged = buildWorkReport(
+      base.map((r) => ({ ...r, unscheduled: true })),
+      [stipend()],
+    );
+    // Control: the flip actually reached the report.
+    expect(clean.detail.filter((d) => d.unscheduled)).toHaveLength(0);
+    expect(flagged.detail.filter((d) => d.unscheduled)).toHaveLength(3);
+    // …and moved nothing that is money or hours.
+    expect(flagged.grandTotalCents).toBe(clean.grandTotalCents);
+    expect(flagged.grandTotalHours).toBe(clean.grandTotalHours);
+    expect(flagged.summary.map((s) => [s.coachId, s.entries, s.hours, s.payCents])).toEqual(
+      clean.summary.map((s) => [s.coachId, s.entries, s.hours, s.payCents]),
+    );
+    expect(flagged.detail.map((d) => [d.id, d.payCents])).toEqual(
+      clean.detail.map((d) => [d.id, d.payCents]),
+    );
   });
 });

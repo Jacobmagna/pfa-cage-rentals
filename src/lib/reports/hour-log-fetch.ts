@@ -79,6 +79,28 @@ export type HourLogFetchRow = HourLogWorkbookRow & {
    */
   stipendCovered: boolean;
   perSessionRateCents: number | null;
+  /**
+   * 🔴 REQUIRED here (optional on the workbook's base row type). The base
+   * fetch always selects it, and `0q` needs it to tell an ACCEPTED
+   * not-on-schedule row from an unreviewed one. Null = nobody has reviewed it.
+   * ⚠️ A REJECTED row also carries it, so it alone never means "accepted".
+   */
+  reviewedAt: Date | null;
+};
+
+/**
+ * The schedule-notes fetch's row: everything above PLUS the `unscheduled`
+ * flag, REQUIRED.
+ *
+ * 🔴 `0q`: the flag used to be optional on every row type, so the pay report
+ * (`buildWorkReport`) could drop it without a type error — and did. A row
+ * with no schedule block then rendered exactly like a perfectly-matched one
+ * (Sept 13 2026). Required here, and required again on the pay report's
+ * input, so a caller that cannot supply it stops compiling instead of
+ * silently reading every row as scheduled (rule 16).
+ */
+export type HourLogFetchRowWithSchedule = HourLogFetchRow & {
+  unscheduled: boolean;
 };
 
 /**
@@ -168,7 +190,7 @@ export async function fetchHourLogRows(
  */
 export async function fetchHourLogRowsWithScheduleNotes(
   filters: NormalizedHourLogFilters,
-): Promise<HourLogFetchRow[]> {
+): Promise<HourLogFetchRowWithSchedule[]> {
   const rows = await fetchHourLogRows(filters);
 
   // Scheduled blocks overlapping the same window as the logs. Overlap =

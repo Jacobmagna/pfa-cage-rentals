@@ -321,7 +321,7 @@ export default async function AdminHourLogPage({
       <HoursClient
         rows={rows.map((r) => ({
           ...r,
-          unscheduled: r.unscheduled ?? false,
+          unscheduled: r.unscheduled,
           reviewedAt: r.reviewedAt ?? null,
           reviewedBy: r.reviewedBy ?? null,
           status: r.status,

@@ -16,7 +16,7 @@ import type {
   PaymentTimelineData,
   PaymentTimelineEvent,
 } from "./payments-timeline";
-import type { WorkDetailRow, WorkReportData } from "./work-report";
+import type { WorkDetailRow, WorkReportData, WorkReportInputRow } from "./work-report";
 
 function makeReport(): ReportData {
   return {
@@ -124,6 +124,8 @@ function makeWork(): WorkReportData {
     {
       kind: "log" as const,
       stipendCovered: false,
+      unscheduled: false,
+      reviewed: false,
       periodLabel: null,
       periodStart: null,
       periodEndExclusive: null,
@@ -146,6 +148,8 @@ function makeWork(): WorkReportData {
     {
       kind: "log" as const,
       stipendCovered: false,
+      unscheduled: false,
+      reviewed: false,
       periodLabel: null,
       periodStart: null,
       periodEndExclusive: null,
@@ -168,6 +172,8 @@ function makeWork(): WorkReportData {
     {
       kind: "log" as const,
       stipendCovered: false,
+      unscheduled: false,
+      reviewed: false,
       periodLabel: null,
       periodStart: null,
       periodEndExclusive: null,
@@ -198,6 +204,8 @@ function makeWork(): WorkReportData {
         entries: 2,
         hours: 5.2,
         payCents: 16000,
+        unscheduledCount: 0,
+        unscheduledUnreviewedCount: 0,
       },
       {
         coachId: "c2",
@@ -206,6 +214,8 @@ function makeWork(): WorkReportData {
         entries: 1,
         hours: 2,
         payCents: 0,
+        unscheduledCount: 0,
+        unscheduledUnreviewedCount: 0,
       },
     ],
     grandTotalCents: 16000,
@@ -579,6 +589,8 @@ describe("buildReportWorkbook", () => {
         "Coach",
         "Email",
         "Entries",
+        // 0q: a COUNT of entries with no schedule block, right after Entries.
+        "Not on schedule",
         "Hours",
         "Work Pay $",
       ]);
@@ -590,19 +602,21 @@ describe("buildReportWorkbook", () => {
       );
       const sheet = wb.getWorksheet("Work Summary")!;
 
+      // Columns since 0q: 3 Entries · 4 Not on schedule · 5 Hours · 6 Work Pay $
       const alice = sheet.getRow(2);
       expect(alice.getCell(1).value).toBe("Alice Coach");
       expect(alice.getCell(3).value).toBe(2); // entries
-      expect(alice.getCell(4).value).toBe(5.2); // hours
-      expect(alice.getCell(5).value).toBe(160); // 16000 cents
+      expect(alice.getCell(4).value).toBe(0); // not on schedule
+      expect(alice.getCell(5).value).toBe(5.2); // hours
+      expect(alice.getCell(6).value).toBe(160); // 16000 cents
 
       // A coach whose logs were never rated pays $0 — a real zero, and it
       // must be written as one rather than left blank.
       const bob = sheet.getRow(3);
       expect(bob.getCell(1).value).toBe("Bob Coach");
-      expect(bob.getCell(5).value).toBe(0);
+      expect(bob.getCell(6).value).toBe(0);
 
-      expect(sheet.getColumn(5).numFmt).toBe('"$"#,##0.00');
+      expect(sheet.getColumn(6).numFmt).toBe('"$"#,##0.00');
     });
 
     // SPEC §7. A bold number at the bottom of a payroll sheet with no
@@ -619,8 +633,9 @@ describe("buildReportWorkbook", () => {
       // that would have been cut — leaving a bare bold payroll figure with
       // no direction on it.
       expect(total.getCell(2).value).toBe("PFA owes coaches");
-      expect(total.getCell(4).value).toBe(7.2);
-      expect(total.getCell(5).value).toBe(160);
+      expect(total.getCell(4).value).toBe(0); // not on schedule (0q)
+      expect(total.getCell(5).value).toBe(7.2);
+      expect(total.getCell(6).value).toBe(160);
       expect(total.font?.bold).toBe(true);
     });
 
@@ -661,7 +676,7 @@ describe("buildReportWorkbook", () => {
       const workTotal = wb
         .getWorksheet("Work Summary")!
         .getRow(4)
-        .getCell(5).value;
+        .getCell(6).value; // "Work Pay $" (col F since 0q)
       expect(cageWorkTotal).toBe(workTotal);
       expect(workTotal).toBe(160);
     });
@@ -981,6 +996,244 @@ describe("buildReportWorkbook", () => {
       const wb = await loadWorkbook(await build(makeReport(), { payments }));
       const notes = columnText(wb.getWorksheet("Payments")!, 1).join(" ");
       expect(notes).not.toContain("TRUNCATED");
+    });
+  });
+});
+
+/* ── 0q RELEASE 1 — "Not on schedule" in the reports workbook ────────────── */
+//
+// Sept 13 2026: the pay report showed $900 against $500–600 correct, and the
+// rows that made the difference had a BLANK Schedule cell — identical to a row
+// that matched its block perfectly. The workbook is the file Mark pays from
+// and emails around, so the mark has to travel with it.
+//
+// Rows go through `buildWorkReport` (rule 26 — the top of the pipeline), and
+// the file is read back with `includeEmpty: true` (rule 36 — a reader that
+// skips blank cells shifts every later value left and manufactures defects).
+// Columns are located by HEADER TEXT, never by a hard-coded index.
+
+describe("🔴 0q — the workbook says 'Not on schedule'", () => {
+  // 2026-05-01 is PDT (UTC-7): hour h PFA = h+7 UTC.
+  const pfa = (hour: number) => new Date(Date.UTC(2026, 4, 1, hour + 7, 0, 0, 0));
+  const STAMP = new Date("2026-05-02T18:00:00.000Z");
+
+  function input(over: Partial<WorkReportInputRow>): WorkReportInputRow {
+    return {
+      id: "log",
+      coachId: "ana",
+      coachName: "Ana Alvarez",
+      coachEmail: "ana@x.com",
+      createdBy: "ana",
+      createdByName: "Ana Alvarez",
+      createdByEmail: "ana@x.com",
+      programId: "fall",
+      programName: "BB - Fall Travelball - Game",
+      startAt: pfa(9),
+      endAt: pfa(10),
+      note: null,
+      scheduleNote: null,
+      status: "posted",
+      decisionReason: null,
+      ratePer30MinCents: null,
+      perSessionRateCents: 10_000,
+      stipendCovered: false,
+      unscheduled: false,
+      reviewedAt: null,
+      ...over,
+    };
+  }
+
+  const BOB = { coachId: "bob", coachName: "Bob Bell", coachEmail: "bob@x.com" };
+
+  function rows(): WorkReportInputRow[] {
+    return [
+      input({ id: "a-unrev", startAt: pfa(9), endAt: pfa(10), unscheduled: true }),
+      input({
+        id: "a-acc",
+        startAt: pfa(11),
+        endAt: pfa(12),
+        unscheduled: true,
+        reviewedAt: STAMP,
+      }),
+      input({ id: "a-clean", startAt: pfa(13), endAt: pfa(14) }),
+      input({
+        id: "a-both",
+        startAt: pfa(15),
+        endAt: pfa(16),
+        unscheduled: true,
+        scheduleNote: "Bob Bell was scheduled.",
+      }),
+      input({
+        id: "b-note",
+        ...BOB,
+        startAt: pfa(7),
+        endAt: pfa(8),
+        ratePer30MinCents: 1_500,
+        perSessionRateCents: null,
+        scheduleNote: "Scheduled 7:00 AM–7:30 AM",
+      }),
+    ];
+  }
+
+  const BOB_STIPEND = {
+    id: "earn-bob",
+    coachId: "bob",
+    coachName: "Bob Bell",
+    coachEmail: "bob@x.com",
+    periodKey: "2026-05-P1",
+    periodStart: new Date("2026-05-01T07:00:00.000Z"),
+    periodEndExclusive: new Date("2026-05-16T07:00:00.000Z"),
+    amountCents: 250_000,
+  };
+
+  async function workbookFrom(logRows: WorkReportInputRow[]) {
+    const work = buildWorkReport(logRows, [BOB_STIPEND]);
+    return loadWorkbook(await build(makeReport(), { work }));
+  }
+
+  /** Every cell in a row, blanks included, as a 0-based array of values. */
+  function rowValues(sheet: ExcelJS.Worksheet, r: number, width: number): unknown[] {
+    const out: unknown[] = Array.from({ length: width }, () => null);
+    sheet.getRow(r).eachCell({ includeEmpty: true }, (cell, col) => {
+      if (col <= width) out[col - 1] = cell.value;
+    });
+    return out;
+  }
+
+  /** 0-based index of a header, located by its TEXT; fails naming it. */
+  function col(sheet: ExcelJS.Worksheet, header: string): number {
+    const headers = rowValues(sheet, 1, sheet.columnCount);
+    const i = headers.indexOf(header);
+    expect(i, `header not found on ${sheet.name}: ${JSON.stringify(header)}`).toBeGreaterThan(-1);
+    return i;
+  }
+
+  /** The one data row whose `byHeader` column equals `value`. */
+  function findRow(
+    sheet: ExcelJS.Worksheet,
+    byHeader: string,
+    value: unknown,
+    alsoHeader?: string,
+    alsoValue?: unknown,
+  ): unknown[] {
+    const width = sheet.columnCount;
+    const key = col(sheet, byHeader);
+    const also = alsoHeader ? col(sheet, alsoHeader) : -1;
+    const hits: unknown[][] = [];
+    for (let r = 2; r <= sheet.rowCount; r++) {
+      const v = rowValues(sheet, r, width);
+      if (v[key] === value && (also < 0 || v[also] === alsoValue)) hits.push(v);
+    }
+    expect(
+      hits.length,
+      `expected one ${sheet.name} row with ${byHeader}=${JSON.stringify(value)}`,
+    ).toBe(1);
+    return hits[0];
+  }
+
+  describe("Work Detail — Schedule cell", () => {
+    it("unreviewed off-schedule → 'Not on schedule'", async () => {
+      const sheet = (await workbookFrom(rows())).getWorksheet("Work Detail")!;
+      const r = findRow(sheet, "Start", "09:00");
+      expect(r[col(sheet, "Schedule")]).toBe("Not on schedule");
+    });
+
+    it("accepted off-schedule → 'Not on schedule · accepted'", async () => {
+      const sheet = (await workbookFrom(rows())).getWorksheet("Work Detail")!;
+      const r = findRow(sheet, "Start", "11:00");
+      expect(r[col(sheet, "Schedule")]).toBe("Not on schedule · accepted");
+    });
+
+    it("off-schedule WITH a note → label; note", async () => {
+      const sheet = (await workbookFrom(rows())).getWorksheet("Work Detail")!;
+      const r = findRow(sheet, "Start", "15:00");
+      expect(r[col(sheet, "Schedule")]).toBe(
+        "Not on schedule; Bob Bell was scheduled.",
+      );
+    });
+
+    it("clean row blank, scheduled-with-note keeps just the note, stipend blank (control: the 09:00 row is marked)", async () => {
+      const sheet = (await workbookFrom(rows())).getWorksheet("Work Detail")!;
+      const schedule = col(sheet, "Schedule");
+      expect(findRow(sheet, "Start", "09:00")[schedule]).toBe("Not on schedule");
+      expect(findRow(sheet, "Start", "13:00")[schedule] ?? "").toBe("");
+      expect(findRow(sheet, "Start", "07:00")[schedule]).toBe(
+        "Scheduled 7:00 AM–7:30 AM",
+      );
+      expect(findRow(sheet, "Start", "—")[schedule] ?? "").toBe("");
+    });
+
+    it("🔴 every money cell is identical with and without the flag", async () => {
+      const flagged = (await workbookFrom(rows())).getWorksheet("Work Detail")!;
+      const clean = (
+        await workbookFrom(rows().map((r) => ({ ...r, unscheduled: false })))
+      ).getWorksheet("Work Detail")!;
+      // Control: the flag did reach the flagged file.
+      expect(findRow(flagged, "Start", "09:00")[col(flagged, "Schedule")]).toBe(
+        "Not on schedule",
+      );
+      for (const header of ["Hours", "Rate", "Rate basis", "Pay $"]) {
+        const a = col(flagged, header);
+        const b = col(clean, header);
+        const read = (s: ExcelJS.Worksheet, i: number) =>
+          Array.from({ length: s.rowCount - 1 }, (_, k) =>
+            rowValues(s, k + 2, s.columnCount)[i],
+          );
+        expect(read(flagged, a), header).toEqual(read(clean, b));
+      }
+      // And the pay itself, by row.
+      expect(findRow(flagged, "Start", "09:00")[col(flagged, "Pay $")]).toBe(100);
+      expect(findRow(flagged, "Start", "07:00")[col(flagged, "Pay $")]).toBe(30);
+    });
+  });
+
+  describe("Work Summary — Not on schedule column", () => {
+    it("sits right after Entries and counts per coach, 0 included", async () => {
+      const sheet = (await workbookFrom(rows())).getWorksheet("Work Summary")!;
+      const nos = col(sheet, "Not on schedule");
+      expect(nos).toBe(col(sheet, "Entries") + 1);
+      expect(findRow(sheet, "Coach", "Ana Alvarez")[nos]).toBe(3);
+      // A real 0, written as a number — not a blank.
+      expect(findRow(sheet, "Coach", "Bob Bell")[nos]).toBe(0);
+    });
+
+    it("the grand-total row carries the total count", async () => {
+      const sheet = (await workbookFrom(rows())).getWorksheet("Work Summary")!;
+      const total = findRow(sheet, "Coach", "Grand total (6 entries)");
+      expect(total[col(sheet, "Not on schedule")]).toBe(3);
+    });
+
+    it("🔴 every money and hours cell is unchanged (vs the same rows with no flag)", async () => {
+      const flagged = (await workbookFrom(rows())).getWorksheet("Work Summary")!;
+      const clean = (
+        await workbookFrom(rows().map((r) => ({ ...r, unscheduled: false })))
+      ).getWorksheet("Work Summary")!;
+      // Control: the flag reached the flagged file and not the clean one.
+      expect(findRow(flagged, "Coach", "Ana Alvarez")[col(flagged, "Not on schedule")]).toBe(3);
+      expect(findRow(clean, "Coach", "Ana Alvarez")[col(clean, "Not on schedule")]).toBe(0);
+      for (const coach of ["Ana Alvarez", "Bob Bell", "Grand total (6 entries)"]) {
+        for (const header of ["Entries", "Hours", "Work Pay $"]) {
+          expect(
+            findRow(flagged, "Coach", coach)[col(flagged, header)],
+            `${coach} / ${header}`,
+          ).toEqual(findRow(clean, "Coach", coach)[col(clean, header)]);
+        }
+      }
+      // The figures themselves: Ana 4 × $100 flat, Bob $30 + $2,500 stipend.
+      expect(findRow(flagged, "Coach", "Ana Alvarez")[col(flagged, "Work Pay $")]).toBe(400);
+      expect(findRow(flagged, "Coach", "Bob Bell")[col(flagged, "Work Pay $")]).toBe(2530);
+      expect(
+        findRow(flagged, "Coach", "Grand total (6 entries)")[col(flagged, "Work Pay $")],
+      ).toBe(2930);
+    });
+
+    it("the note rows still sit in column A", async () => {
+      const sheet = (await workbookFrom(rows())).getWorksheet("Work Summary")!;
+      const notes = columnText(sheet, 1).join(" ");
+      expect(notes).toContain("not what is still owed");
+      expect(notes).toContain("Posted work only");
+      // Control on the same sheet: the new column exists.
+      expect(col(sheet, "Not on schedule")).toBeGreaterThan(-1);
     });
   });
 });

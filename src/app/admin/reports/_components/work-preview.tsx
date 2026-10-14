@@ -11,6 +11,10 @@
 // Server component, no client state.
 
 import { formatDollarsExact } from "@/lib/format-money";
+import {
+  notOnScheduleText,
+  postedRowScheduleState,
+} from "@/lib/schedule-labels";
 import type {
   WorkDetailKind,
   WorkDetailRow,
@@ -84,6 +88,21 @@ export function WorkPreview({
                   </td>
                   <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-muted">
                     {row.entries}
+                    {/* 🔴 `0q`: how many of these entries have no schedule
+                        block. Red while any is unreviewed, gray once Mark has
+                        accepted them all (Q5). Nothing when there are none. A
+                        fact about the schedule, never about pay. */}
+                    {row.unscheduledCount > 0 ? (
+                      <span
+                        className={`block font-sans text-[11px] whitespace-nowrap ${
+                          row.unscheduledUnreviewedCount > 0
+                            ? "text-danger"
+                            : "text-fg-subtle"
+                        }`}
+                      >
+                        {`${row.unscheduledCount} not on schedule`}
+                      </span>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg">
                     {formatHours(row.hours)} hr
@@ -154,9 +173,11 @@ export function WorkPreview({
                   <td className="px-3 py-3 text-right font-mono tnum tabular-nums font-semibold text-fg">
                     {formatCents(row.payCents)}
                   </td>
-                  <td className="px-3 py-3 text-fg-subtle text-xs max-w-[220px] truncate">
-                    {row.scheduleNote ?? ""}
-                  </td>
+                  <ScheduleCell
+                    unscheduled={row.unscheduled}
+                    reviewed={row.reviewed}
+                    scheduleNote={row.scheduleNote}
+                  />
                 </tr>
               ))}
             </tbody>
@@ -291,6 +312,47 @@ function RateCell({
     <td className="px-3 py-3 text-right font-mono tnum tabular-nums text-fg-muted whitespace-nowrap">
       {formatCents(ratePer30MinCents * 2)}{" "}
       <span className="text-fg-subtle">/hr</span>
+    </td>
+  );
+}
+
+// 🔴 `0q` — THE SCHEDULE CELL. Sept 13 2026: this cell rendered
+// `scheduleNote ?? ""`, and the note is null BOTH for a log with no schedule
+// block and for a log that matched its block perfectly — so the rows that put
+// $900 on a $500–600 day looked exactly like correct ones. Now a log with no
+// block gets a pill: red (the Hours tab's Unscheduled pill classes) while
+// nobody has reviewed it, a quieter gray once Mark accepted it (Q5). The note,
+// when there is one, sits BELOW the pill in its own truncated span — the
+// truncate moved off the <td>, which would otherwise clip the pill. Stipend
+// rows and scheduled rows render exactly as before (`unscheduled` is false).
+function ScheduleCell({
+  unscheduled,
+  reviewed,
+  scheduleNote,
+}: {
+  unscheduled: boolean;
+  reviewed: boolean;
+  scheduleNote: string | null;
+}) {
+  const state = postedRowScheduleState({ unscheduled, reviewed });
+  return (
+    <td className="px-3 py-3 text-fg-subtle text-xs">
+      <div className="flex flex-col items-start gap-1">
+        {state === "unreviewed" ? (
+          <span className="inline-flex items-center rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger whitespace-nowrap">
+            {notOnScheduleText(state)}
+          </span>
+        ) : state === "accepted" ? (
+          <span className="inline-flex items-center rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle whitespace-nowrap">
+            {notOnScheduleText(state)}
+          </span>
+        ) : null}
+        {scheduleNote ? (
+          <span className="block max-w-[220px] truncate" title={scheduleNote}>
+            {scheduleNote}
+          </span>
+        ) : null}
+      </div>
     </td>
   );
 }

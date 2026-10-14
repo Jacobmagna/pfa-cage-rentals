@@ -3,13 +3,21 @@
 // branch.
 //
 // 🔴 THE FIRST DESCRIBE BLOCK IS THE POINT OF THIS FILE. The display page has
-// no auth gate, and this repo has no middleware, so the projection in
-// display-schedule.ts is the only thing standing between a free-text field an
-// admin typed and the public internet. These tests seed UNIQUE SENTINEL
-// STRINGS into exactly the fields that must never escape, and assert those
-// strings are absent from the serialized result — rather than asserting that
-// some property is undefined, which would pass just as happily against a
-// result shape that had quietly grown a new column.
+// no auth gate, and this repo has no middleware, so the projection and the
+// label rule in display-schedule.ts are the only things standing between a
+// free-text field somebody typed and the public internet. These tests seed
+// UNIQUE SENTINEL STRINGS into the free-text fields and assert on where each
+// one does and does not appear in the serialized result — rather than
+// asserting that some property is undefined, which would pass just as happily
+// against a result shape that had quietly grown a new column.
+//
+// 📌 THREE EXPECTATIONS, THREE SENTINELS (since 2026-10-13, when the facility
+// owner decided the note on a block she enters by hand is printed on the wall
+// as typed — before that a block's reason was a never-escape field too):
+//   · a session's note, a coach's email — never, in the rows or the result;
+//   · a HAND-ENTERED block's note       — printed as that block's label, and
+//     present nowhere else in the result;
+//   · a PROGRAM-MADE block's reason     — read by the query, never printed.
 //
 // Every fixture is dated in 2037, a year no other suite in this repo uses
 // (2029 admin-hour-entry, 2031 multi-coach, 2033 approval-sync, 2035 no-show
@@ -27,6 +35,7 @@ import {
   sessionsBilling,
   users,
 } from "@/db/schema";
+import { programOccupancyReason } from "@/lib/server/program-resource-blocks";
 import { pfaWallClockToUtc } from "@/lib/timezone";
 import { computeDisplayWindow, type DisplayWindow } from "@/lib/display/window";
 import {
@@ -48,8 +57,20 @@ const at = (time: string) => pfaWallClockToUtc(DAY, time);
 // Sentinels chosen to look like the real thing they are standing in for: a
 // minor's name typed into a free-text field by a coach in a hurry.
 const NOTE_SENTINEL = "SENTINEL-NOTE-jake-birthday-party-7yo";
+// The note on a block an admin entered by hand. This one IS printed.
 const REASON_SENTINEL = "SENTINEL-REASON-tyler-makeup-lesson";
+// The reason on a row a scheduled PROGRAM owns. Never printed. Deliberately
+// NOT shaped like the app's auto text (`Program: <name>`): what withholds it
+// is the row's link to a program block, not what the text looks like.
+const PROGRAM_ROW_REASON_SENTINEL = "SENTINEL-PROGRAM-ROW-REASON-must-not-print";
 const NAMELESS_COACH_EMAIL = "sentinel-nameless-coach@pfa.invalid";
+
+const ZERO_WIDTH_ONLY = "\u200B\u200D";
+
+/** How many times `needle` occurs in everything `value` serializes to. */
+function occurrences(value: unknown, needle: string): number {
+  return JSON.stringify(value).split(needle).length - 1;
+}
 
 let fixtures: FixtureUsers;
 let cage1: Awaited<ReturnType<typeof getSeededResources>>["cage1"];
@@ -122,8 +143,8 @@ afterAll(async () => {
 });
 
 /**
- * A block that a scheduled PROGRAM owns, which is the only kind that can carry
- * a name onto the wall.
+ * A block that a scheduled PROGRAM owns: it carries the program's name onto
+ * the wall, and its own `reason` never.
  *
  * 🔴 THESE ROWS ARE NOT COVERED BY `truncateMutables`, which clears
  * `blocked_times` but not `programs` or `program_schedule_blocks`. Left behind,
@@ -223,7 +244,7 @@ afterEach(async () => {
   await cleanupSeededPrograms();
 });
 
-describe("🔴 PII — the fields that must never reach a public page", () => {
+describe("🔴 PII — what may and may not reach a public page", () => {
   it("never returns a session's free-text note", async () => {
     await seedSession({
       resourceId: cage1.id,
@@ -239,10 +260,16 @@ describe("🔴 PII — the fields that must never reach a public page", () => {
     // the absence assertion below cannot pass because the fixture silently
     // failed to seed (discipline rule 21).
     expect(result.sessions).toHaveLength(1);
+    expect(result.sessions[0].coachLabel).toBe("Integration Coach");
     expect(JSON.stringify(result)).not.toContain(NOTE_SENTINEL);
   });
 
-  it("never returns a block's free-text reason", async () => {
+  // 🔴 RE-POINTED 2026-10-13. This test used to assert the opposite — that a
+  // block's reason is absent from the result. The facility owner decided the
+  // note on a block she enters by hand is printed on the wall as typed, so
+  // the guard is now about WHERE the note may appear: as that block's label,
+  // and nowhere else in what the page receives.
+  it("🔴 a HAND-ENTERED block's note is its label, and appears nowhere else", async () => {
     await seedBlock({
       resourceId: cage1.id,
       start: "14:00",
@@ -253,7 +280,71 @@ describe("🔴 PII — the fields that must never reach a public page", () => {
     const result = await fetchDisplaySchedule(WINDOW);
 
     expect(result.blocks).toHaveLength(1);
-    expect(JSON.stringify(result)).not.toContain(REASON_SENTINEL);
+    expect(result.blocks[0].label).toBe(REASON_SENTINEL);
+    // Exactly once: the label. A second occurrence would mean the raw
+    // `reason` column is riding along on the mapped block as well.
+    expect(occurrences(result, REASON_SENTINEL)).toBe(1);
+    expect(Object.keys(result.blocks[0]).sort()).toEqual(
+      ["endAt", "id", "label", "resourceId", "startAt"].sort(),
+    );
+  });
+
+  it("🔴 a PROGRAM-MADE block's auto `Program: …` reason is never printed", async () => {
+    // The reason is written by the app's own function, so this is the text a
+    // real program block carries rather than a guess at it.
+    const programName = "Fixture 0af — Auto Reason Program";
+    const autoReason = programOccupancyReason(programName);
+    await seedProgramBlock({
+      resourceId: cage1.id,
+      start: "14:00",
+      end: "15:00",
+      programName,
+      programDisplayName: "0af Auto",
+      reason: autoReason,
+    });
+
+    const rows = await fetchDisplayScheduleRows(WINDOW);
+    const result = await fetchDisplaySchedule(WINDOW);
+
+    // Positive controls: the reason really is on the row the query reads, the
+    // row really is program-made, and the block really is in the result. So
+    // the absence below is the label rule withholding it — not a fixture that
+    // never wrote it.
+    expect(autoReason).toBe("Program: Fixture 0af — Auto Reason Program");
+    expect(rows.blocks).toHaveLength(1);
+    expect(rows.blocks[0].reason).toBe(autoReason);
+    expect(rows.blocks[0].programScheduleBlockId).not.toBeNull();
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].label).toBe("0af Auto");
+
+    expect(JSON.stringify(result)).not.toContain("Program:");
+    expect(JSON.stringify(result)).not.toContain(programName);
+    expect(Object.keys(result.blocks[0]).sort()).toEqual(
+      ["endAt", "id", "label", "resourceId", "startAt"].sort(),
+    );
+  });
+
+  it("🔴 ...and neither is a program-made row's reason that LOOKS hand-typed", async () => {
+    // What withholds the reason is the row's link to a program block, not the
+    // shape of the text. A rule keyed on the `Program:` prefix would print
+    // this one.
+    await seedProgramBlock({
+      resourceId: cage1.id,
+      start: "14:00",
+      end: "15:00",
+      programName: "Fixture 0af — Hand-Typed-Looking Reason",
+      programDisplayName: "0af Linked",
+      reason: PROGRAM_ROW_REASON_SENTINEL,
+    });
+
+    const rows = await fetchDisplayScheduleRows(WINDOW);
+    const result = await fetchDisplaySchedule(WINDOW);
+
+    expect(rows.blocks).toHaveLength(1);
+    expect(rows.blocks[0].reason).toBe(PROGRAM_ROW_REASON_SENTINEL);
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].label).toBe("0af Linked");
+    expect(JSON.stringify(result)).not.toContain(PROGRAM_ROW_REASON_SENTINEL);
   });
 
   it("never returns a coach's email address", async () => {
@@ -292,7 +383,8 @@ describe("🔴 PII — the fields that must never reach a public page", () => {
     // A shape assertion to catch a field added later. Deliberately an exact
     // key-set comparison rather than a spot check: the failure mode being
     // guarded against is someone ADDING something, which a spot check
-    // structurally cannot see.
+    // structurally cannot see. `reason` and `programScheduleBlockId` are read
+    // by the query and must NOT be among a mapped block's keys.
     await seedSession({
       resourceId: cage1.id,
       coachId: fixtures.coach.id,
@@ -318,6 +410,10 @@ describe("🔴 PII — the fields that must never reach a public page", () => {
     expect(Object.keys(result.resources[0]).sort()).toEqual(
       ["id", "name", "sortOrder", "type"].sort(),
     );
+    // And the session's note is still nowhere, in the same result that does
+    // carry the block's note as a label.
+    expect(result.blocks[0].label).toBe(REASON_SENTINEL);
+    expect(JSON.stringify(result)).not.toContain(NOTE_SENTINEL);
   });
 });
 
@@ -350,7 +446,18 @@ describe("🔴 PII — the SQL projection itself, asserted separately from the m
     expect(JSON.stringify(rows)).not.toContain("@pfa.invalid");
   });
 
-  it("the block projection never selects reason", async () => {
+  // 🔴 RE-POINTED 2026-10-13: this used to assert `reason` was NOT selected.
+  // It is selected now, together with the link that says whether the row is
+  // hand-entered. The assertion is still an EXACT key set, so the next column
+  // added to this projection fails here until someone decides it belongs.
+  it("the block projection selects reason and the program link, and nothing else new", async () => {
+    await seedSession({
+      resourceId: bullpen1.id,
+      coachId: fixtures.coach.id,
+      start: "14:00",
+      end: "15:00",
+      note: NOTE_SENTINEL,
+    });
     await seedBlock({
       resourceId: cage1.id,
       start: "14:00",
@@ -361,28 +468,36 @@ describe("🔴 PII — the SQL projection itself, asserted separately from the m
     const rows = await fetchDisplayScheduleRows(WINDOW);
 
     expect(rows.blocks).toHaveLength(1);
-    // programName / programDisplayName are the ONLY columns the program joins
-    // are allowed to add. `reason` is still not among them.
     expect(Object.keys(rows.blocks[0]).sort()).toEqual(
       [
         "endAt",
         "id",
         "programDisplayName",
         "programName",
+        "programScheduleBlockId",
+        "reason",
         "resourceId",
         "startAt",
         "tagDisplayName",
         "tagName",
       ].sort(),
     );
-    expect(JSON.stringify(rows)).not.toContain(REASON_SENTINEL);
+    // The raw row carries the note as typed, and a hand-entered row has no
+    // program link — the two facts the label rule reads.
+    expect(rows.blocks[0].reason).toBe(REASON_SENTINEL);
+    expect(rows.blocks[0].programScheduleBlockId).toBeNull();
+    // Selecting a block's note did not bring a session's note with it.
+    expect(rows.sessions).toHaveLength(1);
+    expect(JSON.stringify(rows)).not.toContain(NOTE_SENTINEL);
   });
 });
 
 describe("blocked bars say WHAT is blocking them", () => {
-  // Requested 2026-08-30 (Mark's wife via Jacob): the bars used to read
-  // "Blocked" and now carry the program's name. The safety line is that the
-  // name comes from `programs`, never from `blocked_times.reason`.
+  // Two requests, two sources. 2026-08-30 (Mark's wife via Jacob): a bar a
+  // scheduled program owns carries the program's name, from `programs`.
+  // 2026-10-13 (the facility owner): a bar she enters by hand carries the note
+  // she typed. The safety line is that a PROGRAM-MADE row's reason is never
+  // the label.
 
   it("shows the program's SHORT display name when one is set", async () => {
     await seedProgramBlock({
@@ -391,7 +506,7 @@ describe("blocked bars say WHAT is blocking them", () => {
       end: "15:00",
       programName: "High School Program — Hitting",
       programDisplayName: "HS Hitting",
-      reason: REASON_SENTINEL,
+      reason: PROGRAM_ROW_REASON_SENTINEL,
     });
 
     const result = await fetchDisplaySchedule(WINDOW);
@@ -400,7 +515,7 @@ describe("blocked bars say WHAT is blocking them", () => {
     expect(result.blocks[0].label).toBe("HS Hitting");
     // The long name is not on the wall either — the short form REPLACES it.
     expect(JSON.stringify(result)).not.toContain("High School Program");
-    expect(JSON.stringify(result)).not.toContain(REASON_SENTINEL);
+    expect(JSON.stringify(result)).not.toContain(PROGRAM_ROW_REASON_SENTINEL);
   });
 
   it("falls back to the full program name when no short name is set", async () => {
@@ -410,22 +525,22 @@ describe("blocked bars say WHAT is blocking them", () => {
       end: "15:00",
       programName: "Bullpen Development",
       programDisplayName: null,
-      reason: REASON_SENTINEL,
+      reason: PROGRAM_ROW_REASON_SENTINEL,
     });
 
     const result = await fetchDisplaySchedule(WINDOW);
 
     expect(result.blocks[0].label).toBe("Bullpen Development");
-    expect(JSON.stringify(result)).not.toContain(REASON_SENTINEL);
+    expect(JSON.stringify(result)).not.toContain(PROGRAM_ROW_REASON_SENTINEL);
   });
 
   // 🔴 THIS IS THE REGRESSION TEST FOR THE JOIN TYPE, AND IT IS THE MOST
   // IMPORTANT ONE IN THIS BLOCK. A hand-entered block has a NULL
-  // program_schedule_block_id. If either join is ever "tidied" from LEFT to
+  // program_schedule_block_id. If a join is ever "tidied" from LEFT to
   // INNER, this row vanishes from the query — and a cage that is UNAVAILABLE
   // renders as FREE, which is the exact failure the red bar exists to prevent.
   // It fails on the length assertion before it ever reaches the label.
-  it("keeps a hand-entered block on the board, labelled generically", async () => {
+  it("keeps a hand-entered block on the board, labelled with its note", async () => {
     await seedBlock({
       resourceId: cage1.id,
       start: "14:00",
@@ -436,16 +551,62 @@ describe("blocked bars say WHAT is blocking them", () => {
     const result = await fetchDisplaySchedule(WINDOW);
 
     expect(result.blocks).toHaveLength(1);
-    expect(result.blocks[0].label).toBe(DISPLAY_BLOCKED_LABEL);
-    expect(JSON.stringify(result)).not.toContain(REASON_SENTINEL);
+    expect(result.blocks[0].label).toBe(REASON_SENTINEL);
+  });
+
+  it("prints the note trimmed at its ends", async () => {
+    await seedBlock({
+      resourceId: cage1.id,
+      start: "14:00",
+      end: "15:00",
+      reason: `  ${REASON_SENTINEL} \n`,
+    });
+
+    const result = await fetchDisplaySchedule(WINDOW);
+
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].label).toBe(REASON_SENTINEL);
+  });
+
+  // 📌 `blocked_times.reason` is NOT NULL with no CHECK, so an empty or
+  // whitespace-only value CAN be stored — the first two inserts succeed. The admin
+  // forms trim the note before sending it, but `createBlockSchema` itself is
+  // `min(1)` with no trim: it refuses "" and accepts " ". So a blank note is a
+  // state the display has to survive, and an empty bar reads as a free cage.
+  it("a hand-entered block with a blank note and no tag stays 'Blocked'", async () => {
+    await seedBlock({ resourceId: cage1.id, start: "14:00", end: "15:00", reason: "" });
+    await seedBlock({ resourceId: bullpen1.id, start: "14:00", end: "15:00", reason: " \t " });
+    // Zero-width space + zero-width joiner: not whitespace, so `trim()` keeps
+    // them, and nothing visible. Written as escapes so they can be seen here.
+    await seedBlock({
+      resourceId: weightRoom1.id,
+      start: "14:00",
+      end: "15:00",
+      reason: ZERO_WIDTH_ONLY,
+    });
+
+    const rows = await fetchDisplayScheduleRows(WINDOW);
+    const result = await fetchDisplaySchedule(WINDOW);
+
+    // Positive control: the blank values really were stored as written.
+    expect(rows.blocks.map((b) => b.reason).sort()).toEqual(
+      ["", " \t ", ZERO_WIDTH_ONLY].sort(),
+    );
+    expect(ZERO_WIDTH_ONLY.trim()).toHaveLength(2);
+    expect(result.blocks).toHaveLength(3);
+    expect(result.blocks.map((b) => b.label)).toEqual([
+      DISPLAY_BLOCKED_LABEL,
+      DISPLAY_BLOCKED_LABEL,
+      DISPLAY_BLOCKED_LABEL,
+    ]);
   });
 
   // ── the COSMETIC tag an admin picks in the Block form ──────────────────
   // These are hand-entered blocks with NO program_schedule_block. Nothing here
-  // touches scheduling, hours or pay — the tag exists so the wall can name the
-  // bar instead of reading "Blocked".
+  // touches scheduling, hours or pay. Since 2026-10-13 the tag is only what
+  // the wall falls back to when the block has no note to print.
 
-  it("a hand-entered block TAGGED with a program shows its short name", async () => {
+  it("🔴 a hand-entered block TAGGED with a program shows the NOTE, not the tag", async () => {
     await seedTaggedBlock({
       resourceId: cage1.id,
       start: "14:00",
@@ -458,32 +619,55 @@ describe("blocked bars say WHAT is blocking them", () => {
       reason: REASON_SENTINEL,
     });
 
+    const rows = await fetchDisplayScheduleRows(WINDOW);
+    const result = await fetchDisplaySchedule(WINDOW);
+
+    // Positive control: the tag really is set on this row, so the note beat a
+    // tag that exists rather than one the fixture failed to attach.
+    expect(rows.blocks).toHaveLength(1);
+    expect(rows.blocks[0].tagDisplayName).toBe("Hitting Program");
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0].label).toBe(REASON_SENTINEL);
+    expect(JSON.stringify(result)).not.toContain("Hitting Program");
+    expect(JSON.stringify(result)).not.toContain("Tagged Fixture");
+  });
+
+  it("a tagged block with a whitespace-only note shows the tag's short name", async () => {
+    await seedTaggedBlock({
+      resourceId: cage1.id,
+      start: "14:00",
+      end: "15:00",
+      programName: "Tagged Fixture — Blank Note",
+      programDisplayName: "Blank Note Tag",
+      reason: "   ",
+    });
+
     const result = await fetchDisplaySchedule(WINDOW);
 
     expect(result.blocks).toHaveLength(1);
-    expect(result.blocks[0].label).toBe("Hitting Program");
-    expect(JSON.stringify(result)).not.toContain(REASON_SENTINEL);
+    expect(result.blocks[0].label).toBe("Blank Note Tag");
   });
 
-  it("a tagged block falls back to the full program name with no short form", async () => {
+  it("a tagged block with a blank note falls back to the full program name with no short form", async () => {
     await seedTaggedBlock({
       resourceId: cage1.id,
       start: "14:00",
       end: "15:00",
       programName: "Tagged Fixture — Youth Camp",
       programDisplayName: null,
-      reason: REASON_SENTINEL,
+      reason: " ",
     });
 
     const result = await fetchDisplaySchedule(WINDOW);
 
+    expect(result.blocks).toHaveLength(1);
     expect(result.blocks[0].label).toBe("Tagged Fixture — Youth Camp");
   });
 
   // 🔴 REAL OCCUPANCY OUTRANKS THE COSMETIC TAG, and this is the test that
   // pins the precedence. If a scheduled program owns the slot, that is what
   // the slot IS; a tag someone also set cannot rename it. Reversing the ??
-  // chain in the mapping turns this red.
+  // chain in the label rule turns this red.
   it("a program-linked block ignores a cosmetic tag set on the same row", async () => {
     const [tagProgram] = await db
       .insert(programs)
@@ -511,7 +695,7 @@ describe("blocked bars say WHAT is blocking them", () => {
       resourceId: cage1.id,
       startAt: at("14:00"),
       endAt: at("15:00"),
-      reason: REASON_SENTINEL,
+      reason: PROGRAM_ROW_REASON_SENTINEL,
       programScheduleBlockId: scheduleBlock.id,
       displayProgramId: tagProgram.id,
       createdBy: fixtures.admin.id,
@@ -522,6 +706,7 @@ describe("blocked bars say WHAT is blocking them", () => {
     expect(result.blocks).toHaveLength(1);
     expect(result.blocks[0].label).toBe("REAL WINS");
     expect(JSON.stringify(result)).not.toContain("TAG LOSES");
+    expect(JSON.stringify(result)).not.toContain(PROGRAM_ROW_REASON_SENTINEL);
   });
 
   it("shows both kinds side by side without losing either", async () => {
@@ -531,7 +716,7 @@ describe("blocked bars say WHAT is blocking them", () => {
       end: "15:00",
       programName: "Travel Ball Infield",
       programDisplayName: "Travel INF",
-      reason: REASON_SENTINEL,
+      reason: PROGRAM_ROW_REASON_SENTINEL,
     });
     await seedBlock({
       resourceId: bullpen1.id,
@@ -543,10 +728,12 @@ describe("blocked bars say WHAT is blocking them", () => {
     const result = await fetchDisplaySchedule(WINDOW);
 
     expect(result.blocks).toHaveLength(2);
+    // Each kind takes its label from its own source, on the same call: the
+    // hand-entered bar its note, the program bar its program's short name.
     expect(result.blocks.map((b) => b.label).sort()).toEqual(
-      [DISPLAY_BLOCKED_LABEL, "Travel INF"].sort(),
+      [REASON_SENTINEL, "Travel INF"].sort(),
     );
-    expect(JSON.stringify(result)).not.toContain(REASON_SENTINEL);
+    expect(JSON.stringify(result)).not.toContain(PROGRAM_ROW_REASON_SENTINEL);
   });
 });
 

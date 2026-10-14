@@ -20,6 +20,7 @@ import {
   users,
 } from "@/db/schema";
 import { isLogScheduled } from "@/lib/coach-hour-log";
+import { MAX_HOUR_LOG_DURATION_MS } from "@/lib/schemas/hour-log";
 import {
   annotateLogs,
   type ReconBlock,
@@ -79,6 +80,29 @@ export type HourLogFetchRow = HourLogWorkbookRow & {
    */
   stipendCovered: boolean;
   perSessionRateCents: number | null;
+  /**
+   * 🔴 REQUIRED here (optional on the workbook's base row type). The base
+   * fetch always selects it, and `0q` shows its date beside a not-on-schedule
+   * row. Null = nobody has reviewed it. ⚠️ It never means "accepted as
+   * off-schedule": admin entry, approve-held and queue Accept all stamp it on
+   * rows that were ON a block, and rejecting stamps it too.
+   */
+  reviewedAt: Date | null;
+};
+
+/**
+ * The schedule-notes fetch's row: everything above PLUS the `unscheduled`
+ * flag, REQUIRED.
+ *
+ * 🔴 `0q`: the flag used to be optional on every row type, so the pay report
+ * (`buildWorkReport`) could drop it without a type error — and did. A row
+ * with no schedule block then rendered exactly like a perfectly-matched one
+ * (Sept 13 2026). Required here, and required again on the pay report's
+ * input, so a caller that cannot supply it stops compiling instead of
+ * silently reading every row as scheduled (rule 16).
+ */
+export type HourLogFetchRowWithSchedule = HourLogFetchRow & {
+  unscheduled: boolean;
 };
 
 /**
@@ -168,11 +192,30 @@ export async function fetchHourLogRows(
  */
 export async function fetchHourLogRowsWithScheduleNotes(
   filters: NormalizedHourLogFilters,
-): Promise<HourLogFetchRow[]> {
+): Promise<HourLogFetchRowWithSchedule[]> {
   const rows = await fetchHourLogRows(filters);
 
-  // Scheduled blocks overlapping the same window as the logs. Overlap =
-  // block starts before the range ends AND ends after the range starts.
+  // Every block that could overlap a log IN the result — which is wider than
+  // the date range, because the range filters logs by START only.
+  //
+  // 🔴 UPPER BOUND (`0q` review, 2026-10-14): a log that starts before
+  // `toDateExclusive` can END up to MAX_HOUR_LOG_DURATION_MS later, so a block
+  // covering only its TAIL (e.g. 11 PM–1 AM logged, block 12–1 AM the next
+  // day) starts at or after the range end. Bounding blocks by the range end cut
+  // that block off and marked a scheduled log "Not on schedule" — on the pay
+  // screens since 0q Release 1. Every matching block satisfies
+  // `block.start < log.end <= log.start + MAX < toDateExclusive + MAX`, so this
+  // bound is EXACT, derived from the same constant `needs-review.ts`
+  // (`blockAlertLogFloor`) and the admin overlap guard rely on. ⚠️ It holds
+  // only while no log may exceed that constant (Zod-enforced at write).
+  //
+  // LOWER BOUND, unchanged and already exact: every log here starts at or
+  // after `fromDate`, and an overlapping block must end after the log starts
+  // (half-open overlap), so `block.end > fromDate` drops no block that could
+  // match.
+  const blockWindowEnd = new Date(
+    filters.toDateExclusive.getTime() + MAX_HOUR_LOG_DURATION_MS,
+  );
   const blockRows = await db
     .select({
       id: programScheduleBlocks.id,
@@ -189,7 +232,7 @@ export async function fetchHourLogRowsWithScheduleNotes(
     .leftJoin(users, eq(programScheduleBlocks.scheduledCoachId, users.id))
     .where(
       and(
-        lt(programScheduleBlocks.startAt, filters.toDateExclusive),
+        lt(programScheduleBlocks.startAt, blockWindowEnd),
         gt(programScheduleBlocks.endAt, filters.fromDate),
       ),
     );

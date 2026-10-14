@@ -44,6 +44,7 @@ import {
   WORK_PAY_CAVEAT_LEAD,
   WORK_PAY_CAVEAT_PAYMENTS,
 } from "@/lib/stipend/labels";
+import { scheduleCellText } from "@/lib/schedule-labels";
 import { formatPfaDate, formatPfaTime12h } from "@/lib/timezone";
 import type { WorkReportData } from "./work-report";
 
@@ -303,10 +304,17 @@ function addWorkSummarySheet(
 ) {
   const sheet = workbook.addWorksheet("Work Summary");
 
+  // 🔴 `0q`: "Not on schedule" sits right after Entries — how many of those
+  // entries have no schedule block (reviewed or not). Sept 13 2026 put $900 on
+  // a $500–600 day through rows that looked exactly like correct ones; this
+  // column says, per coach, where to look. A COUNT, never money: no money
+  // figure reads it. ⚠️ It moved "Hours" from D to E and "Work Pay $" from E
+  // to F — anything that reads this sheet by column letter must follow.
   sheet.columns = [
     { header: "Coach", key: "coach", width: 28 },
     { header: "Email", key: "email", width: 28 },
     { header: "Entries", key: "entries", width: 10 },
+    { header: "Not on schedule", key: "notOnSchedule", width: 16 },
     { header: "Hours", key: "hours", width: 10 },
     { header: "Work Pay $", key: "pay", width: 14 },
   ];
@@ -316,6 +324,8 @@ function addWorkSummarySheet(
       coach: row.coachName,
       email: row.coachEmail,
       entries: row.entries,
+      // A real number, 0 included — a blank would read as "not computed".
+      notOnSchedule: row.unscheduledCount,
       hours: roundHours(row.hours),
       pay: row.payCents / 100,
     });
@@ -333,6 +343,7 @@ function addWorkSummarySheet(
     const totalRow = sheet.addRow({
       coach: `Grand total (${work.detail.length} entries)`,
       email: "PFA owes coaches",
+      notOnSchedule: work.summary.reduce((t, r) => t + r.unscheduledCount, 0),
       hours: roundHours(work.grandTotalHours),
       pay: work.grandTotalCents / 100,
     });
@@ -370,7 +381,7 @@ function addWorkSummarySheet(
 
   styleHeader(sheet);
   sheet.getColumn("pay").numFmt = CURRENCY_FMT;
-  for (const key of ["entries", "hours", "pay"] as const) {
+  for (const key of ["entries", "notOnSchedule", "hours", "pay"] as const) {
     sheet.getColumn(key).alignment = { horizontal: "right" };
   }
   sheet.views = [{ state: "frozen", ySplit: 1 }];
@@ -420,7 +431,17 @@ function addWorkDetailSheet(workbook: ExcelJS.Workbook, work: WorkReportData) {
       rateBasis: rate.basis,
       pay: row.payCents / 100,
       note: row.note ?? "",
-      scheduleNote: row.scheduleNote ?? "",
+      // 🔴 `0q`: "Not on schedule" (plus "(reviewed <date>)" when someone
+      // has) ahead of any reconciliation note, from the shared wording. A row
+      // with no block used to print a blank here, exactly like a row that
+      // matched its block. Every row on this sheet is POSTED (the builder's
+      // rule); a stipend row is never unscheduled, so it stays "" as before.
+      scheduleNote: scheduleCellText({
+        status: "posted",
+        unscheduled: row.unscheduled,
+        reviewedOn: row.reviewedOn,
+        scheduleNote: row.scheduleNote,
+      }),
     });
   }
 

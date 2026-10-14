@@ -11,6 +11,7 @@
 // Server component, no client state.
 
 import { formatDollarsExact } from "@/lib/format-money";
+import { NOT_ON_SCHEDULE_LABEL, reviewedOnText } from "@/lib/schedule-labels";
 import type {
   WorkDetailKind,
   WorkDetailRow,
@@ -84,6 +85,15 @@ export function WorkPreview({
                   </td>
                   <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-muted">
                     {row.entries}
+                    {/* 🔴 `0q`: how many of these entries have no schedule
+                        block — always red, reviewed or not (Jacob,
+                        2026-10-14). Nothing when there are none. A fact about
+                        the schedule, never about pay. */}
+                    {row.unscheduledCount > 0 ? (
+                      <span className="block font-sans text-[11px] whitespace-nowrap text-danger">
+                        {`${row.unscheduledCount} not on schedule`}
+                      </span>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg">
                     {formatHours(row.hours)} hr
@@ -154,9 +164,11 @@ export function WorkPreview({
                   <td className="px-3 py-3 text-right font-mono tnum tabular-nums font-semibold text-fg">
                     {formatCents(row.payCents)}
                   </td>
-                  <td className="px-3 py-3 text-fg-subtle text-xs max-w-[220px] truncate">
-                    {row.scheduleNote ?? ""}
-                  </td>
+                  <ScheduleCell
+                    unscheduled={row.unscheduled}
+                    reviewedOn={row.reviewedOn}
+                    scheduleNote={row.scheduleNote}
+                  />
                 </tr>
               ))}
             </tbody>
@@ -291,6 +303,52 @@ function RateCell({
     <td className="px-3 py-3 text-right font-mono tnum tabular-nums text-fg-muted whitespace-nowrap">
       {formatCents(ratePer30MinCents * 2)}{" "}
       <span className="text-fg-subtle">/hr</span>
+    </td>
+  );
+}
+
+// 🔴 `0q` — THE SCHEDULE CELL. Sept 13 2026: this cell rendered
+// `scheduleNote ?? ""`, and the note is null BOTH for a log with no schedule
+// block and for a log that matched its block perfectly — so the rows that put
+// $900 on a $500–600 day looked exactly like correct ones. Now every log with
+// no block gets the red pill (the Hours tab's Unscheduled pill classes).
+//
+// A REVIEWED one gets the same red pill plus a small gray "reviewed <date>"
+// line under it — never a quieter pill. `reviewedAt` is stamped by admin entry,
+// approve-held and queue Accept on rows that were ON a block at the time, so it
+// does not mean "accepted as off-schedule" (Jacob, 2026-10-14: all red).
+//
+// The note, when there is one, sits below in its own truncated span — the
+// truncate moved off the <td>, which would otherwise clip the pill. Stipend
+// rows and scheduled rows show only their note, as before.
+function ScheduleCell({
+  unscheduled,
+  reviewedOn,
+  scheduleNote,
+}: {
+  unscheduled: boolean;
+  reviewedOn: string | null;
+  scheduleNote: string | null;
+}) {
+  return (
+    <td className="px-3 py-3 text-fg-subtle text-xs">
+      <div className="flex flex-col items-start gap-1">
+        {unscheduled ? (
+          <span className="inline-flex items-center rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger whitespace-nowrap">
+            {NOT_ON_SCHEDULE_LABEL}
+          </span>
+        ) : null}
+        {unscheduled && reviewedOn ? (
+          <span className="text-[11px] text-fg-subtle whitespace-nowrap">
+            {reviewedOnText(reviewedOn)}
+          </span>
+        ) : null}
+        {scheduleNote ? (
+          <span className="block max-w-[220px] truncate" title={scheduleNote}>
+            {scheduleNote}
+          </span>
+        ) : null}
+      </div>
     </td>
   );
 }

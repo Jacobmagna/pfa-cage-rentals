@@ -166,8 +166,20 @@ export async function fetchStatementCoaches(
   // Stipends are handed to the SAME builder the Work tab uses, so the work
   // statement quotes the same number as `?tab=work` by construction rather
   // than by a test that can rot — the property SPEC §10 relies on.
+  //
+  // 🔴 `unscheduled: false` ON EVERY ROW, ON PURPOSE (`0q`, Q1 decided by
+  // Jacob 2026-10-14): the printed statement does NOT mark "Not on schedule"
+  // rows. It is the coach's document, printed after Mark has decided; Mark
+  // sees the marks on the Work tab and in the workbook first. The base fetch
+  // above never computes the flag, and switching to the schedule-notes fetch
+  // over this unbounded window would be three wasted queries for a mark the
+  // statement does not print. Stated here rather than defaulted inside the
+  // builder, because a default there would silently unmark the PAY report too.
   const workDetailByCoach = groupBy(
-    buildWorkReport(hourLogRows, stipendEarnings).detail,
+    buildWorkReport(
+      hourLogRows.map((row) => ({ ...row, unscheduled: false })),
+      stipendEarnings,
+    ).detail,
     (row) => row.coachId,
   );
   const paymentsByCoach = groupBy(paymentRows, (row) => row.coachId);

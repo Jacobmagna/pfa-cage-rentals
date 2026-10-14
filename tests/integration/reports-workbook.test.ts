@@ -332,7 +332,7 @@ describe("combined workbook — the two work totals RECONCILE", () => {
     work.eachRow((row) => {
       const label = row.getCell(1).value;
       if (typeof label === "string" && label.startsWith("Grand total")) {
-        workGrandTotal = row.getCell(5).value;
+        workGrandTotal = row.getCell(6).value; // "Work Pay $" (col F since 0q)
       }
     });
 
@@ -347,7 +347,7 @@ describe("combined workbook — the two work totals RECONCILE", () => {
     work.eachRow((row) => {
       const label = row.getCell(1).value;
       if (typeof label === "string" && label.startsWith("Grand total")) {
-        workGrandTotal = row.getCell(5).value;
+        workGrandTotal = row.getCell(6).value; // "Work Pay $" (col F since 0q)
       }
     });
     expect(workGrandTotal).toBe(130); // $30 + $100, coach B excluded

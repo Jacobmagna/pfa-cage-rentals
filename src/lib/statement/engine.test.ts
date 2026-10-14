@@ -25,8 +25,13 @@ import { describe, expect, it } from "vitest";
 import { netCoachLedgers, type LedgerPayment } from "@/lib/payment-ledger";
 import { aggregateReport, type AggregateSessionInput } from "@/lib/reports/aggregate";
 import { normalizeFilters } from "@/lib/reports/filters";
-import { buildWorkReport } from "@/lib/reports/work-report";
-import type { HourLogFetchRow } from "@/lib/reports/hour-log-fetch";
+import {
+  buildWorkReport,
+  // 🔴 `0q`: these fixtures model the STATEMENT path, which hands the builder
+  // `unscheduled: false` explicitly (statement/fetch.ts, Q1 2026-10-14) — so
+  // every fixture below says the same, on purpose, rather than defaulting it.
+  type WorkReportInputRow,
+} from "@/lib/reports/work-report";
 import type { PaymentDirection } from "@/lib/schemas/payment";
 import { formatPfaTime12h, parsePfaInput } from "@/lib/timezone";
 import {
@@ -1194,8 +1199,11 @@ describe("labels, caveat and scope note", () => {
 /* ── §10 — The work account must agree with /admin/reports?tab=work. ────── */
 
 describe("agreement with the shipped Work hours tab (SPEC §10)", () => {
-  function log(over: Partial<HourLogFetchRow>): HourLogFetchRow {
+  function log(over: Partial<WorkReportInputRow>): WorkReportInputRow {
     return {
+      // The statement path's explicit answer (`0q`, Q1) — see the import.
+      unscheduled: false,
+      reviewedAt: null,
       stipendCovered: false,
       id: "log-1",
       coachId: "alex",
@@ -1222,7 +1230,7 @@ describe("agreement with the shipped Work hours tab (SPEC §10)", () => {
     };
   }
 
-  const rows: HourLogFetchRow[] = [
+  const rows: WorkReportInputRow[] = [
     log({ id: "posted-a" }),
     log({
       id: "posted-b",
@@ -1568,8 +1576,11 @@ describe("🔴 a printed cage row can be verified by hand", () => {
 });
 
 describe("the WORK account's rate labels and slots are unchanged", () => {
-  function log(over: Partial<HourLogFetchRow>): HourLogFetchRow {
+  function log(over: Partial<WorkReportInputRow>): WorkReportInputRow {
     return {
+      // The statement path's explicit answer (`0q`, Q1) — see the import.
+      unscheduled: false,
+      reviewedAt: null,
       stipendCovered: false,
       id: "log-1",
       coachId: "alex",
@@ -1782,8 +1793,11 @@ describe("🔴 stipend labelling, through buildWorkReport → chargesFromWorkDet
     return new Date(Date.UTC(2026, 8, 3, hour + 7, 0, 0, 0));
   }
 
-  function workLog(over: Partial<HourLogFetchRow>): HourLogFetchRow {
+  function workLog(over: Partial<WorkReportInputRow>): WorkReportInputRow {
     return {
+      // The statement path's explicit answer (`0q`, Q1) — see the import.
+      unscheduled: false,
+      reviewedAt: null,
       id: "log-1",
       coachId: "c1",
       coachName: "Nick Milone",
@@ -1821,7 +1835,7 @@ describe("🔴 stipend labelling, through buildWorkReport → chargesFromWorkDet
     amountCents: 250_000,
   };
 
-  function charges(logs: HourLogFetchRow[], earnings: typeof earning[]) {
+  function charges(logs: WorkReportInputRow[], earnings: typeof earning[]) {
     const report = buildWorkReport(logs, earnings);
     const sources = logs.map((l) => ({
       id: l.id,
@@ -2057,8 +2071,10 @@ describe("🔴 stipend period bucketing — overlap, not containment", () => {
     // charge would silently change that shipped behaviour.
     const day = parsePfaInput("2026-09-05", "09:00");
     const end = parsePfaInput("2026-09-05", "10:00");
-    const rows: HourLogFetchRow[] = [
+    const rows: WorkReportInputRow[] = [
       {
+        // The statement path's explicit answer (`0q`, Q1).
+        unscheduled: false, reviewedAt: null,
         stipendCovered: false, id: "l1", coachId: "c1", coachName: "Nick Milone",
         coachEmail: "n@x.com", programId: "p1", programName: "Manager Work",
         startAt: day, endAt: end, note: null, scheduleNote: null,

@@ -9,6 +9,7 @@
 // sheet a coach can eyeball (no "off-by-a-rounding-cent" surprises).
 
 import ExcelJS from "exceljs";
+import { scheduleCellText } from "@/lib/schedule-labels";
 import { PFA_TIMEZONE, formatPfaDate } from "@/lib/timezone";
 
 export type HourLogWorkbookRow = {
@@ -25,17 +26,35 @@ export type HourLogWorkbookRow = {
   // schedule (or was unscheduled). Filled by
   // fetchHourLogRowsWithScheduleNotes; null on the base fetch.
   scheduleNote: string | null;
-  // QA10 W3-polish13a: admin-only review fields. All three are optional on
-  // the base workbook type — the Excel builder ignores them and the test
-  // fixtures predate them. Only fetchHourLogRowsWithScheduleNotes fills
-  // `unscheduled`; both fetches surface `reviewedAt`/`reviewedBy`. The
-  // admin table (HourRow) re-declares them as required.
+  // QA10 W3-polish13a: admin-only review fields. All three stay optional on
+  // this BASE row type, because the base fetch (`fetchHourLogRows`) never
+  // computes `unscheduled` and must not be made to invent it. The Excel
+  // builder requires `unscheduled`, `reviewedAt` and `status` on its OWN
+  // input type instead (`HourLogWorkbookInputRow`, 0q). Only
+  // fetchHourLogRowsWithScheduleNotes fills `unscheduled`; both fetches
+  // surface `reviewedAt`/`reviewedBy`. The admin table (HourRow) re-declares
+  // them as required.
   // true when NO scheduled block the log's coach is a MEMBER of overlaps
   // it (same program) — the admin "Unscheduled" flag.
   unscheduled?: boolean;
   // Admin "Resolve" marker (see schema). Null = unreviewed.
   reviewedAt?: Date | null;
   reviewedBy?: string | null;
+};
+
+/**
+ * 🔴 What `buildHourLogWorkbook` takes (`0q`). The Schedule column now says
+ * "Not on schedule" (with the review date when someone reviewed it) and
+ * "Rejected", so the builder needs the flag, the review stamp and the status —
+ * REQUIRED, so a caller that cannot supply them stops compiling rather than
+ * printing a blank for a row with no block (the Sept 13 2026 failure).
+ * `status` matters here in a way it does not on the pay report: this workbook
+ * lists REJECTED rows too.
+ */
+export type HourLogWorkbookInputRow = HourLogWorkbookRow & {
+  unscheduled: boolean;
+  reviewedAt: Date | null;
+  status: "posted" | "held" | "rejected";
 };
 
 export type HourLogWorkbookMeta = {
@@ -64,7 +83,7 @@ function formatTime12(d: Date): string {
 }
 
 export async function buildHourLogWorkbook(
-  rows: HourLogWorkbookRow[],
+  rows: HourLogWorkbookInputRow[],
   meta: HourLogWorkbookMeta,
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
@@ -147,7 +166,7 @@ function addSummarySheet(
 
 function addDetailSheet(
   workbook: ExcelJS.Workbook,
-  rows: HourLogWorkbookRow[],
+  rows: HourLogWorkbookInputRow[],
 ) {
   const sheet = workbook.addWorksheet("Detail");
 
@@ -172,7 +191,24 @@ function addDetailSheet(
       end: formatTime12(row.endAt),
       hours: hoursBetween(row.startAt, row.endAt),
       note: row.note ?? "",
-      scheduleNote: row.scheduleNote ?? "",
+      // 🔴 `0q`, from the shared wording. A POSTED row with no block reads
+      // "Not on schedule" (+ "(reviewed <date>)"); the reconciliation note is
+      // null both for that and for a perfect match, so it used to print blank,
+      // exactly like a correct row. EVERY rejected row starts with "Rejected"
+      // (then "; Not on schedule" if off it): once some rejected rows say so,
+      // a blank would read as "not rejected". The rejected rows' hours still
+      // count in the totals — that is `0aj`, out of scope here.
+      scheduleNote: scheduleCellText({
+        status: row.status,
+        unscheduled: row.unscheduled,
+        // Only a POSTED row's stamp is a review date; rejecting stamps it too,
+        // and "Rejected" already says that.
+        reviewedOn:
+          row.status === "posted" && row.reviewedAt != null
+            ? formatPfaDate(row.reviewedAt)
+            : null,
+        scheduleNote: row.scheduleNote,
+      }),
     });
   }
 

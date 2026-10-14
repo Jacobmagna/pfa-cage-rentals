@@ -21,6 +21,18 @@
 // `workPayForLog` — the shared read-side entry point that branches
 // per-session vs hourly off the immutable snapshot. `aggregate.ts` and the
 // "Owed to coaches" card call the same one. Never reimplement it.
+//
+// ── "Not on schedule" (`0q`) ─────────────────────────────────────────────
+// Sept 13 2026: this report showed $900 against $500–600 correct. Coaches had
+// logged hours on schedule blocks that were later DELETED; the logs stayed
+// posted and paid (by design — a delete changes the plan, not the record of
+// work), but a row with NO block rendered exactly like a row that matched its
+// block perfectly, because the reconciliation note is null in both cases. The
+// fetch already computed the difference (`unscheduled`) and this builder
+// dropped it. Each log row now carries `unscheduled` (and `reviewedOn`, the
+// date someone reviewed it, if anyone did), and each summary row counts the
+// unscheduled ones. The flag is a fact about the SCHEDULE: no total, hours
+// figure or pay figure reads it.
 
 import { programMinutes, workPayForLog } from "@/lib/billing";
 import { payPeriodFor, payPeriodLabel } from "@/lib/pay-period";
@@ -31,6 +43,24 @@ import {
   formatPfaWeekday,
 } from "@/lib/timezone";
 import type { HourLogFetchRow } from "./hour-log-fetch";
+
+/**
+ * 🔴 What `buildWorkReport` takes. `unscheduled` and `reviewedAt` are
+ * REQUIRED, so every caller has to answer "is this row on the schedule?" on
+ * purpose (rule 16 — a required field is a better audit than a grep).
+ *
+ *  - The Work tab and the reports workbook pass the schedule-notes fetch's
+ *    rows, which compute the flag.
+ *  - The printed statement passes `unscheduled: false` EXPLICITLY, with its
+ *    reason beside it (`statement/fetch.ts`, Q1 2026-10-14).
+ *
+ * ⚠️ Never default it (`r.unscheduled ?? false`): that compiles, and silently
+ * reads every row as scheduled — the Sept 13 failure again.
+ */
+export type WorkReportInputRow = HourLogFetchRow & {
+  unscheduled: boolean;
+  reviewedAt: Date | null;
+};
 
 /**
  * Statuses the Work tab reports on. POSTED ONLY, by decision:
@@ -113,6 +143,27 @@ export type WorkDetailRow = {
   payCents: number;
   note: string | null;
   scheduleNote: string | null;
+  /**
+   * 🔴 `0q`: true on a LOG whose coach is on no schedule block of the same
+   * program overlapping it (`isLogScheduled`, via the schedule-notes fetch).
+   * NOT the same as `scheduleNote === null` — that is null both for "no
+   * block at all" and for "matched its block perfectly", which is exactly how
+   * the Sept 13 rows hid. Always false on a stipend row (a stipend is a
+   * period, not a session on the schedule). Never changes `payCents`.
+   */
+  unscheduled: boolean;
+  /**
+   * The PFA date (YYYY-MM-DD) a POSTED log's `reviewedAt` was stamped; null
+   * when nobody has reviewed it, and on a stipend row.
+   *
+   * 🔴 SHOWN, NEVER USED TO QUIETEN THE MARK. `reviewedAt` is stamped by admin
+   * hour entry, approve-held and queue Accept on rows that were ON a block at
+   * the time, so it does not mean "accepted as off-schedule" — a row an admin
+   * entered on a block that was later deleted is reviewed AND left behind.
+   * Jacob, 2026-10-14: every left-behind row is marked the same; this only
+   * adds when it was reviewed.
+   */
+  reviewedOn: string | null;
 };
 
 export type WorkSummaryRow = {
@@ -123,6 +174,11 @@ export type WorkSummaryRow = {
   entries: number;
   hours: number;
   payCents: number;
+  /**
+   * `0q`: how many of this coach's LOG rows are not on the schedule,
+   * reviewed or not. Rolled up from the same detail rows as everything else.
+   */
+  unscheduledCount: number;
 };
 
 export type WorkReportData = {
@@ -148,7 +204,7 @@ export type WorkReportData = {
  *   existed, which is what lets every existing caller and test stay unchanged.
  */
 export function buildWorkReport(
-  rows: HourLogFetchRow[],
+  rows: WorkReportInputRow[],
   stipendEarnings: StipendEarningRow[] = [],
 ): WorkReportData {
   const detail: WorkDetailRow[] = rows
@@ -179,6 +235,15 @@ export function buildWorkReport(
       }),
       note: r.note,
       scheduleNote: r.scheduleNote,
+      // 🔴 Carried straight through — no default. The input type requires it.
+      unscheduled: r.unscheduled,
+      // PFA date, never the UTC slice of the instant. The status check is
+      // redundant after the posted-only filter above, and is kept so a
+      // rejection's stamp can never surface here if that filter ever widens.
+      reviewedOn:
+        r.status === "posted" && r.reviewedAt != null
+          ? formatPfaDate(r.reviewedAt)
+          : null,
     }));
 
   // 🔴 Stipend rows join the SAME array the summary and the grand total are
@@ -214,6 +279,9 @@ export function buildWorkReport(
       payCents: e.amountCents,
       note: null,
       scheduleNote: null,
+      // A stipend is a period, not a session on the schedule.
+      unscheduled: false,
+      reviewedOn: null,
     });
   }
 
@@ -289,12 +357,15 @@ export function buildWorkReport(
         entries: 0,
         hours: 0,
         payCents: 0,
+        unscheduledCount: 0,
       };
       summaryMap.set(row.coachId, entry);
     }
     entry.entries += 1;
     entry.hours += row.hours;
     entry.payCents += row.payCents;
+    // `0q`: a count only — nothing above reads the flag.
+    if (row.unscheduled) entry.unscheduledCount += 1;
   }
 
   const summary = Array.from(summaryMap.values()).sort((a, b) =>

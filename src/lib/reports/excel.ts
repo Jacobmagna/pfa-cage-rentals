@@ -44,7 +44,7 @@ import {
   WORK_PAY_CAVEAT_LEAD,
   WORK_PAY_CAVEAT_PAYMENTS,
 } from "@/lib/stipend/labels";
-import { postedRowScheduleState, scheduleCellText } from "@/lib/schedule-labels";
+import { scheduleCellText } from "@/lib/schedule-labels";
 import { formatPfaDate, formatPfaTime12h } from "@/lib/timezone";
 import type { WorkReportData } from "./work-report";
 
@@ -431,11 +431,17 @@ function addWorkDetailSheet(workbook: ExcelJS.Workbook, work: WorkReportData) {
       rateBasis: rate.basis,
       pay: row.payCents / 100,
       note: row.note ?? "",
-      // 🔴 `0q`: "Not on schedule" (or "· accepted") ahead of any
-      // reconciliation note, from the shared wording. A row with no block used
-      // to print a blank here, exactly like a row that matched its block. A
-      // stipend row is never unscheduled, so it stays "" as before.
-      scheduleNote: scheduleCellText(postedRowScheduleState(row), row.scheduleNote),
+      // 🔴 `0q`: "Not on schedule" (plus "(reviewed <date>)" when someone
+      // has) ahead of any reconciliation note, from the shared wording. A row
+      // with no block used to print a blank here, exactly like a row that
+      // matched its block. Every row on this sheet is POSTED (the builder's
+      // rule); a stipend row is never unscheduled, so it stays "" as before.
+      scheduleNote: scheduleCellText({
+        status: "posted",
+        unscheduled: row.unscheduled,
+        reviewedOn: row.reviewedOn,
+        scheduleNote: row.scheduleNote,
+      }),
     });
   }
 

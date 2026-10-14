@@ -42,13 +42,16 @@ import {
 } from "@/db/schema";
 import { fetchHourLogRowsWithScheduleNotes } from "@/lib/reports/hour-log-fetch";
 import { buildWorkReport } from "@/lib/reports/work-report";
-import { logHourInternal } from "@/lib/server/hour-log-actions";
+import {
+  logHourForCoachInternal,
+  logHourInternal,
+} from "@/lib/server/hour-log-actions";
 import {
   createProgramScheduleBlockInternal,
   deleteProgramScheduleBlockInternal,
 } from "@/lib/server/program-schedule-actions";
 import { fetchStatementCoaches } from "@/lib/statement/fetch";
-import { parsePfaInput } from "@/lib/timezone";
+import { formatPfaDate, parsePfaInput } from "@/lib/timezone";
 import { ensureFixtureUsers, type FixtureUsers } from "./fixtures";
 
 // Breaks the @/lib/authz → @/auth → next-auth import chain (unresolvable under
@@ -238,7 +241,6 @@ describe("🔴 0q — the Sept 13 shape: delete the blocks, the pay report says 
     expect(before.detail.filter((d) => d.unscheduled)).toHaveLength(0);
     for (const s of before.summary) {
       expect(s.unscheduledCount, s.coachName).toBe(0);
-      expect(s.unscheduledUnreviewedCount, s.coachName).toBe(0);
     }
     const statementBefore = await fetchStatementCoaches({
       coachIds: [spencer.id, mike.id, asher.id],
@@ -286,14 +288,12 @@ describe("🔴 0q — the Sept 13 shape: delete the blocks, the pay report says 
       expect(row.unscheduled, name).toBe(false);
     }
     // Coaches posted these themselves; nobody has reviewed them yet.
-    expect(after.detail.every((d) => d.reviewed === false)).toBe(true);
+    expect(after.detail.every((d) => d.reviewedOn === null)).toBe(true);
 
     const count = (coach: User) =>
       after.summary.find((s) => s.coachId === coach.id)!;
     expect(count(spencer).unscheduledCount).toBe(2);
-    expect(count(spencer).unscheduledUnreviewedCount).toBe(2);
     expect(count(asher).unscheduledCount).toBe(2);
-    expect(count(asher).unscheduledUnreviewedCount).toBe(2);
     expect(count(mike).unscheduledCount).toBe(0);
 
     // ── 🔴 NO PAY FIGURE MOVED ──
@@ -336,5 +336,142 @@ describe("🔴 0q — the Sept 13 shape: delete the blocks, the pay report says 
     for (const r of ours) {
       expect(r.unscheduled, r.id).toBe(false);
     }
+  });
+});
+
+/* ── Review round 1 (2026-10-14) ─────────────────────────────────────────── */
+
+/** An ADMIN records hours for a coach, through the real admin entry path. */
+async function adminRecords(
+  coach: User,
+  programId: string,
+  startAt: Date,
+  endAt: Date,
+) {
+  const result = await logHourForCoachInternal(admin, {
+    coachIds: [coach.id],
+    programId,
+    startAt,
+    endAt,
+  });
+  const [row] = result.logs;
+  createdLogIds.push(row.id);
+  if (result.schedule.kind === "created" || result.schedule.kind === "joined") {
+    createdBlockIds.push(result.schedule.blockId);
+  }
+  return { row, schedule: result.schedule };
+}
+
+function reportFor(day: string, coaches: User[]) {
+  return fetchHourLogRowsWithScheduleNotes({
+    from: day,
+    to: day,
+    fromDate: parsePfaInput(day, "00:00"),
+    toDateExclusive: new Date(
+      parsePfaInput(day, "00:00").getTime() + 24 * 3_600_000,
+    ),
+    coachIds: coaches.map((c) => c.id),
+    programId: undefined,
+    isFiltered: true,
+  }).then((rows) => buildWorkReport(rows));
+}
+
+describe("🔴 0q review — a row an admin entered (so already REVIEWED) still reads Not on schedule once its block is deleted", () => {
+  it("is marked, carries its review date, is counted, and moves no money", async () => {
+    // 2039-09-20 — its own day. (Sept 2039 is PDT, so the 24h window below is
+    // exactly one PFA day.)
+    const day = "2039-09-20";
+    const dom = await createCoach("Dom Cervantes");
+    const created = await createProgramScheduleBlockInternal(admin, {
+      programId: fall,
+      scheduledCoachIds: [dom.id],
+      startAt: parsePfaInput(day, "10:00"),
+      endAt: parsePfaInput(day, "12:00"),
+    });
+    createdBlockIds.push(created.id);
+
+    // Mark records the 2 hours on the block — the admin path stamps the row
+    // reviewed at insert (hour-log-actions.ts `reviewStamp`).
+    const { row, schedule } = await adminRecords(
+      dom,
+      fall,
+      parsePfaInput(day, "10:00"),
+      parsePfaInput(day, "12:00"),
+    );
+    expect(row.status).toBe("posted");
+    expect(row.reviewedAt).not.toBeNull();
+    // The block already had Dom on it, so the sync left the schedule alone.
+    expect(schedule.kind).toBe("unchanged");
+    const reviewedOn = formatPfaDate(row.reviewedAt!);
+
+    const before = await reportFor(day, [dom]);
+    expect(before.detail).toHaveLength(1);
+    expect(before.detail[0].unscheduled).toBe(false);
+    expect(before.summary[0].unscheduledCount).toBe(0);
+
+    // Somebody deletes the block, through the real delete action.
+    await deleteProgramScheduleBlockInternal(admin, created.id);
+
+    const after = await reportFor(day, [dom]);
+    expect(after.detail).toHaveLength(1);
+    const [d] = after.detail;
+    // 🔴 Marked — the review stamp does not hide it…
+    expect(d.unscheduled).toBe(true);
+    // …and the review DATE travels with it, for the gray line under the pill.
+    expect(d.reviewedOn).toBe(reviewedOn);
+    expect(after.summary[0].unscheduledCount).toBe(1);
+    // Money unchanged: 2h × $50/hr.
+    expect(after.grandTotalCents).toBe(before.grandTotalCents);
+    expect(after.summary[0].payCents).toBe(before.summary[0].payCents);
+    expect(after.grandTotalCents).toBe(10_000);
+  });
+});
+
+describe("🔴 0q review — a log crossing the END of the range is judged against the block that covers its tail", () => {
+  it("a block starting at/after the range end still schedules the log (control: the same log with no block is marked)", async () => {
+    // Range = 2039-09-27 only. The log runs 11 PM → 1 AM into the 28th; its
+    // ONLY covering block is 12 AM–1 AM on the 28th — i.e. it starts exactly
+    // at the range's exclusive end, which the old block query cut off.
+    const day = "2039-09-27";
+    const next = "2039-09-28";
+    const eve = await createCoach("Eve Ortega");
+    const finn = await createCoach("Finn Park");
+
+    const tail = await createProgramScheduleBlockInternal(admin, {
+      programId: fall,
+      scheduledCoachIds: [eve.id],
+      startAt: parsePfaInput(next, "00:00"),
+      endAt: parsePfaInput(next, "01:00"),
+    });
+    createdBlockIds.push(tail.id);
+
+    const eveLog = await adminRecords(
+      eve,
+      fall,
+      parsePfaInput(day, "23:00"),
+      parsePfaInput(next, "01:00"),
+    );
+    // The sync never moves an existing block's times — the tail block stays
+    // 12–1 AM, so the fixture really is the edge case.
+    expect(eveLog.schedule.kind).toBe("unchanged");
+
+    // Control: same window, different program (so it cannot join Eve's
+    // block). The sync creates a block from the entry; delete it through the
+    // real action so this log has NO block at all.
+    const finnLog = await adminRecords(
+      finn,
+      summer,
+      parsePfaInput(day, "23:00"),
+      parsePfaInput(next, "01:00"),
+    );
+    expect(finnLog.schedule.kind).toBe("created");
+    if (finnLog.schedule.kind === "created") {
+      await deleteProgramScheduleBlockInternal(admin, finnLog.schedule.blockId);
+    }
+
+    const report = await reportFor(day, [eve, finn]);
+    const byId = new Map(report.detail.map((d) => [d.id, d]));
+    expect(byId.get(finnLog.row.id)?.unscheduled).toBe(true);
+    expect(byId.get(eveLog.row.id)?.unscheduled).toBe(false);
   });
 });

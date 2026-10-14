@@ -29,9 +29,10 @@
 // work), but a row with NO block rendered exactly like a row that matched its
 // block perfectly, because the reconciliation note is null in both cases. The
 // fetch already computed the difference (`unscheduled`) and this builder
-// dropped it. Each log row now carries `unscheduled` and `reviewed`, and each
-// summary row counts them. The flag is a fact about the SCHEDULE: no total,
-// hours figure or pay figure reads it.
+// dropped it. Each log row now carries `unscheduled` (and `reviewedOn`, the
+// date someone reviewed it, if anyone did), and each summary row counts the
+// unscheduled ones. The flag is a fact about the SCHEDULE: no total, hours
+// figure or pay figure reads it.
 
 import { programMinutes, workPayForLog } from "@/lib/billing";
 import { payPeriodFor, payPeriodLabel } from "@/lib/pay-period";
@@ -152,11 +153,17 @@ export type WorkDetailRow = {
    */
   unscheduled: boolean;
   /**
-   * True only for a POSTED log with `reviewedAt` set — Mark pressed Accept.
-   * Lets an accepted not-on-schedule row render quieter than an unreviewed
-   * one (Q5). Always false on a stipend row.
+   * The PFA date (YYYY-MM-DD) a POSTED log's `reviewedAt` was stamped; null
+   * when nobody has reviewed it, and on a stipend row.
+   *
+   * 🔴 SHOWN, NEVER USED TO QUIETEN THE MARK. `reviewedAt` is stamped by admin
+   * hour entry, approve-held and queue Accept on rows that were ON a block at
+   * the time, so it does not mean "accepted as off-schedule" — a row an admin
+   * entered on a block that was later deleted is reviewed AND left behind.
+   * Jacob, 2026-10-14: every left-behind row is marked the same; this only
+   * adds when it was reviewed.
    */
-  reviewed: boolean;
+  reviewedOn: string | null;
 };
 
 export type WorkSummaryRow = {
@@ -172,8 +179,6 @@ export type WorkSummaryRow = {
    * reviewed or not. Rolled up from the same detail rows as everything else.
    */
   unscheduledCount: number;
-  /** The part of `unscheduledCount` nobody has reviewed yet. */
-  unscheduledUnreviewedCount: number;
 };
 
 export type WorkReportData = {
@@ -232,10 +237,13 @@ export function buildWorkReport(
       scheduleNote: r.scheduleNote,
       // 🔴 Carried straight through — no default. The input type requires it.
       unscheduled: r.unscheduled,
-      // Posted AND stamped. The status check is redundant after the filter
-      // above, and is kept so this can never read "accepted" for a rejected
-      // row (rejecting also stamps reviewedAt) if that filter ever widens.
-      reviewed: r.status === "posted" && r.reviewedAt != null,
+      // PFA date, never the UTC slice of the instant. The status check is
+      // redundant after the posted-only filter above, and is kept so a
+      // rejection's stamp can never surface here if that filter ever widens.
+      reviewedOn:
+        r.status === "posted" && r.reviewedAt != null
+          ? formatPfaDate(r.reviewedAt)
+          : null,
     }));
 
   // 🔴 Stipend rows join the SAME array the summary and the grand total are
@@ -273,7 +281,7 @@ export function buildWorkReport(
       scheduleNote: null,
       // A stipend is a period, not a session on the schedule.
       unscheduled: false,
-      reviewed: false,
+      reviewedOn: null,
     });
   }
 
@@ -350,18 +358,14 @@ export function buildWorkReport(
         hours: 0,
         payCents: 0,
         unscheduledCount: 0,
-        unscheduledUnreviewedCount: 0,
       };
       summaryMap.set(row.coachId, entry);
     }
     entry.entries += 1;
     entry.hours += row.hours;
     entry.payCents += row.payCents;
-    // `0q`: counts only — nothing above reads the flag.
-    if (row.unscheduled) {
-      entry.unscheduledCount += 1;
-      if (!row.reviewed) entry.unscheduledUnreviewedCount += 1;
-    }
+    // `0q`: a count only — nothing above reads the flag.
+    if (row.unscheduled) entry.unscheduledCount += 1;
   }
 
   const summary = Array.from(summaryMap.values()).sort((a, b) =>

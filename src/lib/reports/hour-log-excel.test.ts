@@ -250,13 +250,17 @@ describe("buildHourLogWorkbook", () => {
 // The Detail sheet's Schedule column (col 8) used to carry only the
 // reconciliation note, which is null BOTH for a log that matched its block and
 // for a log with no block at all — so a left-behind paid row read blank, like a
-// perfect one (Sept 13 2026). This workbook also lists REJECTED rows, so the
-// rejected variant is pinned too, and a rejected row (which carries
-// `reviewedAt`) must never read "accepted".
+// perfect one (Sept 13 2026).
+//
+// Every left-behind POSTED row reads "Not on schedule"; a reviewed one adds its
+// review date and nothing quieter (Jacob, 2026-10-14). This workbook also lists
+// REJECTED rows: EVERY one of them now starts with "Rejected", because once
+// some rejected rows say so, a blank would read as "not rejected".
 //
 // Read back with `includeEmpty: true` (rule 36); columns found by HEADER TEXT.
 
 describe("🔴 0q — hour-log Detail Schedule column says 'Not on schedule'", () => {
+  // 11:00 PDT on May 12.
   const STAMP = new Date("2026-05-12T18:00:00.000Z");
   let n = 0;
   function row(
@@ -286,11 +290,12 @@ describe("🔴 0q — hour-log Detail Schedule column says 'Not on schedule'", (
     n = 0;
     return [
       row("A Unreviewed", { unscheduled: true }),
-      row("B Accepted", { unscheduled: true, reviewedAt: STAMP }),
-      row("C Rejected", { unscheduled: true, status: "rejected", reviewedAt: STAMP }),
+      row("B Reviewed", { unscheduled: true, reviewedAt: STAMP }),
+      row("C RejectedOff", { unscheduled: true, status: "rejected", reviewedAt: STAMP }),
       row("D Both", { unscheduled: true, scheduleNote: "Alice Coach was scheduled." }),
-      row("E Clean", {}),
+      row("E Clean", { reviewedAt: STAMP }),
       row("F CleanWithNote", { scheduleNote: "Scheduled 1:00 PM–2:00 PM" }),
+      row("G RejectedOn", { status: "rejected", reviewedAt: STAMP }),
     ];
   }
 
@@ -319,7 +324,7 @@ describe("🔴 0q — hour-log Detail Schedule column says 'Not on schedule'", (
       const v = rowValues(sheet, r);
       out.set(v[coach], v[schedule] ?? "");
     }
-    expect(out.size).toBe(6);
+    expect(out.size).toBe(7);
     return out;
   }
 
@@ -327,18 +332,22 @@ describe("🔴 0q — hour-log Detail Schedule column says 'Not on schedule'", (
     expect((await scheduleByCoach()).get("A Unreviewed")).toBe("Not on schedule");
   });
 
-  it("accepted row → 'Not on schedule · accepted'", async () => {
-    expect((await scheduleByCoach()).get("B Accepted")).toBe(
-      "Not on schedule · accepted",
+  it("🔴 reviewed posted row → still 'Not on schedule', with the PFA review date", async () => {
+    expect((await scheduleByCoach()).get("B Reviewed")).toBe(
+      "Not on schedule (reviewed 2026-05-12)",
     );
   });
 
-  it("🔴 rejected row (reviewedAt set) → '· rejected', never '· accepted'", async () => {
+  it("🔴 a rejected row OFF the schedule → 'Rejected; Not on schedule' (no review date)", async () => {
+    expect((await scheduleByCoach()).get("C RejectedOff")).toBe(
+      "Rejected; Not on schedule",
+    );
+  });
+
+  it("🔴 a rejected row ON the schedule → 'Rejected', never blank (control: a posted clean row IS blank)", async () => {
     const cells = await scheduleByCoach();
-    expect(cells.get("C Rejected")).toBe("Not on schedule · rejected");
-    expect(String(cells.get("C Rejected"))).not.toContain("accepted");
-    // Control in the same file: the posted+stamped row DOES say accepted.
-    expect(cells.get("B Accepted")).toBe("Not on schedule · accepted");
+    expect(cells.get("G RejectedOn")).toBe("Rejected");
+    expect(cells.get("E Clean")).toBe("");
   });
 
   it("label; note when both", async () => {
@@ -347,7 +356,7 @@ describe("🔴 0q — hour-log Detail Schedule column says 'Not on schedule'", (
     );
   });
 
-  it("clean rows keep today's cell — blank, or just the note (control: A is marked)", async () => {
+  it("clean posted rows keep today's cell — blank (even reviewed), or just the note (control: A is marked)", async () => {
     const cells = await scheduleByCoach();
     expect(cells.get("A Unreviewed")).toBe("Not on schedule");
     expect(cells.get("E Clean")).toBe("");

@@ -588,7 +588,9 @@ describe("coachScopeFromFilters", () => {
 // carrying it moves no money.
 
 describe("🔴 0q — buildWorkReport carries the not-on-schedule flag", () => {
-  const STAMP = new Date("2026-05-02T18:00:00.000Z");
+  // 20:00 PDT on May 2 — but 03:00 UTC on May 3. The review DATE must be the
+  // PFA date, so this stamp catches a UTC slice.
+  const STAMP = new Date("2026-05-03T03:00:00.000Z");
   const SEP_P1_START = new Date("2026-09-01T07:00:00.000Z");
   const SEP_P1_END = new Date("2026-09-16T07:00:00.000Z");
 
@@ -617,9 +619,9 @@ describe("🔴 0q — buildWorkReport carries the not-on-schedule flag", () => {
     expect(on.unscheduled).toBe(false);
   });
 
-  it("reviewed is true ONLY for a posted log with reviewedAt set", () => {
+  it("reviewedOn is the PFA date of reviewedAt on a reviewed log, null on an unreviewed one", () => {
     const { detail } = buildWorkReport([
-      row({ id: "accepted", unscheduled: true, reviewedAt: STAMP }),
+      row({ id: "reviewed", unscheduled: true, reviewedAt: STAMP }),
       row({
         id: "unreviewed",
         unscheduled: true,
@@ -628,8 +630,9 @@ describe("🔴 0q — buildWorkReport carries the not-on-schedule flag", () => {
         endAt: at(12),
       }),
     ]);
-    expect(detail.find((d) => d.id === "accepted")!.reviewed).toBe(true);
-    expect(detail.find((d) => d.id === "unreviewed")!.reviewed).toBe(false);
+    // PFA date, not the UTC date ("2026-05-03").
+    expect(detail.find((d) => d.id === "reviewed")!.reviewedOn).toBe("2026-05-02");
+    expect(detail.find((d) => d.id === "unreviewed")!.reviewedOn).toBeNull();
   });
 
   it("a REJECTED unscheduled log never appears (posted only, unchanged) — control: the posted one does", () => {
@@ -651,7 +654,7 @@ describe("🔴 0q — buildWorkReport carries the not-on-schedule flag", () => {
     expect(detail[0].unscheduled).toBe(true);
   });
 
-  it("🔴 a stipend row is unscheduled: false and reviewed: false — with an unscheduled log in the same build as the control", () => {
+  it("🔴 a stipend row is unscheduled: false and reviewedOn: null — with an unscheduled reviewed log in the same build as the control", () => {
     const { detail } = buildWorkReport(
       [row({ id: "off", unscheduled: true, reviewedAt: STAMP })],
       [stipend()],
@@ -661,12 +664,12 @@ describe("🔴 0q — buildWorkReport carries the not-on-schedule flag", () => {
     // Control first: the log in the SAME build is marked and reviewed, so a
     // false on the stipend is not just "nothing is ever marked".
     expect(log.unscheduled).toBe(true);
-    expect(log.reviewed).toBe(true);
+    expect(log.reviewedOn).toBe("2026-05-02");
     expect(s.unscheduled).toBe(false);
-    expect(s.reviewed).toBe(false);
+    expect(s.reviewedOn).toBeNull();
   });
 
-  it("summary counts all not-on-schedule rows per coach, and the unreviewed ones separately", () => {
+  it("summary counts every not-on-schedule row per coach, reviewed or not", () => {
     const { summary } = buildWorkReport(
       [
         // Coach A: two off-schedule (one accepted, one not) + one clean.
@@ -694,9 +697,10 @@ describe("🔴 0q — buildWorkReport carries the not-on-schedule flag", () => {
     const a = summary.find((s) => s.coachId === "coach-a")!;
     const b = summary.find((s) => s.coachId === "coach-b")!;
     expect(a.unscheduledCount).toBe(2);
-    expect(a.unscheduledUnreviewedCount).toBe(1);
     expect(b.unscheduledCount).toBe(0);
-    expect(b.unscheduledUnreviewedCount).toBe(0);
+    // One count only: a reviewed row is not "less" off-schedule (Jacob,
+    // 2026-10-14), so there is no separate unreviewed tally to read.
+    expect(a).not.toHaveProperty("unscheduledUnreviewedCount");
     // Entries still count every row, stipend included (unchanged).
     expect(a.entries).toBe(4);
   });

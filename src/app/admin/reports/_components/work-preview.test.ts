@@ -53,7 +53,7 @@ function stipendRow(over: Partial<WorkDetailRow> = {}): WorkDetailRow {
     scheduleNote: null,
     // A stipend is never "on" or "off" a schedule (0q).
     unscheduled: false,
-    reviewed: false,
+    reviewedOn: null,
     ...over,
   };
 }
@@ -67,7 +67,6 @@ function summary(over: Partial<WorkSummaryRow> = {}): WorkSummaryRow {
     hours: 30,
     payCents: 258_000,
     unscheduledCount: 0,
-    unscheduledUnreviewedCount: 0,
     ...over,
   } as WorkSummaryRow;
 }
@@ -167,11 +166,14 @@ const CARA = { coachId: "cara", coachName: "Cara Cole", coachEmail: "cara@exampl
 function renderSept13Shape(): string {
   const report = buildWorkReport(
     [
-      // Ana: unreviewed off-schedule, accepted off-schedule, off-schedule
-      // WITH a note (a cover), and one clean row.
+      // Ana: an unreviewed off-schedule row, a REVIEWED off-schedule row (an
+      // admin entry or an Accept stamps reviewedAt — it does not make the row
+      // any less left behind), an off-schedule row WITH a note (a cover), and
+      // a SCHEDULED row that was also reviewed (the control: a review date on
+      // its own prints nothing).
       logRow({ id: "a-unrev", startAt: pfa(9), endAt: pfa(10), unscheduled: true }),
       logRow({
-        id: "a-acc",
+        id: "a-rev",
         startAt: pfa(11),
         endAt: pfa(12),
         unscheduled: true,
@@ -184,7 +186,7 @@ function renderSept13Shape(): string {
         unscheduled: true,
         scheduleNote: "Bob Bell was scheduled.",
       }),
-      logRow({ id: "a-clean", startAt: pfa(15), endAt: pfa(16) }),
+      logRow({ id: "a-clean", startAt: pfa(15), endAt: pfa(16), reviewedAt: STAMP }),
       // Bob: a clean row carrying a timing note, plus a stipend.
       logRow({
         id: "b-note",
@@ -193,9 +195,9 @@ function renderSept13Shape(): string {
         endAt: pfa(8),
         scheduleNote: "Scheduled 7:00 AM–7:30 AM",
       }),
-      // Cara: one off-schedule row, already accepted.
+      // Cara: one off-schedule row, already reviewed.
       logRow({
-        id: "c-acc",
+        id: "c-rev",
         ...CARA,
         startAt: pfa(17),
         endAt: pfa(18),
@@ -253,19 +255,34 @@ function plain(fragment: string): string {
   return fragment.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
+/** The class list of every element whose whole text is "Not on schedule". */
+function pillClasses(fragment: string): string[] {
+  return [...fragment.matchAll(/<span class="([^"]*)">Not on schedule<\/span>/g)].map(
+    (m) => m[1],
+  );
+}
+
 describe("🔴 0q — the Work tab Detail marks rows that are not on the schedule", () => {
-  it("red pill on the UNREVIEWED off-schedule row", () => {
+  it("red pill on the unreviewed off-schedule row, and no reviewed line", () => {
     const cell = scheduleCell(renderSept13Shape(), ">09:00<");
     expect(plain(cell)).toBe("Not on schedule");
-    expect(cell).toContain("text-danger");
-    expect(cell).toContain("bg-danger/10");
+    const [pill] = pillClasses(cell);
+    expect(pill).toContain("text-danger");
+    expect(pill).toContain("bg-danger/10");
   });
 
-  it("gray 'accepted' pill — and NOT the danger colors — on the reviewed one", () => {
+  it("🔴 a REVIEWED off-schedule row gets the SAME red pill, plus a gray 'reviewed <date>' line under it", () => {
     const cell = scheduleCell(renderSept13Shape(), ">11:00<");
-    expect(plain(cell)).toBe("Not on schedule · accepted");
-    expect(cell).toContain("text-fg-subtle");
-    expect(cell).not.toContain("danger");
+    expect(plain(cell)).toBe("Not on schedule reviewed 2026-05-02");
+    const pills = pillClasses(cell);
+    expect(pills).toHaveLength(1);
+    // Pill text and danger class on the SAME element.
+    expect(pills[0]).toContain("text-danger");
+    expect(pills[0]).toContain("bg-danger/10");
+    expect(pills[0]).not.toContain("bg-surface-2");
+    expect(cell).toMatch(
+      /<span class="[^"]*text-\[11px\][^"]*text-fg-subtle[^"]*">reviewed 2026-05-02<\/span>/,
+    );
   });
 
   it("pill AND note both present when a row has both, note keeping its full text in a title", () => {
@@ -280,37 +297,48 @@ describe("🔴 0q — the Work tab Detail marks rows that are not on the schedul
     expect(cell).toContain('title="Bob Bell was scheduled."');
   });
 
-  it("a clean row and a stipend row show no pill (control: the off-schedule row in the same render does)", () => {
+  it("a scheduled row (even a reviewed one) and a stipend row show no pill and no reviewed line (control: the reviewed off-schedule row does)", () => {
     const html = renderSept13Shape();
-    expect(plain(scheduleCell(html, ">09:00<"))).toContain("Not on schedule");
+    expect(plain(scheduleCell(html, ">11:00<"))).toContain("reviewed 2026-05-02");
     expect(plain(scheduleCell(html, ">15:00<"))).toBe("");
-    expect(plain(scheduleCell(html, "Stipend —"))).toBe("");
+    expect(plain(scheduleCell(html, "Stipend \u2014"))).toBe("");
     // A scheduled row with a timing note keeps only the note.
     expect(plain(scheduleCell(html, ">07:00<"))).toBe("Scheduled 7:00 AM–7:30 AM");
   });
 
-  it("adds no wording about pay to any Schedule cell (control: the cells carry the mark)", () => {
+  it("🔴 nothing left behind looks quiet: every 'Not on schedule' pill in the Detail table is red", () => {
+    const tbody = tbodyAfterHeading(renderSept13Shape(), "Detail");
+    const pills = pillClasses(tbody);
+    // a-unrev, a-rev, a-both, c-rev.
+    expect(pills).toHaveLength(4);
+    for (const cls of pills) {
+      expect(cls).toContain("text-danger");
+      expect(cls).not.toContain("bg-surface-2");
+    }
+  });
+
+  it("adds no wording about pay — or 'accepted' — to any Schedule cell (control: the cells carry the mark)", () => {
     const html = renderSept13Shape();
     for (const needle of [">09:00<", ">11:00<", ">13:00<", ">17:00<"]) {
       const text = plain(scheduleCell(html, needle));
       expect(text).toContain("Not on schedule");
-      expect(text.toLowerCase()).not.toMatch(/pay|paid/);
+      expect(text.toLowerCase()).not.toMatch(/pay|paid|accepted/);
     }
   });
 });
 
 describe("🔴 0q — the Work tab Summary counts not-on-schedule rows per coach", () => {
-  it("red count when any of that coach's rows is unreviewed", () => {
+  it("red count for a coach with off-schedule rows", () => {
     const cell = entriesCell(renderSept13Shape(), "Ana Alvarez");
     expect(plain(cell)).toBe("4 3 not on schedule");
     expect(cell).toMatch(/class="[^"]*text-danger[^"]*"[^>]*>3 not on schedule/);
   });
 
-  it("gray count when every one of them is accepted", () => {
+  it("🔴 still red when every one of them has been reviewed", () => {
     const cell = entriesCell(renderSept13Shape(), "Cara Cole");
     expect(plain(cell)).toBe("1 1 not on schedule");
-    expect(cell).toMatch(/class="[^"]*text-fg-subtle[^"]*"[^>]*>1 not on schedule/);
-    expect(cell).not.toContain("danger");
+    expect(cell).toMatch(/class="[^"]*text-danger[^"]*"[^>]*>1 not on schedule/);
+    expect(cell).not.toContain("text-fg-subtle");
   });
 
   it("nothing when the coach has none (control: Ana's cell in the same render has it)", () => {

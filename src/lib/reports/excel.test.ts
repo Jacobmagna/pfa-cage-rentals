@@ -125,7 +125,7 @@ function makeWork(): WorkReportData {
       kind: "log" as const,
       stipendCovered: false,
       unscheduled: false,
-      reviewed: false,
+      reviewedOn: null,
       periodLabel: null,
       periodStart: null,
       periodEndExclusive: null,
@@ -149,7 +149,7 @@ function makeWork(): WorkReportData {
       kind: "log" as const,
       stipendCovered: false,
       unscheduled: false,
-      reviewed: false,
+      reviewedOn: null,
       periodLabel: null,
       periodStart: null,
       periodEndExclusive: null,
@@ -173,7 +173,7 @@ function makeWork(): WorkReportData {
       kind: "log" as const,
       stipendCovered: false,
       unscheduled: false,
-      reviewed: false,
+      reviewedOn: null,
       periodLabel: null,
       periodStart: null,
       periodEndExclusive: null,
@@ -205,7 +205,6 @@ function makeWork(): WorkReportData {
         hours: 5.2,
         payCents: 16000,
         unscheduledCount: 0,
-        unscheduledUnreviewedCount: 0,
       },
       {
         coachId: "c2",
@@ -215,7 +214,6 @@ function makeWork(): WorkReportData {
         hours: 2,
         payCents: 0,
         unscheduledCount: 0,
-        unscheduledUnreviewedCount: 0,
       },
     ],
     grandTotalCents: 16000,
@@ -1049,13 +1047,14 @@ describe("🔴 0q — the workbook says 'Not on schedule'", () => {
     return [
       input({ id: "a-unrev", startAt: pfa(9), endAt: pfa(10), unscheduled: true }),
       input({
-        id: "a-acc",
+        id: "a-rev",
         startAt: pfa(11),
         endAt: pfa(12),
         unscheduled: true,
         reviewedAt: STAMP,
       }),
-      input({ id: "a-clean", startAt: pfa(13), endAt: pfa(14) }),
+      // Scheduled AND reviewed: the control — a review date alone prints nothing.
+      input({ id: "a-clean", startAt: pfa(13), endAt: pfa(14), reviewedAt: STAMP }),
       input({
         id: "a-both",
         startAt: pfa(15),
@@ -1138,10 +1137,10 @@ describe("🔴 0q — the workbook says 'Not on schedule'", () => {
       expect(r[col(sheet, "Schedule")]).toBe("Not on schedule");
     });
 
-    it("accepted off-schedule → 'Not on schedule · accepted'", async () => {
+    it("🔴 REVIEWED off-schedule → still 'Not on schedule', with the review date", async () => {
       const sheet = (await workbookFrom(rows())).getWorksheet("Work Detail")!;
       const r = findRow(sheet, "Start", "11:00");
-      expect(r[col(sheet, "Schedule")]).toBe("Not on schedule · accepted");
+      expect(r[col(sheet, "Schedule")]).toBe("Not on schedule (reviewed 2026-05-02)");
     });
 
     it("off-schedule WITH a note → label; note", async () => {
@@ -1152,7 +1151,7 @@ describe("🔴 0q — the workbook says 'Not on schedule'", () => {
       );
     });
 
-    it("clean row blank, scheduled-with-note keeps just the note, stipend blank (control: the 09:00 row is marked)", async () => {
+    it("clean (even reviewed) row blank, scheduled-with-note keeps just the note, stipend blank (control: the 09:00 row is marked)", async () => {
       const sheet = (await workbookFrom(rows())).getWorksheet("Work Detail")!;
       const schedule = col(sheet, "Schedule");
       expect(findRow(sheet, "Start", "09:00")[schedule]).toBe("Not on schedule");

@@ -4,6 +4,9 @@
 // workbook (`reports/excel.ts`) and the hour-log workbook
 // (`reports/hour-log-excel.ts`). Zero runtime imports, so a client component
 // and a spreadsheet builder can both take it (precedent: `stipend/labels.ts`).
+// The review DATE therefore arrives already formatted (PFA YYYY-MM-DD, via
+// `formatPfaDate` in the caller) rather than as a Date this module would have
+// to format itself.
 //
 // ── Why this exists ──────────────────────────────────────────────────────
 // Sept 13 2026: the Work tab Mark pays from showed **$900 against $500–600
@@ -21,74 +24,62 @@
 // false on most of the rows it appeared on. Pay is decided by Accept / Reject
 // on the Work Log, and this module never changes a figure.
 //
-// ── The three states ─────────────────────────────────────────────────────
-//   unreviewed — posted, nobody has looked at it yet → loud (red on screen).
-//   accepted   — posted AND reviewed (Mark pressed Accept) → quiet (gray).
-//                Q5, 2026-10-14: 20 legitimate accepted rows would otherwise
-//                sit red on the report forever.
-//   rejected   — taken off pay; only the hour-log workbook lists these.
-// 🔴 "accepted" keys on status === "posted" AND reviewedAt set. Rejecting a
-// log ALSO stamps reviewedAt, so a rule on reviewedAt alone would print
-// "accepted" beside work Mark turned down.
+// ── 🔴 A reviewed row is NOT "accepted as off-schedule" ──────────────────
+// `reviewedAt` is stamped by admin hour entry at insert, by approving a held
+// log, and by queue Accept on rows that were ON a block at the time (wrong
+// time, double-logged). So "Mark records 2h on a block, later someone deletes
+// the block" produces a reviewed row that nobody ever judged off-schedule —
+// the exact 0q case. Jacob, 2026-10-14: EVERY left-behind row reads "Not on
+// schedule" in the same loud way; a reviewed one only adds WHEN it was
+// reviewed. Nothing left behind may look quieter than anything else.
+//
+// ── Rejected rows (the hour-log workbook only) ───────────────────────────
+// That workbook lists rejected rows beside paid ones. Once some rejected rows
+// say "Rejected", a blank would read as "not rejected", so EVERY rejected
+// row's cell starts with it — on the schedule or off.
 
 /** The one wording, everywhere an admin pays from. */
 export const NOT_ON_SCHEDULE_LABEL = "Not on schedule";
 
-export type NotOnScheduleState = "unreviewed" | "accepted" | "rejected";
+const REJECTED_LABEL = "Rejected";
+
+/** "reviewed 2026-10-03" — the line under the pill on screen. */
+export function reviewedOnText(reviewedOn: string): string {
+  return `reviewed ${reviewedOn}`;
+}
 
 /**
- * Which "not on schedule" state a log is in, or null when it IS on the
- * schedule. A held log (awaiting approval) has not been decided, so it reads
- * as unreviewed — never accepted.
+ * A spreadsheet "Schedule" cell, in one string so a reader who sorts or
+ * filters the sheet never separates the mark from its row:
+ *
+ *   rejected  → "Rejected", then "; Not on schedule" if off the schedule
+ *               (no review date: rejecting stamps it, and "Rejected" says it)
+ *   otherwise → "Not on schedule" (+ " (reviewed <date>)") if off the schedule
+ *   then "; <note>" whenever the reconciliation note exists.
+ *
+ * A scheduled, non-rejected row is just its note, or "" — a review date alone
+ * prints nothing.
+ *
+ * @param row.reviewedOn PFA date of `reviewedAt`, already formatted, for a
+ *   POSTED row; pass null for anything else.
  */
-export function notOnScheduleState(row: {
-  unscheduled: boolean;
+export function scheduleCellText(row: {
   status: "posted" | "held" | "rejected";
-  reviewedAt: Date | null;
-}): NotOnScheduleState | null {
-  if (!row.unscheduled) return null;
-  if (row.status === "rejected") return "rejected";
-  if (row.status === "posted" && row.reviewedAt != null) return "accepted";
-  return "unreviewed";
-}
-
-/**
- * The same rule for a row already known to be POSTED — the pay report's rows
- * (`WorkDetailRow`), which carry `reviewed` (posted with reviewedAt set)
- * instead of the raw status and stamp. A rejected row never reaches the pay
- * report, so there is no rejected state here.
- */
-export function postedRowScheduleState(row: {
   unscheduled: boolean;
-  reviewed: boolean;
-}): Exclude<NotOnScheduleState, "rejected"> | null {
-  if (!row.unscheduled) return null;
-  return row.reviewed ? "accepted" : "unreviewed";
-}
-
-/** "Not on schedule", "Not on schedule · accepted", "Not on schedule · rejected". */
-export function notOnScheduleText(state: NotOnScheduleState): string {
-  switch (state) {
-    case "unreviewed":
-      return NOT_ON_SCHEDULE_LABEL;
-    case "accepted":
-      return `${NOT_ON_SCHEDULE_LABEL} · accepted`;
-    case "rejected":
-      return `${NOT_ON_SCHEDULE_LABEL} · rejected`;
+  reviewedOn: string | null;
+  scheduleNote: string | null;
+}): string {
+  const parts: string[] = [];
+  if (row.status === "rejected") {
+    parts.push(REJECTED_LABEL);
+    if (row.unscheduled) parts.push(NOT_ON_SCHEDULE_LABEL);
+  } else if (row.unscheduled) {
+    parts.push(
+      row.reviewedOn
+        ? `${NOT_ON_SCHEDULE_LABEL} (${reviewedOnText(row.reviewedOn)})`
+        : NOT_ON_SCHEDULE_LABEL,
+    );
   }
-}
-
-/**
- * A spreadsheet "Schedule" cell: the label, then "; <note>" when the
- * reconciliation note also exists; just the note when the row is on the
- * schedule; "" when neither. One cell, so a reader who sorts or filters the
- * sheet never separates the mark from the row it belongs to.
- */
-export function scheduleCellText(
-  state: NotOnScheduleState | null,
-  scheduleNote: string | null,
-): string {
-  if (state === null) return scheduleNote ?? "";
-  const label = notOnScheduleText(state);
-  return scheduleNote ? `${label}; ${scheduleNote}` : label;
+  if (row.scheduleNote) parts.push(row.scheduleNote);
+  return parts.join("; ");
 }

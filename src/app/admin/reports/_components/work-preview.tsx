@@ -11,10 +11,7 @@
 // Server component, no client state.
 
 import { formatDollarsExact } from "@/lib/format-money";
-import {
-  notOnScheduleText,
-  postedRowScheduleState,
-} from "@/lib/schedule-labels";
+import { NOT_ON_SCHEDULE_LABEL, reviewedOnText } from "@/lib/schedule-labels";
 import type {
   WorkDetailKind,
   WorkDetailRow,
@@ -89,17 +86,11 @@ export function WorkPreview({
                   <td className="px-4 py-3 text-right font-mono tnum tabular-nums text-fg-muted">
                     {row.entries}
                     {/* 🔴 `0q`: how many of these entries have no schedule
-                        block. Red while any is unreviewed, gray once Mark has
-                        accepted them all (Q5). Nothing when there are none. A
-                        fact about the schedule, never about pay. */}
+                        block — always red, reviewed or not (Jacob,
+                        2026-10-14). Nothing when there are none. A fact about
+                        the schedule, never about pay. */}
                     {row.unscheduledCount > 0 ? (
-                      <span
-                        className={`block font-sans text-[11px] whitespace-nowrap ${
-                          row.unscheduledUnreviewedCount > 0
-                            ? "text-danger"
-                            : "text-fg-subtle"
-                        }`}
-                      >
+                      <span className="block font-sans text-[11px] whitespace-nowrap text-danger">
                         {`${row.unscheduledCount} not on schedule`}
                       </span>
                     ) : null}
@@ -175,7 +166,7 @@ export function WorkPreview({
                   </td>
                   <ScheduleCell
                     unscheduled={row.unscheduled}
-                    reviewed={row.reviewed}
+                    reviewedOn={row.reviewedOn}
                     scheduleNote={row.scheduleNote}
                   />
                 </tr>
@@ -319,32 +310,37 @@ function RateCell({
 // 🔴 `0q` — THE SCHEDULE CELL. Sept 13 2026: this cell rendered
 // `scheduleNote ?? ""`, and the note is null BOTH for a log with no schedule
 // block and for a log that matched its block perfectly — so the rows that put
-// $900 on a $500–600 day looked exactly like correct ones. Now a log with no
-// block gets a pill: red (the Hours tab's Unscheduled pill classes) while
-// nobody has reviewed it, a quieter gray once Mark accepted it (Q5). The note,
-// when there is one, sits BELOW the pill in its own truncated span — the
+// $900 on a $500–600 day looked exactly like correct ones. Now every log with
+// no block gets the red pill (the Hours tab's Unscheduled pill classes).
+//
+// A REVIEWED one gets the same red pill plus a small gray "reviewed <date>"
+// line under it — never a quieter pill. `reviewedAt` is stamped by admin entry,
+// approve-held and queue Accept on rows that were ON a block at the time, so it
+// does not mean "accepted as off-schedule" (Jacob, 2026-10-14: all red).
+//
+// The note, when there is one, sits below in its own truncated span — the
 // truncate moved off the <td>, which would otherwise clip the pill. Stipend
-// rows and scheduled rows render exactly as before (`unscheduled` is false).
+// rows and scheduled rows show only their note, as before.
 function ScheduleCell({
   unscheduled,
-  reviewed,
+  reviewedOn,
   scheduleNote,
 }: {
   unscheduled: boolean;
-  reviewed: boolean;
+  reviewedOn: string | null;
   scheduleNote: string | null;
 }) {
-  const state = postedRowScheduleState({ unscheduled, reviewed });
   return (
     <td className="px-3 py-3 text-fg-subtle text-xs">
       <div className="flex flex-col items-start gap-1">
-        {state === "unreviewed" ? (
+        {unscheduled ? (
           <span className="inline-flex items-center rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger whitespace-nowrap">
-            {notOnScheduleText(state)}
+            {NOT_ON_SCHEDULE_LABEL}
           </span>
-        ) : state === "accepted" ? (
-          <span className="inline-flex items-center rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-fg-subtle whitespace-nowrap">
-            {notOnScheduleText(state)}
+        ) : null}
+        {unscheduled && reviewedOn ? (
+          <span className="text-[11px] text-fg-subtle whitespace-nowrap">
+            {reviewedOnText(reviewedOn)}
           </span>
         ) : null}
         {scheduleNote ? (

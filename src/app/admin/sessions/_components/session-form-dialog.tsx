@@ -32,6 +32,10 @@ import {
   formatPfaTime,
   parsePfaInput,
 } from "@/lib/timezone";
+import {
+  WEIGHT_ROOM_RANGE_REFUSAL,
+  weightRoomRangeStatus,
+} from "@/app/admin/schedule/_components/weight-room-admin.logic";
 
 export type SessionFormInitialValues = {
   id: string;
@@ -57,6 +61,16 @@ export type SessionFormInitialValues = {
 // notecards, and submit dispatches to createSessionsBatch (bypassing
 // the form-action layer). Sub-1-slot creates use the original
 // createSessionFormAction path.
+//
+// WEIGHT ROOM (one hour minimum), create mode only: the whole range is ONE
+// rental, never split, always through createSessionFormAction — its
+// server-side translation is what carries the real refusal to the screen on
+// a production build (a batch throw arrives stripped). The slot-length
+// toggle and per-slot notes are hidden; a range under an hour is refused
+// inline and the submit is disabled. Edit mode adds NO check of its own: an
+// old 30-minute weight room rental must stay note-editable and
+// coach-reassignable, and the server decides by comparing values; its
+// refusal arrives through form state.
 
 const INITIAL_STATE: ActionResult = { ok: true };
 
@@ -245,16 +259,32 @@ export function SessionFormDialog({
   }, [live.date, live.startTime, live.endTime, slotLengthMinutes]);
 
   const isCreate = mode === "create";
-  const isMultiSlot = isCreate && slotCount > 1;
+  // Create mode: a weight room range is one rental whatever its length,
+  // never split, never the batch path.
+  const isWeightRoomCreate =
+    isCreate &&
+    resourceOptions.find((r) => r.id === live.resourceId)?.type ===
+      "weight_room";
+  const weightRoom = isWeightRoomCreate
+    ? weightRoomRangeStatus(rangeStart, rangeEnd)
+    : null;
+  const weightRoomTooShort = weightRoom?.kind === "too-short";
+  const isMultiSlot = isCreate && !isWeightRoomCreate && slotCount > 1;
 
   const submitLabel = (() => {
     if (pending || batchPending) return "Saving…";
     if (mode === "edit") return "Save changes";
+    if (isWeightRoomCreate) return "Create session";
     if (slotCount > 1) return `Create ${slotCount} sessions`;
     return "Create session";
   })();
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    if (weightRoomTooShort) {
+      // The inline refusal is already on screen; send nothing.
+      e.preventDefault();
+      return;
+    }
     if (!isMultiSlot) return; // let form-action handle it
     e.preventDefault();
     if (slotCount === 0 || divisibilityError || slots.length === 0) return;
@@ -432,7 +462,18 @@ export function SessionFormDialog({
             </Field>
           </div>
 
-          {isCreate ? (
+          {/* Weight room: one rental for the whole range, at least an hour. */}
+          {weightRoomTooShort ? (
+            <div
+              role="alert"
+              className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+            >
+              {WEIGHT_ROOM_RANGE_REFUSAL}
+            </div>
+          ) : null}
+
+          {/* Not shown for a weight room, which is never split. */}
+          {isCreate && !isWeightRoomCreate ? (
             <Field
               label="Slot length"
               hint="30 min = back-to-back half-hour lessons. 1 hr = full hours."
@@ -444,7 +485,7 @@ export function SessionFormDialog({
             </Field>
           ) : null}
 
-          {isCreate && divisibilityError ? (
+          {isCreate && !isWeightRoomCreate && divisibilityError ? (
             <div
               role="alert"
               className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
@@ -454,7 +495,18 @@ export function SessionFormDialog({
             </div>
           ) : null}
 
-          {isCreate && slotCount > 0 && !divisibilityError ? (
+          {weightRoom?.kind === "ok" ? (
+            <p className="text-xs text-fg-subtle">
+              Will create{" "}
+              <span className="text-fg tnum tabular-nums">1</span> session of{" "}
+              {weightRoom.length}.
+            </p>
+          ) : null}
+
+          {isCreate &&
+          !isWeightRoomCreate &&
+          slotCount > 0 &&
+          !divisibilityError ? (
             <p className="text-xs text-fg-subtle">
               Will create{" "}
               <span className="text-fg tnum tabular-nums">{slotCount}</span>{" "}
@@ -552,6 +604,7 @@ export function SessionFormDialog({
                 pending ||
                 batchPending ||
                 deletePending ||
+                weightRoomTooShort ||
                 (isMultiSlot && (slotCount === 0 || divisibilityError))
               }
               className="rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-9 px-4 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"

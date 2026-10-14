@@ -77,9 +77,10 @@ function buildSessionInput(formData: FormData) {
     resourceId: formData.get("resourceId")?.toString() ?? "",
     startAt,
     endAt,
-    // Booking-level group-session flag. The Session tab still submits
-    // "true"/"false" via a hidden field and it is still passed along here,
-    // but the server no longer acts on it: a new booking is always saved
+    // Booking-level group-session flag. No admin dialog sends it any more
+    // (the Session tab's checkbox and hidden field are gone); an old payload
+    // that still carries it is passed along here, but the server no longer
+    // acts on it: a new booking is always saved
     // is_group_session=false at the regular rate (createSessionInternal), and
     // an edit takes the flag from the stored row (updateSessionInternal).
     // Defaults false when absent.

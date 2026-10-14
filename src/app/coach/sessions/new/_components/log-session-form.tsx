@@ -24,6 +24,7 @@ import {
   type SlotInput,
 } from "@/app/_components/session-slots-list";
 import { formatPfaDate, formatPfaTime, parsePfaInput } from "@/lib/timezone";
+import { isBelowWeightRoomMinimum } from "@/lib/weight-room-minimum";
 import { AvailabilityPanel } from "./availability-panel";
 
 const INITIAL_STATE: CoachActionResult = { ok: true, loggedAt: 0 };
@@ -41,6 +42,13 @@ const INITIAL_STATE: CoachActionResult = { ok: true, loggedAt: 0 };
 // to re-derive its "echo errored values back into the form on
 // failure" behavior. Multi-slot errors do lose typed-per-slot
 // notes on failure — accepted v1 trade-off; coach retypes.
+//
+// WEIGHT ROOM (one hour minimum): the whole range is ONE rental, never
+// split, always through the single-slot form action — its server-side
+// translation is what carries the real refusal to the screen on a
+// production build (a batch throw arrives stripped). The slot-length
+// toggle and per-slot notes are hidden; a range under an hour is refused
+// inline and the submit is disabled. The server stays the backstop.
 export function LogSessionForm({
   resources,
 }: {
@@ -203,7 +211,17 @@ export function LogSessionForm({
     };
   }, [live.date, live.startTime, live.endTime, slotLengthMinutes]);
 
-  const isMultiSlot = slotCount > 1;
+  // A weight room range is one rental whatever its length: never split,
+  // never the batch path.
+  const isWeightRoom =
+    resources.find((r) => r.id === live.resourceId)?.type === "weight_room";
+  const weightRoomTooShort =
+    isWeightRoom &&
+    rangeStart !== null &&
+    rangeEnd !== null &&
+    isBelowWeightRoomMinimum(rangeStart, rangeEnd);
+
+  const isMultiSlot = !isWeightRoom && slotCount > 1;
 
   // CRITICAL: the parent OWNS slot derivation so `slots[]` is always
   // populated from (rangeStart, rangeEnd, slotLengthMinutes) whenever
@@ -237,12 +255,18 @@ export function LogSessionForm({
 
   const submitLabel = (() => {
     if (pending || batchPending) return "Logging…";
+    if (isWeightRoom) return "Log rental";
     if (slotCount === 0) return "Log rental";
     if (slotCount === 1) return "Log rental";
     return `Log ${slotCount} rentals`;
   })();
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    if (weightRoomTooShort) {
+      // The inline refusal is already on screen; send nothing.
+      e.preventDefault();
+      return;
+    }
     if (!isMultiSlot) {
       // N=1 → let the form-action take over. Don't preventDefault.
       return;
@@ -442,27 +466,41 @@ export function LogSessionForm({
           </Field>
         </div>
 
+        {/* Weight room: one rental for the whole range, at least an hour. */}
+        {weightRoomTooShort ? (
+          <div
+            role="alert"
+            className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+          >
+            Weight room rentals are one hour minimum. Make the end time at
+            least 1 hour after the start.
+          </div>
+        ) : null}
+
         {/* Compact, clearly-secondary slot-length micro-control. Sits
             just under the Start/End row rather than as a full Field so
-            it doesn't read as a peer of the time selectors. */}
-        <div className="-mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="text-[11px] uppercase tracking-wider text-fg-muted">
-            Slot length
-          </span>
-          <SlotLengthToggle
-            value={slotLengthMinutes}
-            onChange={(v) => setSlotLengthMinutes(v)}
-            size="sm"
-          />
-          <span
-            className="text-[11px] text-fg-subtle leading-snug basis-full sm:basis-auto"
-            title="30 min = back-to-back half-hour lessons. 1 hr = full hours."
-          >
-            30 min = back-to-back half-hour lessons. 1 hr = full hours.
-          </span>
-        </div>
+            it doesn't read as a peer of the time selectors. Not shown for
+            a weight room, which is never split. */}
+        {!isWeightRoom ? (
+          <div className="-mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-[11px] uppercase tracking-wider text-fg-muted">
+              Slot length
+            </span>
+            <SlotLengthToggle
+              value={slotLengthMinutes}
+              onChange={(v) => setSlotLengthMinutes(v)}
+              size="sm"
+            />
+            <span
+              className="text-[11px] text-fg-subtle leading-snug basis-full sm:basis-auto"
+              title="30 min = back-to-back half-hour lessons. 1 hr = full hours."
+            >
+              30 min = back-to-back half-hour lessons. 1 hr = full hours.
+            </span>
+          </div>
+        ) : null}
 
-        {divisibilityError ? (
+        {divisibilityError && !isWeightRoom ? (
           <div
             role="alert"
             className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
@@ -519,6 +557,7 @@ export function LogSessionForm({
           disabled={
             pending ||
             batchPending ||
+            weightRoomTooShort ||
             (isMultiSlot && (slotCount === 0 || divisibilityError))
           }
           className="w-full sm:w-auto rounded-lg bg-gold text-gold-ink hover:bg-gold-hover shadow-[var(--shadow-sm)] h-12 px-6 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40 transition-colors"

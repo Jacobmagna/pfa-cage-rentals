@@ -14,9 +14,10 @@ import { StaleGuard } from "./stale-guard";
 //   · /video                         — a password box + a cookie (lib/display/access.ts)
 //
 // What they must NOT differ on is what gets rendered, and in particular the
-// PII posture: the projection in lib/server/display-schedule.ts is the boundary
-// for BOTH, and a second copy of this JSX is how one entrance quietly grows a
-// field the other does not have. One board, two doors.
+// PII posture: lib/server/display-schedule.ts is the boundary for BOTH — its
+// explicit projection, its field-by-field mapping and its label rule — and a
+// second copy of this JSX is how one entrance quietly grows a field the other
+// does not have. One board, two doors.
 //
 // 🔴 THIS IS A SERVER COMPONENT AND THAT IS A SECURITY PROPERTY. Read the
 // header of display-grid.tsx before adding `"use client"` here: props handed to

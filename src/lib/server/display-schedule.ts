@@ -3,13 +3,18 @@
 // 🔴🔴 THIS MODULE IS THE PII BOUNDARY OF THE ENTIRE FEATURE. Read this
 // header before changing a single select.
 //
-// The display page is UNAUTHENTICATED. There is no middleware in this repo —
-// every other schedule surface is gated by a `requireRole` / `requireScheduleAccess`
-// call inside its own server component, and this one deliberately has no such
+// The display page is UNAUTHENTICATED. No middleware gates it — the one this
+// repo has, src/proxy.ts, routes by host and does no auth. Every other
+// schedule surface is gated by a `requireRole` / `requireScheduleAccess` call
+// inside its own server component, and this one deliberately has no such
 // call. So nothing structural stops a field from reaching the public internet;
-// the only thing that stops it is the projection list below.
+// the only things that stop it are the projection list below and, for the one
+// free-text column that IS selected, `resolveDisplayBlockLabel`.
 //
-// 🔴 THREE FIELDS MUST NEVER BE SELECTED HERE.
+// 🔴 TWO FIELDS MUST NEVER BE SELECTED HERE: `sessionsBilling.note` and
+// `users.email`. A third, `blockedTimes.reason`, was on this list until
+// 2026-10-13 and IS selected now — read "THE BLOCK NOTE" below before
+// touching it.
 //
 // ⚠️ FIRST, A CORRECTION TO THE OBVIOUS VERSION OF THIS WARNING, because the
 // obvious version is WRONG and was measured rather than reasoned about
@@ -26,37 +31,78 @@
 //     page source, serialized into the RSC payload. Confirmed with a literal
 //     probe string on StaleGuard's props.
 //
-// 🔴 SO THE REAL HAZARD IS SHARPER AND EASIER TO TRIP OVER: today `DisplayGrid`
-// is a server component, so an extra column here would be caught by the
-// mapping and never shipped. THE DAY SOMEBODY ADDS `"use client"` TO IT — for
-// an animation, a marquee, a ticking clock — every prop it receives becomes
-// serialized, and any field riding along in this projection is published.
-// That is a one-line change in a different file, made for an unrelated
-// reason, by someone who will not read this comment. The projection is
-// narrow so that change stays safe.
+// 🔴 SO THE REAL HAZARD IS SHARPER AND EASIER TO TRIP OVER, AND SINCE
+// 2026-10-13 THERE IS SOMETHING IN THIS FILE FOR IT TO PUBLISH. The raw rows
+// read below carry `reason` for EVERY block, including the program-made ones
+// whose reason is never printed. What keeps it in is the mapping in
+// `fetchDisplaySchedule`: it rebuilds each block field by field, and the only
+// text on the result is `label`. `DisplayGrid` is a server component and is
+// handed that mapped result, never a raw row. THE DAY SOMEBODY ADDS
+// `"use client"` TO IT — for an animation, a marquee, a ticking clock — every
+// prop it receives becomes serialized. That is a one-line change in a
+// different file, made for an unrelated reason, by someone who will not read
+// this comment. On that day the mapped result is what gets published, so the
+// mapped result must never carry a raw column: never spread a raw row into a
+// mapped object, and never hand `fetchDisplayScheduleRows`'s output to a
+// component.
 //
-// The three fields, and why each one matters:
+// The two fields that are never selected, and why each one matters:
 //
 //   · sessionsBilling.note   — free text. `/master/schedule` puts it in a
 //     `title` attribute. A tooltip is invisible on a TV (no mouse) and fully
 //     readable in View Source. Nothing stops a coach typing "Tyler makeup
 //     lesson" or "bday party - Jake" into it. That is a MINOR'S NAME on a
 //     public page.
-//   · blockedTimes.reason    — same class, same risk.
 //   · users.email            — a coach's personal email on a wall screen and
 //     in a public page source.
 //
+// 🔴 THE BLOCK NOTE — `blockedTimes.reason` — IS SELECTED, ON PURPOSE. It is
+// the same class of field as a session's note: free text, and nothing stops a
+// name being typed into it. On 2026-10-13 the facility owner (Esther) decided
+// that the red bars she enters by hand should say what she typed, as the
+// admin grid already does, rather than "Blocked" or a program name. What
+// that decision does and does not cover:
+//
+//   · WHERE IT IS PRINTED. Only as the label of a HAND-ENTERED block — one
+//     with no `programScheduleBlockId`. A block a scheduled program owns
+//     keeps the auto text `Program: <name>` in the same column
+//     (`programOccupancyReason`, program-resource-blocks.ts); that is never
+//     printed, and its bar shows the program's short name as before.
+//     `resolveDisplayBlockLabel` is the one place this is decided.
+//   · WHO CAN TYPE ONE. A hand-entered block's `reason` is written only by
+//     block-actions.ts and block-series-actions.ts. Their only callers are
+//     the actions in src/app/admin/schedule/actions.ts, and each of those
+//     calls `requireScheduleAccess` first: an admin, or a coach flagged
+//     `scheduleAdmin` (a Schedule Manager). A plain coach has no path to it.
+//     The Zod schemas those actions parse cap it at 120 characters
+//     (src/lib/schemas/block.ts). That cap is the only one: the column is
+//     plain `text`, so a row written any other way can be longer.
+//   · WHO CAN READ IT. Everyone the display is served to: whoever is in
+//     front of the TV, and anyone holding the `/display/schedule?key=` URL
+//     or a `/video` cookie. The second group gets MORE than the first: the
+//     wall cuts a note off at the width of its bar, the page source carries
+//     every note whole, and `?hours=` widens the window (see the last
+//     paragraph of this header).
+//   · WHAT IT DOES NOT COVER. A session's note. The owner was explicit that
+//     the note on a coach's lesson must never show; "block notes are on the
+//     TV" is not permission to select `sessionsBilling.note`.
+//
 // ⚠️ AND THE TRAP THAT IS ALREADY IN THE CODEBASE: `/master/schedule`'s
 // blockedTimes query is a BARE `db.select().from(blockedTimes)` with no
-// projection — it ships every column on that table, including `reason`, and
-// silently gains any column added to it later. Copying that query shape into
-// this file would reintroduce the leak in the one place it actually matters.
-// Every select here is explicit for that reason. Keep them explicit.
+// projection — it ships every column on that table and silently gains any
+// column added to it later. Copying that query shape into this file would put
+// every one of those columns in the raw rows, one careless mapping away from
+// the one place it actually matters. Every select here is explicit for that
+// reason. Keep them explicit.
 //
 // The token in the URL is the SECOND layer, not the first (src/lib/display/token.ts).
-// If the URL leaks, this projection is what decides whether the leak is
-// "cages, times and coach names" — which is what is already visible on a
-// screen in a room the public walks through — or something worse.
+// If the URL leaks, this file is what decides what leaks: cages, times, coach
+// names, program names and the notes on hand-entered blocks, and nothing
+// else. That is the same KIND of thing the wall shows, but not the same
+// amount. A link holder reads each note whole in the page source where the
+// wall cuts it off at the width of its bar, and can add `?hours=` (2 to 8,
+// `parseDisplayHours` in src/lib/display/window.ts) to see up to 8 hours of
+// today where the default is 3.
 
 import { and, asc, eq, gt, lt } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -97,18 +143,25 @@ const taggedProgram = alias(programs, "tagged_program");
 export const DISPLAY_UNNAMED_COACH_LABEL = "Reserved";
 
 /**
- * What a block with no program behind it renders as.
+ * What a block with nothing to name it renders as: no program behind it, no
+ * program tag, and nothing visible in its note.
  *
- * 🔴 THIS IS THE SAFE FALLBACK AND IT MUST NEVER BECOME `reason`. A blocked
- * row carries `programScheduleBlockId` only when a scheduled PROGRAM occupies
- * the resource; an admin blocking the grid by hand leaves it NULL, and the
- * only text such a row has is the free-form `reason` field — the field this
- * file's header singles out because nothing stops someone typing
- * "bday party - Jake" into it. A minor's name must not reach the wall, so a
- * hand-entered block stays generic no matter what was typed.
+ * 🔴 IT IS THE LAST FALLBACK. An outlined bar with no text in it reads as a
+ * free cage from across the room (see BLOCKED_OUTLINE in display-grid.tsx),
+ * and `blocked_times.reason` is NOT NULL but the database accepts a blank
+ * one — so "the note is required" does not mean "there is always something
+ * to print".
  *
- * Confirmed with Jacob 2026-08-30: hand-entered blocks are the minority, and
- * the named ones are exactly the program-linked rows this resolves.
+ * ⚠️ WHAT THIS DOES AND DOES NOT GUARANTEE. A hand-entered block whose note
+ * is empty, whitespace, or made only of characters NOTHING_VISIBLE matches,
+ * and which has no tag, gets this label. A bar can still come out with no
+ * visible text two ways: a note made only of a blank-looking character that
+ * check does not cover (see its doc), or a program or tag whose short name is
+ * an empty string, which the `??` chains print as-is on purpose.
+ *
+ * Until 2026-10-13 EVERY hand-entered block rendered as this, whatever was
+ * typed, because `reason` was never selected. The file header says what
+ * changed and who decided it.
  */
 export const DISPLAY_BLOCKED_LABEL = "Blocked";
 
@@ -135,10 +188,13 @@ export type DisplayBlock = {
   startAt: Date;
   endAt: Date;
   /**
-   * Already resolved to a safe label — callers never see `reason`, and there
-   * is no code path that can put it here. Mirrors `coachLabel` on
-   * DisplaySession for the same reason: one place turns raw columns into
-   * something printable.
+   * Already resolved by `resolveDisplayBlockLabel`, the one place that turns
+   * a block's raw columns into the text on its bar. For a HAND-ENTERED block
+   * this is the note that was typed, trimmed; for a program-made block it is
+   * never the row's `reason`. The raw `reason` and `programScheduleBlockId`
+   * columns are deliberately not on this type. Mirrors `coachLabel` on
+   * DisplaySession: callers get something printable, not the columns behind
+   * it.
    */
   label: string;
 };
@@ -164,6 +220,10 @@ export type DisplaySchedule = {
  * Now both are asserted independently: key-set tests run against these raw
  * rows, sentinel tests run against the mapped result. Either one regressing
  * fails a named test.
+ *
+ * 🔴 THESE ROWS ARE NOT SAFE TO RENDER OR TO PASS TO A COMPONENT. Since
+ * 2026-10-13 every block row carries its `reason`. `fetchDisplaySchedule` is
+ * the only thing in `src/` that should read them.
  */
 export type DisplayScheduleRows = {
   resources: DisplayResource[];
@@ -180,10 +240,18 @@ export type DisplayScheduleRows = {
     resourceId: string;
     startAt: Date;
     endAt: Date;
+    // 🔴 FREE TEXT, PRESENT ON EVERY BLOCK ROW. Printed only for a
+    // hand-entered one, and only as its label — see the file header.
+    reason: string;
+    // NULL for a hand-entered block; set when a scheduled program owns the
+    // row. This link — not what `reason` looks like — is what the label rule
+    // keys off.
+    programScheduleBlockId: string | null;
     // Both NULL for a hand-entered block: the LEFT JOINs below find no
-    // program, which is what the fallback in the mapping keys off.
+    // program.
     programName: string | null;
     programDisplayName: string | null;
+    // Both NULL unless an admin picked a program tag on the Block form.
     tagName: string | null;
     tagDisplayName: string | null;
   }[];
@@ -199,8 +267,15 @@ export type DisplayScheduleRows = {
  *
  * 🔴 The work-hours schedule is a DIFFERENT surface (`/admin/hour-log/schedule`,
  * built from `hour_logs` and `program_schedule_blocks`) and Mark explicitly
- * does not want it on the screen. Reading only the three tables below is what
- * keeps that true structurally rather than by remembering to.
+ * does not want it on the screen. What keeps that true structurally is where
+ * the three queries below START: `resources`, `sessions_billing` and
+ * `blocked_times`. They touch six tables in all — those three, plus `users`
+ * for the coach's name and `program_schedule_blocks` and `programs` for a
+ * block's label — but `program_schedule_blocks` is only ever reached by a
+ * join FROM a `blocked_times` row, to name a bar that is already there, and
+ * `hour_logs` is never read. A scheduled work block that occupies no
+ * resource has no `blocked_times` row, so it cannot put anything on the
+ * screen.
  */
 export async function fetchDisplayScheduleRows(
   win: DisplayWindow,
@@ -232,7 +307,8 @@ export async function fetchDisplayScheduleRows(
       .orderBy(asc(resources.sortOrder)),
 
     // NOTE: no `note`. No `coachEmail`. Adding either is a PII regression,
-    // and `display-schedule.test.ts` fails loudly if one reappears.
+    // and tests/integration/display-schedule.test.ts fails loudly if one
+    // reappears (an exact key set on these raw rows).
     db
       .select({
         id: sessionsBilling.id,
@@ -247,33 +323,43 @@ export async function fetchDisplayScheduleRows(
       .where(overlapsSession)
       .orderBy(asc(sessionsBilling.startAt)),
 
-    // NOTE: no `reason`, and NOT a bare `.select()`. An explicit projection
-    // is what stops the next column added to `blocked_times` from landing on
-    // a public page without anyone deciding it should.
+    // NOTE: NOT a bare `.select()`. An explicit projection is what stops the
+    // next column added to `blocked_times` from landing in these rows without
+    // anyone deciding it should.
     //
-    // 🔴 THE TWO JOINS ARE WHAT MAKE A NAMED BLOCK POSSIBLE WITHOUT `reason`.
-    // Mark's wife asked for the blocked bars to say what is blocking them
-    // rather than just "Blocked" (2026-08-30). The ONLY safe source for that
-    // is the program the block belongs to: `programs.name` is admin-curated
-    // and unique-constrained, where `reason` is free text a coach types per
-    // block. So the label is resolved through the program chain, and a block
-    // with no program keeps the generic label.
+    // 🔴 `reason` IS IN THIS LIST ON PURPOSE — the owner's decision of
+    // 2026-10-13, see the file header — and so is `programScheduleBlockId`,
+    // the link that says whether a row's reason may be printed. Neither one
+    // leaves this module: `resolveDisplayBlockLabel` reads both, and the
+    // mapping in `fetchDisplaySchedule` exposes only the label it returns.
     //
-    // Both joins are LEFT, not INNER, and that is load-bearing: a hand-entered
-    // block has a NULL `programScheduleBlockId`, and an INNER join would drop
-    // it from the query entirely — an unavailable cage would render as FREE,
-    // the exact failure the red bar was introduced to fix. Proven by mutation:
-    // flipping either join turns six tests red.
+    // 🔴 THE JOINS FETCH THE TWO NAMES THAT ARE NOT THE NOTE. Mark's wife
+    // asked for the blocked bars to say what is blocking them rather than
+    // just "Blocked" (2026-08-30). For a block a scheduled program owns, the
+    // first two joins reach that program: `programs.name` is admin-curated
+    // and unique-constrained, where the row's own `reason` is the auto text
+    // `Program: <name>`. The last join fetches the program tag an admin can
+    // pick on a hand-entered block. A hand-entered block's own note needs no
+    // join; it is the `reason` column above.
+    //
+    // All three joins are LEFT, not INNER, and that is load-bearing: a
+    // hand-entered block has a NULL `programScheduleBlockId`, and an INNER
+    // join would drop it from the query entirely — an unavailable cage would
+    // render as FREE, the exact failure the red bar was introduced to fix.
+    // Proven by mutation: flipping any one of them turns tests red in
+    // tests/integration/display-schedule.test.ts.
     db
       .select({
         id: blockedTimes.id,
         resourceId: blockedTimes.resourceId,
         startAt: blockedTimes.startAt,
         endAt: blockedTimes.endAt,
+        reason: blockedTimes.reason,
+        programScheduleBlockId: blockedTimes.programScheduleBlockId,
         programName: programs.name,
         programDisplayName: programs.displayName,
-        // The hand-picked tag. Still not `reason` — this is a program id an
-        // admin chose from a fixed list, not free text anyone can type.
+        // The hand-picked tag: a program an admin chose from a fixed list on
+        // the Block form, not text anyone typed.
         tagName: taggedProgram.name,
         tagDisplayName: taggedProgram.displayName,
       })
@@ -292,8 +378,92 @@ export async function fetchDisplayScheduleRows(
 }
 
 /**
- * What the page renders. Adds exactly one thing to the raw rows: a coach
- * NAME becomes a coach LABEL that is always safe to print.
+ * Matches a note with nothing in it that a screen would draw: only
+ * whitespace and characters Unicode marks `Default_Ignorable_Code_Point` —
+ * zero-width spaces and joiners, the soft hyphen, direction marks and
+ * isolates, variation selectors, the Hangul fillers, tag characters. Without
+ * it, a note made of nothing but those would pass a plain `trim()` check and
+ * print a bar with no text in it.
+ *
+ * 🔴 USED ONLY TO ASK "IS THERE ANYTHING VISIBLE IN THIS NOTE?", NEVER TO
+ * REWRITE ONE. A note that has visible text is printed exactly as typed,
+ * these characters included: a zero-width joiner or a variation selector is
+ * part of how some emoji and some scripts are written, and a direction mark
+ * can be what makes a name read correctly.
+ *
+ * ⚠️ NOT A LIST OF EVERYTHING THAT LOOKS BLANK. It is exactly "ignorable or
+ * whitespace", as Unicode defines those. A character Unicode treats as an
+ * ordinary symbol but which draws as empty space — U+2800 BRAILLE PATTERN
+ * BLANK is the known one — is not matched, and a note made only of it prints
+ * a bar with no visible text. Pinned as a known gap in display-schedule.test.ts.
+ */
+const NOTHING_VISIBLE = /^[\p{Default_Ignorable_Code_Point}\s]*$/u;
+
+/**
+ * The text a red bar prints. The ONE place a block's raw columns become
+ * something the wall shows, and the only reader of `reason` in this file.
+ *
+ * 🔴 THE DISCRIMINATOR IS THE LINK, NOT THE TEXT. Whether a row's `reason`
+ * may be printed is decided by `programScheduleBlockId` alone — never by
+ * whether the text starts with "Program:".
+ *
+ *   · PROGRAM-MADE (`programScheduleBlockId` set). Exactly the chain this
+ *     file used before 2026-10-13: the program's short name, then its full
+ *     name, then the tag, then the generic label. `reason` is never read.
+ *   · HAND-ENTERED (`programScheduleBlockId` NULL). The note that was typed,
+ *     trimmed at its ends, when it has anything visible in it; otherwise the
+ *     tag, then the generic label. The admin forms require a note, so in
+ *     practice a hand-entered block prints its note and the tag is only a
+ *     fallback.
+ *
+ * The test is `!== null`, so a row that somehow arrives without the column
+ * is treated as program-made and its reason is withheld — it fails closed.
+ *
+ * Pure, and it takes only the six columns it reads, so every branch is pinned
+ * in display-schedule.test.ts without a database.
+ */
+export function resolveDisplayBlockLabel(
+  row: Pick<
+    DisplayScheduleRows["blocks"][number],
+    | "programScheduleBlockId"
+    | "reason"
+    | "programName"
+    | "programDisplayName"
+    | "tagName"
+    | "tagDisplayName"
+  >,
+): string {
+  if (row.programScheduleBlockId !== null) {
+    // Short form first, then the full program name, then the tag, then the
+    // generic fallback. The `??` chain — not `||` — so a program deliberately
+    // given an empty-string short name is not silently skipped over; an empty
+    // label is a data problem worth seeing on the wall rather than one to
+    // paper over here.
+    // Order matters. REAL OCCUPANCY WINS over the cosmetic tag: if a
+    // scheduled program owns the slot, that is what the slot IS, and a tag
+    // someone also set cannot overrule it.
+    return (
+      row.programDisplayName ??
+      row.programName ??
+      row.tagDisplayName ??
+      row.tagName ??
+      DISPLAY_BLOCKED_LABEL
+    );
+  }
+
+  const note = row.reason.trim();
+  // The test only decides whether there is anything to print; what is printed
+  // is the note itself, with nothing taken out of it.
+  if (!NOTHING_VISIBLE.test(note)) return note;
+
+  return row.tagDisplayName ?? row.tagName ?? DISPLAY_BLOCKED_LABEL;
+}
+
+/**
+ * What the page renders. Turns the raw rows into things that are safe to
+ * print: a coach NAME becomes a coach LABEL, and a block's raw columns become
+ * one LABEL. Of a raw block row, only its id, resource, times and that label
+ * survive this function.
  */
 export async function fetchDisplaySchedule(
   win: DisplayWindow,
@@ -311,26 +481,15 @@ export async function fetchDisplaySchedule(
       coachLabel: r.coachName ?? DISPLAY_UNNAMED_COACH_LABEL,
       isGroupSession: r.isGroupSession,
     })),
+    // 🔴 FIELD BY FIELD, NEVER `...r`. The raw row carries `reason` and
+    // `programScheduleBlockId` for every block; spreading it would put both
+    // on the result the page is handed.
     blocks: rows.blocks.map((r) => ({
       id: r.id,
       resourceId: r.resourceId,
       startAt: r.startAt,
       endAt: r.endAt,
-      // Short form first, then the full program name, then the generic
-      // fallback. The `??` chain — not `||` — so a program deliberately given
-      // an empty-string short name is not silently skipped over; an empty
-      // label is a data problem worth seeing on the wall rather than one to
-      // paper over here.
-      // Order matters. REAL OCCUPANCY WINS over the cosmetic tag: if a
-      // scheduled program owns the slot, that is what the slot IS, and a tag
-      // someone also set cannot overrule it. The tag only ever fills the gap
-      // where the answer would otherwise be the generic "Blocked".
-      label:
-        r.programDisplayName ??
-        r.programName ??
-        r.tagDisplayName ??
-        r.tagName ??
-        DISPLAY_BLOCKED_LABEL,
+      label: resolveDisplayBlockLabel(r),
     })),
   };
 }

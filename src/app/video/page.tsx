@@ -25,13 +25,14 @@ import { UnlockForm } from "./_components/unlock-form";
 // contains a password box and nothing else: no resources, no coach names, no
 // times, nothing in the RSC payload to read with View Source.
 //
-// 🔴 AND THIS ROUTE IS PUBLIC BY DEFAULT. There is no middleware in this repo.
-// Together with /display/schedule these are the only two unauthenticated
-// schedule surfaces in the product; every other one sits behind requireRole or
-// requireScheduleAccess. The gate here and the projection in
-// lib/server/display-schedule.ts are the only two things standing between the
-// facility's day and the open internet, and each is only defensible because the
-// other exists.
+// 🔴 AND THIS ROUTE IS PUBLIC BY DEFAULT. Nothing in this repo gates routes
+// centrally: src/proxy.ts only routes by host. Together with /display/schedule
+// these are the only two unauthenticated schedule surfaces in the product;
+// every other one sits behind requireRole or requireScheduleAccess. The gate
+// here and the data layer in lib/server/display-schedule.ts (its projection,
+// its field-by-field mapping and its label rule) are the only two things
+// standing between the facility's day and the open internet, and each is only
+// defensible because the other exists.
 
 export const metadata: Metadata = {
   title: "Facility Schedule",

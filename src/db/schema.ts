@@ -576,7 +576,9 @@ export const sessionRemovalRequests = pgTable(
 //
 // `reason` is required text — surfaces in conflict error messages
 // ("Cage 1 is blocked at this time for: Summer Camp 2026") so the
-// person trying to book knows the situation.
+// person trying to book knows the situation. Since 2026-10-13 it is
+// also printed on the facility TV display, as the label of a block
+// entered by hand (src/lib/server/display-schedule.ts).
 //
 // Index on (resource_id, start_at) for the cross-table overlap
 // check from createSession in C6.
@@ -596,6 +598,11 @@ export const blockedTimes = pgTable(
     // BELOW. Requested 2026-08-30 (Mark's wife via Jacob): when an admin
     // blocks the grid by hand she wants to say WHICH program it is for, so the
     // facility TV board can name the bar instead of reading "Blocked".
+    //
+    // 📌 2026-10-13: the TV now prints a hand-entered block's own note
+    // (`reason` above), by the facility owner's decision. This tag reaches the
+    // wall only when that note is blank, which the admin forms do not allow.
+    // See `resolveDisplayBlockLabel` in src/lib/server/display-schedule.ts.
     //
     // IT MUST NOT REUSE THE OCCUPANCY LINK. `program_schedule_block_id` means
     // "a scheduled program owns this slot" and is load-bearing for coach

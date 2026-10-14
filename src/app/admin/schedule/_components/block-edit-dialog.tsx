@@ -88,7 +88,9 @@ export type BlockEditInitialValues = {
   startAt: Date;
   endAt: Date;
   reason: string;
-  // COSMETIC tag — names the bar on the facility TV board and nothing else.
+  // COSMETIC tag. Since 2026-10-13 the facility TV prints the block's note
+  // (`reason`); this tag is only what the TV falls back to when a note is
+  // blank. It does nothing for scheduling, hours or pay.
   displayProgramId?: string | null;
   // BLOCK-RECUR: set when this block is an occurrence of a recurring series.
   seriesId?: string | null;
@@ -505,7 +507,7 @@ export function BlockEditDialog({
 
           <Field
             label="Reason"
-            hint="Free text — e.g. 'Summer Camp Group 5', 'HVAC repair'."
+            hint="Free text — e.g. 'Summer Camp Group 5', 'HVAC repair'. Shows in the grid and on the facility TV, exactly as typed."
           >
             <input
               type="text"
@@ -519,17 +521,19 @@ export function BlockEditDialog({
 
           {/* Same wording as the create dialog on purpose — this control looks
               like the ones that DO schedule work, so it has to say plainly that
-              it does not. See db/schema.ts on display_program_id. */}
+              it does not. And it must not promise the program's name on the TV:
+              the TV prints the Reason above. See db/schema.ts on
+              display_program_id. */}
           <Field
             label="Program (optional)"
-            hint="Tagging only. The block shows this program's name on the facility TV instead of just 'Blocked'. It does NOT schedule a coach, create hours, or affect anyone's pay."
+            hint="Tagging only. The facility TV shows the Reason above, not this program. It does NOT schedule a coach, create hours, or affect anyone's pay."
           >
             <select
               name="displayProgramId"
               defaultValue={defaults.displayProgramId}
               className={selectStyles}
             >
-              <option value="">No program — shows as &quot;Blocked&quot;</option>
+              <option value="">No program</option>
               {programs.map((prog) => (
                 <option key={prog.id} value={prog.id}>
                   {prog.name}
@@ -831,7 +835,7 @@ function SeriesEditForm({
 
       <Field
         label="Reason"
-        hint="Free text — e.g. 'Summer Camp Group 5', 'HVAC repair'."
+        hint="Free text — e.g. 'Summer Camp Group 5', 'HVAC repair'. Shows in the grid and on the facility TV, exactly as typed."
       >
         <input
           type="text"

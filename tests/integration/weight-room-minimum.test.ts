@@ -37,6 +37,7 @@ import {
 } from "vitest";
 import ExcelJS from "exceljs";
 import { and, eq } from "drizzle-orm";
+import { ZodError } from "zod";
 import { db } from "@/db";
 import {
   auditLog,
@@ -47,6 +48,7 @@ import {
 import { totalFromSnapshot } from "@/lib/billing";
 import { PastRentalImmutableError, WeightRoomMinimumError } from "@/lib/errors";
 import { executeCommitPlan } from "@/lib/server/import-actions";
+import { MAX_DURATION_MESSAGE } from "@/lib/schemas/session";
 import {
   createSessionInternal,
   createSessionsBatchInternal,
@@ -732,6 +734,45 @@ describe("createSessionsBatchInternal — back-to-back weight room slots save as
     expect(together).toBe(apart);
     // $19.00 for the hour: two half-hours at $9.50.
     expect(together).toBe(1900);
+  });
+
+  it("a joined row longer than 16 hours is refused with the schema's own 16-hour error, and nothing is written; two back-to-back half-hours still save as one hour", async () => {
+    // Each slot is exactly 16 hours, so each passes the per-slot cap in the
+    // schema. Joined, they are one 32-hour row, which must be refused the
+    // same way a single 32-hour slot is.
+    const start = at(FUTURE_DAY, "00:00");
+    const HOUR_MS = 3_600_000;
+    const mid = new Date(start.getTime() + 16 * HOUR_MS);
+    const end = new Date(start.getTime() + 32 * HOUR_MS);
+
+    const err = await refusal(() =>
+      createSessionsBatchInternal(fixtures.admin, {
+        coachId: fixtures.coach.id,
+        resourceId: seeded.weightRoom1.id,
+        slots: [
+          { startAt: start, endAt: mid },
+          { startAt: mid, endAt: end },
+        ],
+      }),
+    );
+    expect(err).toBeInstanceOf(ZodError);
+    const issues = (err as ZodError).issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toBe(MAX_DURATION_MESSAGE);
+    expect(issues[0].path[0]).toBe("slots");
+    expect(await allRows()).toHaveLength(0);
+
+    // Control: same weight room, two back-to-back half-hours, one 60-minute row.
+    const inserted = await createSessionsBatchInternal(fixtures.admin, {
+      coachId: fixtures.coach.id,
+      resourceId: seeded.weightRoom1.id,
+      slots: [
+        { startAt: at(FUTURE_DAY, "15:00"), endAt: at(FUTURE_DAY, "15:30") },
+        { startAt: at(FUTURE_DAY, "15:30"), endAt: at(FUTURE_DAY, "16:00") },
+      ],
+    });
+    expect(inserted).toHaveLength(1);
+    expect(minutes(inserted[0])).toBe(60);
   });
 });
 

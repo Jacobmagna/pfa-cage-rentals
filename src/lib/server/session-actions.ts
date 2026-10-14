@@ -33,6 +33,7 @@
 
 import { and, eq, gt, lt, ne } from "drizzle-orm";
 import * as Sentry from "@sentry/nextjs";
+import { ZodError } from "zod";
 import { db } from "@/db";
 import {
   blockedTimes,
@@ -58,6 +59,8 @@ import {
   createSessionBatchSchema,
   createSessionSchema,
   effectiveResourceId,
+  MAX_DURATION_MESSAGE,
+  MAX_DURATION_MS,
   updateSessionSchema,
 } from "@/lib/schemas/session";
 import {
@@ -524,7 +527,8 @@ async function safeRecordCancellation(
  *   2. Resolve each distinct effective resource: existence check +
  *      its own rate, cached in a Map.
  *   3. Join back-to-back weight room slots into rows
- *      (mergeContiguousWeightRoomSlots).
+ *      (mergeContiguousWeightRoomSlots), then hold each joined row to the
+ *      schema's 16-hour cap (same ZodError, same sentence).
  *   4. For each row: the weight room one-hour minimum first; then
  *      cross-check blocked_times AND sessions_billing on ITS OWN
  *      resource, AND every PRIOR row in this same batch that shares the
@@ -601,6 +605,21 @@ export async function createSessionsBatchInternal(
     })),
     (rid) => resourceMap.get(rid)!.resource.type === "weight_room",
   );
+
+  // The 16-hour cap, on the JOINED rows. The schema checked each slot, but
+  // joining happens after it, so two back-to-back 16-hour slots would
+  // otherwise save as one 32-hour row. Refused with the very error the schema
+  // raises for a single slot over the cap (a ZodError with the same
+  // sentence), so every caller's allow-list treats both the same way.
+  // Nothing has been written yet.
+  const overCap = rows.some(
+    (r) => r.endAt.getTime() - r.startAt.getTime() > MAX_DURATION_MS,
+  );
+  if (overCap) {
+    throw new ZodError([
+      { code: "custom", message: MAX_DURATION_MESSAGE, path: ["slots"] },
+    ]);
+  }
 
   // Pre-validate each row against ITS OWN effective resource:
   //   (0) the weight room one-hour minimum, first

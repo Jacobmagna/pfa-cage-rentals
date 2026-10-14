@@ -38,7 +38,15 @@ const sessionBase = z.object(sessionShape);
 // NOT refined here (the DB CHECK is canonical), but a date typo can
 // still produce a huge span; 16h is generous vs the facility window.
 // Zod-only — no DB constraint backs this max.
-const MAX_DURATION_MS = 16 * 60 * 60 * 1000;
+//
+// Exported (the cap and its sentence) for createSessionsBatchInternal, which
+// joins back-to-back weight room slots AFTER this schema has checked each
+// slot, so it holds the joined row to the same cap with the same message;
+// and for createSessionsBatchAction, which shows that one ZodError as a plain
+// sentence.
+export const MAX_DURATION_MS = 16 * 60 * 60 * 1000;
+export const MAX_DURATION_MESSAGE =
+  "That span is over 16 hours — check the start/end (did the date slip?)";
 const maxDur = (v: { startAt: Date; endAt: Date }) =>
   v.endAt.getTime() - v.startAt.getTime() <= MAX_DURATION_MS;
 // Update/partial case: no-op unless BOTH bounds are present.
@@ -46,7 +54,7 @@ const maxDurPartial = (v: { startAt?: Date; endAt?: Date }) =>
   !(v.startAt && v.endAt) ||
   v.endAt.getTime() - v.startAt.getTime() <= MAX_DURATION_MS;
 const maxDurError = {
-  message: "That span is over 16 hours — check the start/end (did the date slip?)",
+  message: MAX_DURATION_MESSAGE,
   path: ["endAt"],
 };
 

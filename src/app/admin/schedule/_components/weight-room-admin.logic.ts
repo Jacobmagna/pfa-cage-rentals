@@ -20,6 +20,7 @@ import {
   formatRentalLength,
   isBelowWeightRoomMinimum,
 } from "@/lib/weight-room-minimum";
+import type { ResourceType } from "@/lib/billing";
 import { SCHEDULE_GRID_LAST_HOUR } from "@/lib/schedule-grid-utils";
 import { formatPfaTime12h, pfaWallClockAt } from "@/lib/timezone";
 
@@ -79,16 +80,26 @@ export function weightRoomRangeStatus(
  * A drag keeps the rental's length. Dropped on a weight room, a rental under
  * an hour is refused before anything is sent, with this message. `null` means
  * the move may go to the server (which still checks overlaps and blocks).
+ *
+ * `sourceType` is the type of the spot the rental is dragged FROM. Only a
+ * weight room rental gets the advice to open it and make it an hour first:
+ * for a cage or bullpen rental that advice would double a cage charge, so it
+ * is refused without advice. A source the grid cannot find gets the same
+ * no-advice sentence.
  */
 export function weightRoomMoveRefusal(args: {
   targetIsWeightRoom: boolean;
+  sourceType: ResourceType | undefined;
   startAt: Date;
   endAt: Date;
 }): string | null {
   if (!args.targetIsWeightRoom) return null;
   if (!isBelowWeightRoomMinimum(args.startAt, args.endAt)) return null;
   const length = formatRentalLength(minutesBetween(args.startAt, args.endAt));
-  return `Weight room rentals are one hour minimum. This rental is ${length}, so it can't be moved there. Open it and make it at least 1 hour first.`;
+  if (args.sourceType === "weight_room") {
+    return `Weight room rentals are one hour minimum. This rental is ${length}, so it can't be moved there. Open it and make it at least 1 hour first.`;
+  }
+  return `Weight room rentals are one hour minimum. This rental is ${length}, so it can't be moved onto a weight room.`;
 }
 
 /**

@@ -435,6 +435,7 @@ export function ScheduleGrid({
       targetIsWeightRoom:
         resources.find((r) => r.id === dropData.resourceId)?.type ===
         "weight_room",
+      sourceType: resources.find((r) => r.id === oldResourceId)?.type,
       startAt: oldStart,
       endAt: oldEnd,
     });

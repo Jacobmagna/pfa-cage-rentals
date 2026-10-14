@@ -68,22 +68,27 @@ describe("weightRoomRangeStatus (the admin create dialogs, weight room only)", (
 });
 
 describe("weightRoomMoveRefusal (drag and drop on both grids)", () => {
-  it("refuses a 30-minute rental dropped on a weight room, naming its length", () => {
+  const FROM_WEIGHT_ROOM =
+    "Weight room rentals are one hour minimum. This rental is 30 min, so it can't be moved there. Open it and make it at least 1 hour first.";
+  const FROM_CAGE_OR_BULLPEN =
+    "Weight room rentals are one hour minimum. This rental is 30 min, so it can't be moved onto a weight room.";
+
+  it("a 30-minute WEIGHT ROOM rental dropped on a weight room: refused, naming its length, with the advice to make it an hour", () => {
     expect(
       weightRoomMoveRefusal({
         targetIsWeightRoom: true,
+        sourceType: "weight_room",
         startAt: at(15),
         endAt: at(15, 30),
       }),
-    ).toBe(
-      "Weight room rentals are one hour minimum. This rental is 30 min, so it can't be moved there. Open it and make it at least 1 hour first.",
-    );
+    ).toBe(FROM_WEIGHT_ROOM);
   });
 
   it("names any length under an hour (45 min)", () => {
     expect(
       weightRoomMoveRefusal({
         targetIsWeightRoom: true,
+        sourceType: "weight_room",
         startAt: at(15),
         endAt: at(15, 45),
       }),
@@ -92,20 +97,59 @@ describe("weightRoomMoveRefusal (drag and drop on both grids)", () => {
     );
   });
 
-  it("lets exactly one hour onto a weight room", () => {
+  it("a 30-minute CAGE rental dropped on a weight room: refused, with no advice to make it longer", () => {
     expect(
       weightRoomMoveRefusal({
         targetIsWeightRoom: true,
+        sourceType: "cage",
         startAt: at(15),
-        endAt: at(16),
+        endAt: at(15, 30),
       }),
-    ).toBeNull();
+    ).toBe(FROM_CAGE_OR_BULLPEN);
+  });
+
+  it("a 30-minute BULLPEN rental dropped on a weight room: the same, no advice", () => {
+    expect(
+      weightRoomMoveRefusal({
+        targetIsWeightRoom: true,
+        sourceType: "bullpen",
+        startAt: at(15),
+        endAt: at(15, 30),
+      }),
+    ).toBe(FROM_CAGE_OR_BULLPEN);
+  });
+
+  it("a 45-minute cage rental names its length too", () => {
+    expect(
+      weightRoomMoveRefusal({
+        targetIsWeightRoom: true,
+        sourceType: "cage",
+        startAt: at(15),
+        endAt: at(15, 45),
+      }),
+    ).toBe(
+      "Weight room rentals are one hour minimum. This rental is 45 min, so it can't be moved onto a weight room.",
+    );
+  });
+
+  it("lets exactly one hour onto a weight room, from any kind of spot", () => {
+    for (const sourceType of ["weight_room", "cage", "bullpen"] as const) {
+      expect(
+        weightRoomMoveRefusal({
+          targetIsWeightRoom: true,
+          sourceType,
+          startAt: at(15),
+          endAt: at(16),
+        }),
+      ).toBeNull();
+    }
   });
 
   it("lets 1 hr 30 min onto a weight room", () => {
     expect(
       weightRoomMoveRefusal({
         targetIsWeightRoom: true,
+        sourceType: "weight_room",
         startAt: at(15),
         endAt: at(16, 30),
       }),
@@ -113,13 +157,16 @@ describe("weightRoomMoveRefusal (drag and drop on both grids)", () => {
   });
 
   it("never refuses a drop on a cage or bullpen, however short", () => {
-    expect(
-      weightRoomMoveRefusal({
-        targetIsWeightRoom: false,
-        startAt: at(15),
-        endAt: at(15, 30),
-      }),
-    ).toBeNull();
+    for (const sourceType of ["weight_room", "cage", "bullpen"] as const) {
+      expect(
+        weightRoomMoveRefusal({
+          targetIsWeightRoom: false,
+          sourceType,
+          startAt: at(15),
+          endAt: at(15, 30),
+        }),
+      ).toBeNull();
+    }
   });
 });
 

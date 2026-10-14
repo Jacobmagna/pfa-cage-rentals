@@ -1486,6 +1486,31 @@ describe("W5 — create: an admin may enter a weight room rental under an hour o
     expect(await allRows()).toHaveLength(0);
   });
 
+  it("through the coach action (logOwnSession): a signed-in coach booking a PAST 30 minutes for themselves is refused with the one-hour error; a past hour saves", async () => {
+    mockAsCoach();
+    const { logOwnSession } = await import("@/app/coach/sessions/actions");
+
+    const err = await refusal(() =>
+      logOwnSession({
+        resourceId: seeded.weightRoom1.id,
+        startAt: at(PAST_DAY, "15:00"),
+        endAt: at(PAST_DAY, "15:30"),
+      }),
+    );
+    expectMinimumRefusal(err, "create", seeded.weightRoom1.name);
+    expect(await allRows()).toHaveLength(0);
+
+    // Control: the same coach, the same past day, an hour. Being in the past
+    // is not what refused the half hour; its length was.
+    const saved = await logOwnSession({
+      resourceId: seeded.weightRoom1.id,
+      startAt: at(PAST_DAY, "15:00"),
+      endAt: at(PAST_DAY, "16:00"),
+    });
+    expect(saved.coachId).toBe(fixtures.coach.id);
+    expect(minutes(saved)).toBe(60);
+  });
+
   it("through the admin create form: the signed-in admin's past 30 minutes saves; the signed-in Schedule Manager's is refused as a message", async () => {
     const { createSessionFormAction } = await import(
       "@/app/admin/sessions/form-actions"

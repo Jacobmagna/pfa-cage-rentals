@@ -12,7 +12,7 @@
 // Every text assertion is scoped to the element it is about: an alert box,
 // a button, or a paragraph.
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -281,6 +281,37 @@ for (const dialog of CREATE_DIALOGS) {
       const html = dialog.render(WR.id, "15:30", "15:00", PAST_DAY, "admin");
       expect(alerts(html)).toEqual([REFUSAL]);
       expect(submitButton(html).disabled).toBe(true);
+    });
+  });
+
+  // The dialog judges the waiver against the browser's clock, not a fixed
+  // date. (While it stays open the clock is re-read every 30 s; that ticker
+  // is tested in src/app/_components/ticking-now.test.ts and in the live QA.)
+  describe(`${dialog.label}: weight room rental in progress vs just over (W5, the browser's clock)`, () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("admin, 2:00-2:30 PM opened at 2:20 PM that day: still in progress, refused", () => {
+      vi.useFakeTimers({ now: at("14:20", PAST_DAY) });
+      const html = dialog.render(WR.id, "14:00", "14:30", PAST_DAY, "admin");
+      expect(alerts(html)).toEqual([REFUSAL]);
+      expect(submitButton(html).disabled).toBe(true);
+    });
+
+    it("admin, the same range opened at 2:31 PM: over, so 30 min is allowed", () => {
+      vi.useFakeTimers({ now: at("14:31", PAST_DAY) });
+      const html = dialog.render(WR.id, "14:00", "14:30", PAST_DAY, "admin");
+      expect(alerts(html)).toEqual([]);
+      expect(willCreateLines(html)).toEqual(["Will create 1 session of 30 min."]);
+      expect(submitButton(html).disabled).toBe(false);
+    });
+
+    it("admin, the same range opened at exactly 2:30 PM: an end at now counts as over", () => {
+      vi.useFakeTimers({ now: at("14:30", PAST_DAY) });
+      const html = dialog.render(WR.id, "14:00", "14:30", PAST_DAY, "admin");
+      expect(alerts(html)).toEqual([]);
+      expect(submitButton(html).disabled).toBe(false);
     });
   });
 

@@ -19,6 +19,7 @@ import {
 } from "@/app/admin/sessions/form-actions";
 import { BATCH_CREATE_FALLBACK } from "@/app/admin/sessions/batch-create-copy";
 import { useCloseAfterOkAction } from "@/app/_components/close-after-save";
+import { useTickingNow } from "@/app/_components/ticking-now";
 import type {
   CoachOption,
   ResourceOption,
@@ -396,6 +397,7 @@ export function ScheduleCreateDialog({
             resources={resources}
             onCancel={onClose}
             viewerRole={viewerRole}
+            open={open}
           />
         ) : (
           <BlockTab
@@ -449,6 +451,7 @@ function SessionTab({
   resources,
   onCancel,
   viewerRole,
+  open,
 }: {
   action: (formData: FormData) => void;
   state: SessionActionResult;
@@ -465,10 +468,14 @@ function SessionTab({
   resources: ResourceOption[];
   onCancel: () => void;
   viewerRole: "admin" | "coach";
+  /** Whether the dialog is open: the clock only ticks while it is. */
+  open: boolean;
 }) {
-  // The browser's "now", read once when the tab mounts (each dialog opening
-  // mounts it fresh). Only used for the admin past-rental weight room waiver.
-  const [openedAt] = useState(() => new Date());
+  // The browser's "now", read when the tab mounts (each dialog opening mounts
+  // it fresh) and re-read every 30 s while an admin has it open, so a range
+  // whose end passes while the dialog is open stops being refused. Only used
+  // for the admin past-rental weight room waiver; the server decides.
+  const browserNow = useTickingNow(open && viewerRole === "admin");
 
   // Controlled live state for fields that multi-slot math reads from.
   // Re-seeded whenever defaults change (new prefill or post-error).
@@ -550,7 +557,7 @@ function SessionTab({
   const weightRoom = isWeightRoom
     ? weightRoomRangeStatus(rangeStart, rangeEnd, {
         role: viewerRole,
-        now: openedAt,
+        now: browserNow,
       })
     : null;
   const weightRoomTooShort = weightRoom?.kind === "too-short";

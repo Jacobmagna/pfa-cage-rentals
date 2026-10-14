@@ -20,6 +20,7 @@ import {
 } from "../form-actions";
 import { BATCH_CREATE_FALLBACK } from "@/app/admin/sessions/batch-create-copy";
 import { useCloseAfterOkAction } from "@/app/_components/close-after-save";
+import { useTickingNow } from "@/app/_components/ticking-now";
 import type { CoachOption, ResourceOption } from "./sessions-client";
 import { TimeSelect } from "@/app/_components/time-select";
 import { DateInput } from "@/app/_components/date-input";
@@ -101,9 +102,13 @@ export function SessionFormDialog({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const router = useRouter();
-  // The browser's "now", read once per opening (each opening mounts a fresh
-  // dialog). Only used for the admin past-rental weight room waiver.
-  const [openedAt] = useState(() => new Date());
+  // The browser's "now", read when the dialog mounts (each opening mounts a
+  // fresh dialog) and re-read every 30 s while an admin creates in it, so a
+  // range whose end passes while the dialog is open stops being refused. Only
+  // used for the admin past-rental weight room waiver; the server decides.
+  const browserNow = useTickingNow(
+    open && mode === "create" && viewerRole === "admin",
+  );
   const action =
     mode === "edit" ? updateSessionFormAction : createSessionFormAction;
   // Single-rental path: the dialog closes from inside the action, right after
@@ -279,7 +284,7 @@ export function SessionFormDialog({
   const weightRoom = isWeightRoomCreate
     ? weightRoomRangeStatus(rangeStart, rangeEnd, {
         role: viewerRole,
-        now: openedAt,
+        now: browserNow,
       })
     : null;
   const weightRoomTooShort = weightRoom?.kind === "too-short";

@@ -160,6 +160,22 @@ describe("one-tap panel, weight room", () => {
     expect(labels).toContain("Cancel");
   });
 
+  it("nothing free from the tapped slot: the header shows only the start time, not \"3:00 PM – 3:00 PM\"", () => {
+    const html = oneTap(WR, 0, { prevSlotFree: true, nextToOwnRental: true });
+    // Paragraphs: "Book a slot", the resource, then the time line.
+    expect(paragraphs(html).slice(0, 3)).toEqual([
+      "Book a slot",
+      "Weight Room 1",
+      "3:00 PM",
+    ]);
+    expect(html).not.toContain("3:00 PM – 3:00 PM");
+
+    // Control: with 30 minutes free the header is still a range.
+    expect(paragraphs(oneTap(WR, 30))[2]).toBe("3:00 PM – 3:30 PM");
+    // Cages unchanged: a range.
+    expect(paragraphs(oneTap(CAGE, 30))[2]).toBe("3:00 PM – 3:30 PM");
+  });
+
   it("two hours free: opens at 1 hr, no 30 min choice, no split, no group checkbox", () => {
     const html = oneTap(WR, 120);
     expect(alerts(html)).toEqual([]);

@@ -129,6 +129,8 @@ export function CageSlotBooking({
   // Less than an hour free from here: a weight room refuses instead.
   const weightRoomRefused =
     isWeightRoom && maxDurationMin < WEIGHT_ROOM_MINIMUM_MINUTES;
+  // Nothing free at all from here (a refresh showed the slot taken).
+  const nothingFreeHere = isWeightRoom && maxDurationMin <= 0;
   // Clamp a typed/preset length to what this resource allows.
   const clampFor = (candidate: number) =>
     isWeightRoom
@@ -284,7 +286,12 @@ export function CageSlotBooking({
           </p>
           <p className="text-sm font-semibold text-fg">{resource.name}</p>
           <p className="text-sm text-fg-muted">
-            {formatPfaTime12h(startAt)} – {formatPfaTime12h(endAt)}
+            {/* A weight room with nothing free from here (the "is no longer
+                free" refusal) has no length to show: just the start time,
+                never "3:00 PM – 3:00 PM". */}
+            {nothingFreeHere
+              ? formatPfaTime12h(startAt)
+              : `${formatPfaTime12h(startAt)} – ${formatPfaTime12h(endAt)}`}
           </p>
         </div>
         <button

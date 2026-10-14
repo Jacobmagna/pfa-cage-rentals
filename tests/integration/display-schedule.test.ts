@@ -3,8 +3,9 @@
 // branch.
 //
 // 🔴 THE FIRST DESCRIBE BLOCK IS THE POINT OF THIS FILE. The display page has
-// no auth gate, and this repo has no middleware, so the projection and the
-// label rule in display-schedule.ts are the only things standing between a
+// no auth gate, and nothing in this repo gates routes centrally (src/proxy.ts
+// only routes by host), so the projection and the label rule in
+// display-schedule.ts are the only things standing between a
 // free-text field somebody typed and the public internet. These tests seed
 // UNIQUE SENTINEL STRINGS into the free-text fields and assert on where each
 // one does and does not appear in the serialized result — rather than

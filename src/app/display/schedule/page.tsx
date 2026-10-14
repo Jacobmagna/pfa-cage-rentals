@@ -12,19 +12,20 @@ import { DisplayBoard } from "./_components/display-board";
 // lib/server/display-schedule.ts, so what that file lets through is what
 // either entrance shows. Since 2026-10-13 that includes the note typed on a
 // hand-entered block: anyone holding this URL can read those notes, with no
-// login. This route is KEPT rather than replaced
-// because it needs no cookie and no typing, which makes it the reliable path
-// for QA harnesses and the fallback if a TV browser will not hold state.
+// login. This route is KEPT rather than replaced because it needs no cookie
+// and no typing, which makes it the reliable path for QA harnesses and the
+// fallback if a TV browser will not hold state.
 // ▶ The human-facing one is /video. See lib/display/access.ts for why.
 //
 // 🔴 THIS AND /video ARE THE ONLY UNAUTHENTICATED SCHEDULE SURFACES IN THE
 // PRODUCT. Every other one (/admin/schedule, /coach/schedule, /master/schedule,
 // /admin/hour-log/schedule) sits behind requireRole / requireScheduleAccess.
-// There is no middleware in this repo, so a route is public by default and
-// nothing structural would stop this one leaking — the two things that do are
-// the token check below and the data layer in lib/server/display-schedule.ts
-// (its projection and its label rule). Neither is optional; each is only
-// defensible because the other exists.
+// Nothing in this repo gates routes centrally (src/proxy.ts only routes by
+// host), so a route is public by default and nothing structural would stop
+// this one leaking — the two things that do are the token check below and the
+// data layer in lib/server/display-schedule.ts (its projection and its label
+// rule). Neither is optional; each is only defensible because the other
+// exists.
 //
 // WHY A TOKEN AND NOT A LOGIN: a session EXPIRES. One that dies at 2 AM leaves
 // a login screen on the facility wall all morning, which is the exact "nobody

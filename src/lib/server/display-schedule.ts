@@ -3,9 +3,10 @@
 // 🔴🔴 THIS MODULE IS THE PII BOUNDARY OF THE ENTIRE FEATURE. Read this
 // header before changing a single select.
 //
-// The display page is UNAUTHENTICATED. There is no middleware in this repo —
-// every other schedule surface is gated by a `requireRole` / `requireScheduleAccess`
-// call inside its own server component, and this one deliberately has no such
+// The display page is UNAUTHENTICATED. No middleware gates it — the one this
+// repo has, src/proxy.ts, routes by host and does no auth. Every other
+// schedule surface is gated by a `requireRole` / `requireScheduleAccess` call
+// inside its own server component, and this one deliberately has no such
 // call. So nothing structural stops a field from reaching the public internet;
 // the only things that stop it are the projection list below and, for the one
 // free-text column that IS selected, `resolveDisplayBlockLabel`.

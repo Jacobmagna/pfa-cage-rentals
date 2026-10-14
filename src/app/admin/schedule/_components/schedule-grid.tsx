@@ -145,6 +145,15 @@ export function ScheduleGrid({
   const [dragError, setDragError] = useState<string | null>(null);
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const [paint, setPaint] = useState<PaintState>({ kind: "idle" });
+  // Bumped on EVERY create opening (a click on an empty cell, or a finished
+  // paint) and used as the create dialog's `key`, so each opening mounts a
+  // brand-new dialog. The dialog's useActionState keeps the last save result
+  // while it stays mounted, and its Session tab prefers a refused save's
+  // typed values over the new cell's prefill; without a fresh mount, a
+  // refused create on cell A showed A's error and A's typed values when cell
+  // B was clicked next. A refused save inside ONE opening still keeps the
+  // dialog open with what the admin typed.
+  const [createOpening, setCreateOpening] = useState(0);
   const [, startTransition] = useTransition();
 
   // Holds the pointerdown anchor between pointerdown and the first
@@ -323,6 +332,7 @@ export function ScheduleGrid({
           FIRST_HOUR + Math.floor(endSlotBoundary / 2),
           (endSlotBoundary % 2) * 30,
         );
+        setCreateOpening((n) => n + 1);
         setDialog({
           kind: "create",
           prefill: { resourceId: current.resourceId, startAt, endAt },
@@ -357,6 +367,7 @@ export function ScheduleGrid({
       slotCount: SLOTS,
     });
     const endAt = new Date(startAt.getTime() + minutes * 60_000);
+    setCreateOpening((n) => n + 1);
     setDialog({
       kind: "create",
       prefill: { resourceId: resource.id, startAt, endAt },
@@ -707,6 +718,7 @@ export function ScheduleGrid({
         </div>
 
         <ScheduleCreateDialog
+          key={createOpening}
           open={dialog.kind === "create"}
           onClose={close}
           coaches={coaches}

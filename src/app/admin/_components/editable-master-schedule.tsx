@@ -149,6 +149,15 @@ export function EditableMasterSchedule({
 }): React.JSX.Element {
   const router = useRouter();
   const [dialog, setDialog] = useState<DialogState>({ kind: "closed" });
+  // Bumped on EVERY cage create opening (a click on an empty cage cell, or a
+  // finished paint on a cage row) and used as the create dialog's `key`, so
+  // each opening mounts a brand-new dialog. The dialog's useActionState keeps
+  // the last save result while it stays mounted, and its Session tab prefers
+  // a refused save's typed values over the new cell's prefill; without a
+  // fresh mount, a refused create on cell A showed A's error and A's typed
+  // values when cell B was clicked next. A refused save inside ONE opening
+  // still keeps the dialog open with what the admin typed.
+  const [cageCreateOpening, setCageCreateOpening] = useState(0);
 
   // #15B drag-to-MOVE. A SINGLE DndContext spans BOTH grid sections even
   // though they have different granularities (cage = 30-min, program = 15-min)
@@ -352,6 +361,7 @@ export function EditableMasterSchedule({
       const startAt = slotStartAt(date, minSlot);
       // maxSlot is inclusive → block runs through the END of slot maxSlot.
       const endAt = slotStartAt(date, maxSlot + 1);
+      setCageCreateOpening((n) => n + 1);
       setDialog({
         kind: "cage",
         prefill: { resourceId: rowId, startAt, endAt },
@@ -605,6 +615,7 @@ export function EditableMasterSchedule({
       });
       const startAt = slotStartAt(selectedDate, slotIndex);
       const endAt = slotStartAt(selectedDate, slotIndex + minutes / 30);
+      setCageCreateOpening((n) => n + 1);
       setDialog({
         kind: "cage",
         prefill: { resourceId: rowId, startAt, endAt },
@@ -720,6 +731,7 @@ export function EditableMasterSchedule({
       </DndContext>
 
       <ScheduleCreateDialog
+        key={cageCreateOpening}
         open={dialog.kind === "cage"}
         onClose={close}
         coaches={cageCoaches}

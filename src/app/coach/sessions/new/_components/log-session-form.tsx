@@ -226,13 +226,13 @@ export function LogSessionForm({
   // default range is a multi-slot span and the notes editor is
   // collapsed (unmounted) by default, so slots would otherwise be
   // empty on load and the batch submit guard would block.
-  const [prevRangeSig, setPrevRangeSig] = useState(" init");
+  const [prevRangeSig, setPrevRangeSig] = useState("\0init");
   if (rangeSig !== prevRangeSig) {
     setPrevRangeSig(rangeSig);
     setSlots((prior) =>
       deriveSlots(rangeStart, rangeEnd, slotLengthMinutes, prior),
     );
-    if (prevRangeSig !== " init") setRevealNotes(false);
+    if (prevRangeSig !== "\0init") setRevealNotes(false);
   }
 
   const submitLabel = (() => {

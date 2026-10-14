@@ -143,6 +143,14 @@ test("coach logs a rental, sees it in history, then deletes it", async ({
     .first()
     .fill(`${mm}/${dd}/${yyyy}`);
 
+  // 4b. Set the times explicitly. The default range follows the clock
+  // (start = now rounded down to the half hour, end = start + 1 hr capped
+  // at 10:00 PM), so between 9:30 and 10:00 PM Pacific it is only 30 min
+  // and the "1 hr" row check below fails. A clock-relative fixture is a
+  // time bomb (maintenance/LESSONS.md rule 58).
+  await page.locator("select[name=startTime]").selectOption("10:00");
+  await page.locator("select[name=endTime]").selectOption("11:00");
+
   // 5. Pick the cage, 6. fill the note, 7. submit.
   await page
     .locator("select[name=resourceId]")

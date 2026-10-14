@@ -95,10 +95,12 @@ function buildSessionInput(formData: FormData) {
   };
 }
 
-function translateError(
-  err: unknown,
-  values: SubmittedFormValues,
-): ActionResult {
+// The allow-list: the typed errors a user can act on, turned into the code
+// and sentence the screen shows. Anything else is rethrown — Next.js error
+// boundary + Sentry handle it ("this is a bug, not a user-correctable
+// conflict"). Shared by the form actions and moveSessionAction so there is
+// one list.
+function translateKnownError(err: unknown): { code: string; message: string } {
   if (
     err instanceof SessionOverlapError ||
     err instanceof BlockedTimeError ||
@@ -106,27 +108,26 @@ function translateError(
     err instanceof SessionNotFoundError ||
     err instanceof ResourceNotFoundError
   ) {
-    return {
-      ok: false,
-      error: { code: err.code, message: err.message },
-      values,
-    };
+    return { code: err.code, message: err.message };
   }
   if (err instanceof ZodError) {
     const first = err.issues[0];
     return {
-      ok: false,
-      error: {
-        code: "VALIDATION",
-        message: first
-          ? `${first.path.join(".")}: ${first.message}`
-          : "Invalid input",
-      },
-      values,
+      code: "VALIDATION",
+      message: first
+        ? `${first.path.join(".")}: ${first.message}`
+        : "Invalid input",
     };
   }
   // Unknown — let Next.js error boundary + Sentry handle it.
   throw err;
+}
+
+function translateError(
+  err: unknown,
+  values: SubmittedFormValues,
+): ActionResult {
+  return { ok: false, error: translateKnownError(err), values };
 }
 
 export async function createSessionFormAction(
@@ -160,6 +161,40 @@ export async function updateSessionFormAction(
     return { ok: true };
   } catch (err) {
     return translateError(err, values);
+  }
+}
+
+export type MoveSessionResult =
+  | { ok: true }
+  | { ok: false; error: { code: string; message: string } };
+
+// Drag-and-drop move on the two admin grids (the day grid, also mounted at
+// /master/schedule, and the admin Home master schedule). Same write and same
+// authorization as before — it calls the very same public updateSession
+// (requireScheduleAccess, then updateSessionInternal) with only the new
+// resource, start and end. The difference is that a refusal comes back as a
+// RESULT, not a throw: a production build strips the message from a thrown
+// server-action error, so the grid could only ever show the framework's
+// "An error occurred in the Server Components render…" sentence. A known
+// refusal (overlap, block, weight room minimum, …) now reaches the screen as
+// its real sentence. Anything else, including the auth redirect, still throws.
+export async function moveSessionAction(
+  id: string,
+  input: {
+    resourceId: string;
+    startAt: Date | string;
+    endAt: Date | string;
+  },
+): Promise<MoveSessionResult> {
+  try {
+    await updateSession(id, {
+      resourceId: input?.resourceId,
+      startAt: input?.startAt,
+      endAt: input?.endAt,
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: translateKnownError(err) };
   }
 }
 

@@ -4,8 +4,9 @@
 //   - Click empty cell → unified create dialog (Session/Block tabs)
 //   - Click session → edit dialog
 //   - Click block → confirm + delete
-//   - Drag session block → updateSession with new (resource, startAt)
-//     preserving duration. Touch-friendly via @dnd-kit's TouchSensor.
+//   - Drag session block → moveSessionAction (updateSession) with new
+//     (resource, startAt) preserving duration. Touch-friendly via
+//     @dnd-kit's TouchSensor.
 //
 // Rows = resources, Columns = 30-min slots 8 AM – 10 PM. Sessions
 // and blocks render via CSS Grid `grid-column: start / span N` so a
@@ -29,7 +30,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import type { ResourceType } from "@/lib/billing";
-import { updateSession } from "@/app/admin/sessions/actions";
+import { moveSessionAction } from "@/app/admin/sessions/form-actions";
 import { SessionFormDialog } from "@/app/admin/sessions/_components/session-form-dialog";
 import type {
   CoachOption,
@@ -41,7 +42,10 @@ import {
 } from "./schedule-create-dialog";
 import { pfaHour, pfaMinute, pfaWallClockAt } from "@/lib/timezone";
 import { GroupMark } from "@/app/_components/group-pill";
-import { emptyCellPrefillMinutes } from "./weight-room-admin.logic";
+import {
+  emptyCellPrefillMinutes,
+  weightRoomMoveRefusal,
+} from "./weight-room-admin.logic";
 
 const FIRST_HOUR = 8;
 const LAST_HOUR = 22;
@@ -397,26 +401,48 @@ export function ScheduleGrid({
       return;
     }
 
+    // The visual snaps back automatically on every refusal below because
+    // nothing is revalidated and the dnd-kit transform clears on dragEnd.
+    const showDragError = (message: string) => {
+      setDragError(message);
+      // Auto-dismiss after 6 seconds.
+      setTimeout(() => setDragError(null), 6_000);
+    };
+
+    // Weight room one-hour minimum, decided HERE before anything is sent: a
+    // drag keeps the rental's length, so a rental under an hour cannot land
+    // on a weight room. The server guard stays as the backstop.
+    const weightRoomRefusal = weightRoomMoveRefusal({
+      targetIsWeightRoom:
+        resources.find((r) => r.id === dropData.resourceId)?.type ===
+        "weight_room",
+      startAt: oldStart,
+      endAt: oldEnd,
+    });
+    if (weightRoomRefusal) {
+      showDragError(weightRoomRefusal);
+      return;
+    }
+
     startTransition(async () => {
       try {
-        await updateSession(sessionData.sessionId, {
+        const result = await moveSessionAction(sessionData.sessionId, {
           resourceId: dropData.resourceId,
           startAt: newStart,
           endAt: newEnd,
         });
-        setDragError(null);
-      } catch (err) {
-        // SessionOverlapError / BlockedTimeError / others — surface
-        // the friendly message; the visual snaps back automatically
-        // because revalidatePath doesn't re-render on error and the
-        // dnd-kit transform clears on dragEnd.
-        const message =
-          err instanceof Error && err.message
-            ? err.message
-            : "Couldn't move that session. Try a different slot.";
-        setDragError(message);
-        // Auto-dismiss after 6 seconds.
-        setTimeout(() => setDragError(null), 6_000);
+        if (result.ok) {
+          setDragError(null);
+        } else {
+          // A known refusal (overlap, block, weight room minimum, …) comes
+          // back as a result with its real sentence.
+          showDragError(result.error.message);
+        }
+      } catch {
+        // Network, or an unknown server error. Never print err.message: a
+        // production build replaces it with the framework's "An error
+        // occurred in the Server Components render…" sentence.
+        showDragError("Couldn't move that session. Try a different slot.");
       }
     });
   };

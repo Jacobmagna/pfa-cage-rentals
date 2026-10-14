@@ -38,7 +38,7 @@ import {
   type PaintOverlay,
   type PaintPointerDown,
 } from "./master-schedule-grid";
-import { updateSession } from "@/app/admin/sessions/actions";
+import { moveSessionAction } from "@/app/admin/sessions/form-actions";
 import { updateProgramScheduleBlock } from "@/app/admin/hour-log/schedule/actions";
 import {
   ScheduleCreateDialog,
@@ -74,7 +74,10 @@ import {
 } from "@/lib/schedule-grid-utils";
 import { assignLanes } from "@/lib/schedule-lanes";
 import { formatPfaTime } from "@/lib/timezone";
-import { emptyCellPrefillMinutes } from "@/app/admin/schedule/_components/weight-room-admin.logic";
+import {
+  emptyCellPrefillMinutes,
+  weightRoomMoveRefusal,
+} from "@/app/admin/schedule/_components/weight-room-admin.logic";
 
 // Drag id prefix (e.g. "session-…" / "program-block-…") → bare entity id, so
 // the grid's draggingId prop (which excludes the dragged item's own footprint
@@ -494,20 +497,40 @@ export function EditableMasterSchedule({
       ) {
         return;
       }
+      // Weight room one-hour minimum, decided HERE before anything is sent:
+      // a drag keeps the rental's length, so a rental under an hour cannot
+      // land on a weight room. The server guard stays as the backstop.
+      const weightRoomRefusal = weightRoomMoveRefusal({
+        targetIsWeightRoom:
+          resources.find((r) => r.id === dropData.resourceId)?.type ===
+          "weight_room",
+        startAt: oldStart,
+        endAt: oldEnd,
+      });
+      if (weightRoomRefusal) {
+        showDragError(weightRoomRefusal);
+        return;
+      }
       startTransition(async () => {
         try {
-          await updateSession(dragData.id, {
+          const result = await moveSessionAction(dragData.id, {
             resourceId: dropData.resourceId,
             startAt: newStart,
             endAt: newEnd,
           });
+          if (!result.ok) {
+            // A known refusal (overlap, block, weight room minimum, …) comes
+            // back as a result with its real sentence.
+            showDragError(result.error.message);
+            return;
+          }
           setDragError(null);
           // The bars render purely from server props; without a refresh the
           // dnd-kit transform clears and the moved bar snaps back to its old
           // server-rendered spot until the 30s AutoRefresh poll. Re-pull now.
           router.refresh();
-        } catch (err) {
-          surfaceDragError(err);
+        } catch {
+          surfaceDragError();
         }
       });
       return;
@@ -534,8 +557,8 @@ export function EditableMasterSchedule({
           // position immediately (the transform clears on dragEnd; without a
           // refresh it snaps back until the 30s AutoRefresh poll).
           router.refresh();
-        } catch (err) {
-          surfaceDragError(err);
+        } catch {
+          surfaceDragError();
         }
       });
       return;
@@ -545,15 +568,19 @@ export function EditableMasterSchedule({
     // the bar snaps back automatically when the dnd-kit transform clears.
   };
 
-  // Friendly, auto-dismissing drag-error toast (snap-back is automatic — a
-  // failed action doesn't revalidate, and the transform clears on dragEnd).
-  const surfaceDragError = (err: unknown) => {
-    const message =
-      err instanceof Error && err.message
-        ? err.message
-        : "Couldn't move that. Try a different slot.";
+  // Auto-dismissing drag-error toast (snap-back is automatic — a failed
+  // action doesn't revalidate, and the transform clears on dragEnd).
+  const showDragError = (message: string) => {
     setDragError(message);
     setTimeout(() => setDragError(null), 6_000);
+  };
+
+  // A THROWN drag error (cage rental or program block): network, or an
+  // unknown server error. Always the friendly fallback, never err.message —
+  // a production build replaces that with the framework's "An error occurred
+  // in the Server Components render…" sentence.
+  const surfaceDragError = () => {
+    showDragError("Couldn't move that. Try a different slot.");
   };
 
   const handleEmptyCellClick: EmptyCellClick = ({

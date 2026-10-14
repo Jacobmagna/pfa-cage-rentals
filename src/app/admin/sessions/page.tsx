@@ -40,7 +40,7 @@ export default async function AdminSessionsPage({
 }: {
   searchParams: RawSearchParams;
 }) {
-  await requireRole("admin");
+  const session = await requireRole("admin");
   const params = await searchParams;
 
   const filters = normalizeFilters(params);
@@ -145,6 +145,7 @@ export default async function AdminSessionsPage({
         resourceOptions={resourceOptions}
         truncated={truncated}
         maxRows={MAX_ROWS}
+        viewerRole={session.user.role}
       />
     </div>
   );

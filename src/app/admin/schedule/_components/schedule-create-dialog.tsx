@@ -203,11 +203,18 @@ export function ScheduleCreateDialog({
   programs,
   prefill,
   defaultTab = "session",
+  viewerRole,
 }: {
   open: boolean;
   onClose: () => void;
   coaches: CoachOption[];
   resources: ResourceOption[];
+  /**
+   * The signed-in user's role, from the server page (a Schedule Manager is
+   * "coach"). Only an admin entering a weight room rental that is already
+   * over is spared the one-hour refusal, as on the server.
+   */
+  viewerRole: "admin" | "coach";
   /** ACTIVE programs only — the Block tab's display-only tag picker. */
   programs: ProgramOption[];
   prefill: CreatePrefill | null;
@@ -388,6 +395,7 @@ export function ScheduleCreateDialog({
             coaches={coaches}
             resources={resources}
             onCancel={onClose}
+            viewerRole={viewerRole}
           />
         ) : (
           <BlockTab
@@ -440,6 +448,7 @@ function SessionTab({
   coaches,
   resources,
   onCancel,
+  viewerRole,
 }: {
   action: (formData: FormData) => void;
   state: SessionActionResult;
@@ -455,7 +464,12 @@ function SessionTab({
   coaches: CoachOption[];
   resources: ResourceOption[];
   onCancel: () => void;
+  viewerRole: "admin" | "coach";
 }) {
+  // The browser's "now", read once when the tab mounts (each dialog opening
+  // mounts it fresh). Only used for the admin past-rental weight room waiver.
+  const [openedAt] = useState(() => new Date());
+
   // Controlled live state for fields that multi-slot math reads from.
   // Re-seeded whenever defaults change (new prefill or post-error).
   const [live, setLive] = useState({
@@ -534,7 +548,10 @@ function SessionTab({
   // A weight room range is one rental whatever its length: never split,
   // never the batch path.
   const weightRoom = isWeightRoom
-    ? weightRoomRangeStatus(rangeStart, rangeEnd)
+    ? weightRoomRangeStatus(rangeStart, rangeEnd, {
+        role: viewerRole,
+        now: openedAt,
+      })
     : null;
   const weightRoomTooShort = weightRoom?.kind === "too-short";
 

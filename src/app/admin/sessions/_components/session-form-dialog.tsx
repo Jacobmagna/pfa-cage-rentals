@@ -84,6 +84,7 @@ export function SessionFormDialog({
   coachOptions,
   resourceOptions,
   initial,
+  viewerRole,
 }: {
   open: boolean;
   mode: "create" | "edit";
@@ -91,9 +92,18 @@ export function SessionFormDialog({
   coachOptions: CoachOption[];
   resourceOptions: ResourceOption[];
   initial?: SessionFormInitialValues;
+  /**
+   * The signed-in user's role, from the server page (a Schedule Manager is
+   * "coach"). Create mode only: an admin entering a weight room rental that
+   * is already over is spared the one-hour refusal, as on the server.
+   */
+  viewerRole: "admin" | "coach";
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const router = useRouter();
+  // The browser's "now", read once per opening (each opening mounts a fresh
+  // dialog). Only used for the admin past-rental weight room waiver.
+  const [openedAt] = useState(() => new Date());
   const action =
     mode === "edit" ? updateSessionFormAction : createSessionFormAction;
   // Single-rental path: the dialog closes from inside the action, right after
@@ -267,7 +277,10 @@ export function SessionFormDialog({
     resourceOptions.find((r) => r.id === live.resourceId)?.type ===
       "weight_room";
   const weightRoom = isWeightRoomCreate
-    ? weightRoomRangeStatus(rangeStart, rangeEnd)
+    ? weightRoomRangeStatus(rangeStart, rangeEnd, {
+        role: viewerRole,
+        now: openedAt,
+      })
     : null;
   const weightRoomTooShort = weightRoom?.kind === "too-short";
   const isMultiSlot = isCreate && !isWeightRoomCreate && slotCount > 1;

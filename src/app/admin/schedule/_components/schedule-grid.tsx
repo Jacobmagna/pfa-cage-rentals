@@ -132,6 +132,7 @@ export function ScheduleGrid({
   coaches,
   programs,
   selectedDate,
+  viewerRole,
 }: {
   resources: ScheduleResource[];
   sessions: ScheduleSession[];
@@ -140,6 +141,13 @@ export function ScheduleGrid({
   /** ACTIVE programs only — the cosmetic tag picker in the Block forms. */
   programs: ProgramOption[];
   selectedDate: Date;
+  /**
+   * The signed-in user's role, from the server page. This grid is also
+   * /master/schedule, where a Schedule Manager (role "coach") works: only an
+   * admin gets the past-rental weight room waiver. The server decides; this
+   * only spares an admin a refusal the server would not make.
+   */
+  viewerRole: "admin" | "coach";
 }) {
   const [dialog, setDialog] = useState<DialogState>({ kind: "closed" });
   const [dragError, setDragError] = useState<string | null>(null);
@@ -430,14 +438,16 @@ export function ScheduleGrid({
 
     // Weight room one-hour minimum, decided HERE before anything is sent: a
     // drag keeps the rental's length, so a rental under an hour cannot land
-    // on a weight room. The server guard stays as the backstop.
+    // on a weight room, unless an admin drops it on a time already over.
+    // The server guard stays as the backstop.
     const weightRoomRefusal = weightRoomMoveRefusal({
       targetIsWeightRoom:
         resources.find((r) => r.id === dropData.resourceId)?.type ===
         "weight_room",
       sourceType: resources.find((r) => r.id === oldResourceId)?.type,
-      startAt: oldStart,
-      endAt: oldEnd,
+      startAt: newStart,
+      endAt: newEnd,
+      viewer: { role: viewerRole, now: new Date() },
     });
     if (weightRoomRefusal) {
       showDragError(weightRoomRefusal);
@@ -729,6 +739,7 @@ export function ScheduleGrid({
           defaultTab={
             dialog.kind === "create" ? dialog.defaultTab ?? "session" : "session"
           }
+          viewerRole={viewerRole}
         />
 
         <SessionFormDialog
@@ -739,6 +750,7 @@ export function ScheduleGrid({
           coachOptions={coaches}
           resourceOptions={sessionResourceOptions}
           initial={editInitial}
+          viewerRole={viewerRole}
         />
 
         <BlockEditDialog

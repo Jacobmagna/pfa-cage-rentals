@@ -129,6 +129,7 @@ export function EditableMasterSchedule({
   programEditById,
   seriesById,
   reconciliation,
+  viewerRole,
 }: {
   resources: MasterResourceRow[];
   sessions: MasterSession[];
@@ -146,6 +147,12 @@ export function EditableMasterSchedule({
   programEditById: Record<string, ProgramBlockEditInitial>;
   seriesById: Record<string, SeriesView>;
   reconciliation: Record<string, BlockReconciliation>;
+  /**
+   * The signed-in user's role, from the server page (admin Home, admin
+   * only today). Only an admin gets the past-rental weight room waiver; the
+   * server decides, this only spares an admin a refusal it would not make.
+   */
+  viewerRole: "admin" | "coach";
 }): React.JSX.Element {
   const router = useRouter();
   const [dialog, setDialog] = useState<DialogState>({ kind: "closed" });
@@ -509,14 +516,16 @@ export function EditableMasterSchedule({
       }
       // Weight room one-hour minimum, decided HERE before anything is sent:
       // a drag keeps the rental's length, so a rental under an hour cannot
-      // land on a weight room. The server guard stays as the backstop.
+      // land on a weight room, unless an admin drops it on a time already
+      // over. The server guard stays as the backstop.
       const weightRoomRefusal = weightRoomMoveRefusal({
         targetIsWeightRoom:
           resources.find((r) => r.id === dropData.resourceId)?.type ===
           "weight_room",
         sourceType: resources.find((r) => r.id === oldResourceId)?.type,
-        startAt: oldStart,
-        endAt: oldEnd,
+        startAt: newStart,
+        endAt: newEnd,
+        viewer: { role: viewerRole, now: new Date() },
       });
       if (weightRoomRefusal) {
         showDragError(weightRoomRefusal);
@@ -740,6 +749,7 @@ export function EditableMasterSchedule({
         resources={cageResources}
         prefill={dialog.kind === "cage" ? dialog.prefill : null}
         defaultTab="session"
+        viewerRole={viewerRole}
       />
 
       <ProgramBlockDialog
@@ -766,6 +776,7 @@ export function EditableMasterSchedule({
         coachOptions={cageCoaches}
         resourceOptions={cageResources}
         initial={editSession ?? undefined}
+        viewerRole={viewerRole}
       />
 
       <BlockEditDialog

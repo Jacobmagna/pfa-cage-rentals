@@ -111,7 +111,7 @@ export default async function AdminHome({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireRole("admin");
+  const session = await requireRole("admin");
 
   const params = await searchParams;
   const selectedDate = parseDateInput(params.date) ?? startOfToday();
@@ -733,6 +733,7 @@ export default async function AdminHome({
         programCoaches={activeCoaches}
         programResources={programResourceOptions}
         selectedDate={selectedDate}
+        viewerRole={session.user.role}
       />
 
       <section aria-labelledby="master-schedule-heading" className="mb-10">
@@ -793,6 +794,7 @@ export default async function AdminHome({
               programEditById={programEditById}
               seriesById={seriesById}
               reconciliation={reconciliation}
+              viewerRole={session.user.role}
             />
           </div>
         ) : null}

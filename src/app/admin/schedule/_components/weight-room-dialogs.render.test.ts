@@ -50,8 +50,14 @@ const COACHES: CoachOption[] = [
   { id: "coach-1", name: "Coach One", email: "one@example.com" },
 ];
 
-const DAY = "2026-10-17";
-const at = (time: string) => pfaWallClockToUtc(DAY, time);
+// The dialogs read the browser's clock for the admin past-rental waiver (an
+// admin may enter a weight room rental under an hour once it is over), so the
+// ordinary cases run on a day that is always in the future, and the waiver
+// cases on a day that is always in the past. A fixed near date would turn
+// these tests red the day it passed.
+const DAY = "2099-10-16";
+const PAST_DAY = "2020-10-15";
+const at = (time: string, day: string = DAY) => pfaWallClockToUtc(day, time);
 
 const REFUSAL =
   "Weight room rentals are one hour minimum. Make the end time at least 1 hour after the start.";
@@ -105,7 +111,15 @@ function noteInputs(html: string): number {
   return [...html.matchAll(/<input[^>]*name="note"[^>]*>/g)].length;
 }
 
-function renderCreateDialog(resourceId: string, start: string, end: string) {
+type ViewerRole = "admin" | "coach";
+
+function renderCreateDialog(
+  resourceId: string,
+  start: string,
+  end: string,
+  day: string = DAY,
+  viewerRole: ViewerRole = "admin",
+) {
   return renderToStaticMarkup(
     createElement(ScheduleCreateDialog, {
       open: true,
@@ -113,8 +127,9 @@ function renderCreateDialog(resourceId: string, start: string, end: string) {
       coaches: COACHES,
       resources: RESOURCES,
       programs: [],
-      prefill: { resourceId, startAt: at(start), endAt: at(end) },
+      prefill: { resourceId, startAt: at(start, day), endAt: at(end, day) },
       defaultTab: "session",
+      viewerRole,
     }),
   );
 }
@@ -125,6 +140,8 @@ function renderSessionDialog(
   start: string,
   end: string,
   isGroupSession = false,
+  day: string = DAY,
+  viewerRole: ViewerRole = "admin",
 ) {
   return renderToStaticMarkup(
     createElement(SessionFormDialog, {
@@ -137,11 +154,12 @@ function renderSessionDialog(
         id: "rental-1",
         coachId: "coach-1",
         resourceId,
-        startAt: at(start),
-        endAt: at(end),
+        startAt: at(start, day),
+        endAt: at(end, day),
         note: null,
         isGroupSession,
       },
+      viewerRole,
     }),
   );
 }
@@ -151,13 +169,24 @@ function renderSessionDialog(
 const CREATE_DIALOGS = [
   {
     label: "ScheduleCreateDialog, Session tab",
-    render: (resourceId: string, start: string, end: string) =>
-      renderCreateDialog(resourceId, start, end),
+    render: (
+      resourceId: string,
+      start: string,
+      end: string,
+      day: string = DAY,
+      viewerRole: ViewerRole = "admin",
+    ) => renderCreateDialog(resourceId, start, end, day, viewerRole),
   },
   {
     label: "SessionFormDialog, create mode",
-    render: (resourceId: string, start: string, end: string) =>
-      renderSessionDialog("create", resourceId, start, end),
+    render: (
+      resourceId: string,
+      start: string,
+      end: string,
+      day: string = DAY,
+      viewerRole: ViewerRole = "admin",
+    ) =>
+      renderSessionDialog("create", resourceId, start, end, false, day, viewerRole),
   },
 ];
 
@@ -216,6 +245,42 @@ for (const dialog of CREATE_DIALOGS) {
         disabled: false,
       });
       expect(noteInputs(html)).toBe(1);
+    });
+  });
+
+  describe(`${dialog.label}: weight room rental already over (W5 admin waiver)`, () => {
+    it("admin, 30 minutes on a past day: no refusal, one session of 30 min, submit enabled", () => {
+      const html = dialog.render(WR.id, "15:00", "15:30", PAST_DAY, "admin");
+      expect(alerts(html)).toEqual([]);
+      expect(willCreateLines(html)).toEqual(["Will create 1 session of 30 min."]);
+      expect(submitButton(html)).toEqual({
+        text: "Create session",
+        disabled: false,
+      });
+      expect(html).not.toContain("Slot length");
+      expect(noteInputs(html)).toBe(1);
+    });
+
+    it("admin, 9:30 PM on a past day: no refusal either", () => {
+      const html = dialog.render(WR.id, "21:30", "22:00", PAST_DAY, "admin");
+      expect(alerts(html)).toEqual([]);
+      expect(submitButton(html).disabled).toBe(false);
+    });
+
+    it("Schedule Manager (role coach), 30 minutes on a past day: refused inline, submit disabled", () => {
+      const html = dialog.render(WR.id, "15:00", "15:30", PAST_DAY, "coach");
+      expect(alerts(html)).toEqual([REFUSAL]);
+      expect(submitButton(html)).toEqual({
+        text: "Create session",
+        disabled: true,
+      });
+      expect(willCreateLines(html)).toEqual([]);
+    });
+
+    it("admin, a past range whose end is before its start: refused inline", () => {
+      const html = dialog.render(WR.id, "15:30", "15:00", PAST_DAY, "admin");
+      expect(alerts(html)).toEqual([REFUSAL]);
+      expect(submitButton(html).disabled).toBe(true);
     });
   });
 

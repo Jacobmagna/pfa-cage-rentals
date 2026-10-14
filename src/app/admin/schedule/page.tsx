@@ -31,7 +31,7 @@ export default async function AdminSchedulePage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireRole("admin");
+  const session = await requireRole("admin");
   const params = await searchParams;
   const selectedDate = parseDateInput(params.date) ?? startOfToday();
 
@@ -148,6 +148,7 @@ export default async function AdminSchedulePage({
         coaches={coachRows}
         programs={programRows}
         selectedDate={selectedDate}
+        viewerRole={session.user.role}
       />
 
       <AutoRefresh />

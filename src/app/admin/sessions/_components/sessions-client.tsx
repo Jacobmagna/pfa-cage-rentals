@@ -54,12 +54,15 @@ export function SessionsClient({
   resourceOptions,
   truncated = false,
   maxRows,
+  viewerRole,
 }: {
   rows: SessionRow[];
   coachOptions: CoachOption[];
   resourceOptions: ResourceOption[];
   truncated?: boolean;
   maxRows?: number;
+  /** The signed-in user's role, from the server page. */
+  viewerRole: "admin" | "coach";
 }) {
   const [dialogState, setDialogState] = useState<
     { mode: "closed" } | { mode: "create" } | { mode: "edit"; row: SessionRow }
@@ -245,6 +248,7 @@ export function SessionsClient({
         coachOptions={coachOptions}
         resourceOptions={resourceOptions}
         initial={initialValues}
+        viewerRole={viewerRole}
       />
 
       <ConfirmDialog

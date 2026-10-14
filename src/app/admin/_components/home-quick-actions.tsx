@@ -32,6 +32,7 @@ export function HomeQuickActions({
   programCoaches,
   programResources,
   selectedDate,
+  viewerRole,
 }: {
   cageCoaches: CageCoachOption[];
   cageResources: CageResourceOption[];
@@ -39,6 +40,8 @@ export function HomeQuickActions({
   programCoaches: ProgramCoachOption[];
   programResources: ProgramResourceOption[];
   selectedDate: Date;
+  /** The signed-in user's role, from the server page. */
+  viewerRole: "admin" | "coach";
 }) {
   const [cageOpen, setCageOpen] = useState(false);
   const [cageTab, setCageTab] = useState<"session" | "block">("session");
@@ -103,6 +106,7 @@ export function HomeQuickActions({
         resources={cageResources}
         prefill={null}
         defaultTab={cageTab}
+        viewerRole={viewerRole}
       />
       <ProgramBlockDialog
         open={programOpen}

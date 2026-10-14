@@ -11,6 +11,13 @@
 // weight room refusal from facts it already has before it calls the server.
 // The server guard stays as the backstop.
 //
+// The one exception the server makes (isPastRentalAdminWaiver: an ADMIN may
+// enter or move a weight room rental under an hour once it is over) is
+// applied here too, with the viewer's role from the server page and the
+// browser's clock, so the screens never refuse what the server would allow.
+// A Schedule Manager is role "coach" and is still refused. The browser's
+// answer only avoids a pointless refusal; the server guard decides.
+//
 // Pure: no React, no fetching. The minimum and the length wording come from
 // @/lib/weight-room-minimum so the screens and the server can never disagree;
 // the grid's last time comes from @/lib/schedule-grid-utils.
@@ -19,6 +26,7 @@ import {
   WEIGHT_ROOM_MINIMUM_MINUTES,
   formatRentalLength,
   isBelowWeightRoomMinimum,
+  isPastRentalAdminWaiver,
 } from "@/lib/weight-room-minimum";
 import type { ResourceType } from "@/lib/billing";
 import { SCHEDULE_GRID_LAST_HOUR } from "@/lib/schedule-grid-utils";
@@ -26,6 +34,25 @@ import { formatPfaTime12h, pfaWallClockAt } from "@/lib/timezone";
 
 const SLOT_MINUTES = 30;
 const MINIMUM_MS = WEIGHT_ROOM_MINIMUM_MINUTES * 60_000;
+
+/**
+ * Who is looking at the screen, and the browser's "now". `role` comes from
+ * the server page (the signed-in user's role); a Schedule Manager is "coach".
+ */
+export type WeightRoomViewer = {
+  role: "admin" | "coach";
+  now: Date;
+};
+
+// The same waiver the server guard applies, for a range on a weight room.
+function waivedFor(viewer: WeightRoomViewer, startAt: Date, endAt: Date) {
+  return isPastRentalAdminWaiver({
+    role: viewer.role,
+    startAt,
+    endAt,
+    now: viewer.now,
+  });
+}
 
 /** Shown in a create dialog when a weight room range is under an hour. */
 export const WEIGHT_ROOM_RANGE_REFUSAL =
@@ -63,13 +90,24 @@ export type WeightRoomRangeStatus =
  * What a create dialog shows for a WEIGHT ROOM range. The whole range is one
  * rental, so the only question is whether it makes an hour. The caller asks
  * only for a weight room; a cage or bullpen range never comes here.
+ *
+ * An ADMIN entering a range that is already over (it ends at or before
+ * `viewer.now`) is not held to the hour, exactly as on the server; the range
+ * is "ok" with its real length ("30 min"). A range whose end is not after its
+ * start is still refused.
  */
 export function weightRoomRangeStatus(
   rangeStart: Date | null,
   rangeEnd: Date | null,
+  viewer: WeightRoomViewer,
 ): WeightRoomRangeStatus {
   if (rangeStart === null || rangeEnd === null) return { kind: "incomplete" };
-  if (isBelowWeightRoomMinimum(rangeStart, rangeEnd)) return { kind: "too-short" };
+  if (
+    isBelowWeightRoomMinimum(rangeStart, rangeEnd) &&
+    !waivedFor(viewer, rangeStart, rangeEnd)
+  ) {
+    return { kind: "too-short" };
+  }
   return {
     kind: "ok",
     length: formatRentalLength(minutesBetween(rangeStart, rangeEnd)),
@@ -80,6 +118,11 @@ export function weightRoomRangeStatus(
  * A drag keeps the rental's length. Dropped on a weight room, a rental under
  * an hour is refused before anything is sent, with this message. `null` means
  * the move may go to the server (which still checks overlaps and blocks).
+ *
+ * `startAt` / `endAt` are where the rental would LAND (the drop's times; the
+ * length is the rental's own). An ADMIN dropping it on a time that is already
+ * over is not refused, exactly as on the server: the waiver is judged on the
+ * landing end, so a past half hour dragged into the future is still refused.
  *
  * `sourceType` is the type of the spot the rental is dragged FROM. Only a
  * weight room rental gets the advice to open it and make it an hour first:
@@ -92,9 +135,11 @@ export function weightRoomMoveRefusal(args: {
   sourceType: ResourceType | undefined;
   startAt: Date;
   endAt: Date;
+  viewer: WeightRoomViewer;
 }): string | null {
   if (!args.targetIsWeightRoom) return null;
   if (!isBelowWeightRoomMinimum(args.startAt, args.endAt)) return null;
+  if (waivedFor(args.viewer, args.startAt, args.endAt)) return null;
   const length = formatRentalLength(minutesBetween(args.startAt, args.endAt));
   if (args.sourceType === "weight_room") {
     return `Weight room rentals are one hour minimum. This rental is ${length}, so it can't be moved there. Open it and make it at least 1 hour first.`;

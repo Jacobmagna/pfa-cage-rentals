@@ -41,6 +41,7 @@ import {
 } from "./schedule-create-dialog";
 import { pfaHour, pfaMinute, pfaWallClockAt } from "@/lib/timezone";
 import { GroupMark } from "@/app/_components/group-pill";
+import { emptyCellPrefillMinutes } from "./weight-room-admin.logic";
 
 const FIRST_HOUR = 8;
 const LAST_HOUR = 22;
@@ -344,7 +345,14 @@ export function ScheduleGrid({
       FIRST_HOUR + Math.floor(slotIdx / 2),
       (slotIdx % 2) * 30,
     );
-    const endAt = new Date(startAt.getTime() + 30 * 60_000);
+    // A weight room starts at an hour (its minimum) unless that would run
+    // past the last cell; then 30 min, and the dialog explains the refusal.
+    const minutes = emptyCellPrefillMinutes({
+      isWeightRoom: resource.type === "weight_room",
+      slotIndex: slotIdx,
+      slotCount: SLOTS,
+    });
+    const endAt = new Date(startAt.getTime() + minutes * 60_000);
     setDialog({
       kind: "create",
       prefill: { resourceId: resource.id, startAt, endAt },

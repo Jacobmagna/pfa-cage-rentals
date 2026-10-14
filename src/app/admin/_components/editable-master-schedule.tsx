@@ -74,6 +74,7 @@ import {
 } from "@/lib/schedule-grid-utils";
 import { assignLanes } from "@/lib/schedule-lanes";
 import { formatPfaTime } from "@/lib/timezone";
+import { emptyCellPrefillMinutes } from "@/app/admin/schedule/_components/weight-room-admin.logic";
 
 // Drag id prefix (e.g. "session-…" / "program-block-…") → bare entity id, so
 // the grid's draggingId prop (which excludes the dragged item's own footprint
@@ -567,8 +568,16 @@ export function EditableMasterSchedule({
     // but its click/drop layer is 30-min (slotIndex 0..27, decoded to the
     // 15-min template via *2).
     if (section === "resource") {
+      // A weight room starts at an hour (its minimum) unless that would run
+      // past the last cell; then 30 min, and the dialog explains the refusal.
+      const minutes = emptyCellPrefillMinutes({
+        isWeightRoom:
+          resources.find((r) => r.id === rowId)?.type === "weight_room",
+        slotIndex,
+        slotCount: SCHEDULE_GRID_SLOTS,
+      });
       const startAt = slotStartAt(selectedDate, slotIndex);
-      const endAt = slotStartAt(selectedDate, slotIndex + 1); // +30 min
+      const endAt = slotStartAt(selectedDate, slotIndex + minutes / 30);
       setDialog({
         kind: "cage",
         prefill: { resourceId: rowId, startAt, endAt },

@@ -24,10 +24,14 @@ import { formatPfaTime12h } from "@/lib/timezone";
 // 2026-08-27: props passed to a SERVER component are rendered away and never
 // reach the page source, while props passed to a CLIENT component are
 // serialized into the RSC payload and ARE readable by anyone with the URL —
-// rendered or not. The moment this component goes client-side, every field in
-// the display projection becomes published. The projection is deliberately
-// narrow so that day stays safe, but the two facts are coupled and only this
-// comment says so.
+// rendered or not. The moment this component goes client-side, every field of
+// every prop it is handed becomes published. Today those props are the MAPPED
+// result of `fetchDisplaySchedule`: ids, times and labels that are already
+// safe to print. They are not the raw query rows, which since 2026-10-13
+// carry every block's `reason`. What keeps that day safe is three things in
+// display-schedule.ts together — the explicit projection, the field-by-field
+// mapping, and the label rule — and the two files are coupled; only these
+// comments say so.
 //
 // No state, no effects, no interactivity. The only client code on the page is
 // AutoRefresh and StaleGuard, and StaleGuard receives one timestamp.

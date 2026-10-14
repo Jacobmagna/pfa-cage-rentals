@@ -124,7 +124,7 @@ describe("a HAND-ENTERED block prints the note that was typed", () => {
     ).toBe("Softball Travel Ball");
   });
 
-  it("...then to the generic label, never to an empty bar", () => {
+  it("...then to the generic label when there is no tag either", () => {
     // An outlined bar with no text in it reads as a free cage from across the
     // room (see BLOCKED_OUTLINE in display-grid.tsx).
     expect(resolveDisplayBlockLabel(handEntered({ reason: "   " }))).toBe(
@@ -133,6 +133,19 @@ describe("a HAND-ENTERED block prints the note that was typed", () => {
     expect(resolveDisplayBlockLabel(handEntered({ reason: "" }))).toBe(
       DISPLAY_BLOCKED_LABEL,
     );
+  });
+
+  it("📌 a tag whose short name is an empty string still prints as empty (`??`, not `||`)", () => {
+    // The one way a hand-entered bar can still come out with no text: no
+    // note, and a tag whose `displayName` is "". Same choice as the program
+    // chain makes — an empty short name is a data problem worth seeing on the
+    // wall, not one to paper over — and the reason DISPLAY_BLOCKED_LABEL's
+    // doc does not promise a bar is never empty.
+    expect(
+      resolveDisplayBlockLabel(
+        handEntered({ reason: "  ", tagName: "Camp", tagDisplayName: "" }),
+      ),
+    ).toBe("");
   });
 });
 
@@ -182,6 +195,76 @@ describe("a note with nothing VISIBLE in it counts as blank", () => {
     expect(resolveDisplayBlockLabel(handEntered({ reason: invisible }))).toBe(
       DISPLAY_BLOCKED_LABEL,
     );
+  });
+
+  // Everything Unicode marks Default_Ignorable_Code_Point — the characters a
+  // renderer is told to show as nothing. Built from code points, never typed,
+  // so each one can be read here.
+  const DEFAULT_IGNORABLE: [number, string][] = [
+    [0x00ad, "soft hyphen"],
+    [0x034f, "combining grapheme joiner"],
+    [0x061c, "Arabic letter mark"],
+    [0x115f, "Hangul choseong filler"],
+    [0x1160, "Hangul jungseong filler"],
+    [0x180e, "Mongolian vowel separator"],
+    [0x200e, "left-to-right mark"],
+    [0x200f, "right-to-left mark"],
+    [0x202a, "left-to-right embedding"],
+    [0x202b, "right-to-left embedding"],
+    [0x202c, "pop directional formatting"],
+    [0x202d, "left-to-right override"],
+    [0x202e, "right-to-left override"],
+    [0x2061, "function application"],
+    [0x2066, "left-to-right isolate"],
+    [0x2067, "right-to-left isolate"],
+    [0x2068, "first strong isolate"],
+    [0x2069, "pop directional isolate"],
+    [0x3164, "Hangul filler"],
+    [0xfe0f, "variation selector-16"],
+    [0xffa0, "halfwidth Hangul filler"],
+    [0xe0020, "tag space (outside the BMP)"],
+  ];
+  const cp = (n: number) => `U+${n.toString(16).toUpperCase().padStart(4, "0")}`;
+
+  it("each default-ignorable character on its own falls to the generic label", () => {
+    for (const [code, name] of DEFAULT_IGNORABLE) {
+      expect(
+        resolveDisplayBlockLabel(handEntered({ reason: String.fromCodePoint(code) })),
+        `${cp(code)} ${name}`,
+      ).toBe(DISPLAY_BLOCKED_LABEL);
+    }
+  });
+
+  it("a note of only such characters and spaces falls to the tag", () => {
+    const invisible = ` ${DEFAULT_IGNORABLE.map(([code]) => String.fromCodePoint(code)).join(" ")} `;
+    expect(
+      resolveDisplayBlockLabel(
+        handEntered({ reason: invisible, tagName: "Softball Travel Ball", tagDisplayName: "SB - Travelball" }),
+      ),
+    ).toBe("SB - Travelball");
+  });
+
+  it("🔴 a real note that contains one of them is printed as typed, character for character", () => {
+    // They decide only whether there is anything to print. Each of these is a
+    // normal thing to find inside real text.
+    const baseball = `${String.fromCodePoint(0x26be, 0xfe0f)} practice`; // emoji + variation selector
+    const softHyphen = `Travel${String.fromCodePoint(0x00ad)}ball`;
+    const rtlMark = `Mia${String.fromCodePoint(0x200f)} 4821`;
+    for (const real of [baseball, softHyphen, rtlMark]) {
+      const label = resolveDisplayBlockLabel(handEntered({ reason: `  ${real}  ` }));
+      expect(label).toBe(real);
+      expect(label.length, "nothing was removed from the note").toBe(real.length);
+    }
+  });
+
+  it("📌 known gap: a blank-LOOKING character Unicode does not mark ignorable is printed", () => {
+    // The check is "Default_Ignorable_Code_Point or whitespace", not "renders
+    // as nothing". U+2800 BRAILLE PATTERN BLANK is an ordinary symbol to
+    // Unicode and an empty box to the eye, so a note made only of it prints a
+    // bar with no visible text. Pinned so the constant's doc cannot claim more
+    // than this.
+    const brailleBlank = String.fromCodePoint(0x2800);
+    expect(resolveDisplayBlockLabel(handEntered({ reason: brailleBlank }))).toBe(brailleBlank);
   });
 
   it("🔴 a real note that CONTAINS a zero-width character is printed as typed", () => {
@@ -257,12 +340,5 @@ describe("🔴 a PROGRAM-MADE block never prints its reason", () => {
     // Unchanged from before this rule existed: an empty short name is a data
     // problem worth seeing on the wall, not one to paper over.
     expect(resolveDisplayBlockLabel(programMade({ programDisplayName: "" }))).toBe("");
-    // The same holds for the tag a hand-entered block falls back to when it
-    // has no note to print.
-    expect(
-      resolveDisplayBlockLabel(
-        handEntered({ reason: "  ", tagName: "Camp", tagDisplayName: "" }),
-      ),
-    ).toBe("");
   });
 });

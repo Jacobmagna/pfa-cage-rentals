@@ -15,13 +15,22 @@
 // src/lib/server/display-schedule.ts): it never SELECTs a session's `note` or
 // a coach's email, and the one free-text column it does read, a block's
 // `reason`, is printed only for blocks an admin or Schedule Manager entered
-// by hand. If the URL leaks, what leaks is what the wall shows: cages, times,
-// coach names, program names and — since 2026-10-13 — the notes on
-// hand-entered blocks, exactly as typed (up to 120 characters, the cap in
-// src/lib/schemas/block.ts). All of that is already visible on a screen in a
-// room the public walks through, but a note is free text: whatever is typed
-// into one is readable by anyone holding the link. Weaken either layer and
-// the argument for the other one collapses.
+// by hand. If the URL leaks, what leaks is the same KIND of thing the wall
+// shows: cages, times, coach names, program names and — since 2026-10-13 —
+// the notes on hand-entered blocks. It is NOT limited to what the wall shows:
+//
+//   · the wall cuts a note off at the width of its bar; the page a link
+//     holder loads carries every note whole, trimmed at its ends and
+//     otherwise as typed. The admin actions' Zod schemas cap a note at 120
+//     characters (src/lib/schemas/block.ts); the column itself is uncapped
+//     `text`.
+//   · a link holder can add `?hours=` and see up to 8 hours of today
+//     (`parseDisplayHours` in ./window.ts clamps it to 2–8) where the
+//     default is 3.
+//
+// And a note is free text: whatever is typed into one is readable by anyone
+// holding the link. Weaken either layer and the argument for the other one
+// collapses.
 //
 // PURE MODULE — no env reads, no next/navigation. The page passes both values
 // in. That is what makes the fail-closed behaviour provable in a unit test

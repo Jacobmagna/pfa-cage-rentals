@@ -75,8 +75,10 @@ export type ScheduleBlock = {
   startAt: Date;
   endAt: Date;
   reason: string;
-  // COSMETIC TAG. Display-only: it names the bar on the facility TV board and
-  // does nothing for scheduling, hours or pay. See db/schema.ts.
+  // COSMETIC TAG. Display-only, and it does nothing for scheduling, hours or
+  // pay. Since 2026-10-13 the facility TV prints the block's note (`reason`);
+  // the tag is only what the TV falls back to when a note is blank. See
+  // db/schema.ts.
   displayProgramId?: string | null;
   // BLOCK-RECUR: set when this block is an occurrence of a recurring series
   // (drives the "recurring" chip + series actions in the edit dialog).

@@ -3,8 +3,11 @@
 // table overlap with sessions) live in the server action.
 //
 // `reason` is required free text — surfaces in the schedule grid
-// tooltip and in session-conflict error messages ("Cage 1 is
-// blocked at this time for: Summer Camp 2026").
+// (label and tooltip), in session-conflict error messages ("Cage 1 is
+// blocked at this time for: Summer Camp 2026") and, since 2026-10-13,
+// on the facility TV display as the label of a block entered by hand
+// (src/lib/server/display-schedule.ts). The 120-character cap below
+// is the only one the server enforces: the column is plain `text`.
 
 import { z } from "zod";
 

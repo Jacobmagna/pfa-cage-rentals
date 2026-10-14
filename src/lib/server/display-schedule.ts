@@ -74,11 +74,15 @@
 //     the actions in src/app/admin/schedule/actions.ts, and each of those
 //     calls `requireScheduleAccess` first: an admin, or a coach flagged
 //     `scheduleAdmin` (a Schedule Manager). A plain coach has no path to it.
-//     The schemas those actions parse cap it at 120 characters
-//     (src/lib/schemas/block.ts).
+//     The Zod schemas those actions parse cap it at 120 characters
+//     (src/lib/schemas/block.ts). That cap is the only one: the column is
+//     plain `text`, so a row written any other way can be longer.
 //   · WHO CAN READ IT. Everyone the display is served to: whoever is in
 //     front of the TV, and anyone holding the `/display/schedule?key=` URL
-//     or a `/video` cookie, in the rendered page and in its source.
+//     or a `/video` cookie. The second group gets MORE than the first: the
+//     wall cuts a note off at the width of its bar, the page source carries
+//     every note whole, and `?hours=` widens the window (see the last
+//     paragraph of this header).
 //   · WHAT IT DOES NOT COVER. A session's note. The owner was explicit that
 //     the note on a coach's lesson must never show; "block notes are on the
 //     TV" is not permission to select `sessionsBilling.note`.
@@ -92,10 +96,13 @@
 // reason. Keep them explicit.
 //
 // The token in the URL is the SECOND layer, not the first (src/lib/display/token.ts).
-// If the URL leaks, this file is what decides whether the leak is "cages,
-// times, coach names, program names and the notes on hand-entered blocks" —
-// which is what is already visible on a screen in a room the public walks
-// through — or something worse.
+// If the URL leaks, this file is what decides what leaks: cages, times, coach
+// names, program names and the notes on hand-entered blocks, and nothing
+// else. That is the same KIND of thing the wall shows, but not the same
+// amount. A link holder reads each note whole in the page source where the
+// wall cuts it off at the width of its bar, and can add `?hours=` (2 to 8,
+// `parseDisplayHours` in src/lib/display/window.ts) to see up to 8 hours of
+// today where the default is 3.
 
 import { and, asc, eq, gt, lt } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -137,13 +144,20 @@ export const DISPLAY_UNNAMED_COACH_LABEL = "Reserved";
 
 /**
  * What a block with nothing to name it renders as: no program behind it, no
- * program tag, and no visible text in its note.
+ * program tag, and nothing visible in its note.
  *
- * 🔴 IT IS THE LAST FALLBACK, AND IT EXISTS SO A BAR IS NEVER EMPTY. An
- * outlined bar with no text in it reads as a free cage from across the room
- * (see BLOCKED_OUTLINE in display-grid.tsx). `blocked_times.reason` is NOT
- * NULL but the database accepts a blank one, so "the note is required" does
- * not mean "there is always something to print".
+ * 🔴 IT IS THE LAST FALLBACK. An outlined bar with no text in it reads as a
+ * free cage from across the room (see BLOCKED_OUTLINE in display-grid.tsx),
+ * and `blocked_times.reason` is NOT NULL but the database accepts a blank
+ * one — so "the note is required" does not mean "there is always something
+ * to print".
+ *
+ * ⚠️ WHAT THIS DOES AND DOES NOT GUARANTEE. A hand-entered block whose note
+ * is empty, whitespace, or made only of characters NOTHING_VISIBLE matches,
+ * and which has no tag, gets this label. A bar can still come out with no
+ * visible text two ways: a note made only of a blank-looking character that
+ * check does not cover (see its doc), or a program or tag whose short name is
+ * an empty string, which the `??` chains print as-is on purpose.
  *
  * Until 2026-10-13 EVERY hand-entered block rendered as this, whatever was
  * typed, because `reason` was never selected. The file header says what
@@ -253,8 +267,15 @@ export type DisplayScheduleRows = {
  *
  * 🔴 The work-hours schedule is a DIFFERENT surface (`/admin/hour-log/schedule`,
  * built from `hour_logs` and `program_schedule_blocks`) and Mark explicitly
- * does not want it on the screen. Reading only the three tables below is what
- * keeps that true structurally rather than by remembering to.
+ * does not want it on the screen. What keeps that true structurally is where
+ * the three queries below START: `resources`, `sessions_billing` and
+ * `blocked_times`. They touch six tables in all — those three, plus `users`
+ * for the coach's name and `program_schedule_blocks` and `programs` for a
+ * block's label — but `program_schedule_blocks` is only ever reached by a
+ * join FROM a `blocked_times` row, to name a bar that is already there, and
+ * `hour_logs` is never read. A scheduled work block that occupies no
+ * resource has no `blocked_times` row, so it cannot put anything on the
+ * screen.
  */
 export async function fetchDisplayScheduleRows(
   win: DisplayWindow,
@@ -286,7 +307,8 @@ export async function fetchDisplayScheduleRows(
       .orderBy(asc(resources.sortOrder)),
 
     // NOTE: no `note`. No `coachEmail`. Adding either is a PII regression,
-    // and `display-schedule.test.ts` fails loudly if one reappears.
+    // and tests/integration/display-schedule.test.ts fails loudly if one
+    // reappears (an exact key set on these raw rows).
     db
       .select({
         id: sessionsBilling.id,
@@ -356,17 +378,26 @@ export async function fetchDisplayScheduleRows(
 }
 
 /**
- * The zero-width characters `String.prototype.trim` leaves in place: zero
- * width space, non-joiner, joiner, and word joiner. (`trim` already strips
- * U+FEFF along with ordinary whitespace.)
+ * Matches a note with nothing in it that a screen would draw: only
+ * whitespace and characters Unicode marks `Default_Ignorable_Code_Point` —
+ * zero-width spaces and joiners, the soft hyphen, direction marks and
+ * isolates, variation selectors, the Hangul fillers, tag characters. Without
+ * it, a note made of nothing but those would pass a plain `trim()` check and
+ * print a bar with no text in it.
  *
  * 🔴 USED ONLY TO ASK "IS THERE ANYTHING VISIBLE IN THIS NOTE?", NEVER TO
- * REWRITE ONE. A note made of nothing but these would otherwise pass the
- * blank check and print a bar with no text in it. A note that has visible
- * text is printed exactly as typed, these characters included — a zero-width
- * joiner is part of how some emoji and some scripts are written.
+ * REWRITE ONE. A note that has visible text is printed exactly as typed,
+ * these characters included: a zero-width joiner or a variation selector is
+ * part of how some emoji and some scripts are written, and a direction mark
+ * can be what makes a name read correctly.
+ *
+ * ⚠️ NOT A LIST OF EVERYTHING THAT LOOKS BLANK. It is exactly "ignorable or
+ * whitespace", as Unicode defines those. A character Unicode treats as an
+ * ordinary symbol but which draws as empty space — U+2800 BRAILLE PATTERN
+ * BLANK is the known one — is not matched, and a note made only of it prints
+ * a bar with no visible text. Pinned as a known gap in display-schedule.test.ts.
  */
-const ZERO_WIDTH_CHARS = /[\u200B\u200C\u200D\u2060]/g;
+const NOTHING_VISIBLE = /^[\p{Default_Ignorable_Code_Point}\s]*$/u;
 
 /**
  * The text a red bar prints. The ONE place a block's raw columns become
@@ -421,9 +452,9 @@ export function resolveDisplayBlockLabel(
   }
 
   const note = row.reason.trim();
-  // Blank is decided with the zero-width characters taken out; what is
-  // printed is the note itself, with nothing taken out of it.
-  if (note.replace(ZERO_WIDTH_CHARS, "").trim() !== "") return note;
+  // The test only decides whether there is anything to print; what is printed
+  // is the note itself, with nothing taken out of it.
+  if (!NOTHING_VISIBLE.test(note)) return note;
 
   return row.tagDisplayName ?? row.tagName ?? DISPLAY_BLOCKED_LABEL;
 }

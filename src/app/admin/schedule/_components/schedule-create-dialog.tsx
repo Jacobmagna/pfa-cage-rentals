@@ -1204,7 +1204,7 @@ const BlockFields = forwardRef<
 
         <Field
           label="Reason"
-          hint="Free text — e.g. 'Summer Camp Group 5', 'Team Hitting Lab', 'HVAC repair'. Shown in the grid."
+          hint="Free text — e.g. 'Summer Camp Group 5', 'Team Hitting Lab', 'HVAC repair'. Shows in the grid and on the facility TV, exactly as typed."
         >
           <input
             type="text"
@@ -1222,10 +1222,15 @@ const BlockFields = forwardRef<
             obvious reading is that tagging a block puts a program on the
             schedule and pays someone for it. It does not: it writes one
             display-only column that only the facility TV board reads. Jacob was
-            explicit that the form must say so in words. */}
+            explicit that the form must say so in words.
+
+            📌 2026-10-13: the TV now prints the block's Reason, and this form
+            requires one, so the hint must NOT promise the program's name on
+            the TV. The tag is only what the TV falls back to for a block whose
+            note is blank. */}
         <Field
           label="Program (optional)"
-          hint="Tagging only. The block shows this program's name on the facility TV instead of just 'Blocked'. It does NOT schedule a coach, create hours, or affect anyone's pay."
+          hint="Tagging only. The facility TV shows the Reason above, not this program. It does NOT schedule a coach, create hours, or affect anyone's pay."
         >
           <select
             value={live.displayProgramId}
@@ -1234,7 +1239,7 @@ const BlockFields = forwardRef<
             }
             className={selectStyles}
           >
-            <option value="">No program — shows as &quot;Blocked&quot;</option>
+            <option value="">No program</option>
             {programs.map((prog) => (
               <option key={prog.id} value={prog.id}>
                 {prog.name}

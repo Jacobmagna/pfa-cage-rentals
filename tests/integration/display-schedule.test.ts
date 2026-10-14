@@ -36,6 +36,7 @@ import {
   sessionsBilling,
   users,
 } from "@/db/schema";
+import { PROGRAM_NAMES as SEEDED_PROGRAM_NAMES } from "@/db/seed-programs";
 import { programOccupancyReason } from "@/lib/server/program-resource-blocks";
 import { pfaWallClockToUtc } from "@/lib/timezone";
 import { computeDisplayWindow, type DisplayWindow } from "@/lib/display/window";
@@ -120,6 +121,16 @@ async function seedBlock(opts: {
 }
 
 beforeAll(async () => {
+  // 🔴 PRE-CLEAN, BEFORE ANYTHING IS SEEDED. A run that is KILLED mid-test
+  // never reaches afterEach, and what it leaves behind breaks the next run in
+  // a way that reads like a flake: a fixture program trips
+  // `programs_name_unique` (23505) in the seed helper, and a booking by the
+  // nameless coach blocks deleting that coach below (23503). Mutables first —
+  // a leftover tagged block references its program — then this file's own
+  // programs.
+  await truncateMutables();
+  await removeFixturePrograms();
+
   fixtures = await ensureFixtureUsers();
   const seeded = await getSeededResources();
   cage1 = seeded.cage1;
@@ -144,38 +155,103 @@ afterAll(async () => {
 });
 
 /**
+ * EVERY program this file inserts, in one place.
+ *
+ * 🔴 THIS LIST IS WHAT THE CLEANUP DELETES BY, SO IT IS ALSO WHAT KEEPS THE
+ * CLEANUP AWAY FROM REAL ROWS. `truncateMutables` clears `blocked_times` but
+ * not `programs` or `program_schedule_blocks`, and `programs.name` is UNIQUE,
+ * so these rows have to be removed by this file — after every test, and
+ * before the first one in case an earlier run was killed (see beforeAll).
+ * Deleting by NAME on a shared database is only safe if no real program can
+ * carry one of these names, so:
+ *
+ *   · every name starts with FIXTURE_PROGRAM_PREFIX, which no real program
+ *     does;
+ *   · none is a name `src/db/seed-programs.ts` seeds — CI runs `npm run
+ *     db:seed` before this suite, and borrowing a seeded name was 26 days of
+ *     red CI (rule 57). A test at the bottom of this file asserts both.
+ *
+ * `insertFixtureProgram` is the only place this file inserts a program, and
+ * it refuses a name that is not on this list.
+ */
+const FIXTURE_PROGRAM_PREFIX = "Display Fixture — ";
+const FIXTURE_PROGRAMS = {
+  autoReason: `${FIXTURE_PROGRAM_PREFIX}Auto Reason Program`,
+  linkedHandTypedReason: `${FIXTURE_PROGRAM_PREFIX}Hand-Typed-Looking Reason`,
+  hsHitting: `${FIXTURE_PROGRAM_PREFIX}High School Program Hitting`,
+  bullpenDevelopment: `${FIXTURE_PROGRAM_PREFIX}Bullpen Development`,
+  taggedHitting: `${FIXTURE_PROGRAM_PREFIX}Tagged Hitting`,
+  taggedBlankNote: `${FIXTURE_PROGRAM_PREFIX}Tagged Blank Note`,
+  taggedYouthCamp: `${FIXTURE_PROGRAM_PREFIX}Tagged Youth Camp`,
+  tagThatMustLose: `${FIXTURE_PROGRAM_PREFIX}Tag That Must Lose`,
+  realOccupancy: `${FIXTURE_PROGRAM_PREFIX}Real Occupancy`,
+  travelBallInfield: `${FIXTURE_PROGRAM_PREFIX}Travel Ball Infield`,
+} as const;
+type FixtureProgramName = (typeof FIXTURE_PROGRAMS)[keyof typeof FIXTURE_PROGRAMS];
+const FIXTURE_PROGRAM_NAMES: string[] = Object.values(FIXTURE_PROGRAMS);
+
+async function insertFixtureProgram(
+  name: FixtureProgramName,
+  displayName: string | null,
+): Promise<string> {
+  // Vitest does not typecheck, so the type above is not enough on its own.
+  if (!FIXTURE_PROGRAM_NAMES.includes(name)) {
+    throw new Error(
+      `"${name}" is not in FIXTURE_PROGRAMS — add it there, or the cleanup will never remove it`,
+    );
+  }
+  const [program] = await db
+    .insert(programs)
+    .values({ name, displayName })
+    .returning({ id: programs.id });
+  return program.id;
+}
+
+/**
+ * Removes this file's fixture programs and everything hanging off them, found
+ * by the exact names in FIXTURE_PROGRAMS. Returns how many programs it removed.
+ *
+ * Children first, because neither foreign key cascades: a tagged block points
+ * at its program through `display_program_id`, and a program schedule block
+ * through `program_id`. (A program block's linked `blocked_times` rows DO
+ * cascade away with it.)
+ */
+async function removeFixturePrograms(): Promise<number> {
+  const rows = await db
+    .select({ id: programs.id })
+    .from(programs)
+    .where(inArray(programs.name, FIXTURE_PROGRAM_NAMES));
+  const ids = rows.map((r) => r.id);
+  if (ids.length === 0) return 0;
+  await db.delete(blockedTimes).where(inArray(blockedTimes.displayProgramId, ids));
+  await db
+    .delete(programScheduleBlocks)
+    .where(inArray(programScheduleBlocks.programId, ids));
+  await db.delete(programs).where(inArray(programs.id, ids));
+  return ids.length;
+}
+
+/**
  * A block that a scheduled PROGRAM owns: it carries the program's name onto
  * the wall, and its own `reason` never.
- *
- * 🔴 THESE ROWS ARE NOT COVERED BY `truncateMutables`, which clears
- * `blocked_times` but not `programs` or `program_schedule_blocks`. Left behind,
- * a program row would collide on the next run — `programs.name` is UNIQUE — and
- * the failure would look like a flake rather than a leak. Every id is tracked
- * and deleted in afterEach below, children first.
  */
-const seededProgramIds: string[] = [];
-
 async function seedProgramBlock(opts: {
   resourceId: string;
   start: string;
   end: string;
-  programName: string;
+  programName: FixtureProgramName;
   programDisplayName?: string | null;
   reason: string;
 }) {
-  const [program] = await db
-    .insert(programs)
-    .values({
-      name: opts.programName,
-      displayName: opts.programDisplayName ?? null,
-    })
-    .returning({ id: programs.id });
-  seededProgramIds.push(program.id);
+  const programId = await insertFixtureProgram(
+    opts.programName,
+    opts.programDisplayName ?? null,
+  );
 
   const [scheduleBlock] = await db
     .insert(programScheduleBlocks)
     .values({
-      programId: program.id,
+      programId,
       startAt: at(opts.start),
       endAt: at(opts.end),
       createdBy: fixtures.admin.id,
@@ -201,39 +277,24 @@ async function seedTaggedBlock(opts: {
   resourceId: string;
   start: string;
   end: string;
-  programName: string;
+  programName: FixtureProgramName;
   programDisplayName?: string | null;
   reason: string;
 }) {
-  const [program] = await db
-    .insert(programs)
-    .values({
-      name: opts.programName,
-      displayName: opts.programDisplayName ?? null,
-    })
-    .returning({ id: programs.id });
-  seededProgramIds.push(program.id);
+  const programId = await insertFixtureProgram(
+    opts.programName,
+    opts.programDisplayName ?? null,
+  );
 
   await db.insert(blockedTimes).values({
     resourceId: opts.resourceId,
     startAt: at(opts.start),
     endAt: at(opts.end),
     reason: opts.reason,
-    displayProgramId: program.id,
+    displayProgramId: programId,
     createdBy: fixtures.admin.id,
   });
-  return program.id;
-}
-
-async function cleanupSeededPrograms() {
-  if (seededProgramIds.length === 0) return;
-  // Children first: program_schedule_blocks.program_id has no ON DELETE rule,
-  // so deleting the program first would be a foreign-key violation.
-  await db
-    .delete(programScheduleBlocks)
-    .where(inArray(programScheduleBlocks.programId, seededProgramIds));
-  await db.delete(programs).where(inArray(programs.id, seededProgramIds));
-  seededProgramIds.length = 0;
+  return programId;
 }
 
 beforeEach(async () => {
@@ -242,7 +303,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await truncateMutables();
-  await cleanupSeededPrograms();
+  await removeFixturePrograms();
 });
 
 describe("🔴 PII — what may and may not reach a public page", () => {
@@ -293,7 +354,7 @@ describe("🔴 PII — what may and may not reach a public page", () => {
   it("🔴 a PROGRAM-MADE block's auto `Program: …` reason is never printed", async () => {
     // The reason is written by the app's own function, so this is the text a
     // real program block carries rather than a guess at it.
-    const programName = "Fixture 0af — Auto Reason Program";
+    const programName = FIXTURE_PROGRAMS.autoReason;
     const autoReason = programOccupancyReason(programName);
     await seedProgramBlock({
       resourceId: cage1.id,
@@ -311,7 +372,7 @@ describe("🔴 PII — what may and may not reach a public page", () => {
     // row really is program-made, and the block really is in the result. So
     // the absence below is the label rule withholding it — not a fixture that
     // never wrote it.
-    expect(autoReason).toBe("Program: Fixture 0af — Auto Reason Program");
+    expect(autoReason).toBe(`Program: ${programName}`);
     expect(rows.blocks).toHaveLength(1);
     expect(rows.blocks[0].reason).toBe(autoReason);
     expect(rows.blocks[0].programScheduleBlockId).not.toBeNull();
@@ -333,7 +394,7 @@ describe("🔴 PII — what may and may not reach a public page", () => {
       resourceId: cage1.id,
       start: "14:00",
       end: "15:00",
-      programName: "Fixture 0af — Hand-Typed-Looking Reason",
+      programName: FIXTURE_PROGRAMS.linkedHandTypedReason,
       programDisplayName: "0af Linked",
       reason: PROGRAM_ROW_REASON_SENTINEL,
     });
@@ -505,7 +566,7 @@ describe("blocked bars say WHAT is blocking them", () => {
       resourceId: cage1.id,
       start: "14:00",
       end: "15:00",
-      programName: "High School Program — Hitting",
+      programName: FIXTURE_PROGRAMS.hsHitting,
       programDisplayName: "HS Hitting",
       reason: PROGRAM_ROW_REASON_SENTINEL,
     });
@@ -515,6 +576,7 @@ describe("blocked bars say WHAT is blocking them", () => {
     expect(result.blocks).toHaveLength(1);
     expect(result.blocks[0].label).toBe("HS Hitting");
     // The long name is not on the wall either — the short form REPLACES it.
+    expect(JSON.stringify(result)).not.toContain(FIXTURE_PROGRAMS.hsHitting);
     expect(JSON.stringify(result)).not.toContain("High School Program");
     expect(JSON.stringify(result)).not.toContain(PROGRAM_ROW_REASON_SENTINEL);
   });
@@ -524,14 +586,14 @@ describe("blocked bars say WHAT is blocking them", () => {
       resourceId: cage1.id,
       start: "14:00",
       end: "15:00",
-      programName: "Bullpen Development",
+      programName: FIXTURE_PROGRAMS.bullpenDevelopment,
       programDisplayName: null,
       reason: PROGRAM_ROW_REASON_SENTINEL,
     });
 
     const result = await fetchDisplaySchedule(WINDOW);
 
-    expect(result.blocks[0].label).toBe("Bullpen Development");
+    expect(result.blocks[0].label).toBe(FIXTURE_PROGRAMS.bullpenDevelopment);
     expect(JSON.stringify(result)).not.toContain(PROGRAM_ROW_REASON_SENTINEL);
   });
 
@@ -612,10 +674,7 @@ describe("blocked bars say WHAT is blocking them", () => {
       resourceId: cage1.id,
       start: "14:00",
       end: "15:00",
-      // NOT a name from src/db/seed-programs.ts: CI runs `npm run db:seed`
-      // before this suite, so borrowing a seeded name trips
-      // programs_name_unique (23505) in CI only — green locally, red there.
-      programName: "Tagged Fixture — Hitting",
+      programName: FIXTURE_PROGRAMS.taggedHitting,
       programDisplayName: "Hitting Program",
       reason: REASON_SENTINEL,
     });
@@ -630,7 +689,7 @@ describe("blocked bars say WHAT is blocking them", () => {
     expect(result.blocks).toHaveLength(1);
     expect(result.blocks[0].label).toBe(REASON_SENTINEL);
     expect(JSON.stringify(result)).not.toContain("Hitting Program");
-    expect(JSON.stringify(result)).not.toContain("Tagged Fixture");
+    expect(JSON.stringify(result)).not.toContain(FIXTURE_PROGRAM_PREFIX);
   });
 
   it("a tagged block with a whitespace-only note shows the tag's short name", async () => {
@@ -638,7 +697,7 @@ describe("blocked bars say WHAT is blocking them", () => {
       resourceId: cage1.id,
       start: "14:00",
       end: "15:00",
-      programName: "Tagged Fixture — Blank Note",
+      programName: FIXTURE_PROGRAMS.taggedBlankNote,
       programDisplayName: "Blank Note Tag",
       reason: "   ",
     });
@@ -654,7 +713,7 @@ describe("blocked bars say WHAT is blocking them", () => {
       resourceId: cage1.id,
       start: "14:00",
       end: "15:00",
-      programName: "Tagged Fixture — Youth Camp",
+      programName: FIXTURE_PROGRAMS.taggedYouthCamp,
       programDisplayName: null,
       reason: " ",
     });
@@ -662,7 +721,7 @@ describe("blocked bars say WHAT is blocking them", () => {
     const result = await fetchDisplaySchedule(WINDOW);
 
     expect(result.blocks).toHaveLength(1);
-    expect(result.blocks[0].label).toBe("Tagged Fixture — Youth Camp");
+    expect(result.blocks[0].label).toBe(FIXTURE_PROGRAMS.taggedYouthCamp);
   });
 
   // 🔴 REAL OCCUPANCY OUTRANKS THE COSMETIC TAG, and this is the test that
@@ -670,22 +729,19 @@ describe("blocked bars say WHAT is blocking them", () => {
   // the slot IS; a tag someone also set cannot rename it. Reversing the ??
   // chain in the label rule turns this red.
   it("a program-linked block ignores a cosmetic tag set on the same row", async () => {
-    const [tagProgram] = await db
-      .insert(programs)
-      .values({ name: "Tag That Must Lose", displayName: "TAG LOSES" })
-      .returning({ id: programs.id });
-    seededProgramIds.push(tagProgram.id);
-
-    const [realProgram] = await db
-      .insert(programs)
-      .values({ name: "Real Occupancy", displayName: "REAL WINS" })
-      .returning({ id: programs.id });
-    seededProgramIds.push(realProgram.id);
+    const tagProgramId = await insertFixtureProgram(
+      FIXTURE_PROGRAMS.tagThatMustLose,
+      "TAG LOSES",
+    );
+    const realProgramId = await insertFixtureProgram(
+      FIXTURE_PROGRAMS.realOccupancy,
+      "REAL WINS",
+    );
 
     const [scheduleBlock] = await db
       .insert(programScheduleBlocks)
       .values({
-        programId: realProgram.id,
+        programId: realProgramId,
         startAt: at("14:00"),
         endAt: at("15:00"),
         createdBy: fixtures.admin.id,
@@ -698,7 +754,7 @@ describe("blocked bars say WHAT is blocking them", () => {
       endAt: at("15:00"),
       reason: PROGRAM_ROW_REASON_SENTINEL,
       programScheduleBlockId: scheduleBlock.id,
-      displayProgramId: tagProgram.id,
+      displayProgramId: tagProgramId,
       createdBy: fixtures.admin.id,
     });
 
@@ -715,7 +771,7 @@ describe("blocked bars say WHAT is blocking them", () => {
       resourceId: cage1.id,
       start: "14:00",
       end: "15:00",
-      programName: "Travel Ball Infield",
+      programName: FIXTURE_PROGRAMS.travelBallInfield,
       programDisplayName: "Travel INF",
       reason: PROGRAM_ROW_REASON_SENTINEL,
     });
@@ -885,5 +941,49 @@ describe("resource coverage — Mark asked for the whole facility", () => {
     const result = await fetchDisplaySchedule(WINDOW);
     const orders = result.resources.map((r) => r.sortOrder);
     expect([...orders].sort((a, b) => a - b)).toEqual(orders);
+  });
+});
+
+describe("this file's own fixture programs", () => {
+  // The cleanup deletes programs BY NAME on a shared database (see
+  // FIXTURE_PROGRAMS). These are what make that safe.
+  it("none borrows a name the seed script inserts, and every one carries the fixture prefix", () => {
+    expect(FIXTURE_PROGRAM_NAMES.length).toBeGreaterThan(0);
+    expect(SEEDED_PROGRAM_NAMES.length).toBeGreaterThan(0);
+    for (const name of FIXTURE_PROGRAM_NAMES) {
+      expect(name.startsWith(FIXTURE_PROGRAM_PREFIX), name).toBe(true);
+      expect(SEEDED_PROGRAM_NAMES as readonly string[], name).not.toContain(name);
+    }
+    for (const seeded of SEEDED_PROGRAM_NAMES) {
+      expect(seeded.startsWith(FIXTURE_PROGRAM_PREFIX), seeded).toBe(false);
+    }
+    expect(new Set(FIXTURE_PROGRAM_NAMES).size).toBe(FIXTURE_PROGRAM_NAMES.length);
+  });
+
+  it("the cleanup leaves none of them behind, and leaves every other program alone", async () => {
+    const before = await db.select({ id: programs.id }).from(programs);
+    await seedProgramBlock({
+      resourceId: cage1.id,
+      start: "14:00",
+      end: "15:00",
+      programName: FIXTURE_PROGRAMS.hsHitting,
+      reason: PROGRAM_ROW_REASON_SENTINEL,
+    });
+    await seedTaggedBlock({
+      resourceId: bullpen1.id,
+      start: "14:00",
+      end: "15:00",
+      programName: FIXTURE_PROGRAMS.taggedHitting,
+      reason: REASON_SENTINEL,
+    });
+
+    // Without clearing the tagged block first, exactly as beforeAll meets a
+    // killed run's leftovers after its truncate — here the function has to
+    // remove the tagged block itself.
+    expect(await removeFixturePrograms()).toBe(2);
+
+    const after = await db.select({ id: programs.id }).from(programs);
+    expect(after.map((r) => r.id).sort()).toEqual(before.map((r) => r.id).sort());
+    expect(await removeFixturePrograms()).toBe(0);
   });
 });

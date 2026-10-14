@@ -62,7 +62,9 @@ jobs:
     name: Integration tests
     runs-on: ubuntu-latest
     needs: verify
-    timeout-minutes: 10
+    # 20, not 10: the suite reached 9.4 min of tests on 2026-10-14 (756 tests)
+    # and the 10-minute cap killed a fully passing run after its last test.
+    timeout-minutes: 20
 
     # Integration tests need a real Neon dev branch. Set
     # INTEGRATION_DATABASE_URL in repo secrets to enable. When the

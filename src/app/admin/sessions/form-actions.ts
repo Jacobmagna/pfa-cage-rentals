@@ -29,6 +29,7 @@ import {
   SessionOverlapError,
   WeightRoomMinimumError,
 } from "@/lib/errors";
+import { MAX_DURATION_MESSAGE } from "@/lib/schemas/session";
 import { parsePfaInput } from "@/lib/timezone";
 
 export type SubmittedFormValues = {
@@ -99,8 +100,8 @@ function buildSessionInput(formData: FormData) {
 // The allow-list: the typed errors a user can act on, turned into the code
 // and sentence the screen shows. Anything else is rethrown — Next.js error
 // boundary + Sentry handle it ("this is a bug, not a user-correctable
-// conflict"). Shared by the form actions and moveSessionAction so there is
-// one list.
+// conflict"). Used by the two form actions only; moveSessionAction and
+// createSessionsBatchAction use the narrower list below.
 function translateKnownError(err: unknown): { code: string; message: string } {
   if (
     err instanceof SessionOverlapError ||
@@ -129,6 +130,38 @@ function translateError(
   values: SubmittedFormValues,
 ): ActionResult {
   return { ok: false, error: translateKnownError(err), values };
+}
+
+// The narrower allow-list for the two result-returning actions below
+// (moveSessionAction, createSessionsBatchAction). Their callers show a
+// returned sentence ON SCREEN as is, so only the refusals a person can fix by
+// picking another time or spot come back: an overlap, blocked time, the
+// weight room minimum. Everything else (a rental or resource that is not
+// there, a ZodError, …) is rethrown: it reaches Sentry through
+// onRequestError, and the grids and dialogs show their own fixed fallback
+// sentence instead of raw internal text ("Session <uuid> not found").
+function translateCorrectableRefusal(
+  err: unknown,
+): { code: string; message: string } {
+  if (
+    err instanceof SessionOverlapError ||
+    err instanceof BlockedTimeError ||
+    err instanceof WeightRoomMinimumError
+  ) {
+    return { code: err.code, message: err.message };
+  }
+  throw err;
+}
+
+// True for the ONE ZodError a person can fix on the admin create dialogs: a
+// span over 16 hours, usually a typo'd date. The schema raises it per slot,
+// and createSessionsBatchInternal raises it on a joined weight room row.
+function isSpanOverCapError(err: unknown): err is ZodError {
+  return (
+    err instanceof ZodError &&
+    err.issues.length > 0 &&
+    err.issues.every((issue) => issue.message === MAX_DURATION_MESSAGE)
+  );
 }
 
 export async function createSessionFormAction(
@@ -176,9 +209,11 @@ export type MoveSessionResult =
 // resource, start and end. The difference is that a refusal comes back as a
 // RESULT, not a throw: a production build strips the message from a thrown
 // server-action error, so the grid could only ever show the framework's
-// "An error occurred in the Server Components render…" sentence. A known
-// refusal (overlap, block, weight room minimum, …) now reaches the screen as
-// its real sentence. Anything else, including the auth redirect, still throws.
+// "An error occurred in the Server Components render…" sentence. A refusal
+// the admin can fix (overlap, block, weight room minimum) now reaches the
+// screen as its real sentence. Anything else, including the auth redirect, a
+// rental that is not there and every ZodError, still throws (Sentry sees it;
+// the grid shows its fixed fallback).
 export async function moveSessionAction(
   id: string,
   input: {
@@ -195,7 +230,7 @@ export async function moveSessionAction(
     });
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: translateKnownError(err) };
+    return { ok: false, error: translateCorrectableRefusal(err) };
   }
 }
 
@@ -211,9 +246,13 @@ export type CreateSessionsBatchResult =
 // back as a RESULT, not a throw: a production build strips the message from
 // a thrown server-action error, so the dialogs could only ever show the
 // framework's "An error occurred in the Server Components render…" sentence
-// (a cage overlap showed it). A known refusal now reaches the screen as its
-// real sentence. Anything else, including the auth redirect, still throws.
-// `count` is the rentals saved (back-to-back weight room slots are one).
+// (a cage overlap showed it). A refusal the admin can fix (overlap, block,
+// weight room minimum, and a span over 16 hours, as its plain sentence with
+// no "slots.0.endAt:" prefix) now reaches the screen. Anything else,
+// including the auth redirect, a resource that is not there and every other
+// ZodError, still throws (Sentry sees it; the dialogs show their fixed
+// fallback). `count` is the rentals saved (back-to-back weight room slots
+// are one).
 export async function createSessionsBatchAction(
   input: unknown,
 ): Promise<CreateSessionsBatchResult> {
@@ -221,7 +260,13 @@ export async function createSessionsBatchAction(
     const saved = await createSessionsBatch(input);
     return { ok: true, count: saved.length };
   } catch (err) {
-    return { ok: false, error: translateKnownError(err) };
+    if (isSpanOverCapError(err)) {
+      return {
+        ok: false,
+        error: { code: "VALIDATION", message: MAX_DURATION_MESSAGE },
+      };
+    }
+    return { ok: false, error: translateCorrectableRefusal(err) };
   }
 }
 

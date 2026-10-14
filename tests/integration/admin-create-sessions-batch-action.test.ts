@@ -8,6 +8,11 @@
 //     message } }`, carrying the real sentence. (A thrown server-action error
 //     reaches the browser with its message stripped on a production build, so
 //     the dialogs could only show the framework's sentence.)
+//   - ONLY the user-correctable refusals come back as a result: overlap,
+//     block, weight room minimum, and the 16-hour span (a typo'd date), that
+//     last one as the plain sentence with no "slots.0.endAt:" prefix.
+//     Anything else (a resource that is not there, any other ZodError, …) is
+//     THROWN, so it reaches Sentry and the dialogs show their fixed fallback.
 //   - A clean batch comes back `{ ok: true, count }`, where count is the
 //     rentals SAVED (back-to-back weight room slots are one rental).
 //   - Authorization is exactly the public createSessionsBatch's, because it
@@ -26,10 +31,14 @@
 // `@/auth` and `next/cache` are mocked at file scope (vi.mock is hoisted), the
 // same way admin-move-session-action.test.ts does it.
 
+import { randomUUID } from "node:crypto";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { asc } from "drizzle-orm";
+import { ZodError } from "zod";
 import { db } from "@/db";
 import { sessionsBilling } from "@/db/schema";
+import { ResourceNotFoundError } from "@/lib/errors";
+import { MAX_DURATION_MESSAGE } from "@/lib/schemas/session";
 import { formatPfaDate, parsePfaInput } from "@/lib/timezone";
 import {
   ensureFixtureUsers,
@@ -231,6 +240,115 @@ describe("createSessionsBatchAction: refusals come back as a result, not a throw
         ["15:00", "15:30"],
         ["15:30", "16:00"],
       ]),
+    );
+    expect(saved).toEqual({ ok: true, count: 1 });
+  });
+});
+
+// ── the 16-hour span comes back as its plain sentence ────────────────────
+
+describe("createSessionsBatchAction: a span over 16 hours comes back as the plain sentence", () => {
+  it("one slot over 16 hours: { ok: false } with the sentence and no path; nothing is written", async () => {
+    mockAsAdmin();
+    const start = at("06:00");
+
+    const refused = await createSessionsBatchAction({
+      coachId: fixtures.coach.id,
+      resourceId: seeded.cage1.id,
+      slots: [
+        {
+          startAt: start,
+          endAt: new Date(start.getTime() + 17 * 3_600_000),
+          note: null,
+        },
+      ],
+    });
+    expect(refused).toEqual({
+      ok: false,
+      error: { code: "VALIDATION", message: MAX_DURATION_MESSAGE },
+    });
+    expect(await allRows()).toHaveLength(0);
+
+    // Control: the same action, the same cage, a normal length.
+    const saved = await createSessionsBatchAction(
+      batchInput(seeded.cage1.id, [["15:00", "15:30"]]),
+    );
+    expect(saved).toEqual({ ok: true, count: 1 });
+  });
+
+  it("two back-to-back 16-hour weight room slots (one 32-hour rental once joined): the same sentence; nothing is written", async () => {
+    mockAsAdmin();
+    const start = at("00:00");
+    const mid = new Date(start.getTime() + 16 * 3_600_000);
+    const end = new Date(start.getTime() + 32 * 3_600_000);
+
+    const refused = await createSessionsBatchAction({
+      coachId: fixtures.coach.id,
+      resourceId: seeded.weightRoom1.id,
+      slots: [
+        { startAt: start, endAt: mid, note: null },
+        { startAt: mid, endAt: end, note: null },
+      ],
+    });
+    expect(refused).toEqual({
+      ok: false,
+      error: { code: "VALIDATION", message: MAX_DURATION_MESSAGE },
+    });
+    expect(await allRows()).toHaveLength(0);
+
+    // Control: two back-to-back half hours on the same weight room.
+    const saved = await createSessionsBatchAction(
+      batchInput(seeded.weightRoom1.id, [
+        ["15:00", "15:30"],
+        ["15:30", "16:00"],
+      ]),
+    );
+    expect(saved).toEqual({ ok: true, count: 1 });
+  });
+});
+
+// ── anything else is thrown, not returned ────────────────────────────────
+
+describe("createSessionsBatchAction: anything that is not a user-correctable refusal is thrown", () => {
+  it("a resource id that does not exist: throws ResourceNotFoundError; nothing is written", async () => {
+    mockAsAdmin();
+
+    const err = await thrown(() =>
+      createSessionsBatchAction(
+        batchInput(randomUUID(), [
+          ["15:00", "15:30"],
+          ["15:30", "16:00"],
+        ]),
+      ),
+    );
+    expect(err).toBeInstanceOf(ResourceNotFoundError);
+    expect(await allRows()).toHaveLength(0);
+
+    // Control: the same action and slots on a real cage.
+    const saved = await createSessionsBatchAction(
+      batchInput(seeded.cage1.id, [
+        ["15:00", "15:30"],
+        ["15:30", "16:00"],
+      ]),
+    );
+    expect(saved).toEqual({ ok: true, count: 2 });
+  });
+
+  it("any other ZodError (here an empty coach id) is thrown; nothing is written", async () => {
+    mockAsAdmin();
+
+    const err = await thrown(() =>
+      createSessionsBatchAction(
+        batchInput(seeded.cage1.id, [["15:00", "15:30"]], ""),
+      ),
+    );
+    expect(err).toBeInstanceOf(ZodError);
+    expect((err as ZodError).issues[0].message).not.toBe(MAX_DURATION_MESSAGE);
+    expect(await allRows()).toHaveLength(0);
+
+    // Control: the same action and slot with the coach filled in.
+    const saved = await createSessionsBatchAction(
+      batchInput(seeded.cage1.id, [["15:00", "15:30"]]),
     );
     expect(saved).toEqual({ ok: true, count: 1 });
   });

@@ -7,6 +7,10 @@
 //     message } }`, carrying the real sentence. (A thrown server-action error
 //     reaches the browser with its message stripped on a production build.)
 //   - A clean move comes back `{ ok: true }` and the row really moved.
+//   - ONLY the user-correctable refusals (overlap, block, weight room
+//     minimum) come back as a result. Anything else (a rental that is not
+//     there, a span over 16 hours, …) is THROWN, so it reaches Sentry and the
+//     grid shows its own fixed fallback sentence, never raw internal text.
 //   - Authorization is exactly the public updateSession's, because it calls
 //     it: a signed-out caller and a plain coach are refused with the very
 //     same redirect updateSession throws, and nothing is written; an admin and
@@ -25,10 +29,14 @@
 // `@/auth` and `next/cache` are mocked at file scope (vi.mock is hoisted), the
 // same way weight-room-minimum.test.ts does it.
 
+import { randomUUID } from "node:crypto";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
+import { ZodError } from "zod";
 import { db } from "@/db";
 import { blockedTimes, sessionsBilling } from "@/db/schema";
+import { SessionNotFoundError } from "@/lib/errors";
+import { MAX_DURATION_MESSAGE } from "@/lib/schemas/session";
 import { formatPfaDate, parsePfaInput } from "@/lib/timezone";
 import {
   ensureFixtureUsers,
@@ -298,6 +306,63 @@ describe("moveSessionAction: refusals come back as a result, not a throw", () =>
       endAt: at("18:00"),
     });
     expect(moved).toEqual({ ok: true });
+  });
+});
+
+// ── anything else is thrown, not returned ────────────────────────────────
+
+describe("moveSessionAction: anything that is not a user-correctable refusal is thrown", () => {
+  it("a rental id that does not exist: throws SessionNotFoundError, and nothing changes", async () => {
+    mockAsAdmin();
+    const bystander = await seedRental({
+      resourceId: seeded.cage1.id,
+      start: "15:00",
+      end: "15:30",
+    });
+    const target = {
+      resourceId: seeded.cage2.id,
+      startAt: at("16:00"),
+      endAt: at("16:30"),
+    };
+
+    const err = await thrown(() => moveSessionAction(randomUUID(), target));
+    expect(err).toBeInstanceOf(SessionNotFoundError);
+    expectUnchanged(await readRow(bystander.id), bystander);
+    const rows = await db.select().from(sessionsBilling);
+    expect(rows).toHaveLength(1);
+
+    // Control: the same action and target, with a real rental id.
+    expect(await moveSessionAction(bystander.id, target)).toEqual({ ok: true });
+  });
+
+  it("a span over 16 hours: the ZodError is thrown, not returned, and nothing moves", async () => {
+    mockAsAdmin();
+    const mover = await seedRental({
+      resourceId: seeded.cage1.id,
+      start: "15:00",
+      end: "15:30",
+    });
+    const start = at("15:00");
+
+    const err = await thrown(() =>
+      moveSessionAction(mover.id, {
+        resourceId: seeded.cage2.id,
+        startAt: start,
+        endAt: new Date(start.getTime() + 17 * 3_600_000),
+      }),
+    );
+    expect(err).toBeInstanceOf(ZodError);
+    expect((err as ZodError).issues[0].message).toBe(MAX_DURATION_MESSAGE);
+    expectUnchanged(await readRow(mover.id), mover);
+
+    // Control: the same rental, same action, a normal length.
+    expect(
+      await moveSessionAction(mover.id, {
+        resourceId: seeded.cage2.id,
+        startAt: at("15:00"),
+        endAt: at("15:30"),
+      }),
+    ).toEqual({ ok: true });
   });
 });
 

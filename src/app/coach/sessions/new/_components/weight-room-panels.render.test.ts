@@ -74,6 +74,11 @@ function durationButtons(html: string): Button[] | null {
   return m ? buttons(m[1]) : null;
 }
 
+/** The batch panel's small title (the first paragraph, "Book N …"). */
+function header(html: string): string | undefined {
+  return paragraphs(html)[0];
+}
+
 function paragraphs(html: string): string[] {
   return [...html.matchAll(/<p(?:\s[^>]*)?>([\s\S]*?)<\/p>/g)].map((m) => textOf(m[1]));
 }
@@ -144,6 +149,17 @@ describe("one-tap panel, weight room", () => {
     ]);
   });
 
+  it("nothing free from the tapped slot (a refresh showed it taken): says so, no Book button", () => {
+    const html = oneTap(WR, 0, { prevSlotFree: true, nextToOwnRental: true });
+    expect(alerts(html)).toEqual([
+      ["3:00 PM on Weight Room 1 is no longer free.", "Pick another time."],
+    ]);
+    expect(durationButtons(html)).toBeNull();
+    const labels = buttons(html).map((b) => b.text);
+    expect(labels).not.toContain("Book this slot");
+    expect(labels).toContain("Cancel");
+  });
+
   it("two hours free: opens at 1 hr, no 30 min choice, no split, no group checkbox", () => {
     const html = oneTap(WR, 120);
     expect(alerts(html)).toEqual([]);
@@ -195,6 +211,7 @@ describe("batch panel, weight room", () => {
     ]);
     const book = buttons(html).find((b) => b.text.startsWith("Book "));
     expect(book).toEqual({ text: "Book 1 rental", disabled: true, pressed: null });
+    expect(header(html)).toBe("Book 1 rental");
     expect(paragraphs(html)).toContain("3:00 PM – 3:30 PM (30 min, not enough)");
     expect(paragraphs(html)).toContain(
       "Weight room rentals are one hour minimum: pick back-to-back half hours on the same spot.",
@@ -207,6 +224,8 @@ describe("batch panel, weight room", () => {
     expect(paragraphs(html)).toContain("3:00 PM – 4:00 PM (1 hr)");
     const book = buttons(html).find((b) => b.text.startsWith("Book "));
     expect(book).toEqual({ text: "Book 1 rental", disabled: false, pressed: null });
+    // The panel's title counts the rental saved, not the two taps.
+    expect(header(html)).toBe("Book 1 rental");
     expect(html).not.toContain("Group session");
   });
 
@@ -224,6 +243,16 @@ describe("batch panel, weight room", () => {
     ]);
     const book = buttons(html).find((b) => b.text.startsWith("Book "));
     expect(book?.disabled).toBe(true);
+    expect(header(html)).toBe("Book 2 rentals");
+  });
+
+  it("four back-to-back picks on one weight room: one rental of 2 hr in the title and the button", () => {
+    const html = batch([0, 1, 2, 3].map((i) => key(WR, S3PM + i)));
+    expect(alerts(html)).toEqual([]);
+    expect(paragraphs(html)).toContain("3:00 PM – 5:00 PM (2 hr)");
+    expect(header(html)).toBe("Book 1 rental");
+    const book = buttons(html).find((b) => b.text.startsWith("Book "));
+    expect(book).toEqual({ text: "Book 1 rental", disabled: false, pressed: null });
   });
 });
 
@@ -234,6 +263,8 @@ describe("batch panel, cage (unchanged review text)", () => {
     expect(paragraphs(html)).toContain("3:00 PM, 3:30 PM — 2 rentals of 30 min");
     const book = buttons(html).find((b) => b.text.startsWith("Book "));
     expect(book).toEqual({ text: "Book 2 rentals", disabled: false, pressed: null });
+    // Cages: one rental per slot, so the number is the slot count as before.
+    expect(header(html)).toBe("Book 2 rentals");
     expect(html).not.toContain("Weight room rentals are one hour minimum");
     expect(html).not.toContain("Group session");
   });

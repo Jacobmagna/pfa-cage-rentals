@@ -1,7 +1,9 @@
 // The weight room choices and copy for the admin screens: the two create
 // dialogs (schedule-create-dialog.tsx, session-form-dialog.tsx in create
 // mode), and the two grids' click-to-create and drag-to-move
-// (schedule-grid.tsx, editable-master-schedule.tsx).
+// (schedule-grid.tsx, editable-master-schedule.tsx). The range refusal is
+// also used by the coach form (log-session-form.tsx), so the coach and the
+// admin read the same sentence.
 //
 // Why these are decided HERE, in the browser: a production build strips the
 // message (and the class) from an error a server action throws, so a
@@ -10,19 +12,43 @@
 // The server guard stays as the backstop.
 //
 // Pure: no React, no fetching. The minimum and the length wording come from
-// @/lib/weight-room-minimum so the screens and the server can never disagree.
+// @/lib/weight-room-minimum so the screens and the server can never disagree;
+// the grid's last time comes from @/lib/schedule-grid-utils.
 
 import {
   WEIGHT_ROOM_MINIMUM_MINUTES,
   formatRentalLength,
   isBelowWeightRoomMinimum,
 } from "@/lib/weight-room-minimum";
+import { SCHEDULE_GRID_LAST_HOUR } from "@/lib/schedule-grid-utils";
+import { formatPfaTime12h, pfaWallClockAt } from "@/lib/timezone";
 
 const SLOT_MINUTES = 30;
+const MINIMUM_MS = WEIGHT_ROOM_MINIMUM_MINUTES * 60_000;
 
 /** Shown in a create dialog when a weight room range is under an hour. */
 export const WEIGHT_ROOM_RANGE_REFUSAL =
   "Weight room rentals are one hour minimum. Make the end time at least 1 hour after the start.";
+
+/**
+ * The inline refusal for a weight room range under an hour, shared by the
+ * coach form ("Prefer the form?") and both admin create dialogs. Shown only
+ * when the range is already refused.
+ *
+ * When an hour from the start would run past the grid's last time (10:00 PM,
+ * SCHEDULE_GRID_LAST_HOUR), moving the end time cannot help, so the sentence
+ * names the last start that can make an hour ("9:00 PM") instead. A start of
+ * exactly that time can still make an hour and keeps the usual sentence.
+ */
+export function weightRoomRangeRefusal(rangeStart: Date | null): string {
+  if (rangeStart === null) return WEIGHT_ROOM_RANGE_REFUSAL;
+  const gridEnd = pfaWallClockAt(rangeStart, SCHEDULE_GRID_LAST_HOUR, 0);
+  if (rangeStart.getTime() + MINIMUM_MS <= gridEnd.getTime()) {
+    return WEIGHT_ROOM_RANGE_REFUSAL;
+  }
+  const lastHourStart = new Date(gridEnd.getTime() - MINIMUM_MS);
+  return `Weight room rentals are one hour minimum, and the last hour starts at ${formatPfaTime12h(lastHourStart)}. Pick an earlier start.`;
+}
 
 export type WeightRoomRangeStatus =
   /** Start or end not filled in yet: show nothing, the server validates. */

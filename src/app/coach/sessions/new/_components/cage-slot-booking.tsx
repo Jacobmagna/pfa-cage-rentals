@@ -318,6 +318,7 @@ export function CageSlotBooking({
             startAt,
             prevSlotFree,
             nextToOwnRental,
+            maxDurationMin,
           }).map((line) => (
             <p key={line}>{line}</p>
           ))}

@@ -2,10 +2,12 @@
 // (pure module). Plain data in, plain data out: no database, no clock.
 
 import { describe, expect, it } from "vitest";
+import { pfaWallClockToUtc } from "@/lib/timezone";
 import {
   WEIGHT_ROOM_RANGE_REFUSAL,
   emptyCellPrefillMinutes,
   weightRoomMoveRefusal,
+  weightRoomRangeRefusal,
   weightRoomRangeStatus,
 } from "./weight-room-admin.logic";
 
@@ -153,5 +155,35 @@ describe("emptyCellPrefillMinutes (click on an empty cell, both grids)", () => {
     expect(
       emptyCellPrefillMinutes({ isWeightRoom: false, slotIndex: 27, slotCount: SLOTS }),
     ).toBe(30);
+  });
+});
+
+describe("weightRoomRangeRefusal (coach form and both admin create dialogs)", () => {
+  // Wall-clock times at the facility on an ordinary day.
+  const DAY = "2026-10-17";
+  const pfa = (time: string) => pfaWallClockToUtc(DAY, time);
+  const LATE =
+    "Weight room rentals are one hour minimum, and the last hour starts at 9:00 PM. Pick an earlier start.";
+
+  it("an ordinary short range keeps the existing sentence", () => {
+    expect(weightRoomRangeRefusal(pfa("15:00"))).toBe(WEIGHT_ROOM_RANGE_REFUSAL);
+    expect(weightRoomRangeRefusal(pfa("08:00"))).toBe(WEIGHT_ROOM_RANGE_REFUSAL);
+  });
+
+  it("boundary: a start of exactly 9:00 PM can still make an hour, so the existing sentence", () => {
+    expect(weightRoomRangeRefusal(pfa("21:00"))).toBe(WEIGHT_ROOM_RANGE_REFUSAL);
+  });
+
+  it("a start of 9:30 PM cannot make an hour before the grid ends at 10:00 PM", () => {
+    expect(weightRoomRangeRefusal(pfa("21:30"))).toBe(LATE);
+  });
+
+  it("any start after 9:00 PM gets the same sentence", () => {
+    expect(weightRoomRangeRefusal(pfa("21:01"))).toBe(LATE);
+    expect(weightRoomRangeRefusal(pfa("21:59"))).toBe(LATE);
+  });
+
+  it("no start yet: the existing sentence", () => {
+    expect(weightRoomRangeRefusal(null)).toBe(WEIGHT_ROOM_RANGE_REFUSAL);
   });
 });

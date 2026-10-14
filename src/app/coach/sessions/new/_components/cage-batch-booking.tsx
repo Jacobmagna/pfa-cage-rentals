@@ -193,8 +193,10 @@ export function CageBatchBooking({
     <div className="rounded-xl border border-line bg-surface shadow-[var(--shadow-md)] p-4 sm:p-5 space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-0.5">
+          {/* Rentals that will be saved, the same count as the Book button
+              (back-to-back weight room picks are one rental). */}
           <p className="text-xs uppercase tracking-wider text-fg-muted">
-            Book {count} {count === 1 ? "slot" : "slots"}
+            Book {savedCount} {savedCount === 1 ? "rental" : "rentals"}
           </p>
           {dayCount > 1 || cageCount > 1 ? (
             <p className="text-sm text-fg-muted">

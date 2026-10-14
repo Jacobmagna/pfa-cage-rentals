@@ -169,6 +169,7 @@ describe("oneTapWeightRoomRefusal", () => {
         startAt,
         prevSlotFree: true,
         nextToOwnRental: false,
+        maxDurationMin: 30,
       }),
     ).toEqual([LINE_1, "Tap 2:30 PM instead to book 2:30 PM – 3:30 PM."]);
   });
@@ -180,6 +181,7 @@ describe("oneTapWeightRoomRefusal", () => {
         startAt,
         prevSlotFree: true,
         nextToOwnRental: true,
+        maxDurationMin: 30,
       }),
     ).toEqual([LINE_1, "Tap 2:30 PM instead to book 2:30 PM – 3:30 PM."]);
   });
@@ -191,6 +193,7 @@ describe("oneTapWeightRoomRefusal", () => {
         startAt,
         prevSlotFree: false,
         nextToOwnRental: true,
+        maxDurationMin: 30,
       }),
     ).toEqual([
       LINE_1,
@@ -205,8 +208,44 @@ describe("oneTapWeightRoomRefusal", () => {
         startAt,
         prevSlotFree: false,
         nextToOwnRental: false,
+        maxDurationMin: 30,
       }),
     ).toEqual([LINE_1, "Pick another time."]);
+  });
+
+  // A refresh can show the tapped slot itself is now taken: nothing is free
+  // from it, so "only 30 minutes is free" would be wrong.
+  describe("nothing free from the tapped slot (maxDurationMin 0)", () => {
+    const GONE = "3:00 PM on Weight Room 1 is no longer free.";
+
+    it("says the slot is no longer free, then Pick another time", () => {
+      expect(
+        oneTapWeightRoomRefusal({
+          resourceName: "Weight Room 1",
+          startAt,
+          prevSlotFree: false,
+          nextToOwnRental: false,
+          maxDurationMin: 0,
+        }),
+      ).toEqual([GONE, "Pick another time."]);
+    });
+
+    it("suggests nothing else, even when the half hour before is free or an own rental is next to it", () => {
+      for (const facts of [
+        { prevSlotFree: true, nextToOwnRental: false },
+        { prevSlotFree: false, nextToOwnRental: true },
+        { prevSlotFree: true, nextToOwnRental: true },
+      ]) {
+        expect(
+          oneTapWeightRoomRefusal({
+            resourceName: "Weight Room 1",
+            startAt,
+            maxDurationMin: 0,
+            ...facts,
+          }),
+        ).toEqual([GONE, "Pick another time."]);
+      }
+    });
   });
 });
 

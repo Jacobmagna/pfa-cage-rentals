@@ -77,14 +77,25 @@ export function oneTapNeighborFacts(args: {
 /**
  * The one-tap panel's refusal when less than an hour is free from the
  * tapped slot. Two lines: the rule, then exactly one way forward.
+ *
+ * `maxDurationMin` is the free run from the tapped slot (the panel's own
+ * prop). At 0 the tapped slot itself is taken (a refresh revealed it), so
+ * the panel says that instead and suggests nothing but another time.
  */
 export function oneTapWeightRoomRefusal(args: {
   resourceName: string;
   startAt: Date;
   prevSlotFree: boolean;
   nextToOwnRental: boolean;
+  maxDurationMin: number;
 }): string[] {
   const { resourceName, startAt, prevSlotFree, nextToOwnRental } = args;
+  if (args.maxDurationMin <= 0) {
+    return [
+      `${formatPfaTime12h(startAt)} on ${resourceName} is no longer free.`,
+      "Pick another time.",
+    ];
+  }
   const first = `Weight room rentals are one hour minimum, and only 30 minutes is free from ${formatPfaTime12h(startAt)} on ${resourceName}.`;
   if (prevSlotFree) {
     const prevStart = formatPfaTime12h(new Date(startAt.getTime() - SLOT_MS));

@@ -25,6 +25,7 @@ import {
 } from "@/app/_components/session-slots-list";
 import { formatPfaDate, formatPfaTime, parsePfaInput } from "@/lib/timezone";
 import { isBelowWeightRoomMinimum } from "@/lib/weight-room-minimum";
+import { weightRoomRangeRefusal } from "@/app/admin/schedule/_components/weight-room-admin.logic";
 import { AvailabilityPanel } from "./availability-panel";
 
 const INITIAL_STATE: CoachActionResult = { ok: true, loggedAt: 0 };
@@ -472,8 +473,7 @@ export function LogSessionForm({
             role="alert"
             className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
           >
-            Weight room rentals are one hour minimum. Make the end time at
-            least 1 hour after the start.
+            {weightRoomRangeRefusal(rangeStart)}
           </div>
         ) : null}
 

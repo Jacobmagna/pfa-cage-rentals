@@ -33,7 +33,7 @@ import {
   parsePfaInput,
 } from "@/lib/timezone";
 import {
-  WEIGHT_ROOM_RANGE_REFUSAL,
+  weightRoomRangeRefusal,
   weightRoomRangeStatus,
 } from "@/app/admin/schedule/_components/weight-room-admin.logic";
 
@@ -468,7 +468,7 @@ export function SessionFormDialog({
               role="alert"
               className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
             >
-              {WEIGHT_ROOM_RANGE_REFUSAL}
+              {weightRoomRangeRefusal(rangeStart)}
             </div>
           ) : null}
 

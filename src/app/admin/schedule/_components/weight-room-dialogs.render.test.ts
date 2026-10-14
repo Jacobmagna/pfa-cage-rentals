@@ -57,6 +57,8 @@ const at = (time: string) => pfaWallClockToUtc(DAY, time);
 
 const REFUSAL =
   "Weight room rentals are one hour minimum. Make the end time at least 1 hour after the start.";
+const LATE_REFUSAL =
+  "Weight room rentals are one hour minimum, and the last hour starts at 9:00 PM. Pick an earlier start.";
 
 function decode(text: string): string {
   return text
@@ -175,6 +177,20 @@ for (const dialog of CREATE_DIALOGS) {
       expect(html).not.toContain('name="isGroupSession"');
       expect(willCreateLines(html)).toEqual([]);
       expect(noteInputs(html)).toBe(1);
+    });
+
+    it("9:30 PM, 30 minutes: the refusal names the last hour's start, submit disabled", () => {
+      const html = dialog.render(WR.id, "21:30", "22:00");
+      expect(alerts(html)).toEqual([LATE_REFUSAL]);
+      expect(submitButton(html)).toEqual({
+        text: "Create session",
+        disabled: true,
+      });
+    });
+
+    it("9:00 PM, 30 minutes: an hour still fits, so the usual refusal", () => {
+      const html = dialog.render(WR.id, "21:00", "21:30");
+      expect(alerts(html)).toEqual([REFUSAL]);
     });
 
     it("1 hour: one session line, submit enabled, one Note field", () => {

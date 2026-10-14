@@ -356,7 +356,9 @@ export function CageCalendar({
   };
 
   // Batch submit succeeded → clear the selection, confirm, re-fetch so
-  // the booked slots flip to gold. Stays in multi-select mode.
+  // the booked slots flip to gold. Stays in multi-select mode. `count` is
+  // the rentals SAVED (back-to-back weight room picks save as one), not
+  // the slots tapped.
   const handleBatchBooked = (count: number) => {
     clearSelection();
     setFormOpen(false);
@@ -754,6 +756,10 @@ export function CageCalendar({
           <CageBatchBooking
             resources={resources}
             selection={selection}
+            displayedDate={dateStr}
+            slotStateOnDisplayedDay={(resourceId, slotIndex) =>
+              slotStateFor(resourceId, slotIndex).state
+            }
             onBooked={handleBatchBooked}
             onCancel={() => setFormOpen(false)}
           />

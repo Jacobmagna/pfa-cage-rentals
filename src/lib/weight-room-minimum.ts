@@ -1,7 +1,9 @@
 // The weight room one-hour minimum, in one place.
 //
 // The rule: a rental on a weight room can never be shorter than one hour.
-// Longer is fine. Cages and bullpens are not touched by anything here.
+// Longer is fine. Cages and bullpens are not touched by anything here. One
+// exception: an ADMIN may enter or correct one that is already over
+// (isPastRentalAdminWaiver).
 //
 // This module is PURE and has ZERO runtime imports, on purpose: the server
 // write functions (src/lib/server/session-actions.ts) import it to enforce
@@ -39,6 +41,48 @@ const NOTE_SEPARATOR = " / ";
 export function isBelowWeightRoomMinimum(startAt: Date, endAt: Date): boolean {
   const lengthMs = endAt.getTime() - startAt.getTime();
   return !(lengthMs >= MINIMUM_MS);
+}
+
+/**
+ * True when the one-hour minimum does NOT apply: an ADMIN fixing a rental
+ * that is already over. Everyone else, and every rental that is in progress
+ * or still to come, is held to the hour.
+ *
+ * Why: a weight room rental under an hour that is already over (logged
+ * before this rule, or imported) may have been entered at the wrong time or
+ * on the wrong spot. Without this, nobody could re-time it, and deleting it
+ * and entering it again would be refused too. An admin may now correct it.
+ *
+ * Exactly:
+ *  - `role` must be "admin". A Schedule Manager is a coach (role "coach"
+ *    with the scheduleAdmin flag) and is NOT waived. The server passes the
+ *    role pinned from the sign-in, never anything from the request; a screen
+ *    passes the viewer's role only to avoid a pointless refusal, and the
+ *    server guard still decides.
+ *  - `startAt` / `endAt` are the rental's FINAL times (after the edit, not
+ *    the stored ones). The end must be at or before `now`; ending exactly
+ *    now counts as over.
+ *  - The end must be after the start. A range that is not a real rental
+ *    (zero length, or backwards) is never waived, so it keeps getting the
+ *    one-hour refusal instead of reaching the database.
+ *  - `now` is passed in; there is no clock in here.
+ *  - A time that is not a real date is never waived (every comparison with
+ *    NaN is false), so it fails closed like isBelowWeightRoomMinimum.
+ *
+ * It says nothing about price: a re-timed rental keeps the rate stamped on
+ * it, and a rental entered again is priced at today's rate like any other.
+ */
+export function isPastRentalAdminWaiver(args: {
+  role: "admin" | "coach" | null | undefined;
+  startAt: Date;
+  endAt: Date;
+  now: Date;
+}): boolean {
+  return (
+    args.role === "admin" &&
+    args.endAt.getTime() > args.startAt.getTime() &&
+    args.endAt.getTime() <= args.now.getTime()
+  );
 }
 
 /**

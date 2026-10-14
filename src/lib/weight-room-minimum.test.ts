@@ -11,6 +11,7 @@ import {
   findLoneWeightRoomPicks,
   formatRentalLength,
   isBelowWeightRoomMinimum,
+  isPastRentalAdminWaiver,
   mergeContiguousWeightRoomSlots,
 } from "./weight-room-minimum";
 
@@ -667,5 +668,124 @@ describe("formatRentalLength", () => {
   it("says hours and minutes together", () => {
     expect(formatRentalLength(90)).toBe("1 hr 30 min");
     expect(formatRentalLength(150)).toBe("2 hr 30 min");
+  });
+});
+
+describe("isPastRentalAdminWaiver", () => {
+  // "Now" is 4:00 PM on the test day. A rental 3:00-3:30 PM is over; one
+  // 3:45-4:15 PM is in progress; one 5:00-5:30 PM is in the future.
+  const now = at(16);
+
+  // A 30-minute rental ending at `endAt` (the usual short rental).
+  function waived(
+    role: "admin" | "coach" | null | undefined,
+    endAt: Date,
+    when: Date = now,
+  ): boolean {
+    return isPastRentalAdminWaiver({
+      role,
+      startAt: new Date(endAt.getTime() - 30 * 60_000),
+      endAt,
+      now: when,
+    });
+  }
+
+  it("waives the minimum for an ADMIN when the rental ended before now", () => {
+    expect(waived("admin", at(15, 30))).toBe(true);
+  });
+
+  it("waives it when the rental ends EXACTLY now (at or before now counts as past)", () => {
+    expect(waived("admin", at(16))).toBe(true);
+  });
+
+  it("does not waive it when the rental ends one millisecond after now", () => {
+    expect(waived("admin", new Date(now.getTime() + 1))).toBe(false);
+  });
+
+  it("does not waive it for an admin on a rental in progress or in the future", () => {
+    expect(waived("admin", at(16, 15))).toBe(false);
+    expect(waived("admin", at(17, 30))).toBe(false);
+    expect(waived("admin", at(15, 30, 1))).toBe(false);
+  });
+
+  it("judges the END: a rental that started before now but ends after it is not waived", () => {
+    expect(
+      isPastRentalAdminWaiver({
+        role: "admin",
+        startAt: at(9),
+        endAt: at(16, 30),
+        now,
+      }),
+    ).toBe(false);
+  });
+
+  it("never waives it for a coach, a Schedule Manager included (role coach), even on a past rental", () => {
+    expect(waived("coach", at(15, 30))).toBe(false);
+    expect(waived("coach", at(15, 30, -30))).toBe(false);
+  });
+
+  it("never waives it when the role is missing", () => {
+    expect(waived(undefined, at(15, 30))).toBe(false);
+    expect(waived(null, at(15, 30))).toBe(false);
+  });
+
+  it("never waives a past range whose end is not after its start (zero length or backwards)", () => {
+    expect(
+      isPastRentalAdminWaiver({
+        role: "admin",
+        startAt: at(15),
+        endAt: at(15),
+        now,
+      }),
+    ).toBe(false);
+    expect(
+      isPastRentalAdminWaiver({
+        role: "admin",
+        startAt: at(15, 30),
+        endAt: at(15),
+        now,
+      }),
+    ).toBe(false);
+    // Control: the same past half hour the right way round is waived.
+    expect(
+      isPastRentalAdminWaiver({
+        role: "admin",
+        startAt: at(15),
+        endAt: at(15, 30),
+        now,
+      }),
+    ).toBe(true);
+  });
+
+  it("fails closed when a time or now is not a real date", () => {
+    expect(waived("admin", new Date(NaN))).toBe(false);
+    expect(waived("admin", at(15, 30), new Date(NaN))).toBe(false);
+    expect(
+      isPastRentalAdminWaiver({
+        role: "admin",
+        startAt: new Date(NaN),
+        endAt: at(15, 30),
+        now,
+      }),
+    ).toBe(false);
+  });
+
+  it("reads the clock it is given, not the real one", () => {
+    // A rental far in the real future is "past" against a later `now`, and a
+    // rental far in the real past is "future" against an earlier `now`.
+    expect(
+      waived(
+        "admin",
+        new Date(Date.UTC(2099, 0, 1, 15, 30)),
+        new Date(Date.UTC(2099, 0, 1, 16)),
+      ),
+    ).toBe(true);
+    expect(
+      waived(
+        "admin",
+        new Date(Date.UTC(2001, 0, 1, 15, 30)),
+        new Date(Date.UTC(2001, 0, 1, 15)),
+      ),
+    ).toBe(false);
   });
 });

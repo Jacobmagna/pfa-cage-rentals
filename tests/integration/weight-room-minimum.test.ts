@@ -4,7 +4,9 @@
 // The rule: a rental on a `weight_room` resource can never be CREATED shorter
 // than 60 minutes, and cannot be re-timed or moved while it is shorter than 60
 // minutes. Cages and bullpens are untouched. The historical import is exempt.
-// The "group session" flag can no longer be set by a new booking.
+// The "group session" flag can no longer be set by a new booking. W5: an
+// ADMIN may create, re-time or move one under an hour once its final end is
+// at or before now (the "W5" blocks below); everyone else is still held.
 //
 // How this file is built:
 //   - EVERY refusal fixture fails for exactly one reason: valid ids, an empty
@@ -1207,7 +1209,11 @@ describe("update — what only the admin form can do", () => {
     expect(row.note).toBe("keep me");
   });
 
-  it("re-timing an old 30-minute weight room rental in the PAST while it is still 30 minutes is refused; lengthening it to 60 is allowed", async () => {
+  // W5: an admin may correct a rental that is already over, even under an
+  // hour (the final end time is at or before now). Before W5 this exact edit
+  // was refused, and nobody could fix a past half hour logged at the wrong
+  // time. The future case stays refused (see the W5 block below).
+  it("re-timing an old 30-minute weight room rental in the PAST to another past time, still 30 minutes, is allowed for an admin, at the stored rate", async () => {
     const old = await seedRentalDirect({
       resourceId: seeded.weightRoom1.id,
       day: PAST_DAY,
@@ -1215,17 +1221,20 @@ describe("update — what only the admin form can do", () => {
       end: "15:30",
     });
 
-    const refused = await adminEdit.submit(old, {
+    const allowed = await adminEdit.submit(old, {
       start: "16:00",
       end: "16:30",
     });
-    expectRefusedState(refused);
-    await expectUntouched(old);
-
-    const allowed = await adminEdit.submit(old, { end: "16:00" });
     expect(allowed).toEqual({ ok: true });
-    const row = await readRowUntil(old.id, (r) => minutes(r) === 60);
-    expect(minutes(row)).toBe(60);
+    const row = await readRowUntil(
+      old.id,
+      (r) => r.startAt.getTime() === at(PAST_DAY, "16:00").getTime(),
+    );
+    expect(row.startAt.getTime()).toBe(at(PAST_DAY, "16:00").getTime());
+    expect(row.endAt.getTime()).toBe(at(PAST_DAY, "16:30").getTime());
+    expect(minutes(row)).toBe(30);
+    expect(row.resourceId).toBe(seeded.weightRoom1.id);
+    expect(row.ratePer30MinCents).toBe(old.ratePer30MinCents);
   });
 });
 
@@ -1326,6 +1335,512 @@ describe("updateSessionInternal — the rule compares VALUES, not which fields w
     });
     expect(updated.resourceId).toBe(seeded.weightRoom2.id);
     expect(minutes(updated)).toBe(60);
+  });
+});
+
+// ── W5: an admin can fix a PAST short weight room rental ─────────────────
+//
+// The rule (src/lib/weight-room-minimum.ts, isPastRentalAdminWaiver): the
+// one-hour minimum is waived ONLY when the person is an ADMIN (role "admin",
+// pinned by the server from the sign-in, never from the request) AND the
+// rental's FINAL end time is at or before now. A Schedule Manager is a coach
+// with the scheduleAdmin flag and is still held to the hour, like every coach.
+// A rental in progress or in the future is still held, admin or not. The
+// rate on a re-timed or same-kind moved rental stays as stamped.
+
+function mockAsScheduleManager() {
+  authMock.mockResolvedValue({
+    user: {
+      id: fixtures.flaggedCoach.id,
+      email: fixtures.flaggedCoach.email,
+      name: fixtures.flaggedCoach.name,
+      role: "coach",
+      scheduleAdmin: true,
+    },
+  });
+}
+
+// A 30-minute range around the real clock: started 15 minutes ago, ends in 15.
+function inProgressHalfHour(): { startAt: Date; endAt: Date } {
+  const now = Date.now();
+  return {
+    startAt: new Date(now - 15 * 60_000),
+    endAt: new Date(now + 15 * 60_000),
+  };
+}
+
+describe("W5 — create: an admin may enter a weight room rental under an hour once it is over", () => {
+  it("admin: 30 minutes on a weight room that ended days ago saves, at the rate any new rental gets", async () => {
+    const created = await createSessionInternal(fixtures.admin, {
+      coachId: fixtures.coach.id,
+      resourceId: seeded.weightRoom1.id,
+      startAt: at(PAST_DAY, "15:00"),
+      endAt: at(PAST_DAY, "15:30"),
+    });
+    expect(created.resourceId).toBe(seeded.weightRoom1.id);
+    expect(created.startAt.getTime()).toBe(at(PAST_DAY, "15:00").getTime());
+    expect(minutes(created)).toBe(30);
+    expect(created.isGroupSession).toBe(false);
+
+    // Same coach, same weight room, an hour in the future: the same rate.
+    const control = await createSessionInternal(fixtures.admin, {
+      coachId: fixtures.coach.id,
+      resourceId: seeded.weightRoom1.id,
+      startAt: at(FUTURE_DAY, "15:00"),
+      endAt: at(FUTURE_DAY, "16:00"),
+    });
+    expect(created.ratePer30MinCents).toBe(control.ratePer30MinCents);
+  });
+
+  it("admin: the same 30 minutes in the FUTURE is still refused, and nothing is written", async () => {
+    const err = await refusal(() =>
+      createSessionInternal(fixtures.admin, {
+        coachId: fixtures.coach.id,
+        resourceId: seeded.weightRoom1.id,
+        startAt: at(FUTURE_DAY, "15:00"),
+        endAt: at(FUTURE_DAY, "15:30"),
+      }),
+    );
+    expectMinimumRefusal(err, "create", seeded.weightRoom1.name);
+    expect(await allRows()).toHaveLength(0);
+
+    // Control: the same 30 minutes in the past goes through.
+    const created = await createSessionInternal(fixtures.admin, {
+      coachId: fixtures.coach.id,
+      resourceId: seeded.weightRoom1.id,
+      startAt: at(PAST_DAY, "15:00"),
+      endAt: at(PAST_DAY, "15:30"),
+    });
+    expect(minutes(created)).toBe(30);
+  });
+
+  it("admin: 30 minutes IN PROGRESS (started, not yet over) is refused; the same length that ended a minute ago saves", async () => {
+    const live = inProgressHalfHour();
+    const err = await refusal(() =>
+      createSessionInternal(fixtures.admin, {
+        coachId: fixtures.coach.id,
+        resourceId: seeded.weightRoom2.id,
+        ...live,
+      }),
+    );
+    expectMinimumRefusal(err, "create", seeded.weightRoom2.name);
+    expect(await allRows()).toHaveLength(0);
+
+    const now = Date.now();
+    const justOver = await createSessionInternal(fixtures.admin, {
+      coachId: fixtures.coach.id,
+      resourceId: seeded.weightRoom2.id,
+      startAt: new Date(now - 31 * 60_000),
+      endAt: new Date(now - 60_000),
+    });
+    expect(minutes(justOver)).toBe(30);
+  });
+
+  it("Schedule Manager (coach with scheduleAdmin): a PAST 30 minutes is refused; an admin's identical call saves", async () => {
+    const input = {
+      coachId: fixtures.coach.id,
+      resourceId: seeded.weightRoom1.id,
+      startAt: at(PAST_DAY, "15:00"),
+      endAt: at(PAST_DAY, "15:30"),
+    };
+    expect(fixtures.flaggedCoach.role).toBe("coach");
+    expect(fixtures.flaggedCoach.scheduleAdmin).toBe(true);
+    const err = await refusal(() =>
+      createSessionInternal(fixtures.flaggedCoach, input),
+    );
+    expectMinimumRefusal(err, "create", seeded.weightRoom1.name);
+    expect(await allRows()).toHaveLength(0);
+
+    const created = await createSessionInternal(fixtures.admin, input);
+    expect(minutes(created)).toBe(30);
+  });
+
+  it("admin: a PAST weight room range whose end is not after its start still gets the one-hour refusal, not a database error", async () => {
+    for (const [start, end] of [
+      ["15:30", "15:00"],
+      ["15:00", "15:00"],
+    ]) {
+      const err = await refusal(() =>
+        createSessionInternal(fixtures.admin, {
+          coachId: fixtures.coach.id,
+          resourceId: seeded.weightRoom1.id,
+          startAt: at(PAST_DAY, start),
+          endAt: at(PAST_DAY, end),
+        }),
+      );
+      expectMinimumRefusal(err, "create", seeded.weightRoom1.name);
+    }
+    expect(await allRows()).toHaveLength(0);
+  });
+
+  it("plain coach: a PAST 30 minutes is refused, and nothing is written", async () => {
+    const err = await refusal(() =>
+      createSessionInternal(fixtures.coach, {
+        coachId: fixtures.coach.id,
+        resourceId: seeded.weightRoom1.id,
+        startAt: at(PAST_DAY, "15:00"),
+        endAt: at(PAST_DAY, "15:30"),
+      }),
+    );
+    expectMinimumRefusal(err, "create", seeded.weightRoom1.name);
+    expect(await allRows()).toHaveLength(0);
+  });
+
+  it("through the admin create form: the signed-in admin's past 30 minutes saves; the signed-in Schedule Manager's is refused as a message", async () => {
+    const { createSessionFormAction } = await import(
+      "@/app/admin/sessions/form-actions"
+    );
+    const form = () => {
+      const fd = new FormData();
+      fd.set("coachId", fixtures.coach.id);
+      fd.set("resourceId", seeded.weightRoom1.id);
+      fd.set("date", PAST_DAY);
+      fd.set("startTime", "15:00");
+      fd.set("endTime", "15:30");
+      fd.set("note", "");
+      return fd;
+    };
+
+    mockAsScheduleManager();
+    const refused = await createSessionFormAction({ ok: true }, form());
+    expect(refused.ok).toBe(false);
+    if (refused.ok) throw new Error("unreachable");
+    expect(refused.error.code).toBe("WEIGHT_ROOM_MINIMUM");
+    expect(refused.error.message).toBe(CREATE_MESSAGE(seeded.weightRoom1.name));
+    expect(await allRows()).toHaveLength(0);
+
+    mockAsAdmin();
+    const saved = await createSessionFormAction({ ok: true }, form());
+    expect(saved).toEqual({ ok: true });
+  });
+});
+
+describe("W5 — batch: each JOINED row is judged on its own", () => {
+  it("admin: a lone PAST half hour saves as one 30-minute row", async () => {
+    const inserted = await createSessionsBatchInternal(fixtures.admin, {
+      coachId: fixtures.coach.id,
+      slots: [
+        {
+          resourceId: seeded.weightRoom1.id,
+          startAt: at(PAST_DAY, "15:00"),
+          endAt: at(PAST_DAY, "15:30"),
+        },
+      ],
+    });
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].resourceId).toBe(seeded.weightRoom1.id);
+    expect(minutes(inserted[0])).toBe(30);
+  });
+
+  it("admin: a past lone half hour beside a FUTURE lone half hour is refused as a whole, and nothing is written (the cage slot neither)", async () => {
+    const err = await refusal(() =>
+      createSessionsBatchInternal(fixtures.admin, {
+        coachId: fixtures.coach.id,
+        slots: [
+          {
+            resourceId: seeded.weightRoom1.id,
+            startAt: at(PAST_DAY, "15:00"),
+            endAt: at(PAST_DAY, "15:30"),
+          },
+          {
+            resourceId: seeded.cage1.id,
+            startAt: at(FUTURE_DAY, "15:00"),
+            endAt: at(FUTURE_DAY, "15:30"),
+          },
+          {
+            resourceId: seeded.weightRoom1.id,
+            startAt: at(FUTURE_DAY, "15:00"),
+            endAt: at(FUTURE_DAY, "15:30"),
+          },
+        ],
+      }),
+    );
+    expectMinimumRefusal(err, "create", seeded.weightRoom1.name);
+    expect(await allRows()).toHaveLength(0);
+  });
+
+  it("admin: a lone half hour IN PROGRESS (started, not over) is refused, nothing is written; one that ended a minute ago saves", async () => {
+    const err = await refusal(() =>
+      createSessionsBatchInternal(fixtures.admin, {
+        coachId: fixtures.coach.id,
+        slots: [{ resourceId: seeded.weightRoom1.id, ...inProgressHalfHour() }],
+      }),
+    );
+    expectMinimumRefusal(err, "create", seeded.weightRoom1.name);
+    expect(await allRows()).toHaveLength(0);
+
+    const now = Date.now();
+    const inserted = await createSessionsBatchInternal(fixtures.admin, {
+      coachId: fixtures.coach.id,
+      slots: [
+        {
+          resourceId: seeded.weightRoom1.id,
+          startAt: new Date(now - 31 * 60_000),
+          endAt: new Date(now - 60_000),
+        },
+      ],
+    });
+    expect(inserted).toHaveLength(1);
+    expect(minutes(inserted[0])).toBe(30);
+  });
+
+  it("Schedule Manager and plain coach: a lone PAST half hour is refused, nothing is written", async () => {
+    for (const actor of [fixtures.flaggedCoach, fixtures.coach]) {
+      const err = await refusal(() =>
+        createSessionsBatchInternal(actor, {
+          coachId: fixtures.coach.id,
+          slots: [
+            {
+              resourceId: seeded.weightRoom1.id,
+              startAt: at(PAST_DAY, "15:00"),
+              endAt: at(PAST_DAY, "15:30"),
+            },
+          ],
+        }),
+      );
+      expectMinimumRefusal(err, "create", seeded.weightRoom1.name);
+    }
+    expect(await allRows()).toHaveLength(0);
+  });
+
+  it("through the admin multi-slot action: the admin's lone past half hour returns { ok: true, count: 1 }; the Schedule Manager's returns the refusal", async () => {
+    const { createSessionsBatchAction } = await import(
+      "@/app/admin/sessions/form-actions"
+    );
+    const input = {
+      coachId: fixtures.coach.id,
+      slots: [
+        {
+          resourceId: seeded.weightRoom2.id,
+          startAt: at(PAST_DAY, "15:00"),
+          endAt: at(PAST_DAY, "15:30"),
+        },
+      ],
+    };
+
+    mockAsScheduleManager();
+    const refused = await createSessionsBatchAction(input);
+    expect(refused).toEqual({
+      ok: false,
+      error: {
+        code: "WEIGHT_ROOM_MINIMUM",
+        message: CREATE_MESSAGE(seeded.weightRoom2.name),
+      },
+    });
+    expect(await allRows()).toHaveLength(0);
+
+    mockAsAdmin();
+    const saved = await createSessionsBatchAction(input);
+    expect(saved).toEqual({ ok: true, count: 1 });
+  });
+});
+
+describe("W5 — update: an admin may re-time or move a PAST short rental, judged on the FINAL values", () => {
+  it("admin re-times a past 30 minutes to another past time: allowed, rate unchanged", async () => {
+    const old = await seedRentalDirect({
+      resourceId: seeded.weightRoom1.id,
+      day: PAST_DAY,
+      start: "15:00",
+      end: "15:30",
+    });
+    const updated = await updateSessionInternal(fixtures.admin, old.id, {
+      resourceId: old.resourceId,
+      startAt: at(PAST_DAY, "17:00"),
+      endAt: at(PAST_DAY, "17:30"),
+    });
+    expect(updated.startAt.getTime()).toBe(at(PAST_DAY, "17:00").getTime());
+    expect(updated.endAt.getTime()).toBe(at(PAST_DAY, "17:30").getTime());
+    expect(updated.resourceId).toBe(seeded.weightRoom1.id);
+    expect(updated.ratePer30MinCents).toBe(913);
+    expect(updated.ratePer30MinCents).toBe(old.ratePer30MinCents);
+  });
+
+  it("admin re-times a past 30 minutes into the FUTURE: refused, untouched; making it an hour there is allowed", async () => {
+    const old = await seedRentalDirect({
+      resourceId: seeded.weightRoom1.id,
+      day: PAST_DAY,
+      start: "15:00",
+      end: "15:30",
+    });
+    const err = await refusal(() =>
+      updateSessionInternal(fixtures.admin, old.id, {
+        startAt: at(FUTURE_DAY, "15:00"),
+        endAt: at(FUTURE_DAY, "15:30"),
+      }),
+    );
+    expectMinimumRefusal(err, "update", seeded.weightRoom1.name);
+    await expectUntouched(old);
+
+    const updated = await updateSessionInternal(fixtures.admin, old.id, {
+      startAt: at(FUTURE_DAY, "15:00"),
+      endAt: at(FUTURE_DAY, "16:00"),
+    });
+    expect(minutes(updated)).toBe(60);
+  });
+
+  it("admin re-times a past 30 minutes so it is IN PROGRESS: refused, untouched", async () => {
+    const old = await seedRentalDirect({
+      resourceId: seeded.weightRoom1.id,
+      day: PAST_DAY,
+      start: "15:00",
+      end: "15:30",
+    });
+    const err = await refusal(() =>
+      updateSessionInternal(fixtures.admin, old.id, inProgressHalfHour()),
+    );
+    expectMinimumRefusal(err, "update", seeded.weightRoom1.name);
+    await expectUntouched(old);
+  });
+
+  it("admin sends ONLY a new end on a past 30 minutes that would end in the future: judged on the final end, refused", async () => {
+    // Start stays days ago; the end moves to 15 minutes from now. The stored
+    // end is past, the final end is not: the final end decides.
+    const old = await seedRentalDirect({
+      resourceId: seeded.weightRoom1.id,
+      day: PAST_DAY,
+      start: "15:00",
+      end: "15:30",
+    });
+    const err = await refusal(() =>
+      updateSessionInternal(fixtures.admin, old.id, {
+        startAt: new Date(Date.now() - 15 * 60_000),
+        endAt: new Date(Date.now() + 15 * 60_000),
+      }),
+    );
+    expectMinimumRefusal(err, "update", seeded.weightRoom1.name);
+    await expectUntouched(old);
+  });
+
+  it("admin re-times a FUTURE 30-minute rental into the past: judged on the final end, allowed", async () => {
+    const old = await seedRentalDirect({
+      resourceId: seeded.weightRoom1.id,
+      day: FUTURE_DAY,
+      start: "15:00",
+      end: "15:30",
+    });
+    const updated = await updateSessionInternal(fixtures.admin, old.id, {
+      startAt: at(PAST_DAY, "15:00"),
+      endAt: at(PAST_DAY, "15:30"),
+    });
+    expect(updated.endAt.getTime()).toBe(at(PAST_DAY, "15:30").getTime());
+    expect(updated.ratePer30MinCents).toBe(old.ratePer30MinCents);
+  });
+
+  it("admin moves a past 30 minutes to the other weight room (drag, moveSessionAction): allowed, rate unchanged", async () => {
+    mockAsAdmin();
+    const { moveSessionAction } = await import(
+      "@/app/admin/sessions/form-actions"
+    );
+    const old = await seedRentalDirect({
+      resourceId: seeded.weightRoom1.id,
+      day: PAST_DAY,
+      start: "15:00",
+      end: "15:30",
+    });
+    const result = await moveSessionAction(old.id, {
+      resourceId: seeded.weightRoom2.id,
+      startAt: old.startAt,
+      endAt: old.endAt,
+    });
+    expect(result).toEqual({ ok: true });
+    const row = await readRowUntil(
+      old.id,
+      (r) => r.resourceId === seeded.weightRoom2.id,
+    );
+    expect(row.resourceId).toBe(seeded.weightRoom2.id);
+    expect(minutes(row)).toBe(30);
+    expect(row.ratePer30MinCents).toBe(old.ratePer30MinCents);
+  });
+
+  it("admin moves a past 30-minute CAGE rental onto a weight room: allowed (the spot was wrong), re-priced because the kind changed", async () => {
+    await db.insert(coachRateOverrides).values({
+      coachId: fixtures.coach.id,
+      resourceType: "weight_room",
+      ratePer30MinCents: 555,
+    });
+    const old = await seedRentalDirect({
+      resourceId: seeded.cage1.id,
+      day: PAST_DAY,
+      start: "15:00",
+      end: "15:30",
+    });
+    const updated = await updateSessionInternal(fixtures.admin, old.id, {
+      resourceId: seeded.weightRoom1.id,
+    });
+    expect(updated.resourceId).toBe(seeded.weightRoom1.id);
+    expect(minutes(updated)).toBe(30);
+    expect(updated.ratePer30MinCents).toBe(555);
+  });
+
+  it("admin re-times a past 30 minutes so its end is before its start: the one-hour refusal, untouched", async () => {
+    const old = await seedRentalDirect({
+      resourceId: seeded.weightRoom1.id,
+      day: PAST_DAY,
+      start: "15:00",
+      end: "15:30",
+    });
+    const err = await refusal(() =>
+      updateSessionInternal(fixtures.admin, old.id, {
+        startAt: at(PAST_DAY, "16:00"),
+        endAt: at(PAST_DAY, "15:30"),
+      }),
+    );
+    expectMinimumRefusal(err, "update", seeded.weightRoom1.name);
+    await expectUntouched(old);
+  });
+
+  it("plain coach re-timing a past 30 minutes (straight through the write function): refused, untouched", async () => {
+    const old = await seedRentalDirect({
+      resourceId: seeded.weightRoom1.id,
+      day: PAST_DAY,
+      start: "15:00",
+      end: "15:30",
+    });
+    const err = await refusal(() =>
+      updateSessionInternal(fixtures.coach, old.id, {
+        startAt: at(PAST_DAY, "16:00"),
+        endAt: at(PAST_DAY, "16:30"),
+      }),
+    );
+    expectMinimumRefusal(err, "update", seeded.weightRoom1.name);
+    await expectUntouched(old);
+  });
+
+  it("Schedule Manager re-timing or dragging a past 30 minutes: refused, untouched; the admin's identical drag goes through", async () => {
+    const old = await seedRentalDirect({
+      resourceId: seeded.weightRoom1.id,
+      day: PAST_DAY,
+      start: "15:00",
+      end: "15:30",
+    });
+    const err = await refusal(() =>
+      updateSessionInternal(fixtures.flaggedCoach, old.id, {
+        startAt: at(PAST_DAY, "16:00"),
+        endAt: at(PAST_DAY, "16:30"),
+      }),
+    );
+    expectMinimumRefusal(err, "update", seeded.weightRoom1.name);
+    await expectUntouched(old);
+
+    const { moveSessionAction } = await import(
+      "@/app/admin/sessions/form-actions"
+    );
+    const move = {
+      resourceId: seeded.weightRoom2.id,
+      startAt: at(PAST_DAY, "16:00"),
+      endAt: at(PAST_DAY, "16:30"),
+    };
+    mockAsScheduleManager();
+    const refused = await moveSessionAction(old.id, move);
+    expect(refused).toEqual({
+      ok: false,
+      error: { code: "WEIGHT_ROOM_MINIMUM", message: UPDATE_MESSAGE },
+    });
+    await expectUntouched(old);
+
+    mockAsAdmin();
+    const moved = await moveSessionAction(old.id, move);
+    expect(moved).toEqual({ ok: true });
   });
 });
 

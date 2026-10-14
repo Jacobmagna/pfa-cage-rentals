@@ -15,6 +15,11 @@
 //   2b. Weight room one-hour minimum       — WeightRoomMinimumError, keyed
 //       on the FINAL resource's type (see @/lib/weight-room-minimum). The
 //       batch first joins back-to-back weight room slots into one rental.
+//       Waived ONLY for an ADMIN (actor.role "admin", pinned by the server
+//       from the sign-in; a Schedule Manager is a coach and stays held) when
+//       the rental's FINAL end is at or before the server's now
+//       (isPastRentalAdminWaiver), so a past short rental can be corrected.
+//       In progress or future: held for everyone.
 //   3. Cross-check blocked_times           — block-vs-session app-layer
 //   4. Mutation, then audit (sequential)   — see "Atomicity" below
 //   5. Translate Postgres 23P01 (EXCLUDE)  — friendly SessionOverlapError
@@ -65,6 +70,7 @@ import {
 } from "@/lib/schemas/session";
 import {
   isBelowWeightRoomMinimum,
+  isPastRentalAdminWaiver,
   mergeContiguousWeightRoomSlots,
 } from "@/lib/weight-room-minimum";
 
@@ -228,10 +234,17 @@ export async function createSessionInternal(
   const resource = await getResourceOrThrow(parsed.resourceId);
 
   // Weight room one-hour minimum: a new weight room rental is never shorter
-  // than 60 minutes. Cages and bullpens are not checked.
+  // than 60 minutes. Cages and bullpens are not checked. An admin entering
+  // one that is already over is waived (isPastRentalAdminWaiver).
   if (
     resource.type === "weight_room" &&
-    isBelowWeightRoomMinimum(parsed.startAt, parsed.endAt)
+    isBelowWeightRoomMinimum(parsed.startAt, parsed.endAt) &&
+    !isPastRentalAdminWaiver({
+      role: actor.role,
+      startAt: parsed.startAt,
+      endAt: parsed.endAt,
+      now: new Date(),
+    })
   ) {
     throw new WeightRoomMinimumError(resource.name, "create");
   }
@@ -333,6 +346,12 @@ export async function updateSessionInternal(
   // Old short rentals are real (the calendar allowed them before this rule,
   // and the import still records them) and their note or coach can still be
   // changed; only re-timing or moving one is refused, until it is an hour.
+  //
+  // Except: an ADMIN may re-time or move one whose FINAL end (after this
+  // edit, not the stored end) is at or before now, so a past half hour
+  // logged at the wrong time can be corrected. Re-timing it into the future
+  // or onto a time still in progress is refused. The rate rule below is not
+  // touched by this: a re-time or a same-kind move keeps the stamped rate.
   const timeOrSpotChanged =
     finalStartAt.getTime() !== existing.startAt.getTime() ||
     finalEndAt.getTime() !== existing.endAt.getTime() ||
@@ -340,7 +359,13 @@ export async function updateSessionInternal(
   if (
     resource.type === "weight_room" &&
     isBelowWeightRoomMinimum(finalStartAt, finalEndAt) &&
-    timeOrSpotChanged
+    timeOrSpotChanged &&
+    !isPastRentalAdminWaiver({
+      role: actor.role,
+      startAt: finalStartAt,
+      endAt: finalEndAt,
+      now: new Date(),
+    })
   ) {
     throw new WeightRoomMinimumError(resource.name, "update");
   }
@@ -629,6 +654,7 @@ export async function createSessionsBatchInternal(
   //       (cross-cage same-time rows must NOT collide)
   // Nothing has been written yet, so a refusal here writes nothing: not
   // the refused row, and not the cage rows that sit beside it.
+  const now = new Date();
   for (let i = 0; i < rows.length; i++) {
     const slot = rows[i];
     const rid = slot.resourceId;
@@ -636,9 +662,18 @@ export async function createSessionsBatchInternal(
 
     // Weight room one-hour minimum, step 2: judged on the JOINED row, so
     // two back-to-back half-hours pass and a half-hour on its own does not.
+    // An admin's joined row that is already over is waived; each row is
+    // judged on its own, so a future lone half hour in the same batch is
+    // still refused (and nothing is written).
     if (
       resource.type === "weight_room" &&
-      isBelowWeightRoomMinimum(slot.startAt, slot.endAt)
+      isBelowWeightRoomMinimum(slot.startAt, slot.endAt) &&
+      !isPastRentalAdminWaiver({
+        role: actor.role,
+        startAt: slot.startAt,
+        endAt: slot.endAt,
+        now,
+      })
     ) {
       throw new WeightRoomMinimumError(resource.name, "create");
     }

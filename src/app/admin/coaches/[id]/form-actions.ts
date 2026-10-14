@@ -31,8 +31,8 @@ export type RateOverrideFormValues = {
   /** As the user typed it (dollars, "22.00"). Echoed back on error. */
   rateDollars: string;
   /**
-   * Weight-room ONLY: the GROUP weight-room rate as the user typed it
-   * (dollars/HR). Blank on non-weight-room rows. Echoed back on error.
+   * Weight-room ONLY: the GROUP weight-room rate (dollars/HR) if a payload
+   * carries it. The card no longer sends it, so this is "" in practice.
    */
   groupRateDollars: string;
 };
@@ -102,14 +102,13 @@ export async function upsertRateOverrideFormAction(
       values.resourceType === "weight_room"
         ? hourlyDollarsToCentsPer30Min(values.rateDollars)
         : dollarsToCents(values.rateDollars);
-    // Weight-room ONLY: optional GROUP rate. Entered per HOUR / stored per
-    // 30 min via the SAME parser as the regular weight-room rate, so the
-    // dollars shown equal the dollars charged. The card ALWAYS renders this
-    // input for weight_room and promises "leave blank to bill at the regular
-    // rate", so a BLANK there is an explicit CLEAR → send `null` (fall back to
-    // the regular weight-room rate). A filled value sends the cents. NON-
-    // weight-room rows never include the field (undefined) so the internal
-    // leaves the column untouched for those callers.
+    // Weight-room ONLY: the GROUP rate. The card no longer renders a group
+    // input (no new booking is a group session), so the field is ABSENT,
+    // reads as "" here, and is sent as `null`: every weight room Save
+    // CLEARS a stored coach group rate to NULL. A filled value (only an old
+    // or hand-built payload) still converts per HOUR → per 30 min via the
+    // SAME parser as the regular weight-room rate. NON-weight-room rows
+    // send undefined so the internal leaves the column untouched.
     const groupRatePer30MinCents =
       values.resourceType === "weight_room"
         ? values.groupRateDollars.trim() !== ""

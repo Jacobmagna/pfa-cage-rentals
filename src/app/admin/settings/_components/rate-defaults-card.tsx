@@ -7,6 +7,11 @@
 // keep their stamped ratePer30MinCents. This guarantee is enforced
 // in the read path (src/lib/reports/aggregate.ts reads the snapshot;
 // /admin/sessions reads the snapshot).
+//
+// There is no GROUP weight room rate input any more: no new booking is a
+// group session. The form no longer sends the field, and the save action
+// reads its absence as a blank, so "Save defaults" clears the stored
+// facility group rate to NULL (it was inert already).
 
 import { useActionState } from "react";
 import { Check, CheckCircle2 } from "lucide-react";
@@ -21,13 +26,6 @@ const INITIAL_STATE: RateDefaultsActionResult = { ok: true, savedAt: 0 };
 export type RateDefaultsRow = {
   type: "cage" | "bullpen" | "weight_room";
   ratePer30MinCents: number;
-  /**
-   * Weight-room ONLY: the FACILITY-WIDE group weight-room rate, if set.
-   * null = no group rate configured → group weight-room sessions fall back
-   * to the regular weight-room rate. Stored per 30 min, ENTERED/DISPLAYED
-   * per hour like the regular weight-room rate.
-   */
-  groupRatePer30MinCents: number | null;
   updatedAt: Date;
 };
 
@@ -81,18 +79,8 @@ export function RateDefaultsCard({ rows }: { rows: RateDefaultsRow[] }) {
     return (row.ratePer30MinCents / 100).toFixed(2);
   };
 
-  // FACILITY-WIDE group weight-room rate. Same per-hour entry/display as the
-  // regular weight-room rate (stored per 30 min). Blank = falls back to the
-  // regular weight-room rate. Echoes the admin's typed value back on error.
-  const groupValue = (): string => {
-    if (!state.ok) return state.values.weightRoomGroupDollars;
-    const row = byType.get("weight_room");
-    if (!row || row.groupRatePer30MinCents == null) return "";
-    return ((row.groupRatePer30MinCents * 2) / 100).toFixed(2);
-  };
-
   const formKey = state.ok
-    ? `ok-${state.savedAt}-${rows.map((r) => `${r.type}:${r.ratePer30MinCents}:${r.groupRatePer30MinCents ?? "none"}`).join("|")}`
+    ? `ok-${state.savedAt}-${rows.map((r) => `${r.type}:${r.ratePer30MinCents}`).join("|")}`
     : `err-${state.error.code}-${state.error.message}`;
 
   const justSaved = state.ok && state.savedAt > 0;
@@ -142,7 +130,6 @@ export function RateDefaultsCard({ rows }: { rows: RateDefaultsRow[] }) {
               unit={FIELD_UNIT[type]}
               value={valueFor(type)}
               updatedAt={byType.get(type)?.updatedAt ?? null}
-              groupValue={type === "weight_room" ? groupValue() : undefined}
             />
           ))}
         </div>
@@ -168,19 +155,12 @@ function RateField({
   unit,
   value,
   updatedAt,
-  groupValue,
 }: {
   label: string;
   name: string;
   unit: string;
   value: string;
   updatedAt: Date | null;
-  /**
-   * Weight-room ONLY: when provided, render a second per-HOUR input for the
-   * FACILITY-WIDE group rate beneath the regular rate. Blank = unset (falls
-   * back to the regular weight-room rate).
-   */
-  groupValue?: string;
 }) {
   return (
     <div className="space-y-2">
@@ -210,33 +190,6 @@ function RateField({
           />
         </span>
       </label>
-      {groupValue !== undefined ? (
-        <label className="grid grid-cols-[1fr_140px] items-center gap-3">
-          <span className="block text-xs text-fg-muted">
-            Group rate
-            <span className="block text-[10px] text-fg-subtle mt-0.5 leading-relaxed">
-              Leave blank to bill group sessions at the regular rate.
-            </span>
-          </span>
-          <span className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle text-sm">
-              $
-            </span>
-            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-fg-subtle">
-              / hr
-            </span>
-            <input
-              type="text"
-              inputMode="decimal"
-              name="weightRoomGroupDollars"
-              defaultValue={groupValue}
-              placeholder="—"
-              aria-label="Facility-wide group weight room rate (/ hr)"
-              className="w-full pl-7 pr-16 h-10 rounded-lg bg-surface border border-line text-fg placeholder:text-fg-subtle text-sm tnum tabular-nums focus:outline-none focus:border-line-strong focus:ring-2 focus:ring-gold/40"
-            />
-          </span>
-        </label>
-      ) : null}
     </div>
   );
 }
